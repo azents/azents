@@ -4,8 +4,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -31,13 +31,18 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.data import DiscordConnectionConfiguration
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_binding_settings_open_custom_id,
+)
 from azents.services.external_channel.provider_effect import (
     ProviderEffectOutcome,
+    ProviderEffectPlan,
     ProviderOperationKey,
     ProviderTarget,
 )
 from azents.services.external_channel.slack_events import SlackControlMessageResult
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import require_instance
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
 
@@ -149,14 +154,19 @@ def _effect(
     *,
     part: int = 0,
 ) -> ChannelActionEffectPlan:
-    return cast(
-        ChannelActionEffectPlan,
-        SimpleNamespace(
-            provider=SimpleNamespace(
-                target=SimpleNamespace(operation=operation),
+    return ChannelActionEffectPlan(
+        provider=ProviderEffectPlan(
+            target=_target(
+                provider=ExternalChannelProvider.SLACK,
+                operation=operation,
             ),
-            part=part,
+            operation_key=ProviderOperationKey.from_seed(
+                f"effect:{operation.value}:{part}"
+            ),
         ),
+        part=part,
+        work_cycle_id="work-1",
+        expected_desired_progress_revision=None,
     )
 
 
@@ -169,17 +179,21 @@ def _service(
     bound_discord_client: object | None = None
     if discord_client is not None:
         bound_discord_client = _OpenableDiscordClient(discord_client)
-    return cast(
-        ExternalChannelActionService,
-        SimpleNamespace(
+    return require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
             config=SimpleNamespace(
                 web_url="https://azents.example",
                 avatar_cdn_base_url=None,
+                auth=SimpleNamespace(
+                    jwt=SimpleNamespace(secret_key="test-settings-secret")
+                ),
             ),
             slack_client=slack_client,
             discord_client=bound_discord_client,
             exchange_file_service=exchange_file_service,
         ),
+        ExternalChannelActionService,
     )
 
 
@@ -263,13 +277,14 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     async def session_manager() -> AsyncIterator[object]:
         yield session
 
-    service = cast(
-        ExternalChannelActionService,
-        SimpleNamespace(
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
             execute_direct_effect=execute_direct_effect,
         ),
+        ExternalChannelActionService,
     )
 
     result = await ExternalChannelActionService.execute(
@@ -335,13 +350,14 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     async def session_manager() -> AsyncIterator[object]:
         yield session
 
-    service = cast(
-        ExternalChannelActionService,
-        SimpleNamespace(
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
             execute_direct_effect=execute_direct_effect,
         ),
+        ExternalChannelActionService,
     )
 
     result = await ExternalChannelActionService.execute(
@@ -453,7 +469,7 @@ async def test_discord_exchange_file_delivery_does_not_require_runtime_storage()
         (ExternalChannelDeliveryOperation.PROGRESS_UPDATE, "update_message"),
     ],
 )
-async def test_slack_tracker_delivery_includes_session_navigation(
+async def test_slack_tracker_delivery_includes_session_and_settings_actions(
     operation: ExternalChannelDeliveryOperation,
     method_name: str,
 ) -> None:
@@ -486,17 +502,23 @@ async def test_slack_tracker_delivery_includes_session_navigation(
     call = method.await_args
     assert call is not None
     blocks = call.kwargs["blocks"]
-    assert blocks[-1] == {
-        "type": "actions",
-        "elements": [
-            {
-                "type": "button",
-                "action_id": "view_azents_session",
-                "text": {"type": "plain_text", "text": "View session"},
-                "url": _SESSION_URL,
-            }
-        ],
+    assert blocks[-1]["type"] == "actions"
+    elements = blocks[-1]["elements"]
+    assert isinstance(elements, list)
+    assert elements[0] == {
+        "type": "button",
+        "action_id": "view_azents_session",
+        "text": {"type": "plain_text", "text": "View session"},
+        "url": _SESSION_URL,
     }
+    assert isinstance(elements[1], dict)
+    assert elements[1]["action_id"] == "azents_conversation_settings_open"
+    assert elements[1]["text"] == {
+        "type": "plain_text",
+        "text": "Conversation settings",
+    }
+    assert isinstance(elements[1]["value"], str)
+    assert elements[1]["value"]
 
 
 @pytest.mark.asyncio
@@ -578,6 +600,70 @@ async def test_discord_tracker_delivery_includes_session_navigation(
         _service(discord_client=discord_client),
         _target(provider=ExternalChannelProvider.DISCORD, operation=operation),
         operation_key=ProviderOperationKey.from_seed("discord-progress"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    call = method.await_args
+    assert call is not None
+    assert call.kwargs["components"] == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": _SESSION_URL,
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Conversation settings",
+                    "custom_id": build_discord_binding_settings_open_custom_id(
+                        secret="test-settings-secret",
+                        binding_id="binding-1",
+                    ),
+                },
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "method_name"),
+    [
+        (ExternalChannelDeliveryOperation.PROGRESS_CREATE, "create_message"),
+        (ExternalChannelDeliveryOperation.PROGRESS_UPDATE, "update_message"),
+    ],
+)
+async def test_discord_scheduled_tracker_keeps_session_navigation_only(
+    operation: ExternalChannelDeliveryOperation,
+    method_name: str,
+) -> None:
+    """Scheduled Task Trackers do not expose conversation Binding settings."""
+    method = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    discord_client = _DiscordClientDelegate(
+        create_message=method if method_name == "create_message" else AsyncMock(),
+        update_message=method if method_name == "update_message" else AsyncMock(),
+    )
+    target = _target(provider=ExternalChannelProvider.DISCORD, operation=operation)
+    target.request_payload["tracker_kind"] = "scheduled_task"
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=discord_client),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-scheduled-progress"),
         bot_token="discord-secret",
         file_storage=None,
         agent_id=None,
@@ -734,7 +820,7 @@ async def test_discord_terminal_thread_files_forward_to_exact_parent() -> None:
         bot_token="discord-secret",
         file_storage=None,
         agent_id=None,
-        authority=cast(Any, object()),
+        authority=MagicMock(spec=SessionResourceAuthority),
     )
 
     assert result.status == "delivered"
@@ -902,11 +988,11 @@ async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
         bot_token="discord-secret",
         file_storage=None,
         agent_id=None,
-        authority=cast(Any, object()),
+        authority=MagicMock(spec=SessionResourceAuthority),
     )
 
     assert result.status == "delivered"
-    assert cast(_OpenableDiscordClient, service.discord_client).opens == 0
+    assert require_instance(service.discord_client, _OpenableDiscordClient).opens == 0
     create_file_message.assert_awaited_once()
 
 
@@ -958,7 +1044,7 @@ async def test_discord_thread_effect_reuses_one_sdk_session() -> None:
     )
 
     assert result.status == "delivered"
-    assert cast(_OpenableDiscordClient, service.discord_client).opens == 1
+    assert require_instance(service.discord_client, _OpenableDiscordClient).opens == 1
     ensure_thread.assert_awaited_once()
     create_message.assert_awaited_once()
 

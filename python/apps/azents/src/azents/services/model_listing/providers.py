@@ -512,7 +512,7 @@ def _candidate_from_chatgpt_model(
         else None
     )
     capabilities = ModelCapabilities(
-        context_window=ModelContextWindow(max_input_tokens=context_window),
+        context_window=context_window,
         modalities=ModelModalities(
             input=input_modalities,
             output=[ModelModality.TEXT],
@@ -1329,13 +1329,14 @@ def _chatgpt_reasoning_efforts(value: object) -> list[ModelReasoningEffort]:
     return efforts
 
 
-def _chatgpt_context_window(model: dict[str, object]) -> int | None:
-    """Resolve the effective ChatGPT context window from backend metadata."""
-    for key in ("context_window", "max_context_window"):
-        value = model.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return None
+def _chatgpt_context_window(model: dict[str, object]) -> ModelContextWindow:
+    """Preserve ChatGPT default and maximum context-window metadata."""
+    default_input_tokens = _positive_int(model.get("context_window"))
+    max_input_tokens = _positive_int(model.get("max_context_window"))
+    return ModelContextWindow(
+        default_input_tokens=default_input_tokens,
+        max_input_tokens=max_input_tokens or default_input_tokens,
+    )
 
 
 def _chatgpt_modalities(model: dict[str, object]) -> list[ModelModality]:

@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 from urllib.parse import urlencode
 
 import aiohttp
-import httpx
+import httpx2 as httpx
 import jmespath
 import yaml
 from botocore.exceptions import ClientError as BotoClientError
@@ -900,7 +900,7 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                     cluster_cred,
                     proxy_url=self._proxy_url,
                 )
-                httpx_client: httpx.AsyncClient = new_client._client._client  # ty: ignore[invalid-assignment] — No raw HTTP access method in lightkube public API; runtime is httpx.AsyncClient but the stub declares Client.
+                httpx_client: httpx.AsyncClient = new_client._client._client
                 new_cache = ResourceDiscoveryCache()
                 await new_cache.discover(httpx_client)
             except asyncio.CancelledError:

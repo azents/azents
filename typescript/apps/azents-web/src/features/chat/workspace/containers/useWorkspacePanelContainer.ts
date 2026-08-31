@@ -2,8 +2,12 @@
 
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
-import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import {
+  shouldPollAgentWorkspaceLifecycle,
+  shouldPollRuntimeLifecycle,
+} from "@/shared/lib/runtimeLifecycle";
+import { useRuntimeSystemMetricsContainer } from "@/shared/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,
@@ -23,7 +27,7 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "../components/WorkspaceDirectoryPickerModal";
-import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { GitRefEntryResponse } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
@@ -66,6 +70,7 @@ export interface WorkspacePanelContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onCloseProjectRegistration: () => void;
   onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
@@ -209,11 +214,15 @@ export function useWorkspacePanelContainer({
   const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
     { handle, agentId },
     {
-      refetchInterval: (query): number | false =>
-        query.state.data?.capability === "removing" ||
-        query.state.data?.configuration?.status === "waiting_for_recreation"
+      refetchInterval: (query): number | false => {
+        const runtime = query.state.data;
+        return shouldPollRuntimeLifecycle(runtime?.lifecycle, {
+          removing: runtime?.capability === "removing",
+          configurationStatus: runtime?.configuration?.status,
+        })
           ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
-          : false,
+          : false;
+      },
     },
   );
   const runtimeManaged = runtimeQuery.data?.capability === "managed";
@@ -231,11 +240,9 @@ export function useWorkspacePanelContainer({
     {
       enabled: runtimeManaged,
       refetchInterval: (query): number | false =>
-        query.state.data?.workspace.type === "CONNECTING" ||
-        query.state.data?.workspace.type === "CONTROL_UNAVAILABLE" ||
-        query.state.data?.runtime.type === "STARTING" ||
-        query.state.data?.runtime.type === "RESETTING" ||
-        query.state.data?.runtime.type === "STOPPING"
+        shouldPollAgentWorkspaceLifecycle(query.state.data, {
+          configurationStatus: runtimeQuery.data?.configuration?.status,
+        })
           ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
           : false,
     },
@@ -1247,6 +1254,7 @@ export function useWorkspacePanelContainer({
     onSelectProjectPickerDirectory: projectPicker.selectDirectory,
     onRefreshProjectPicker: projectPicker.refresh,
     onStartRuntimeForProjectPicker: projectPicker.startRuntime,
+    onRestartRuntimeForProjectPicker: projectPicker.restartRuntime,
     onCloseProjectRegistration,
     onSetProjectRegistrationMode: setRegistrationMode,
     onSetProjectRegistrationStartingRef: setRegistrationStartingRef,

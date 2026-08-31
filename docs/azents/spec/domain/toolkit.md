@@ -41,6 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
@@ -58,8 +59,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-08-23
-spec_version: 97
+last_verified_at: 2026-08-29
+spec_version: 100
 ---
 
 # Toolkit
@@ -391,8 +392,9 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
   proxy-required, or no-network authority; Docker remains direct-only under its supported Profile
   contract. ([`core/runtime_profile.py`](../../../../python/apps/azents/src/azents/core/runtime_profile.py), [`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime))
 - Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
-- Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt reads only the bounded current desired configuration state from PostgreSQL, renders available or blocked behavior without claiming physical readiness, and captures its positive configuration sequence, digest, and desired target generation as execution authority. An absent state, or an unconfigured, blocked, or malformed desired slot, leaves Runtime operations unavailable.
-- Each ordinary Runtime-backed Tool resolves a bounded exact target only when it executes and may request start/wait according to that operation contract. A prompt-bound target must still match the captured sequence, digest, and desired generation. Qualification requires the current desired slot to be ready, the bounded applied slot to be the exact promoted desired sequence, exact Provider and Runner digest evidence admitted under their current connection generations, the Provider connected and running on the current desired generation, a ready positive Runner generation, and current Workspace evidence. The returned operation target freezes Runtime ID, Runtime capability version, desired generation, Runner generation, configuration sequence and digest, and Workspace path. Supersession or drift fails the Tool rather than executing against a substituted Runtime. Skill filesystem projection is non-starting and succeeds only from an immediately qualified current target.
+- Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt selects the applied configuration when a ready current-generation Runner is already serving it; otherwise it selects the desired configuration used for a permitted start/wait path. A blocked or malformed future desired slot does not replace the authority of an already-ready applied Runtime. When neither path supplies a usable configuration document, the prompt leaves Runtime operations unavailable.
+- Each ordinary Runtime-backed Tool resolves a bounded exact target only when it executes and may request start/wait according to that operation contract. A prompt-bound target must still match the captured applied or desired sequence, digest, and target generation. An already-ready target requires the retained applied configuration, a ready positive Runner generation, and current Runner-reported Workspace evidence; Provider connection/resource observation and a future desired mismatch are not data-plane fences. Starting or replacing compute still requires the desired configuration and Provider lifecycle authority. The returned operation target freezes Runtime ID, Runtime capability version, target generation, Runner generation, configuration sequence and digest, and Workspace path. Runner loss, terminal deletion, capability change, supersession, or drift fails the Tool rather than executing against a substituted Runtime. Skill filesystem projection is non-starting and succeeds only from an immediately qualified current target.
+- `read` file tool interprets both `offset` and `limit` as decoded text character counts. It reads fixed-size byte ranges from the Runtime and applies strict incremental decoding from the start of the file, so a storage boundary cannot split a multibyte character into a false decode failure. The decoder retains only the bounded requested text plus one continuation character. Invalid source bytes encountered while locating the offset or decoding that bounded range return an explicit encoding error; an unread suffix is not validated. Result range metadata and continuation offsets use the same character unit as the input schema.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
 - `glob` file tool accepts absolute path patterns and implements a shell-style pathname matching subset: `*`, `?`, character classes (`[...]`), recursive `**` matching zero or more path segments, and comma-separated brace alternatives such as `*.{jpg,png}`, including nested alternatives. Recursive patterns search below the non-glob prefix and may return matching directories as well as files, so `<agent-workspace>/.claude/skills/*` exposes directory entries and `/foo/bar/**/baz.{jpg,png}` matches both `/foo/bar/baz.jpg` and nested equivalents. Brace expansion is evaluated once per tool call and is limited to 256 alternatives. Brace sequences such as `{1..10}`, extglob, variable expansion, command substitution, shell quoting, backslash escaping, and tilde expansion are not supported. Patterns beginning with `~` fail explicitly instead of depending on the Runtime process home directory. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
 - Runtime tool prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process. Runtime config prompts sort registered projects and domain lists deterministically and describe the preserved Agent Workspace, temporary work, and outbound connectivity without claiming Azents-owned infrastructure isolation or exposing sensitive path inventories.
@@ -401,7 +403,7 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
 - Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
 - The legacy `bash` tool is no longer exposed as the model-visible runtime shell command tool. Existing file tools continue to use Runner file operations.
 
-One `RuntimeRunnerFileStorage` instance is created per Runtime Toolkit turn and shared by visible file tools and instruction appendix loaders. The storage is bound to the Runtime Agent identity and carries the invoking Agent Session ID as `owner_session_id` on every Runner file operation. It clears its cached target at every model-visible file-tool boundary and resolves a fresh exact qualified target using the prompt-selected authority; appendix reads within that boundary share the same target. A subagent therefore uses its parent Agent Runtime while retaining its own Session ownership. An in-flight boundary does not retry a failed mutation against a replacement Runner generation.
+One `RuntimeRunnerFileStorage` instance is created per Runtime Toolkit turn and shared by visible file tools and instruction appendix loaders. The storage is bound to the Runtime Agent identity and carries the invoking Agent Session ID as `owner_session_id` on every Runner file operation. It clears its cached target at every model-visible file-tool boundary and resolves a fresh exact qualified target using the prompt-selected applied or desired authority; appendix reads within that boundary share the same target. A subagent therefore uses its parent Agent Runtime while retaining its own Session ownership. An in-flight boundary does not retry a failed mutation against a replacement Runner generation.
 
 Shell and managed process execution runs directly through the Runner process service. Native file,
 edit, patch, search, Git, import, image, publication, provider-delivery, and transfer operations
@@ -720,9 +722,11 @@ Runtime abstraction is `ToolkitStateStore` and typed `ToolkitStateHandle`. `load
 External Channel uses the same storage model through a domain-specific typed store.
 Each binding owns exactly one identity in namespace `external_channel` with state name
 `channel_work:{binding_id}`. The payload contains the current or latest Channel Work
-cycle and ordered current provider projection parts. It preserves a stable
-`work_cycle_id`, validates the binding-derived identity, and uses independent
-whole-state optimistic concurrency per binding.
+cycle, nullable Slack status anchor and initiator, and ordered current provider
+projection parts. Schema version 3 preserves existing version-2 Work while adding
+those provider-presentation coordinates. It preserves a stable `work_cycle_id`,
+validates the binding-derived identity, and uses independent whole-state optimistic
+concurrency per binding.
 
 ### Session Todo State
 
@@ -812,8 +816,12 @@ Compaction preserves only unfinished work continuity: binding, provider, resourc
 label, current title, and ordered tasks. It omits state revisions, provider projection
 diagnostics, and provider-effect outcomes.
 
-Ingress creates the current work cycle and its initial Slack Activity Tracker before
-Agent execution. The tool atomically commits an optional conversational reply and
+Ingress creates the current work cycle before Agent execution and creates an initial
+Slack or Discord Activity Tracker only when that cycle is visible. Ordinary
+all-messages admission may start hidden; an explicit invocation or unfinished Todo
+publication promotes visibility monotonically. Slack native Work presence is
+independent from this Tracker policy. The tool atomically commits an optional
+conversational reply and
 an optional current-work title plus complete ordered task replacement before any
 provider call. It then executes the returned process-local provider effects in order
 and returns ordered sanitized `delivered`, `failed`, `unknown`, or `not_attempted`
@@ -865,6 +873,16 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 100) — Advanced External Channel Work state to
+  schema version 3 with nullable Slack presence coordinates and made initial Slack
+  Tracker creation follow the provider-neutral visibility and promotion lifecycle.
+- **2026-08-26** (spec_version 99) — Bound Runtime prompt and Tool execution
+  authority to the configuration actually served by a ready Runner, allowing current
+  data-plane work through Provider control loss or a blocked future selection while
+  retaining desired/Provider authority for start and replacement.
+- **2026-08-24** (spec_version 98) — Aligned the Runtime `read` tool schema,
+  implementation, range metadata, and continuation cursor on decoded character
+  units while preserving bounded byte-chunk I/O and strict source decoding.
 - **2026-08-23** (spec_version 97) — Moved projection-dependent Skill composer
   discovery and preparation behind the shared closed TurnAction capability
   boundary while retaining VFS projection authority.

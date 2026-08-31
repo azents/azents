@@ -3,7 +3,6 @@
 import dataclasses
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
 
 import pytest
 from azents_runtime_control.provider import (
@@ -489,7 +488,7 @@ async def test_stop_allows_cleanup_of_removed_containment_runtime(
 
 
 @pytest.mark.asyncio
-async def test_restart_replaces_container_and_preserves_workspace_data(
+async def test_restart_deletes_container_and_preserves_workspace_data(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
@@ -497,12 +496,41 @@ async def test_restart_replaces_container_and_preserves_workspace_data(
     await provider.start(_command(RuntimeLifecycleCommandType.START))
     marker = tmp_path / "agent-runtimes" / "runtime-1" / "workspace" / "keep.txt"
     marker.write_text("preserved")
+    networks = list(docker.networks)
+    images = list(docker.images)
 
     result = await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
 
-    assert result.report.observed_state is RuntimeProviderObservedState.RUNNING
+    assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
+    assert result.report.reason == "restart_container_removed"
     assert docker.removed == ["azents-runtime-runtime-1"]
+    assert "azents-runtime-runtime-1" not in docker.containers
+    assert docker.networks == networks
+    assert docker.images == images
     assert marker.read_text() == "preserved"
+
+
+@pytest.mark.asyncio
+async def test_restart_rejects_container_owned_by_another_runtime(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    container = docker.containers["azents-runtime-runtime-1"]
+    container.spec = dataclasses.replace(
+        container.spec,
+        labels={
+            **container.spec.labels,
+            "azents/runtime-id": "another-runtime",
+        },
+    )
+
+    with pytest.raises(UnsupportedRuntimeConfiguration, match="owned by a different"):
+        await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
+
+    assert docker.removed == []
+    assert "azents-runtime-runtime-1" in docker.containers
 
 
 @pytest.mark.asyncio
@@ -621,7 +649,8 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
     command = _command(RuntimeLifecycleCommandType.START)
     await provider.start(command)
     container = docker.containers["azents-runtime-runtime-1"]
-    labels = cast(dict[str, str], container.spec.labels)
+    labels = container.spec.labels
+    assert isinstance(labels, dict)
     for key in (
         "azents/runtime-configuration-sequence",
         "azents/runtime-configuration-digest",

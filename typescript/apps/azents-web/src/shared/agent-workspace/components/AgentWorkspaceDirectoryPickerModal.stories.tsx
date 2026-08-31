@@ -1,0 +1,116 @@
+import { rem } from "@mantine/core";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { AgentWorkspaceDirectoryPickerModal } from "./AgentWorkspaceDirectoryPickerModal";
+import type { ProjectDirectoryPickerState } from "../types";
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+const noop = (): void => {};
+
+const readyState = {
+  type: "SERVER",
+  server: {
+    lifecycle: {
+      target: "running",
+      convergence: "stable",
+      provider: { connection: "connected", resource: "running" },
+      runner: { state: "ready" },
+      availability: "ready",
+      reason_code: null,
+      desired_generation: 3,
+    },
+    runtime: {
+      type: "RUNNING",
+      runtime_id: "runtime-1",
+      detail: null,
+    },
+    workspace: {
+      type: "READY",
+      manifest: {
+        root: "/workspace/agent",
+        cwd: "/workspace/agent",
+        entries: [],
+        git: null,
+      },
+    },
+    actions: {
+      start: null,
+      stop: null,
+      restart: null,
+      reset: null,
+    },
+  },
+  currentPath: "/workspace/agent",
+  entries: [
+    {
+      path: "/workspace/agent/azents",
+      kind: "directory",
+      repositoryType: "git",
+    },
+    {
+      path: "/workspace/agent/research",
+      kind: "directory",
+      repositoryType: null,
+    },
+  ],
+  isRefreshing: false,
+  isStarting: false,
+  isRestarting: false,
+} satisfies ProjectDirectoryPickerState;
+
+const runtimeUnavailableState = {
+  ...readyState,
+  server: {
+    ...readyState.server,
+    lifecycle: {
+      ...readyState.server.lifecycle,
+      runner: { state: "disconnected" },
+      availability: "runner_unavailable",
+      reason_code: "runner_disconnected",
+    },
+    workspace: {
+      type: "CONTROL_UNAVAILABLE",
+      detail: "The Runtime connection is unavailable.",
+      retry_after_ms: 1_000,
+    },
+  },
+} satisfies ProjectDirectoryPickerState;
+
+const meta = {
+  component: AgentWorkspaceDirectoryPickerModal,
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(960)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  args: {
+    opened: true,
+    state: { type: "LOADING" },
+    onClose: noop,
+    onOpenDirectory: noop,
+    onSelectDirectory: noop,
+    onRefresh: noop,
+    onStartRuntime: noop,
+    onRestartRuntime: noop,
+    runtimeSettingsHref: "/w/engineering/agents/agent-1/runtime",
+  },
+} satisfies Meta<typeof AgentWorkspaceDirectoryPickerModal>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Loading = {} satisfies Story;
+
+export const RuntimeUnavailable = {
+  args: {
+    state: runtimeUnavailableState,
+  },
+} satisfies Story;
+
+export const Ready = {
+  args: {
+    state: readyState,
+  },
+} satisfies Story;

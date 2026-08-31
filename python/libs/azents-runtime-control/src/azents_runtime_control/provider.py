@@ -19,6 +19,7 @@ JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 )
 _LOGGER = logging.getLogger(__name__)
+_MIN_HEARTBEAT_CHECK_INTERVAL_SECONDS = 0.01
 
 
 class RuntimeDesiredState(enum.StrEnum):
@@ -645,8 +646,6 @@ class ProviderRunLoop:
                 ),
             )
         await self._client.complete_provider_command(completion)
-        if completion.report is not None:
-            await self.report_provider_state(completion.report)
         _LOGGER.info(
             "Runtime Provider command finished provider_id=%s provider_generation=%s "
             "request_id=%s command=%s resource=runtime/%s desired_generation=%s "
@@ -686,8 +685,52 @@ class ProviderRunLoop:
         """Run until the caller signals stop or the task is cancelled."""
         if self._accepted is None:
             await self.start()
+        heartbeat_task = asyncio.create_task(
+            self._run_heartbeat_loop(stop),
+            name="runtime-provider-heartbeat",
+        )
+        command_task = asyncio.create_task(
+            self._run_command_loop(stop, command_block_ms=command_block_ms),
+            name="runtime-provider-command",
+        )
+        tasks = (heartbeat_task, command_task)
+        try:
+            done, _pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                await task
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _run_heartbeat_loop(self, stop: asyncio.Event) -> None:
+        """Refresh the Provider lease independently from lifecycle commands."""
+        accepted = self._require_accepted()
+        check_interval_seconds = max(
+            accepted.heartbeat_interval_seconds / 2,
+            _MIN_HEARTBEAT_CHECK_INTERVAL_SECONDS,
+        )
         while not stop.is_set():
-            await self.heartbeat()
+            try:
+                await asyncio.wait_for(
+                    stop.wait(),
+                    timeout=check_interval_seconds,
+                )
+            except TimeoutError:
+                await self.heartbeat()
+
+    async def _run_command_loop(
+        self,
+        stop: asyncio.Event,
+        *,
+        command_block_ms: int,
+    ) -> None:
+        """Execute Provider commands serially while the connection is active."""
+        while not stop.is_set():
             await self.process_next_command(block_ms=command_block_ms)
 
     async def _execute_command(

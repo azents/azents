@@ -61,6 +61,78 @@ class _ObservedProviderMessages(
             await self.changed.wait()
 
 
+def test_grpc_client_bounds_in_memory_queues() -> None:
+    """Provider transport buffers remain bounded under a slow peer."""
+
+    async def stream(
+        requests: AsyncIterator[runtime_provider_control_pb2.ProviderMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
+        del requests, metadata
+        if False:
+            yield runtime_provider_control_pb2.ControlMessage()
+
+    client = GrpcProviderControlClient(
+        stream,
+        provider_credential="provider-secret",
+        provider_auth_method=PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+    )
+
+    assert 0 < client._outbound.maxsize
+    assert client._commands.maxsize == 1
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_heartbeat_timeout_includes_outbound_backpressure() -> None:
+    """A full transport queue cannot block heartbeat failure detection forever."""
+    stream_closed = asyncio.Event()
+
+    async def stream(
+        requests: AsyncIterator[runtime_provider_control_pb2.ProviderMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_provider_control_pb2.ControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_provider_control_pb2.ProviderRegisterAccepted(
+                provider_id=register.register.provider_id,
+                connection_id=register.connection_id,
+                generation=3,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        await stream_closed.wait()
+
+    client = GrpcProviderControlClient(
+        stream,
+        heartbeat_ack_timeout_seconds=0.01,
+        provider_credential="provider-secret",
+        provider_auth_method=PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+    )
+    accepted = await client.register_provider(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    message = runtime_provider_control_pb2.ProviderMessage()
+    for _ in range(client._outbound.maxsize):
+        client._outbound.put_nowait(message)
+
+    with pytest.raises(TimeoutError):
+        await client.heartbeat_provider(
+            provider_id="provider-1",
+            generation=accepted.generation,
+            heartbeat_at=_now(),
+            operational_diagnostics=None,
+        )
+
+    stream_closed.set()
+    await client.close()
+
+
 @pytest.mark.asyncio
 async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     """The client maps the gRPC stream onto the ProviderControlClient protocol."""

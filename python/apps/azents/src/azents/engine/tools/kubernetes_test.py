@@ -9,6 +9,7 @@ import pytest
 from kubernetes_asyncio.client import Configuration
 from kubernetes_asyncio.client.rest import ApiException
 from lightkube import ApiError, AsyncClient
+from lightkube.models.meta_v1 import Status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
@@ -1825,11 +1826,11 @@ class TestKubernetesToolHandlers:
         )
 
         # Mock async iterator that raises ApiError
-        status_dict = {"code": 403, "reason": "Forbidden", "message": "Forbidden"}
+        status = Status(code=403, reason="Forbidden", message="Forbidden")
 
         async def _mock_list_error(*_args: object, **_kwargs: object) -> object:
             """Mock list that raises ApiError."""
-            raise ApiError(status=status_dict)
+            raise ApiError(status=status)
             yield  # unreachable yield to make async generator
 
         monkeypatch.setattr(

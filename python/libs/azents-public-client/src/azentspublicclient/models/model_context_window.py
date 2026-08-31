@@ -27,10 +27,11 @@ class ModelContextWindow(BaseModel):
     """
     Model context window capability.
     """ # noqa: E501
+    default_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     max_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     max_output_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["max_input_tokens", "max_output_tokens"]
+    __properties: ClassVar[List[str]] = ["default_input_tokens", "max_input_tokens", "max_output_tokens"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -78,6 +79,11 @@ class ModelContextWindow(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if default_input_tokens (nullable) is None
+        # and model_fields_set contains the field
+        if self.default_input_tokens is None and "default_input_tokens" in self.model_fields_set:
+            _dict['default_input_tokens'] = None
+
         # set to None if max_input_tokens (nullable) is None
         # and model_fields_set contains the field
         if self.max_input_tokens is None and "max_input_tokens" in self.model_fields_set:
@@ -100,6 +106,7 @@ class ModelContextWindow(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "default_input_tokens": obj.get("default_input_tokens"),
             "max_input_tokens": obj.get("max_input_tokens"),
             "max_output_tokens": obj.get("max_output_tokens")
         })

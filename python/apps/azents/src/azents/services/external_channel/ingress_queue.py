@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
-    ExternalChannelDeliveryOperation,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelPrincipalAuthorType,
@@ -25,9 +24,6 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
-from azents.core.external_channel_session_presence import (
-    binding_settings_on_demand_payload,
-)
 from azents.job_runtime.types import (
     JobExecutionContext,
     JobPayload,
@@ -340,10 +336,19 @@ class ExternalChannelIngressDrainService:
                 if locked is None:
                     await session.rollback()
                     return False
+                first_item = await self.queue_repository.lock_first_authoritative_item(
+                    session,
+                    owner_id=locked.id,
+                )
+                if first_item is None:
+                    await session.rollback()
+                    return False
                 completion = await self.provisioning_service.complete(
                     session,
                     owner=ExternalChannelIngressOwner.model_validate(locked),
                     preparation=preparation,
+                    initial_provider=first_item.provider,
+                    initial_invocation=first_item.invocation,
                 )
                 await self.queue_repository.mark_owner_ready(
                     session,
@@ -534,7 +539,6 @@ class ExternalChannelIngressDrainService:
         """Atomically apply one prepared successful subset and queue transitions."""
         now = datetime.datetime.now(datetime.UTC)
         wake: tuple[str, str] | None = None
-        settings_plan: ProviderEffectPlan | None = None
         progress_plan: ProviderEffectPlan | None = None
         async with self.session_manager() as session:
             connections = {
@@ -617,7 +621,8 @@ class ExternalChannelIngressDrainService:
             order_group = uuid7().hex
             order_sequence = 0
             enqueues: list[MailboxEnqueue] = []
-            settings_trigger_keys: set[str] = set()
+            visible_tracker_mailbox_keys: set[str] = set()
+            slack_presence_by_mailbox_key: dict[str, tuple[str, str]] = {}
             target_resource: ExternalChannelResource | None = None
             target_binding: ExternalChannelBinding | None = None
             successful_positions = {
@@ -658,15 +663,6 @@ class ExternalChannelIngressDrainService:
                             )
                         target_resource = resource
                         target_binding = binding
-                        if item.invocation and not item.initial_title_eligible:
-                            settings_trigger_keys.add(
-                                _message_idempotency_key(
-                                    invocation_id=item.invocation_id,
-                                    provider_message_key=(
-                                        item.trigger_provider_message_key
-                                    ),
-                                )
-                            )
                         for message_index, message in enumerate(
                             success.history.messages
                         ):
@@ -699,6 +695,29 @@ class ExternalChannelIngressDrainService:
                                 ),
                                 sequence=order_sequence,
                             )
+                            mailbox_idempotency_key = _message_idempotency_key(
+                                invocation_id=invocation_id,
+                                provider_message_key=message.provider_message_key,
+                            )
+                            if item.invocation:
+                                visible_tracker_mailbox_keys.add(
+                                    mailbox_idempotency_key
+                                )
+                            if (
+                                item.provider is ExternalChannelProvider.SLACK
+                                and message.provider_message_key
+                                == item.trigger_provider_message_key
+                                and item.provider_user_id is not None
+                            ):
+                                slack_presence_by_mailbox_key[
+                                    mailbox_idempotency_key
+                                ] = (
+                                    _slack_presence_thread_ts(
+                                        item=item,
+                                        resource=resource,
+                                    ),
+                                    item.provider_user_id,
+                                )
                             enqueues.append(
                                 MailboxEnqueue(
                                     session_id=batch.session_id,
@@ -710,12 +729,7 @@ class ExternalChannelIngressDrainService:
                                     order_group=order_group,
                                     order_sequence=order_sequence,
                                     content="",
-                                    idempotency_key=_message_idempotency_key(
-                                        invocation_id=invocation_id,
-                                        provider_message_key=(
-                                            message.provider_message_key
-                                        ),
-                                    ),
+                                    idempotency_key=mailbox_idempotency_key,
                                     metadata={},
                                     attachments=[],
                                     file_parts=[],
@@ -777,9 +791,27 @@ class ExternalChannelIngressDrainService:
                 if not enqueues
                 else await self.mailbox_service.enqueue_many(session, enqueues)
             )
-            settings_requested = any(
-                result.created and enqueue.idempotency_key in settings_trigger_keys
-                for enqueue, result in zip(enqueues, mailbox_results, strict=True)
+            slack_presence = next(
+                (
+                    slack_presence_by_mailbox_key[enqueue.idempotency_key]
+                    for enqueue, result in zip(
+                        enqueues,
+                        mailbox_results,
+                        strict=True,
+                    )
+                    if result.created
+                    and enqueue.idempotency_key in slack_presence_by_mailbox_key
+                ),
+                None,
+            )
+            tracker_visibility: Literal["hidden", "visible"] = (
+                "visible"
+                if any(
+                    result.created
+                    and enqueue.idempotency_key in visible_tracker_mailbox_keys
+                    for enqueue, result in zip(enqueues, mailbox_results, strict=True)
+                )
+                else "hidden"
             )
             if any(result.created for result in mailbox_results):
                 if target_resource is None or target_binding is None:
@@ -794,25 +826,19 @@ class ExternalChannelIngressDrainService:
                     raise RuntimeError(
                         "External Channel final Session ownership disappeared."
                     )
-                if settings_requested:
-                    settings_plan = await self.work_repository.prepare_direct_control(
-                        session,
-                        connection_id=target_resource.connection_id,
-                        resource_id=target_resource.id,
-                        route_id=target_binding.route_id,
-                        binding_id=target_binding.id,
-                        operation=(ExternalChannelDeliveryOperation.CONTROL_MESSAGE),
-                        request_payload=binding_settings_on_demand_payload(
-                            target_resource.labels
-                        ),
-                        operation_seed=f"binding-settings:{target_binding.id}",
-                    )
                 work = await self.work_repository.ensure_active_work(
                     session,
                     agent_id=target_session.agent_id,
                     session_id=batch.session_id,
                     binding_id=batch.binding_id,
                     desired_progress=checking_progress(),
+                    tracker_visibility=tracker_visibility,
+                    slack_presence_thread_ts=(
+                        None if slack_presence is None else slack_presence[0]
+                    ),
+                    slack_presence_initiator_user_id=(
+                        None if slack_presence is None else slack_presence[1]
+                    ),
                 )
                 progress_plan = await self.work_repository.prepare_initial_progress(
                     session,
@@ -872,8 +898,6 @@ class ExternalChannelIngressDrainService:
                 deleted_items=delete_items,
             )
             await session.commit()
-        if settings_plan is not None:
-            await self._attempt_control_plans((settings_plan,))
         if progress_plan is not None:
             await self._attempt_control_plans((progress_plan,))
         self.metrics.record_finalization(
@@ -1145,6 +1169,19 @@ def _retry_transition(
     if delay > remaining:
         return None
     return now + delay
+
+
+def _slack_presence_thread_ts(
+    *,
+    item: ExternalChannelIngressItem,
+    resource: ExternalChannelResource,
+) -> str:
+    """Return the exact Slack loading anchor for one admitted Work cycle."""
+    labels = resource.labels or {}
+    retained = labels.get("thread_ts")
+    if isinstance(retained, str) and retained:
+        return retained
+    return item.trigger_provider_message_id
 
 
 def _locator(item: ExternalChannelIngressItem) -> ExternalChannelTriggerLocator:

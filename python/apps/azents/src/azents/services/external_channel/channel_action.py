@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Annotated, NotRequired, TypedDict, assert_never, cast
+from typing import Annotated, NotRequired, TypedDict, assert_never
 from urllib.parse import urlparse
 
 import httpx
@@ -35,8 +35,7 @@ from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
 from azents.core.slack_external_channel_progress import (
-    render_slack_binding_settings_on_demand,
-    render_slack_session_navigation_actions,
+    render_slack_session_actions,
     render_slack_session_presence,
     render_slack_setup_required,
 )
@@ -72,7 +71,6 @@ from azents.services.external_channel.discord_delivery import (
     _sdk_timeout_result,
 )
 from azents.services.external_channel.discord_presentation import (
-    render_discord_binding_settings_on_demand,
     render_discord_session_navigation_components,
     render_discord_session_presence,
     render_discord_setup_required,
@@ -773,39 +771,6 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "binding_settings_on_demand"
-                ):
-                    context = _session_navigation_context(
-                        target,
-                        web_url=self.config.web_url,
-                    )
-                    if (
-                        context is None
-                        or files
-                        or not isinstance(target.binding_id, str)
-                        or not target.binding_id
-                    ):
-                        return _discord_invalid_payload()
-                    control = render_discord_binding_settings_on_demand(
-                        agent_name=context.agent_name,
-                        settings_custom_id=(
-                            build_discord_binding_settings_open_custom_id(
-                                secret=self.config.auth.jwt.secret_key,
-                                binding_id=target.binding_id,
-                            )
-                        ),
-                    )
-                    return await discord_client.create_message(
-                        bot_token=bot_token,
-                        guild_id=guild_id,
-                        channel_id=delivery_channel_id,
-                        content=control.text,
-                        operation_key=operation_key,
-                        components=control.components,
-                        embeds=control.embeds,
-                    )
-                if (
-                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and payload.get("control_kind") == "scheduled_task_registration"
                 ):
                     text = payload.get("text")
@@ -885,9 +850,13 @@ class ExternalChannelActionService:
                     )
                     if context is None or components is not None:
                         return _discord_invalid_payload()
-                    components = render_discord_session_navigation_components(
-                        context.session_url
+                    components = _discord_tracker_components(
+                        target,
+                        session_url=context.session_url,
+                        secret=self.config.auth.jwt.secret_key,
                     )
+                    if components is None:
+                        return _discord_invalid_payload()
                 if files:
                     if components is not None or embeds is not None:
                         return _discord_invalid_payload()
@@ -902,9 +871,8 @@ class ExternalChannelActionService:
                         if file.source is ExternalChannelOutboundFileSource.EXCHANGE
                     ]
                     if runtime_files and (
-                        file_storage is None
+                        not isinstance(file_storage, RangedFileStorage)
                         or agent_id is None
-                        or not callable(getattr(file_storage, "read_range", None))
                     ):
                         return DiscordDeliveryResult(
                             status="failed",
@@ -924,9 +892,9 @@ class ExternalChannelActionService:
                             ),
                         )
                     ranged_storage = (
-                        None
-                        if file_storage is None
-                        else cast(RangedFileStorage, file_storage)
+                        file_storage
+                        if isinstance(file_storage, RangedFileStorage)
+                        else None
                     )
                     return await discord_client.create_file_message(
                         bot_token=bot_token,
@@ -1003,15 +971,20 @@ class ExternalChannelActionService:
                     or message_id is None
                 ):
                     return _discord_invalid_payload()
+                components = _discord_tracker_components(
+                    target,
+                    session_url=context.session_url,
+                    secret=self.config.auth.jwt.secret_key,
+                )
+                if components is None:
+                    return _discord_invalid_payload()
                 return await discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
                     message_id=message_id,
                     content=_discord_agent_content(target, text),
-                    components=render_discord_session_navigation_components(
-                        context.session_url
-                    ),
+                    components=components,
                     embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
@@ -1131,7 +1104,12 @@ class ExternalChannelActionService:
                 if not isinstance(text, str) or blocks is None or context is None:
                     return _invalid_payload()
                 blocks.append(
-                    render_slack_session_navigation_actions(context.session_url)
+                    _slack_progress_actions(
+                        target=target,
+                        channel_id=channel_id,
+                        session_url=context.session_url,
+                        jwt_secret=self.config.auth.jwt.secret_key,
+                    )
                 )
                 return await self.slack_client.post_blocks(
                     bot_token=bot_token,
@@ -1158,7 +1136,12 @@ class ExternalChannelActionService:
                 ):
                     return _invalid_payload()
                 blocks.append(
-                    render_slack_session_navigation_actions(context.session_url)
+                    _slack_progress_actions(
+                        target=target,
+                        channel_id=channel_id,
+                        session_url=context.session_url,
+                        jwt_secret=self.config.auth.jwt.secret_key,
+                    )
                 )
                 return await self.slack_client.update_message(
                     bot_token=bot_token,
@@ -1250,37 +1233,6 @@ class ExternalChannelActionService:
                     secret=self.config.auth.jwt.secret_key,
                     connection_id=target.connection_id,
                     provider_parent_channel_id=channel_id,
-                ),
-            )
-            return await self.slack_client.post_blocks(
-                bot_token=bot_token,
-                tenant_id=tenant_id,
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text=control.text,
-                blocks=control.blocks,
-                icon_url=None,
-            )
-        if control_kind == "binding_settings_on_demand":
-            context = _session_navigation_context(
-                target,
-                web_url=self.config.web_url,
-            )
-            if (
-                context is None
-                or target.resource_id is None
-                or target.binding_id is None
-            ):
-                return _invalid_payload()
-            control = render_slack_binding_settings_on_demand(
-                agent_name=context.agent_name,
-                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
-                settings_action_value=build_slack_settings_locator(
-                    secret=self.config.auth.jwt.secret_key,
-                    connection_id=target.connection_id,
-                    provider_parent_channel_id=channel_id,
-                    resource_id=target.resource_id,
-                    binding_id=target.binding_id,
                 ),
             )
             return await self.slack_client.post_blocks(
@@ -1719,6 +1671,58 @@ def _session_navigation_context(
     return _SessionNavigationContext(
         agent_name=target.agent_name,
         session_url=session_url,
+    )
+
+
+def _slack_progress_actions(
+    *,
+    target: ProviderTarget,
+    channel_id: str,
+    session_url: str,
+    jwt_secret: str,
+) -> dict[str, object]:
+    """Render Slack Tracker controls from exact current target authority."""
+    if target.request_payload.get("tracker_kind") == "scheduled_task":
+        return render_slack_session_actions(
+            session_url=session_url,
+            settings_action_id=None,
+            settings_action_value=None,
+        )
+    if target.resource_id is None or target.binding_id is None:
+        raise ValueError("Conversational Slack Tracker authority is incomplete.")
+    return render_slack_session_actions(
+        session_url=session_url,
+        settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+        settings_action_value=build_slack_settings_locator(
+            secret=jwt_secret,
+            connection_id=target.connection_id,
+            provider_parent_channel_id=channel_id,
+            resource_id=target.resource_id,
+            binding_id=target.binding_id,
+        ),
+    )
+
+
+def _discord_tracker_components(
+    target: ProviderTarget,
+    *,
+    session_url: str,
+    secret: str,
+) -> list[dict[str, object]] | None:
+    """Render current Discord Tracker controls from exact target authority."""
+    if target.request_payload.get("tracker_kind") == "scheduled_task":
+        return render_discord_session_navigation_components(
+            session_url,
+            settings_custom_id=None,
+        )
+    if not isinstance(target.binding_id, str) or not target.binding_id:
+        return None
+    return render_discord_session_navigation_components(
+        session_url,
+        settings_custom_id=build_discord_binding_settings_open_custom_id(
+            secret=secret,
+            binding_id=target.binding_id,
+        ),
     )
 
 

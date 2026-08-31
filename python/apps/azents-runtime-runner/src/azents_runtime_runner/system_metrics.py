@@ -79,6 +79,14 @@ class _CpuBaseline:
     observed_at: float
 
 
+@dataclasses.dataclass(frozen=True)
+class _MemoryReading:
+    """One memory usage and capacity reading."""
+
+    used: int
+    total: int | None
+
+
 class LinuxSystemMetricsCollector:
     """Collect Runner-visible CPU, memory, and root-filesystem usage."""
 
@@ -217,15 +225,16 @@ class LinuxSystemMetricsCollector:
 
     def _collect_memory(self) -> RunnerSystemMetricObservation:
         try:
-            if self._scope is RunnerSystemMetricsScope.CONTAINER:
-                used, total = self._read_container_memory()
-            else:
-                used, total = self._read_host_memory()
+            reading = (
+                self._read_container_memory()
+                if self._scope is RunnerSystemMetricsScope.CONTAINER
+                else self._read_host_memory()
+            )
         except OSError, ValueError:
             return _missing(RunnerSystemMetricAvailability.UNAVAILABLE)
-        return _available(used=used, total=total)
+        return _available(used=reading.used, total=reading.total)
 
-    def _read_container_memory(self) -> tuple[int, int | None]:
+    def _read_container_memory(self) -> _MemoryReading:
         try:
             used = _parse_nonnegative_int(self._read_text(_CGROUP_V2_MEMORY_CURRENT))
             raw_total = self._read_text(_CGROUP_V2_MEMORY_MAX).strip()
@@ -238,15 +247,15 @@ class LinuxSystemMetricsCollector:
                 if parsed_total >= _UNLIMITED_MEMORY_THRESHOLD_BYTES
                 else parsed_total
             )
-        return used, total
+        return _MemoryReading(used=used, total=total)
 
-    def _read_host_memory(self) -> tuple[int, int]:
+    def _read_host_memory(self) -> _MemoryReading:
         fields = _memory_info(self._read_text(_PROC_MEMINFO))
         total = _required_nonnegative_int(fields, "MemTotal") * 1024
         available = _required_nonnegative_int(fields, "MemAvailable") * 1024
         if total <= 0 or available > total:
             raise ValueError("Host memory counters are invalid")
-        return total - available, total
+        return _MemoryReading(used=total - available, total=total)
 
     def _collect_disk(self) -> RunnerSystemMetricObservation:
         try:

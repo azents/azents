@@ -4,7 +4,7 @@ import datetime
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import NamedTuple, cast
+from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,12 +20,16 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
-from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_progress import (
+    ExternalChannelDesiredProgress,
+    checking_progress,
+)
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
@@ -61,15 +65,27 @@ class _CommitIgnoreResult(NamedTuple):
     update: AsyncMock
 
 
+def _string(value: object) -> str:
+    """Validate one provider payload string."""
+    if not isinstance(value, str):
+        raise AssertionError("Expected a string.")
+    return value
+
+
 def _work(
     *,
     desired: bool,
+    tracker_visibility: Literal["hidden", "visible"] = "visible",
     projection_parts: list[ChannelWorkProjectionPartState] | None = None,
 ) -> ChannelWorkState:
     return ChannelWorkState(
+        schema_version=3,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
+        tracker_visibility=tracker_visibility,
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title="Working…" if desired else None,
         tasks=[],
         state_revision=2,
@@ -97,6 +113,10 @@ def _part(
 
 def test_projection_state_is_missing_without_owned_parts() -> None:
     assert projection_state(_work(desired=True)) == "missing"
+
+
+def test_projection_state_is_none_for_intentionally_hidden_work() -> None:
+    assert projection_state(_work(desired=True, tracker_visibility="hidden")) == "none"
 
 
 def test_projection_state_is_synchronized_for_current_present_part() -> None:
@@ -190,7 +210,7 @@ async def test_direct_control_ignores_connection_health_status() -> None:
     repository = ExternalChannelWorkRepository()
 
     plan = await repository.prepare_direct_control(
-        cast(AsyncSession, session),
+        session,
         connection_id=connection.id,
         resource_id=None,
         route_id=None,
@@ -252,7 +272,7 @@ async def test_binding_reply_effects_preserve_exact_thread_surfacing(
     repository.prepare_direct_control = AsyncMock(return_value=prepared)
 
     plans = await repository.prepare_binding_reply_effects(
-        cast(AsyncSession, session),
+        session,
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -289,7 +309,7 @@ async def test_binding_effect_revalidation_rejects_changed_agent_authority() -> 
     repository.revalidate_direct_control = AsyncMock(return_value=changed)
 
     current = await repository.revalidate_binding_effect(
-        cast(AsyncSession, object()),
+        MagicMock(spec=AsyncSession),
         plan=plan,
     )
 
@@ -325,7 +345,7 @@ async def test_slack_binding_reply_effects_split_oversized_terminal_text() -> No
     )
 
     plans = await repository.prepare_binding_reply_effects(
-        cast(AsyncSession, session),
+        session,
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -341,11 +361,11 @@ async def test_slack_binding_reply_effects_split_oversized_terminal_text() -> No
         awaited.kwargs["request_payload"]
         for awaited in repository.prepare_direct_control.await_args_list
     ]
-    assert "".join(cast(str, payload["text"]) for payload in payloads) == (
+    assert "".join(_string(payload["text"]) for payload in payloads) == (
         ("x" * 12_000) + "\ncontinued"
     )
     assert all(
-        len(cast(str, payload["text"])) <= SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512
+        len(_string(payload["text"])) <= SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512
         for payload in payloads
     )
     assert all(payload["reply_broadcast"] is True for payload in payloads)
@@ -360,9 +380,13 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 ) -> None:
     """Repeated admissions cannot create another Tracker for the same active Work."""
     work = ChannelWorkState(
+        schema_version=3,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
+        tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=None,
         tasks=[],
         state_revision=1,
@@ -427,7 +451,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
     repository.prepare_direct_control = AsyncMock(return_value=plan)
 
     first = await repository.prepare_initial_progress(
-        cast(AsyncSession, session),
+        session,
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -448,7 +472,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
         else None
     )
     repeated = await repository.prepare_initial_progress(
-        cast(AsyncSession, session),
+        session,
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -457,6 +481,278 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 
     assert repeated is None
     repository.prepare_direct_control.assert_awaited_once()
+
+
+async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
+    """A later invocation promotes one active hidden Work without replacing it."""
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current: ChannelWorkState | None = None
+
+    async def update(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        default_factory: Callable[[], ChannelWorkState],
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[ChannelWorkState],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[ChannelWorkState]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(default_factory() if current is None else current)
+        current = mutation.state
+        return mutation
+
+    state_store.update = AsyncMock(side_effect=update)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    progress = checking_progress()
+
+    hidden = await repository.ensure_active_work(
+        MagicMock(spec=AsyncSession),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        desired_progress=progress,
+        tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
+    )
+    hidden_work_cycle_id = hidden.work_cycle_id
+    hidden_state_revision = hidden.state_revision
+    assert hidden.tracker_visibility == "hidden"
+
+    repeated_hidden = await repository.ensure_active_work(
+        MagicMock(spec=AsyncSession),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        desired_progress=progress,
+        tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
+    )
+    assert repeated_hidden == hidden
+
+    promoted = await repository.ensure_active_work(
+        MagicMock(spec=AsyncSession),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        desired_progress=progress,
+        tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
+    )
+    assert promoted.work_cycle_id == hidden_work_cycle_id
+    assert promoted.tracker_visibility == "visible"
+    assert promoted.state_revision == hidden_state_revision + 1
+    assert promoted.desired_progress == hidden.desired_progress
+    assert promoted.desired_progress_revision == hidden.desired_progress_revision
+
+    repeated_visible = await repository.ensure_active_work(
+        MagicMock(spec=AsyncSession),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        desired_progress=progress,
+        tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
+    )
+    assert repeated_visible == promoted
+    state_store.update.assert_awaited()
+
+
+async def test_ensure_active_work_uses_requested_visibility_for_new_cycle() -> None:
+    """Reactivation gets one fresh visibility classification from its new trigger."""
+    finished = _work(desired=False)
+    finished.status = ExternalChannelWorkStatus.FINISHED
+    finished.finished_at = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = finished
+
+    async def update(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        default_factory: Callable[[], ChannelWorkState],
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[ChannelWorkState],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[ChannelWorkState]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, default_factory, max_retries
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update = AsyncMock(side_effect=update)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+
+    replacement = await repository.ensure_active_work(
+        MagicMock(spec=AsyncSession),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        desired_progress=checking_progress(),
+        tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
+    )
+
+    assert replacement.work_cycle_id != finished.work_cycle_id
+    assert replacement.tracker_visibility == "hidden"
+    assert replacement.projection_parts == []
+    assert replacement.desired_progress_revision == 1
+
+
+async def test_initial_progress_hidden_work_plans_no_tracker() -> None:
+    """A hidden Work retains desired progress without claiming provider projection."""
+    work = _work(desired=True, tracker_visibility="hidden")
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(id="resource-1", labels={"guild_id": "111"})
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.DISCORD,
+    )
+    result = MagicMock()
+    result.one_or_none.return_value = (binding, resource, route, connection)
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    state_store.load = AsyncMock(return_value=work)
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=result)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    repository.prepare_direct_control = AsyncMock()
+
+    plan = await repository.prepare_initial_progress(
+        session,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        work_cycle_id=work.work_cycle_id,
+    )
+
+    assert plan is None
+    assert work.projection_parts == []
+    repository.prepare_direct_control.assert_not_awaited()
+    state_store.update_existing.assert_not_awaited()
+
+
+async def test_initial_progress_rerenders_latest_progress_after_claim_race() -> None:
+    """A late promotion claims one Tracker from the latest complete snapshot."""
+    initial = _work(desired=True)
+    latest_task = ChannelWorkTask(
+        id="task-1",
+        title="Latest task",
+        status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+        details=None,
+        output=None,
+        sources=[],
+    )
+    latest_progress = ExternalChannelDesiredProgress(
+        schema_version=2,
+        state="working",
+        title="Latest work…",
+        tasks=[latest_task],
+    )
+    latest = initial.model_copy(deep=True)
+    latest.title = latest_progress.title
+    latest.tasks = list(latest_progress.tasks)
+    latest.state_revision += 1
+    latest.desired_progress_revision += 1
+    latest.desired_progress = latest_progress
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "channel_id": "channel-1",
+            "thread_ts": "1.000001",
+        },
+    )
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+    )
+    result = MagicMock()
+    result.one_or_none.return_value = (binding, resource, route, connection)
+    current = initial
+    update_attempts = 0
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+
+    async def load_state(*args: object, **kwargs: object) -> ChannelWorkState:
+        del args, kwargs
+        return current
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[Literal["claimed", "retry", "stop"]],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[Literal["claimed", "retry", "stop"]]:
+        nonlocal current, update_attempts
+        del _session, agent_id, session_id, binding_id, max_retries
+        if update_attempts == 0:
+            current = latest
+        update_attempts += 1
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.load = AsyncMock(side_effect=load_state)
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=result)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    initial_plan = make_provider_effect_plan("initial-progress:initial")
+    latest_plan = make_provider_effect_plan("initial-progress:latest")
+    repository.prepare_direct_control = AsyncMock(
+        side_effect=[initial_plan, latest_plan]
+    )
+
+    plan = await repository.prepare_initial_progress(
+        session,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        work_cycle_id=initial.work_cycle_id,
+    )
+
+    assert plan == latest_plan
+    assert len(current.projection_parts) == 1
+    claimed = current.projection_parts[0]
+    assert claimed.part_ordinal == 0
+    assert claimed.desired_progress_revision == latest.desired_progress_revision
+    assert state_store.update_existing.await_count == 2
+    assert repository.prepare_direct_control.await_count == 2
+    first_payload = repository.prepare_direct_control.await_args_list[0].kwargs[
+        "request_payload"
+    ]
+    latest_payload = repository.prepare_direct_control.await_args_list[1].kwargs[
+        "request_payload"
+    ]
+    assert (
+        first_payload["desired_progress_revision"] == initial.desired_progress_revision
+    )
+    assert (
+        latest_payload["desired_progress_revision"] == latest.desired_progress_revision
+    )
+    assert latest_progress.title in latest_payload["text"]
 
 
 async def test_direct_control_rejects_terminal_connection_before_credential_purge(
@@ -562,7 +858,7 @@ async def test_channel_action_ignores_connection_health_status() -> None:
 
     with pytest.raises(ResourceLookupReached):
         await repository.commit_direct_action(
-            cast(AsyncSession, session),
+            session,
             session_id="session-1",
             agent_id="agent-1",
             run_id="run-1",
@@ -580,10 +876,135 @@ async def test_channel_action_ignores_connection_health_status() -> None:
     assert "external_channel_connections.status" not in _where_sql(connection_query)
 
 
-async def test_continue_after_finished_work_creates_replacement_tracker() -> None:
-    """Active Todos after finish create a Tracker for the new Work cycle."""
+async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
+    """Canonical unfinished tasks promote hidden Work and create its Tracker."""
+    work = _work(desired=True, tracker_visibility="hidden")
+    binding = SimpleNamespace(
+        id="binding-1",
+        route_id="route-1",
+        resource_id="resource-1",
+    )
+    route = SimpleNamespace(id="route-1", connection_id="connection-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.DISCORD,
+        app_mode=ExternalChannelAppMode.SINGLE,
+        encrypted_credentials="ciphertext",
+        provider_tenant_id="111",
+        capabilities={},
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "111",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
+    )
+    agent = SimpleNamespace(
+        id="agent-1",
+        workspace_id="workspace-1",
+        name="Agent",
+        avatar=None,
+    )
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "guild_id": "111",
+            "parent_channel_id": "333",
+            "conversation_scope": "parent_channel",
+        },
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(
+        side_effect=[
+            SimpleNamespace(id="session-1"),
+            agent,
+            binding,
+            route,
+            connection,
+            resource,
+        ]
+    )
+    session.get = AsyncMock(return_value=SimpleNamespace(handle="workspace"))
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = work
+
+    async def update(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        default_factory: Callable[[], ChannelWorkState],
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[ChannelActionTransition],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[ChannelActionTransition]:
+        nonlocal current
+        del (
+            _session,
+            agent_id,
+            session_id,
+            binding_id,
+            default_factory,
+            max_retries,
+        )
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update = AsyncMock(side_effect=update)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    tasks = [
+        ChannelWorkTask(
+            id="task-1",
+            title="Latest task",
+            status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+            details=None,
+            output=None,
+            sources=[],
+        )
+    ]
+
+    transition = await repository.commit_direct_action(
+        session,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="tool-call-hidden-continue",
+        binding_id=binding.id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Latest work…",
+        tasks=tasks,
+        files=(),
+        now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
+    )
+
+    assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
+    assert len(transition.effects) == 1
+    assert (
+        transition.effects[0].provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    )
+    assert current.tracker_visibility == "visible"
+    assert current.desired_progress is not None
+    assert current.desired_progress.title == "Latest work…"
+    assert current.desired_progress.tasks == tasks
+    assert current.projection_parts == []
+
+
+@pytest.mark.parametrize(
+    "tracker_visibility",
+    ["visible", "hidden"],
+)
+async def test_continue_after_finished_work_with_tasks_is_visible(
+    tracker_visibility: Literal["hidden", "visible"],
+) -> None:
+    """A replacement cycle with unfinished tasks has a visible Tracker."""
     finished = _work(
         desired=False,
+        tracker_visibility=tracker_visibility,
         projection_parts=[
             _part(
                 status=ExternalChannelWorkProjectionStatus.DELETED,
@@ -616,6 +1037,7 @@ async def test_continue_after_finished_work_creates_replacement_tracker() -> Non
     )
     resource = SimpleNamespace(
         id="resource-1",
+        resource_type=ExternalChannelResourceType.THREAD,
         labels={
             "channel_id": "channel-1",
             "thread_ts": "1.000001",
@@ -665,7 +1087,7 @@ async def test_continue_after_finished_work_creates_replacement_tracker() -> Non
     state_store.update = AsyncMock(side_effect=update)
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
-        cast(AsyncSession, session),
+        session,
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",
@@ -690,6 +1112,7 @@ async def test_continue_after_finished_work_creates_replacement_tracker() -> Non
 
     assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
     assert transition.work_id != finished.work_cycle_id
+    assert current.tracker_visibility == "visible"
     assert len(transition.effects) == 1
     assert (
         transition.effects[0].provider.target.operation
@@ -794,7 +1217,7 @@ async def _commit_ignore(
     state_store.update = AsyncMock(side_effect=update)
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
-        cast(AsyncSession, session),
+        session,
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",
@@ -926,23 +1349,16 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
     session = MagicMock(spec=AsyncSession)
     session.execute = AsyncMock(side_effect=QueryCaptured())
     repository = ExternalChannelWorkRepository()
-    effect = cast(
-        ChannelActionEffectPlan,
-        SimpleNamespace(
-            work_cycle_id="work-1",
-            provider=SimpleNamespace(
-                target=SimpleNamespace(
-                    binding_id="binding-1",
-                    resource_id="resource-1",
-                    connection_id="connection-1",
-                )
-            ),
-        ),
+    effect = ChannelActionEffectPlan(
+        provider=make_provider_effect_plan("direct-effect"),
+        part=0,
+        work_cycle_id="work-1",
+        expected_desired_progress_revision=None,
     )
 
     with pytest.raises(QueryCaptured):
         await repository.revalidate_direct_effect(
-            cast(AsyncSession, session),
+            session,
             effect=effect,
         )
 
@@ -959,7 +1375,7 @@ async def test_access_control_create_is_claimed_once_before_provider_io() -> Non
         control_provider_message_key=None,
         control_projection_status=None,
     )
-    session = MagicMock()
+    session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=request)
     session.flush = AsyncMock()
     repository = ExternalChannelWorkRepository()
@@ -967,7 +1383,7 @@ async def test_access_control_create_is_claimed_once_before_provider_io() -> Non
     repository.prepare_direct_control = AsyncMock(return_value=plan)
 
     first = await repository.prepare_access_control_create(
-        cast(AsyncSession, session),
+        session,
         access_request_id="access-request-1",
         connection_id="connection-1",
         resource_id="resource-1",
@@ -977,7 +1393,7 @@ async def test_access_control_create_is_claimed_once_before_provider_io() -> Non
         operation_seed="access-request:access-request-1",
     )
     second = await repository.prepare_access_control_create(
-        cast(AsyncSession, session),
+        session,
         access_request_id="access-request-1",
         connection_id="connection-1",
         resource_id="resource-1",
@@ -1001,19 +1417,19 @@ async def test_discord_delivery_channel_records_direct_create_title_once() -> No
     resource = SimpleNamespace(
         labels={"provider": "discord", "guild_id": "111"},
     )
-    session = MagicMock()
+    session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=resource)
     session.flush = AsyncMock()
     repository = ExternalChannelWorkRepository()
 
     first = await repository.record_discord_delivery_channel(
-        cast(AsyncSession, session),
+        session,
         resource_id="resource-1",
         delivery_channel_id="444",
         initial_thread_title="Test agent",
     )
     second = await repository.record_discord_delivery_channel(
-        cast(AsyncSession, session),
+        session,
         resource_id="resource-1",
         delivery_channel_id="555",
         initial_thread_title="Another title",

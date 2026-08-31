@@ -169,13 +169,29 @@ def render_slack_session_presence(
     )
 
 
-def render_slack_session_navigation_actions(
+def render_slack_session_actions(
+    *,
     session_url: str,
+    settings_action_id: str | None,
+    settings_action_value: str | None,
 ) -> dict[str, object]:
-    """Render one reusable Slack Session navigation action row."""
+    """Render reusable Slack Session and optional settings actions."""
+    elements = [_session_navigation_button(session_url)]
+    if settings_action_id is not None and settings_action_value is not None:
+        elements.append(
+            {
+                "type": "button",
+                "action_id": settings_action_id,
+                "text": {
+                    "type": "plain_text",
+                    "text": "Conversation settings",
+                },
+                "value": settings_action_value,
+            }
+        )
     return {
         "type": "actions",
-        "elements": [_session_navigation_button(session_url)],
+        "elements": elements,
     }
 
 
@@ -226,45 +242,6 @@ def render_slack_setup_required(
                         "text": {
                             "type": "plain_text",
                             "text": "Choose conversation location",
-                        },
-                        "value": settings_action_value,
-                    }
-                ],
-            },
-        ],
-    )
-
-
-def render_slack_binding_settings_on_demand(
-    *,
-    agent_name: str,
-    settings_action_id: str,
-    settings_action_value: str,
-) -> SlackProgressPresentation:
-    """Render settings access after an eligible mention in an existing Binding."""
-    escaped_name = (
-        agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    )
-    text = f"Conversation settings for {agent_name}."
-    return SlackProgressPresentation(
-        text=text,
-        blocks=[
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"Conversation settings for *{escaped_name}*.",
-                },
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "action_id": settings_action_id,
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Conversation settings",
                         },
                         "value": settings_action_value,
                     }

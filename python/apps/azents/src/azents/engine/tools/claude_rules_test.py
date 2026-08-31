@@ -38,6 +38,7 @@ from azents.engine.tools.runtime_instruction_context import (
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.file_storage import TextReadResult
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 
@@ -73,8 +74,8 @@ class _FailingListStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         recursive: bool = False,
         exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
@@ -99,8 +100,8 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         recursive: bool = False,
         exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
@@ -120,8 +121,8 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Count candidate metadata reads."""
         self.stat_calls.append(path)
@@ -131,12 +132,12 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         offset: int,
-        max_bytes: int,
+        limit: int,
         encoding: str,
-    ) -> str:
+    ) -> TextReadResult:
         """Count and optionally block candidate content reads."""
         self.get_calls.append(path)
         if self.get_started_event is not None:
@@ -147,7 +148,7 @@ class _CountingStorage(FakeSharedStorage):
             path,
             agent_id=agent_id,
             offset=offset,
-            max_bytes=max_bytes,
+            limit=limit,
             encoding=encoding,
         )
 
@@ -166,8 +167,8 @@ class _SymlinkStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Return metadata with configured real path."""
         metadata = await super().stat(path, agent_id=agent_id, user_id=user_id)
@@ -655,7 +656,6 @@ class TestClaudeRulesToolkit:
 
         second_task = asyncio.create_task(run_second())
         await second_started.wait()
-        await asyncio.sleep(0)
         assert storage.get_calls == [rule_path]
 
         storage.get_continue_event.set()

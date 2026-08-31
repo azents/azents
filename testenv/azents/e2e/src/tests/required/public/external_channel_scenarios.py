@@ -7,7 +7,7 @@ import shlex
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, cast
+from typing import Any, NamedTuple, TypeVar
 from urllib.parse import urlencode
 
 import azentsadminclient
@@ -26,6 +26,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_session_title_source import (
     AgentSessionTitleSource,
 )
@@ -78,6 +79,10 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.managed_binding_list_response import (
+    ManagedBindingListResponse,
+)
+from azentspublicclient.models.managed_connection import ManagedConnection
 from azentspublicclient.models.multi_channel_default_request import (
     MultiChannelDefaultRequest,
 )
@@ -133,6 +138,109 @@ _DISCORD_COMMAND_CONTRACTS = {
 }
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
 
+T = TypeVar("T")
+
+
+class _CreatedAgent(NamedTuple):
+    """Authenticated owner and one created Agent identity."""
+
+    token: str
+    email: str
+    handle: str
+    agent_id: str
+
+
+class _CreatedWorkspaceAgents(NamedTuple):
+    """Authenticated owner and a created Agent catalog."""
+
+    token: str
+    email: str
+    handle: str
+    agent_ids: list[str]
+
+
+class _SessionBinding(NamedTuple):
+    """Generated-client Session and its External Channel Binding."""
+
+    session: Any
+    binding: Any
+
+
+class _SessionProjection(NamedTuple):
+    """Session identity and its generated-client Channel projection."""
+
+    session_id: str
+    projection: Any
+
+
+def _required(value: T | None) -> T:
+    """Return one required observed value."""
+    if value is None:
+        raise AssertionError("Expected a non-null observed value.")
+    return value
+
+
+def _object(value: object) -> dict[str, object]:
+    """Validate one string-keyed object used as provider evidence."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError("Expected an object with string keys.")
+    return value
+
+
+def _list(value: object) -> list[object]:
+    """Validate one provider evidence list."""
+    if not isinstance(value, list):
+        raise AssertionError("Expected a list.")
+    return value
+
+
+def _objects(value: object) -> list[dict[str, object]]:
+    """Validate one list of string-keyed provider evidence objects."""
+    return [_object(item) for item in _list(value)]
+
+
+def _strings(value: object) -> list[str]:
+    """Validate one provider evidence string list."""
+    values = _list(value)
+    if not all(isinstance(item, str) for item in values):
+        raise AssertionError("Expected a list of strings.")
+    return [item for item in values if isinstance(item, str)]
+
+
+def _int_dict(value: object) -> dict[str, int]:
+    """Validate one string-to-integer provider evidence mapping."""
+    values = _object(value)
+    if not all(
+        isinstance(item, int) and not isinstance(item, bool) for item in values.values()
+    ):
+        raise AssertionError("Expected an integer mapping.")
+    return {
+        key: item
+        for key, item in values.items()
+        if isinstance(item, int) and not isinstance(item, bool)
+    }
+
+
+def _string(value: object) -> str:
+    """Validate one provider evidence string."""
+    if not isinstance(value, str):
+        raise AssertionError("Expected a string.")
+    return value
+
+
+def _int(value: object) -> int:
+    """Validate one provider evidence integer."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise AssertionError("Expected an integer.")
+    return value
+
+
+def _web_driver(value: object) -> WebDriver:
+    """Validate the browser driver fixture."""
+    if not isinstance(value, WebDriver):
+        raise AssertionError("Expected a Selenium WebDriver.")
+    return value
+
 
 def _create_agent(
     public_api_client: azentspublicclient.ApiClient,
@@ -141,7 +249,7 @@ def _create_agent(
     *,
     runtime_profile_provider_id: str | None,
     shell_enabled: bool,
-) -> tuple[str, str, str, str]:
+) -> _CreatedAgent:
     """Create an authenticated workspace administrator and one active Agent."""
     token, email, handle, agent_ids = _create_workspace_agents(
         public_api_client,
@@ -151,7 +259,7 @@ def _create_agent(
         runtime_profile_provider_id=runtime_profile_provider_id,
         shell_enabled=shell_enabled,
     )
-    return token, email, handle, agent_ids[0]
+    return _CreatedAgent(token, email, handle, agent_ids[0])
 
 
 def _wait_for_runtime_runner_ready(
@@ -249,7 +357,7 @@ def _create_workspace_agents(
     agent_count: int,
     runtime_profile_provider_id: str | None,
     shell_enabled: bool,
-) -> tuple[str, str, str, list[str]]:
+) -> _CreatedWorkspaceAgents:
     """Create one Workspace owner and a deterministic active Agent catalog."""
     suffix = unique()
     token, _, email = authenticate_user(
@@ -315,7 +423,7 @@ def _create_workspace_agents(
             workspace_handle=handle,
             agent_id=agent_id,
         )
-    return token, email, handle, agent_ids
+    return _CreatedWorkspaceAgents(token, email, handle, agent_ids)
 
 
 def _invite_workspace_user(
@@ -374,7 +482,7 @@ def _provider_state(slack_provider_fake_url: str) -> dict[str, object]:
         timeout=5,
     )
     response.raise_for_status()
-    return cast(dict[str, object], response.json())
+    return _object(response.json())
 
 
 def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]:
@@ -384,7 +492,7 @@ def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]
         timeout=5,
     )
     response.raise_for_status()
-    return cast(dict[str, object], response.json())
+    return _object(response.json())
 
 
 def _active_ingress_state(
@@ -484,8 +592,7 @@ def _open_discord_settings(
     user_id: str,
 ) -> None:
     """Open parent settings through the capability-proven Discord command."""
-    command_id = cast(
-        str,
+    command_id = _string(
         wait_until(
             lambda: _discord_command_id(
                 discord_provider_fake_url,
@@ -494,7 +601,7 @@ def _open_discord_settings(
             timeout=15,
             interval=0.2,
             message="Discord settings command ID was not reconciled",
-        ),
+        )
     )
     command_name, command_type = _DISCORD_COMMAND_CONTRACTS["azents_settings"]
     response = requests.post(
@@ -540,13 +647,14 @@ def _select_discord_setup_location(
             "channel_id": channel_id,
             "channel": {"id": channel_id, "type": 0},
             "member": {"user": {"id": user_id}},
+            "token": f"token-{interaction_id}",
             "message": {"id": f"message-{interaction_id}"},
             "data": {"custom_id": custom_id},
         },
         timeout=10,
     )
     response.raise_for_status()
-    assert response.json() == {"status": 200, "response_type": 7}
+    assert response.json() == {"status": 200, "response_type": 6}
 
 
 def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
@@ -555,10 +663,10 @@ def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
     if not isinstance(deliveries, list):
         return []
     paths: list[str] = []
-    for raw_delivery in cast(list[object], deliveries):
+    for raw_delivery in _list(deliveries):
         if not isinstance(raw_delivery, dict):
             continue
-        delivery = cast(dict[str, object], raw_delivery)
+        delivery = _object(raw_delivery)
         path = delivery.get("session_path")
         if delivery.get("outcome") in {
             "delivered",
@@ -577,10 +685,10 @@ def _successful_session_navigation_categories(
     if not isinstance(deliveries, list):
         return []
     categories: list[str] = []
-    for raw_delivery in cast(list[object], deliveries):
+    for raw_delivery in _list(deliveries):
         if not isinstance(raw_delivery, dict):
             continue
-        delivery = cast(dict[str, object], raw_delivery)
+        delivery = _object(raw_delivery)
         category = delivery.get("safe_category")
         if (
             delivery.get("outcome") in {"delivered", "created", "duplicate"}
@@ -589,6 +697,57 @@ def _successful_session_navigation_categories(
         ):
             categories.append(category)
     return categories
+
+
+def _successful_session_navigation_action_ids(
+    provider_state: dict[str, object],
+    *,
+    category: str,
+) -> list[list[str]]:
+    """Return sanitized action roles for one successful navigation category."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return []
+    action_ids: list[list[str]] = []
+    for raw_delivery in _list(deliveries):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = _object(raw_delivery)
+        raw_action_ids = delivery.get("action_ids")
+        if (
+            delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == category
+            and isinstance(raw_action_ids, list)
+            and all(isinstance(item, str) for item in raw_action_ids)
+        ):
+            action_ids.append(_strings(raw_action_ids))
+    return action_ids
+
+
+def _discord_typing_channel_observed(
+    provider_state: dict[str, object],
+    *,
+    channel_id: str,
+) -> bool:
+    """Return whether one safe typing snapshot includes the exact channel."""
+    typing = provider_state.get("typing")
+    if not isinstance(typing, dict):
+        return False
+    snapshots = typing.get("snapshots")
+    if not isinstance(snapshots, list):
+        return False
+    for raw_snapshot in _list(snapshots):
+        if not isinstance(raw_snapshot, dict):
+            continue
+        targets = raw_snapshot.get("targets")
+        if not isinstance(targets, list):
+            continue
+        if any(
+            isinstance(target, dict) and target.get("channel_id") == channel_id
+            for target in targets
+        ):
+            return True
+    return False
 
 
 def _completed_session_navigation_state(
@@ -617,10 +776,10 @@ def _successful_session_presence_states(
     if not isinstance(deliveries, list):
         return []
     states: list[str] = []
-    for raw_delivery in cast(list[object], deliveries):
+    for raw_delivery in _list(deliveries):
         if not isinstance(raw_delivery, dict):
             continue
-        delivery = cast(dict[str, object], raw_delivery)
+        delivery = _object(raw_delivery)
         category = delivery.get("safe_category")
         if delivery.get("outcome") not in {"delivered", "created", "duplicate"}:
             continue
@@ -656,42 +815,40 @@ def _external_channel_input_evidence(
         live_response.raise_for_status()
         live_payload = live_response.json()
         if isinstance(live_payload, dict):
-            envelopes = cast(dict[str, object], live_payload).get("mailbox_items")
+            envelopes = _object(live_payload).get("mailbox_items")
             if isinstance(envelopes, list):
-                for raw_envelope in cast(list[object], envelopes):
+                for raw_envelope in _list(envelopes):
                     if not isinstance(raw_envelope, dict):
                         continue
-                    envelope = cast(dict[str, object], raw_envelope)
+                    envelope = _object(raw_envelope)
                     if envelope.get("kind") != "external_channel_message":
                         continue
                     raw_items = envelope.get("items")
                     if not isinstance(raw_items, list):
                         continue
-                    for raw_item in cast(list[object], raw_items):
+                    for raw_item in _list(raw_items):
                         if not isinstance(raw_item, dict):
                             continue
-                        presentation = cast(dict[str, object], raw_item).get(
-                            "presentation"
-                        )
+                        presentation = _object(raw_item).get("presentation")
                         if not isinstance(presentation, dict):
                             continue
-                        presentation_item = cast(dict[str, object], presentation)
+                        presentation_item = _object(presentation)
                         if presentation_item.get("type") == "external_channel_message":
                             candidates.append(presentation_item)
 
     history_payload = history_response.json()
     if isinstance(history_payload, dict):
-        events = cast(dict[str, object], history_payload).get("items")
+        events = _object(history_payload).get("items")
         if isinstance(events, list):
-            for raw_event in cast(list[object], events):
+            for raw_event in _list(events):
                 if not isinstance(raw_event, dict):
                     continue
-                event = cast(dict[str, object], raw_event)
+                event = _object(raw_event)
                 event_payload = event.get("payload")
                 if event.get("kind") == "external_channel_message" and isinstance(
                     event_payload, dict
                 ):
-                    candidates.append(cast(dict[str, object], event_payload))
+                    candidates.append(_object(event_payload))
 
     logical_items: dict[tuple[str, str], dict[str, object]] = {}
     for candidate in candidates:
@@ -702,7 +859,7 @@ def _external_channel_input_evidence(
             for value in (provider, external_message_id)
         ):
             continue
-        key = (cast(str, provider), cast(str, external_message_id))
+        key = (_string(provider), _string(external_message_id))
         evidence = {
             "provider": provider,
             "external_message_id": external_message_id,
@@ -725,10 +882,10 @@ def _approval_request_id(slack_provider_fake_url: str) -> str:
     deliveries = state.get("deliveries")
     if not isinstance(deliveries, list):
         return ""
-    for raw_delivery in cast(list[object], deliveries):
+    for raw_delivery in _list(deliveries):
         if not isinstance(raw_delivery, dict):
             continue
-        delivery = cast(dict[str, object], raw_delivery)
+        delivery = _object(raw_delivery)
         request_id = delivery.get("approval_request_id")
         if isinstance(request_id, str) and request_id:
             return request_id
@@ -740,12 +897,10 @@ def _selector_admission_id(slack_provider_fake_url: str) -> str:
     deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
     if not isinstance(deliveries, list):
         return ""
-    for raw_delivery in reversed(cast(list[object], deliveries)):
+    for raw_delivery in reversed(_list(deliveries)):
         if not isinstance(raw_delivery, dict):
             continue
-        admission_id = cast(dict[str, object], raw_delivery).get(
-            "selector_admission_id"
-        )
+        admission_id = _object(raw_delivery).get("selector_admission_id")
         if isinstance(admission_id, str) and admission_id:
             return admission_id
     return ""
@@ -762,7 +917,7 @@ def _latest_selector_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return cast(dict[str, object], payload) if isinstance(payload, dict) else None
+    return _object(payload) if isinstance(payload, dict) else None
 
 
 def _latest_setup_view(
@@ -776,7 +931,7 @@ def _latest_setup_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return cast(dict[str, object], payload) if isinstance(payload, dict) else None
+    return _object(payload) if isinstance(payload, dict) else None
 
 
 def _open_slack_setup_modal(
@@ -895,18 +1050,17 @@ def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
     deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
     if not isinstance(deliveries, list):
         return None
-    for raw_delivery in reversed(cast(list[object], deliveries)):
+    for raw_delivery in reversed(_list(deliveries)):
         if not isinstance(raw_delivery, dict):
             continue
-        delivery = cast(dict[str, object], raw_delivery)
+        delivery = _object(raw_delivery)
         blocks = delivery.get("blocks")
         if (
             delivery.get("operation") == "chat.update"
             and isinstance(blocks, list)
             and any(
-                isinstance(block, dict)
-                and cast(dict[str, object], block).get("type") == "plan"
-                for block in cast(list[object], blocks)
+                isinstance(block, dict) and _object(block).get("type") == "plan"
+                for block in _list(blocks)
             )
         ):
             return delivery
@@ -923,11 +1077,7 @@ def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]
     payload = response.json()
     if not isinstance(payload, list):
         return []
-    return [
-        cast(dict[str, object], item)
-        for item in cast(list[object], payload)
-        if isinstance(item, dict)
-    ]
+    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
 
 
 def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
@@ -940,11 +1090,7 @@ def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
     payload = response.json()
     if not isinstance(payload, list):
         return []
-    return [
-        cast(dict[str, object], item)
-        for item in cast(list[object], payload)
-        if isinstance(item, dict)
-    ]
+    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
 
 
 def _channel_action_tool_evidence(
@@ -964,21 +1110,21 @@ def _channel_action_tool_evidence(
     payload = response.json()
     if not isinstance(payload, dict):
         return []
-    items = cast(dict[str, object], payload).get("items")
+    items = _object(payload).get("items")
     if not isinstance(items, list):
         return []
     evidence: list[dict[str, object]] = []
-    for raw_event in cast(list[object], items):
+    for raw_event in _list(items):
         if not isinstance(raw_event, dict):
             continue
-        event = cast(dict[str, object], raw_event)
+        event = _object(raw_event)
         kind = event.get("kind")
         if kind not in {"client_tool_call", "client_tool_result"}:
             continue
         raw_payload = event.get("payload")
         if not isinstance(raw_payload, dict):
             continue
-        event_payload = cast(dict[str, object], raw_payload)
+        event_payload = _object(raw_payload)
         if event_payload.get("call_id") not in call_ids:
             continue
         item: dict[str, object] = {
@@ -994,13 +1140,12 @@ def _channel_action_tool_evidence(
             item["output"] = output[:1_000]
         elif isinstance(output, list):
             texts = [
-                cast(dict[str, object], part).get("text")
-                for part in cast(list[object], output)
-                if isinstance(part, dict)
-                and isinstance(cast(dict[str, object], part).get("text"), str)
+                _object(part).get("text")
+                for part in _list(output)
+                if isinstance(part, dict) and isinstance(_object(part).get("text"), str)
             ]
             if texts:
-                item["output"] = " ".join(cast(list[str], texts))[:1_000]
+                item["output"] = " ".join(_strings(texts))[:1_000]
         evidence.append(item)
     return evidence
 
@@ -1066,15 +1211,15 @@ def _session_project_paths(
     payload = response.json()
     if not isinstance(payload, dict):
         return []
-    items = cast(dict[str, object], payload).get("items")
+    items = _object(payload).get("items")
     if not isinstance(items, list):
         return []
     return [
         path
-        for raw_item in cast(list[object], items)
+        for raw_item in _list(items)
         if isinstance(raw_item, dict)
         and isinstance(
-            path := cast(dict[str, object], raw_item).get("path"),
+            path := _object(raw_item).get("path"),
             str,
         )
     ]
@@ -1092,11 +1237,7 @@ def _dynamic_worktree_request_evidence(
     payload = response.json()
     if not isinstance(payload, list):
         return []
-    return [
-        cast(dict[str, object], item)
-        for item in cast(list[object], payload)
-        if isinstance(item, dict)
-    ]
+    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
 
 
 def _worktree_action_result(
@@ -1117,34 +1258,34 @@ def _worktree_action_result(
     payload = response.json()
     if not isinstance(payload, dict):
         return None
-    items = cast(dict[str, object], payload).get("items")
+    items = _object(payload).get("items")
     if not isinstance(items, list):
         return None
-    for raw_event in reversed(cast(list[object], items)):
+    for raw_event in reversed(_list(items)):
         if not isinstance(raw_event, dict):
             continue
-        event = cast(dict[str, object], raw_event)
+        event = _object(raw_event)
         if event.get("kind") != "action_execution_result":
             continue
         raw_payload = event.get("payload")
         if not isinstance(raw_payload, dict):
             continue
-        raw_projection = cast(dict[str, object], raw_payload).get("action_execution")
+        raw_projection = _object(raw_payload).get("action_execution")
         if not isinstance(raw_projection, dict):
             continue
-        raw_execution = cast(dict[str, object], raw_projection).get("execution")
+        raw_execution = _object(raw_projection).get("execution")
         if not isinstance(raw_execution, dict):
             continue
-        execution = cast(dict[str, object], raw_execution)
+        execution = _object(raw_execution)
         raw_action = execution.get("action")
         if not isinstance(raw_action, dict):
             continue
-        action = cast(dict[str, object], raw_action)
+        action = _object(raw_action)
         if (
             action.get("client_tool_call_id") == call_id
             and execution.get("status") == status
         ):
-            return cast(dict[str, object], raw_projection)
+            return _object(raw_projection)
     return None
 
 
@@ -1164,14 +1305,10 @@ def _session_history(
     payload = response.json()
     if not isinstance(payload, dict):
         return []
-    items = cast(dict[str, object], payload).get("items")
+    items = _object(payload).get("items")
     if not isinstance(items, list):
         return []
-    return [
-        cast(dict[str, object], item)
-        for item in cast(list[object], items)
-        if isinstance(item, dict)
-    ]
+    return [_object(item) for item in _list(items) if isinstance(item, dict)]
 
 
 def _turn_run_ids(history: list[dict[str, object]]) -> list[str]:
@@ -1183,7 +1320,7 @@ def _turn_run_ids(history: list[dict[str, object]]) -> list[str]:
         payload = event.get("payload")
         if not isinstance(payload, dict):
             continue
-        run_id = cast(dict[str, object], payload).get("run_id")
+        run_id = _object(payload).get("run_id")
         if isinstance(run_id, str):
             run_ids.append(run_id)
     return run_ids
@@ -1200,7 +1337,7 @@ def _tool_call_run_id(
         payload = event.get("payload")
         if not isinstance(payload, dict):
             continue
-        event_payload = cast(dict[str, object], payload)
+        event_payload = _object(payload)
         if (
             event.get("kind") == "client_tool_call"
             and event_payload.get("call_id") == call_id
@@ -1238,9 +1375,15 @@ def test_http_admission_unknown_participant_and_approval_journey(
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
 ) -> None:
     """Exercise connection setup, signed admission, dedupe, and idempotent approval."""
     del azents_engine_worker_container
+    gateway_context = azents_external_channel_gateway_factory()
+    gateway_context.__enter__()
+    request.addfinalizer(lambda: gateway_context.__exit__(None, None, None))
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -1438,14 +1581,13 @@ def test_http_admission_unknown_participant_and_approval_journey(
         channel_id=_CHANNEL_ID,
         user_id="U-EXTERNAL",
     )
-    setup_view = cast(
-        dict[str, object],
+    setup_view = _object(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Approved Slack setup did not open a location modal",
-        ),
+        )
     )
     _submit_slack_setup_location(
         callback_url=callback_url,
@@ -1455,7 +1597,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         setup_view=setup_view,
     )
 
-    def binding_projection() -> tuple[str, Any] | None:
+    def binding_projection() -> _SessionProjection | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -1468,17 +1610,16 @@ def test_http_admission_unknown_participant_and_approval_journey(
                 _headers=headers,
             )
             if len(projection.items) == 1:
-                return session.id, projection
+                return _SessionProjection(session.id, projection)
         return None
 
-    approved_session_id, bindings = cast(
-        tuple[str, Any],
+    approved_session_id, bindings = _required(
         wait_until(
             binding_projection,
             timeout=10,
             interval=0.2,
             message="Approved External Channel binding was not available",
-        ),
+        )
     )
     assert len(bindings.items) == 1
     assert bindings.grants == []
@@ -1501,8 +1642,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert len(agent_access.grants) == 1
     assert agent_access.grants[0].scope is ExternalChannelAccessGrantScope.AGENT
     assert agent_access.grants[0].agent_session_id is None
-    input_evidence = cast(
-        list[dict[str, object]],
+    input_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -1520,7 +1660,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
             timeout=30,
             interval=0.2,
             message="Approved Slack input was not promoted into Session history",
-        ),
+        )
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
@@ -1538,23 +1678,33 @@ def test_http_admission_unknown_participant_and_approval_journey(
         counts = state.get("request_counts")
         if not isinstance(counts, dict):
             return None
-        typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
+        typed = _object(counts)
+        presence = state.get("presence")
+        has_processing_presence = isinstance(presence, list) and any(
+            isinstance(item, dict)
+            and item.get("operation") == "agents.sessions.setStatus"
+            and item.get("desired_state") == "processing"
+            for item in _list(presence)
+        )
+        if (
+            typed.get("chat.postMessage") == 3
+            and typed.get("chat.delete") == 1
+            and has_processing_presence
+        ):
             return state
         return None
 
-    provider_state = cast(
-        dict[str, object],
+    provider_state = _object(
         wait_until(
             settled_provider_controls,
             timeout=10,
             interval=0.2,
             message="Slack approval and initial progress controls did not settle",
-        ),
+        )
     )
     request_counts = provider_state.get("request_counts")
     assert isinstance(request_counts, dict)
-    typed_counts = cast(dict[str, Any], request_counts)
+    typed_counts = _object(request_counts)
     assert "conversations.info" not in typed_counts
     # The initial callback, duplicate delivery, and Allow replay each revalidate
     # provider history before one mailbox input wins.
@@ -1573,7 +1723,15 @@ def test_http_admission_unknown_participant_and_approval_journey(
         "activity_tracker",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
-    deliveries = cast(list[dict[str, object]], provider_state["deliveries"])
+    assert _objects(provider_state["presence"])[-1] == {
+        "operation": "agents.sessions.setStatus",
+        "channel": _CHANNEL_ID,
+        "thread_ts": root_timestamp,
+        "desired_state": "processing",
+        "has_initiator": True,
+        "outcome": "delivered",
+    }
+    deliveries = _objects(provider_state["deliveries"])
     assert any(
         delivery.get("session_path")
         == f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
@@ -1648,8 +1806,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert follow_up.status_code == 200
     assert time.monotonic() - started < _SLACK_HTTP_ACK_DEADLINE_SECONDS
-    barrier_state = cast(
-        dict[str, object],
+    barrier_state = _object(
         wait_until(
             lambda: (
                 state
@@ -1665,7 +1822,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
             timeout=15,
             interval=0.1,
             message="Slack callback did not reach the blocked provider history read",
-        ),
+        )
     )
     assert barrier_state == {
         "operation": "conversations.replies",
@@ -1689,8 +1846,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         f"{slack_provider_fake_url}/__testenv/barrier/release",
         timeout=5,
     ).raise_for_status()
-    follow_up_evidence = cast(
-        list[dict[str, object]],
+    follow_up_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -1708,17 +1864,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
             timeout=30,
             interval=0.2,
             message="Slack follow-up input was not promoted",
-        ),
+        )
     )
     assert follow_up_body in {item["body"] for item in follow_up_evidence}
     follow_up_provider_state = _provider_state(slack_provider_fake_url)
     assert "activity_tracker" not in _successful_session_navigation_categories(
         follow_up_provider_state
     )
-    follow_up_counts = cast(
-        dict[str, int],
-        follow_up_provider_state["request_counts"],
-    )
+    follow_up_counts = _int_dict(follow_up_provider_state["request_counts"])
     assert follow_up_counts.get("chat.postMessage", 0) == 0
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
@@ -1731,8 +1884,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert len(disconnected.items) == 1
     assert disconnected.items[0].disconnected_at is not None
 
-    disconnected_state = cast(
-        dict[str, object],
+    disconnected_state = _object(
         wait_until(
             lambda: (
                 state
@@ -1741,17 +1893,22 @@ def test_http_admission_unknown_participant_and_approval_journey(
                         state := _provider_state(slack_provider_fake_url)
                     )
                     == ["left"]
-                    and cast(dict[str, Any], state["request_counts"]).get("chat.delete")
-                    == 1
+                    and _object(state["request_counts"]).get("chat.delete") == 1
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("operation") == "agents.sessions.setStatus"
+                        and item.get("desired_state") == "idle"
+                        for item in _list(state.get("presence", []))
+                    )
                 )
                 else None
             ),
             timeout=10,
             interval=0.2,
             message="Manual Slack binding disconnect did not deliver leave presence",
-        ),
+        )
     )
-    disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
+    disconnected_counts = _object(disconnected_state["request_counts"])
     assert disconnected_counts["chat.postMessage"] == 1
     assert disconnected_counts["chat.delete"] == 1
     assert _successful_session_paths(disconnected_state) == [
@@ -2019,14 +2176,13 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         channel_id=_CHANNEL_ID,
         user_id="U-MODE",
     )
-    setup_view = cast(
-        dict[str, object],
+    setup_view = _object(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Slack response-mode setup did not open a location modal",
-        ),
+        )
     )
     _submit_slack_setup_location(
         callback_url=callback_url,
@@ -2036,7 +2192,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         setup_view=setup_view,
     )
 
-    def find_binding() -> tuple[Any, Any] | None:
+    def find_binding() -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -2049,17 +2205,16 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
                 _headers=headers,
             )
             if len(projection.items) == 1:
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
-    session, binding = cast(
-        tuple[Any, Any],
+    session, binding = _required(
         wait_until(
             find_binding,
             timeout=15,
             interval=0.2,
             message="Slack response-mode invocation did not create one binding",
-        ),
+        )
     )
     assert binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
     wait_until(
@@ -2080,8 +2235,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         interval=0.2,
         message="Initial Slack response-mode input was not promoted",
     )
-    generated_detail = cast(
-        Any,
+    generated_detail = _required(
         wait_until(
             lambda: (
                 detail
@@ -2100,15 +2254,14 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             timeout=30,
             interval=0.2,
             message="Slack Session automatic title generation did not complete",
-        ),
+        )
     )
     assert generated_detail.id == session.id
     assert generated_detail.title
     assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
 
-    before_counts = cast(
-        dict[str, int],
-        _provider_state(slack_provider_fake_url)["request_counts"],
+    before_counts = _int_dict(
+        _provider_state(slack_provider_fake_url)["request_counts"]
     )
     before_history_reads = before_counts.get(
         "conversations.history", 0
@@ -2126,9 +2279,8 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    after_ignored_counts = cast(
-        dict[str, int],
-        _provider_state(slack_provider_fake_url)["request_counts"],
+    after_ignored_counts = _int_dict(
+        _provider_state(slack_provider_fake_url)["request_counts"]
     )
     assert (
         after_ignored_counts.get("conversations.history", 0)
@@ -2187,8 +2339,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    mention_evidence = cast(
-        list[dict[str, object]],
+    mention_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -2206,7 +2357,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             timeout=30,
             interval=0.2,
             message="Later Slack mention did not include retained context",
-        ),
+        )
     )
     mention_by_body = {item["body"]: item for item in mention_evidence}
     assert mention_by_body[ordinary_body]["prompt_role"] == "context"
@@ -2269,8 +2420,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    continuation_evidence = cast(
-        list[dict[str, object]],
+    continuation_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -2288,7 +2438,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             timeout=30,
             interval=0.2,
             message="All-messages Slack continuation was not admitted",
-        ),
+        )
     )
     continuation_by_body = {item["body"]: item for item in continuation_evidence}
     assert continuation_by_body[ordinary_body]["prompt_role"] == "context"
@@ -2316,7 +2466,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             ),
             _headers=headers,
         )
-    assert cast(Any, disconnected_update.value).status == 404
+    assert disconnected_update.value.status == 404
 
 
 def test_multi_app_workspace_management_default_and_disconnect_journey(
@@ -2371,7 +2521,7 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
             handle=handle,
             _headers=member_headers,
         )
-    assert cast(Any, member_error.value).status == 403
+    assert member_error.value.status == 403
 
     setup = external_api.external_channel_v1_setup_multi_slack_connection(
         handle=handle,
@@ -2501,7 +2651,7 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
             ),
             _headers=manager_headers,
         )
-    assert cast(Any, stale_error.value).status == 409
+    assert stale_error.value.status == 409
 
     route_impact = external_api.external_channel_v1_get_multi_slack_route_impact(
         connection_id=connection.id,
@@ -2559,7 +2709,7 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
             handle=foreign_handle,
             _headers={"Authorization": f"Bearer {foreign_token}"},
         )
-    assert cast(Any, foreign_error.value).status == 404
+    assert foreign_error.value.status == 404
 
     connection_impact = (
         external_api.external_channel_v1_get_multi_slack_connection_impact(
@@ -2759,14 +2909,13 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         )
         assert response.status_code == 200
 
-    selector_view = cast(
-        dict[str, object],
+    selector_view = _object(
         wait_until(
             lambda: _latest_selector_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Selector interaction did not open a modal",
-        ),
+        )
     )
     assert selector_view["route_ids"] == [route.id for route in routes]
     metadata = selector_view.get("private_metadata")
@@ -2818,14 +2967,13 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
             headers=headers,
             baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
         )
-    setup_view = cast(
-        dict[str, object],
+    setup_view = _object(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Selected Multi App route did not open a location modal",
-        ),
+        )
     )
     _submit_slack_setup_location(
         callback_url=callback_url,
@@ -2835,7 +2983,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         setup_view=setup_view,
     )
 
-    def find_selected_binding() -> tuple[Any, Any] | None:
+    def find_selected_binding() -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_ids[1],
             _headers=headers,
@@ -2848,22 +2996,20 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
                 _headers=headers,
             )
             if len(projection.items) == 1:
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
-    selected_session, selected_binding = cast(
-        tuple[Any, Any],
+    selected_session, selected_binding = _required(
         wait_until(
             find_selected_binding,
             timeout=10,
             interval=0.2,
             message="Selected open-access Multi App route did not bind once",
-        ),
+        )
     )
     assert selected_session.agent_id == agent_ids[1]
     assert selected_binding.provider.value == "slack"
-    input_evidence = cast(
-        list[dict[str, object]],
+    input_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -2881,7 +3027,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
             timeout=15,
             interval=0.2,
             message="Slack Multi selector did not preserve its source invocation",
-        ),
+        )
     )
     assert input_evidence[0]["provider"] == "slack"
     assert input_evidence[0]["external_message_id"]
@@ -2893,8 +3039,8 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     )
     assert _approval_request_id(slack_provider_fake_url) == ""
     provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = cast(dict[str, int], provider_state["request_counts"])
-    views = cast(list[dict[str, object]], provider_state["views"])
+    request_counts = _int_dict(provider_state["request_counts"])
+    views = _objects(provider_state["views"])
     assert request_counts["views.open"] == len(views)
     assert 1 <= sum(view["control_scope"] == "selector" for view in views) <= 2
     assert sum(view["control_scope"] == "setup" for view in views) == 1
@@ -3085,14 +3231,13 @@ def test_provider_native_channel_work_progress_journey(
         channel_id=_CHANNEL_ID,
         user_id="U-EXTERNAL",
     )
-    setup_view = cast(
-        dict[str, object],
+    setup_view = _object(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Approved Channel Work setup did not open a location modal",
-        ),
+        )
     )
     _submit_slack_setup_location(
         callback_url=callback_url,
@@ -3127,7 +3272,7 @@ def test_provider_native_channel_work_progress_journey(
     assert isinstance(selected_session, str)
     session_id = selected_session
 
-    def management_projection() -> object | None:
+    def management_projection() -> ManagedBindingListResponse | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
             session_id=session_id,
@@ -3138,14 +3283,13 @@ def test_provider_native_channel_work_progress_journey(
             return projection
         return None
 
-    active_projection = cast(
-        Any,
+    active_projection = _required(
         wait_until(
             management_projection,
             timeout=15,
             interval=0.2,
             message="Approved Channel Work binding was not available",
-        ),
+        )
     )
     binding_id = active_projection.items[0].id
 
@@ -3199,7 +3343,7 @@ def test_provider_native_channel_work_progress_journey(
     assert "action_id" not in result_output
     assert "credentials" not in result_output
 
-    def rich_management_projection() -> object | None:
+    def rich_management_projection() -> ManagedBindingListResponse | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
             session_id=session_id,
@@ -3215,14 +3359,13 @@ def test_provider_native_channel_work_progress_journey(
             return projection
         return None
 
-    projection = cast(
-        Any,
+    projection = _required(
         wait_until(
             rich_management_projection,
             timeout=20,
             interval=0.2,
             message="Canonical Channel Work was not updated by the model action",
-        ),
+        )
     )
     work = projection.items[0].work
     assert work is not None
@@ -3238,20 +3381,19 @@ def test_provider_native_channel_work_progress_journey(
     assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
 
     provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    request_counts = _int_dict(provider_state["request_counts"])
     assert request_counts["users.info"] >= 2
     assert request_counts["conversations.info"] >= 2
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    plan_delivery = cast(
-        dict[str, object],
+    plan_delivery = _object(
         wait_until(
             lambda: _plan_delivery(slack_provider_fake_url),
             timeout=20,
             interval=0.2,
             message="Slack Plan update was not delivered",
-        ),
+        )
     )
     expected_fallback = (
         "Investigating error logs…\n"
@@ -3260,7 +3402,7 @@ def test_provider_native_channel_work_progress_journey(
         "Failed: Trace the unavailable dependency\n"
         "Pending: Summarize the incident"
     )
-    blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
+    blocks = _objects(plan_delivery["blocks"])
     assert len(blocks) == 2
     assert plan_delivery["text"] == expected_fallback
     assert plan_delivery["safe_category"] == "activity_tracker"
@@ -3273,15 +3415,23 @@ def test_provider_native_channel_work_progress_journey(
     assert "plan_id" not in plan
     actions = blocks[1]
     assert actions["type"] == "actions"
-    action_elements = cast(list[dict[str, object]], actions["elements"])
-    assert len(action_elements) == 1
+    action_elements = _objects(actions["elements"])
+    assert len(action_elements) == 2
     assert action_elements[0]["type"] == "button"
     assert action_elements[0]["action_id"] == "view_azents_session"
     assert action_elements[0]["text"] == {
         "type": "plain_text",
         "text": "View session",
     }
-    tasks = cast(list[dict[str, object]], plan["tasks"])
+    assert action_elements[1]["type"] == "button"
+    assert action_elements[1]["action_id"] == "azents_conversation_settings_open"
+    assert action_elements[1]["text"] == {
+        "type": "plain_text",
+        "text": "Conversation settings",
+    }
+    assert isinstance(action_elements[1]["value"], str)
+    assert action_elements[1]["value"]
+    tasks = _objects(plan["tasks"])
     assert [task["task_id"] for task in tasks] == [
         "inspect",
         "verify",
@@ -3349,7 +3499,7 @@ def test_provider_native_channel_work_progress_journey(
             ),
         )
         results = {
-            cast(str, item["call_id"]): item
+            _string(item["call_id"]): item
             for item in evidence
             if item.get("kind") == "client_tool_result"
             and isinstance(item.get("call_id"), str)
@@ -3368,7 +3518,7 @@ def test_provider_native_channel_work_progress_journey(
         message="Direct failed and unknown Channel Action results did not complete",
     )
     outcome_results = {
-        cast(str, item["call_id"]): item
+        _string(item["call_id"]): item
         for item in outcome_evidence
         if item.get("kind") == "client_tool_result"
         and isinstance(item.get("call_id"), str)
@@ -3395,7 +3545,7 @@ def test_provider_native_channel_work_progress_journey(
         assert "credentials" not in output
 
     outcome_state = _provider_state(slack_provider_fake_url)
-    outcome_counts = cast(dict[str, int], outcome_state["request_counts"])
+    outcome_counts = _int_dict(outcome_state["request_counts"])
     assert outcome_counts["chat.update"] == 3
     assert outcome_counts["chat.delete"] == 1
 
@@ -3414,10 +3564,7 @@ def test_provider_native_channel_work_progress_journey(
         message="Channel Work Session did not reach its terminal idle boundary",
     )
     assert (
-        cast(
-            dict[str, int],
-            _provider_state(slack_provider_fake_url)["request_counts"],
-        )
+        _int_dict(_provider_state(slack_provider_fake_url)["request_counts"])
         == outcome_counts
     )
     assert _BOT_TOKEN not in str(outcome_state)
@@ -3547,7 +3694,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         ).items
     }
 
-    def socket_binding() -> tuple[Any, Any] | None:
+    def socket_binding() -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -3560,18 +3707,15 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
                 _headers=headers,
             )
             if len(projection.items) == 1:
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
     def socket_evidence_contains(field: str) -> bool:
         socket_state = _provider_state(slack_provider_fake_url).get("socket")
         if not isinstance(socket_state, dict):
             return False
-        values = cast(dict[str, object], socket_state).get(field)
-        return isinstance(values, list) and envelope_id in cast(
-            list[object],
-            values,
-        )
+        values = _object(socket_state).get(field)
+        return isinstance(values, list) and envelope_id in _list(values)
 
     with azents_external_channel_gateway_factory():
         wait_until(
@@ -3595,7 +3739,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             baseline_session_ids=baseline_session_ids,
         )
 
-        def reconnect_required_connection() -> object | None:
+        def reconnect_required_connection() -> ManagedConnection | None:
             connections = external_api.external_channel_v1_list_connections(
                 agent_id=agent_id,
                 handle=handle,
@@ -3609,18 +3753,20 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
                 return connections.items[0]
             return None
 
-        reconnect_required = wait_until(
-            reconnect_required_connection,
-            timeout=15,
-            interval=0.2,
-            message="Socket link_disabled did not require reconnection",
+        reconnect_required = _required(
+            wait_until(
+                reconnect_required_connection,
+                timeout=15,
+                interval=0.2,
+                message="Socket link_disabled did not require reconnection",
+            )
         )
-        reconnect_payload = cast(Any, reconnect_required)
+        reconnect_payload = reconnect_required
         assert reconnect_payload.socket_gap_reason == "link_disabled"
         provider_state = _provider_state(slack_provider_fake_url)
         socket_state = provider_state["socket"]
         assert isinstance(socket_state, dict)
-        socket_state_object = cast(dict[str, object], socket_state)
+        socket_state_object = _object(socket_state)
         assert socket_state_object["connections"] == 2
         assert socket_state_object["configured_sessions"] == 2
         assert "xapp-e2e-private" not in str(provider_state)
@@ -3649,14 +3795,13 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         channel_id=_CHANNEL_ID,
         user_id="U-SOCKET",
     )
-    setup_view = cast(
-        dict[str, object],
+    setup_view = _object(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
             interval=0.2,
             message="Recovered Socket Mode setup did not open a location modal",
-        ),
+        )
     )
     _submit_slack_setup_location(
         callback_url=callback_url,
@@ -3665,8 +3810,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         user_id="U-SOCKET",
         setup_view=setup_view,
     )
-    socket_session, socket_channel = cast(
-        tuple[Any, Any],
+    socket_session, socket_channel = _required(
         wait_until(
             socket_binding,
             timeout=15,
@@ -3674,7 +3818,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             message=(
                 "Recovered Socket Mode invocation did not retain one Session binding"
             ),
-        ),
+        )
     )
     assert socket_session.agent_id == agent_id
     assert socket_channel.provider.value == "slack"
@@ -3694,8 +3838,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
     expected_session_path = (
         f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
     )
-    presence_state = cast(
-        dict[str, object],
+    presence_state = _object(
         wait_until(
             lambda: (
                 state
@@ -3709,7 +3852,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             timeout=10,
             interval=0.2,
             message="Recovered Socket Mode joined presence was not delivered",
-        ),
+        )
     )
     assert expected_session_path in _successful_session_paths(presence_state)
 
@@ -3770,7 +3913,7 @@ def run_connection_management_web_surface_uses_redacted_operational_state(
             )
         )
     )
-    cast(Any, browser_driver).execute_script(
+    browser_driver.execute_script(
         "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
         connection,
     )
@@ -3837,10 +3980,7 @@ def run_connection_management_web_surface_uses_redacted_operational_state(
 
     def validation_reached_provider(_: WebDriver) -> bool:
         counts = _provider_state(slack_provider_fake_url).get("request_counts")
-        return (
-            isinstance(counts, dict)
-            and cast(dict[str, object], counts).get("auth.test") == 2
-        )
+        return isinstance(counts, dict) and _object(counts).get("auth.test") == 2
 
     wait.until(validation_reached_provider)
     assert connection.is_displayed()
@@ -3937,17 +4077,13 @@ def test_discord_single_activation_and_interaction_journey(
         {"role": "message_action", "type": 3},
         {"role": "unrelated", "type": 2},
     ]
-    activation_request_counts = cast(
-        dict[str, int],
-        activation_state["request_counts"],
-    )
+    activation_request_counts = _int_dict(activation_state["request_counts"])
     assert activation_request_counts["list_guild_commands"] == 1
     assert activation_request_counts["create_guild_command"] == 1
     assert activation_request_counts["update_guild_command"] == 1
     assert activation_request_counts["delete_guild_command"] == 1
     command_ids = {
-        role: cast(
-            str,
+        role: _string(
             wait_until(
                 lambda role=role: _discord_command_id(
                     discord_provider_fake_url,
@@ -3956,7 +4092,7 @@ def test_discord_single_activation_and_interaction_journey(
                 timeout=15,
                 interval=0.2,
                 message=f"Discord {role} command ID was not reconciled",
-            ),
+            )
         )
         for role in _DISCORD_COMMAND_CONTRACTS
     }
@@ -4195,7 +4331,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         ).items
     }
 
-    def gateway_binding() -> tuple[Any, Any] | None:
+    def gateway_binding() -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -4211,19 +4347,17 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 len(projection.items) == 1
                 and projection.items[0].provider.value == "discord"
             ):
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
     with azents_external_channel_gateway_factory():
         wait_until(
             lambda: (
                 6
-                in cast(
-                    list[object],
-                    cast(
-                        dict[str, object],
-                        _discord_provider_state(discord_provider_fake_url)["gateway"],
-                    )["initial_opcodes"],
+                in _list(
+                    _object(
+                        _discord_provider_state(discord_provider_fake_url)["gateway"]
+                    )["initial_opcodes"]
                 )
             ),
             timeout=45,
@@ -4234,11 +4368,8 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         )
         wait_until(
             lambda: (
-                cast(
-                    dict[str, int],
-                    _discord_provider_state(discord_provider_fake_url)[
-                        "request_counts"
-                    ],
+                _int_dict(
+                    _discord_provider_state(discord_provider_fake_url)["request_counts"]
                 ).get("get_message", 0)
                 >= 1
             ),
@@ -4254,8 +4385,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             headers=headers,
             baseline_session_ids=baseline_session_ids,
         )
-        setup_threads_custom_id = cast(
-            str,
+        setup_threads_custom_id = _string(
             wait_until(
                 lambda: _discord_settings_component_id(
                     discord_provider_fake_url,
@@ -4264,13 +4394,10 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 timeout=30,
                 interval=0.2,
                 message="Discord Gateway setup control was not delivered",
-            ),
+            )
         )
         setup_gate_state = _discord_provider_state(discord_provider_fake_url)
-        setup_gate_counts = cast(
-            dict[str, int],
-            setup_gate_state["request_counts"],
-        )
+        setup_gate_counts = _int_dict(setup_gate_state["request_counts"])
         assert setup_gate_counts.get("create_thread", 0) == 0
         assert setup_gate_counts.get("create_message", 0) == 1
         _select_discord_setup_location(
@@ -4282,19 +4409,17 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             user_id=participant_id,
             custom_id=setup_threads_custom_id,
         )
-        session, binding = cast(
-            tuple[Any, Any],
+        session, binding = _required(
             wait_until(
                 gateway_binding,
                 timeout=30,
                 interval=0.2,
                 message="Discord setup selection did not activate one Session binding",
-            ),
+            )
         )
         expected_session_path = f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
 
-        barrier_state = cast(
-            dict[str, object],
+        barrier_state = _object(
             wait_until(
                 lambda: (
                     state
@@ -4313,21 +4438,20 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     "Discord direct-created thread evidence was not committed before "
                     "title generation"
                 ),
-            ),
+            )
         )
         assert barrier_state["operation"] == "create_message"
         assert barrier_state["occurrence"] == 2
         assert barrier_state["request_count"] == 2
 
-        def generated_title_projection() -> Any | None:
+        def generated_title_projection() -> AgentSessionResponse | None:
             generated_detail = chat_api.chat_v1_get_agent_session(
                 agent_id=agent_id,
                 session_id=session.id,
                 _headers=headers,
             )
-            counts = cast(
-                dict[str, int],
-                _discord_provider_state(discord_provider_fake_url)["request_counts"],
+            counts = _int_dict(
+                _discord_provider_state(discord_provider_fake_url)["request_counts"]
             )
             if (
                 generated_detail.title
@@ -4339,8 +4463,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 return generated_detail
             return None
 
-        generated_detail = cast(
-            Any,
+        generated_detail = _required(
             wait_until(
                 generated_title_projection,
                 timeout=30,
@@ -4349,14 +4472,13 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     "Discord Session title generation and one-shot thread rename "
                     "did not complete"
                 ),
-            ),
+            )
         )
         requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
             timeout=5,
         ).raise_for_status()
-        state = cast(
-            dict[str, object],
+        state = _object(
             wait_until(
                 lambda: _completed_session_navigation_state(
                     _discord_provider_state(discord_provider_fake_url),
@@ -4368,7 +4490,34 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     "Discord joined-presence and Activity Tracker controls were not "
                     "delivered"
                 ),
-            ),
+            )
+        )
+        thread_channel_id = _string(
+            next(
+                operation["thread_channel_id"]
+                for operation in _objects(state["operations"])
+                if operation.get("event") == "thread_create"
+                and operation.get("outcome") == "delivered"
+            )
+        )
+        state = _object(
+            wait_until(
+                lambda: (
+                    provider_state
+                    if _discord_typing_channel_observed(
+                        provider_state := _discord_provider_state(
+                            discord_provider_fake_url
+                        ),
+                        channel_id=thread_channel_id,
+                    )
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord provisioned Thread did not receive an active typing target"
+                ),
+            )
         )
 
         # Keep current Gateway route authority through the adjacent title projection.
@@ -4383,8 +4532,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         _headers=headers,
     )
     assert detail.id == session.id
-    input_evidence = cast(
-        list[dict[str, object]],
+    input_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -4402,7 +4550,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             timeout=30,
             interval=0.2,
             message="Discord Gateway input was not promoted into Session history",
-        ),
+        )
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
@@ -4424,8 +4572,12 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "session_presence_joined",
         "activity_tracker",
     ]
+    assert _successful_session_navigation_action_ids(
+        state,
+        category="activity_tracker",
+    ) == [["view_azents_session", "azents_conversation_settings_open"]]
     assert _successful_session_presence_states(state) == ["joined"]
-    request_counts = cast(dict[str, int], state["request_counts"])
+    request_counts = _int_dict(state["request_counts"])
     assert request_counts["create_thread"] >= 1
     assert request_counts["get_channel"] == 1
     assert request_counts["update_channel"] == 1
@@ -4433,7 +4585,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert request_counts["get_message"] >= 2
     title_operations = [
         operation["operation"]
-        for operation in cast(list[dict[str, object]], state["operations"])
+        for operation in _objects(state["operations"])
         if operation["operation"] in {"create_thread", "get_channel", "update_channel"}
     ]
     expected_title_operations = [
@@ -4449,12 +4601,12 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         if matched_title_operation_count == len(expected_title_operations):
             break
     assert matched_title_operation_count == len(expected_title_operations)
-    gateway = cast(dict[str, object], state["gateway"])
-    assert cast(int, gateway["connections"]) >= 2
-    initial_opcodes = cast(list[object], gateway["initial_opcodes"])
+    gateway = _object(state["gateway"])
+    assert _int(gateway["connections"]) >= 2
+    initial_opcodes = _list(gateway["initial_opcodes"])
     resume_index = initial_opcodes.index(6)
     assert 2 in initial_opcodes[:resume_index]
-    dispatches = cast(list[object], gateway["dispatches"])
+    dispatches = _list(gateway["dispatches"])
     assert {"event_type": "GUILD_CREATE", "sequence": 2} in dispatches
     assert {"event_type": "MESSAGE_CREATE", "sequence": 3} in dispatches
     rendered = str(state)
@@ -4470,8 +4622,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     )
     assert disconnected.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert disconnected.credentials_configured is False
-    terminal_state = cast(
-        dict[str, object],
+    terminal_state = _object(
         wait_until(
             lambda: (
                 provider_state
@@ -4486,7 +4637,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             message=(
                 "Discord connection disconnect did not deliver captured leave presence"
             ),
-        ),
+        )
     )
     assert _successful_session_paths(terminal_state) == [
         expected_session_path,
@@ -4499,6 +4650,790 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "session_presence_left",
     ]
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
+
+
+def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
+    openai_proxy_url: str,
+) -> None:
+    """Show Todo work without a mention and preserve typing through restart."""
+    del azents_engine_worker_container
+    application_id = "100000000000000051"
+    guild_id = "200000000000000051"
+    bot_user_id = "300000000000000051"
+    bot_role_id = "350000000000000051"
+    channel_id = "400000000000000051"
+    participant_id = "600000000000000051"
+    initial_message_id = "500000000000000051"
+    quiet_message_id = "500000000000000052"
+    late_mention_message_id = "500000000000000053"
+    timestamp = "2026-08-28T00:00:00.000000+00:00"
+    quiet_text = (
+        "Discord quiet work presence E2E. Provider-native Channel Work progress E2E."
+    )
+    initial_text = f"<@&{bot_role_id}> Discord quiet work setup E2E"
+    late_mention_text = (
+        f"<@{bot_user_id}> late explicit mention during quiet work. "
+        "Provider-native Channel Work progress E2E."
+    )
+    author: dict[str, object] = {
+        "id": participant_id,
+        "username": "participant",
+        "discriminator": "0",
+        "avatar": None,
+    }
+    bot: dict[str, object] = {
+        "id": bot_user_id,
+        "username": "Azents",
+        "discriminator": "0",
+        "avatar": None,
+        "bot": True,
+    }
+
+    def message(
+        *,
+        message_id: str,
+        content: str,
+        role_mentioned: bool,
+        directly_mentioned: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "content": content,
+            "timestamp": timestamp,
+            "edited_timestamp": None,
+            "author": author,
+            "mentions": [{"id": bot_user_id}] if directly_mentioned else [],
+            "mention_roles": [bot_role_id] if role_mentioned else [],
+            "attachments": [],
+            "embeds": [],
+            "components": [],
+            "type": 0,
+            "pinned": False,
+            "mention_everyone": False,
+            "tts": False,
+        }
+
+    def external_message_id(message_id: str) -> str:
+        return f"discord:{guild_id}:{message_id}"
+
+    def guild_create() -> dict[str, object]:
+        return {
+            "id": guild_id,
+            "name": "Quiet Work Presence E2E",
+            "unavailable": False,
+            "owner_id": participant_id,
+            "roles": [
+                {
+                    "id": bot_role_id,
+                    "name": "Azents",
+                    "color": 0,
+                    "hoist": False,
+                    "position": 1,
+                    "permissions": "0",
+                    "managed": True,
+                    "mentionable": True,
+                    "flags": 0,
+                    "tags": {"bot_id": bot_user_id},
+                }
+            ],
+            "emojis": [],
+            "stickers": [],
+            "features": [],
+            "channels": [
+                {
+                    "id": channel_id,
+                    "guild_id": guild_id,
+                    "type": 0,
+                    "name": "quiet-work-presence-e2e",
+                    "position": 0,
+                    "permission_overwrites": [],
+                }
+            ],
+            "threads": [],
+            "members": [
+                {
+                    "user": bot,
+                    "roles": [bot_role_id],
+                    "joined_at": timestamp,
+                    "deaf": False,
+                    "mute": False,
+                    "flags": 0,
+                }
+            ],
+            "presences": [],
+            "voice_states": [],
+            "stage_instances": [],
+            "guild_scheduled_events": [],
+            "member_count": 1,
+        }
+
+    def configure_gateway(
+        messages: list[dict[str, object]],
+        *,
+        sequence: int,
+    ) -> None:
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/configure",
+            json={
+                "application_id": application_id,
+                "guild_id": guild_id,
+                "bot_user_id": bot_user_id,
+                "root_messages": messages,
+                "gateway_dispatches": [
+                    {
+                        "sequence": sequence,
+                        "event_type": "GUILD_CREATE",
+                        "payload": guild_create(),
+                    },
+                    *[
+                        {
+                            "sequence": sequence + index,
+                            "event_type": "MESSAGE_CREATE",
+                            "payload": provider_message,
+                        }
+                        for index, provider_message in enumerate(messages, start=1)
+                    ],
+                ],
+                "gateway_scenarios": ["open"],
+            },
+            timeout=5,
+        ).raise_for_status()
+
+    expected_typing_target = {
+        "guild_id": guild_id,
+        "channel_id": channel_id,
+        "work_cycle_count": 1,
+    }
+
+    def active_typing_state_after(
+        *,
+        snapshot_index: int,
+        pulse_index: int,
+    ) -> dict[str, object] | None:
+        state = _discord_provider_state(discord_provider_fake_url)
+        typing = state.get("typing")
+        if not isinstance(typing, dict):
+            return None
+        typed_typing = _object(typing)
+        snapshots = typed_typing.get("snapshots")
+        pulses = typed_typing.get("pulses")
+        if not isinstance(snapshots, list) or not isinstance(pulses, list):
+            return None
+        new_snapshots = _list(snapshots)[snapshot_index:]
+        new_pulses = _list(pulses)[pulse_index:]
+        if expected_typing_target not in new_pulses or not any(
+            isinstance(snapshot, dict)
+            and _object(snapshot).get("targets") == [expected_typing_target]
+            for snapshot in new_snapshots
+        ):
+            return None
+        return state
+
+    def empty_typing_state_after(
+        *,
+        snapshot_index: int,
+    ) -> dict[str, object] | None:
+        state = _discord_provider_state(discord_provider_fake_url)
+        typing = state.get("typing")
+        if not isinstance(typing, dict):
+            return None
+        snapshots = _object(typing).get("snapshots")
+        if not isinstance(snapshots, list):
+            return None
+        new_snapshots = _list(snapshots)[snapshot_index:]
+        if (
+            not new_snapshots
+            or not isinstance(new_snapshots[-1], dict)
+            or _object(new_snapshots[-1]).get("targets") != []
+        ):
+            return None
+        return state
+
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    configure_gateway(
+        [
+            message(
+                message_id=initial_message_id,
+                content=initial_text,
+                role_mentioned=True,
+            )
+        ],
+        sequence=2,
+    )
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    updated_default = external_api.external_channel_v1_update_default_response_mode(
+        agent_id=agent_id,
+        handle=handle,
+        response_mode_request=ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        ),
+        _headers=headers,
+    )
+    assert updated_default.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    setup = external_api.external_channel_v1_setup_discord_connection(
+        agent_id=agent_id,
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=application_id,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=guild_id,
+                thread_auto_archive_duration_minutes=1440,
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    request.addfinalizer(
+        lambda: external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True,
+        ),
+        _headers=headers,
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def discord_binding() -> _SessionBinding | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].provider.value == "discord"
+                and projection.items[0].disconnected_at is None
+            ):
+                return _SessionBinding(session, projection.items[0])
+        return None
+
+    with azents_external_channel_gateway_factory():
+        setup_custom_id = _string(
+            wait_until(
+                lambda: _discord_settings_component_id(
+                    discord_provider_fake_url,
+                    action_code="sc",
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work setup control was not delivered",
+            )
+        )
+        _select_discord_setup_location(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id="700000000000000051",
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+            custom_id=setup_custom_id,
+        )
+        session, binding = _required(
+            wait_until(
+                discord_binding,
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work setup did not create one binding",
+            )
+        )
+        input_evidence = _objects(
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 1
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord explicit setup input was not promoted",
+            )
+        )
+    assert session.agent_id == agent_id
+    assert binding.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    assert input_evidence[0]["body"] == initial_text
+    assert input_evidence[0]["prompt_role"] == "invocation"
+
+    def session_is_idle() -> bool:
+        live = list_live(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session.id,
+        )
+        return live.get("run") is None and live.get("session_run_state") == "idle"
+
+    wait_until(
+        session_is_idle,
+        timeout=90,
+        interval=0.2,
+        message="Discord setup work did not settle before typing evidence reset",
+    )
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
+        timeout=5,
+    ).raise_for_status()
+    barrier_arm = requests.post(
+        f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
+        json={"binding": binding.id},
+        timeout=5,
+    )
+    assert barrier_arm.status_code == 201
+    assert barrier_arm.json() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
+    quiet_message = message(
+        message_id=quiet_message_id,
+        content=quiet_text,
+        role_mentioned=False,
+    )
+    configure_gateway([quiet_message], sequence=10)
+
+    def quiet_barrier_reached() -> dict[str, object] | None:
+        response = requests.get(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("reached") is not True:
+            return None
+        return _object(payload)
+
+    with azents_external_channel_gateway_factory():
+
+        def quiet_input_admitted() -> list[dict[str, object]] | None:
+            evidence = _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            if {item.get("external_message_id") for item in evidence} != {
+                external_message_id(initial_message_id),
+                external_message_id(quiet_message_id),
+            }:
+                return None
+            return evidence
+
+        try:
+            wait_until(
+                quiet_input_admitted,
+                timeout=75,
+                interval=0.2,
+                message="Quiet all-messages Discord input was not admitted",
+            )
+        except TimeoutError as error:
+            state = _discord_provider_state(discord_provider_fake_url)
+            observed_inputs = _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            pytest.fail(
+                f"{error}; gateway={state.get('gateway')!r}; "
+                f"request_counts={state.get('request_counts')!r}; "
+                f"typing={state.get('typing')!r}; "
+                "observed_input_ids="
+                f"{[item.get('external_message_id') for item in observed_inputs]!r}; "
+                f"progress={_progress_request_evidence(openai_proxy_url)!r}"
+            )
+        barrier_state = _object(
+            wait_until(
+                quiet_barrier_reached,
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work proxy barrier was not reached",
+            )
+        )
+        assert barrier_state.get("armed") is True
+        active_state = _object(
+            wait_until(
+                lambda: (
+                    state
+                    if _successful_session_navigation_categories(
+                        state := _discord_provider_state(discord_provider_fake_url)
+                    ).count("activity_tracker")
+                    >= 1
+                    and active_typing_state_after(
+                        snapshot_index=0,
+                        pulse_index=0,
+                    )
+                    is not None
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord unmentioned Todo work did not publish its Tracker and "
+                    "active typing"
+                ),
+            )
+        )
+        quiet_tracker_action_ids = _successful_session_navigation_action_ids(
+            active_state,
+            category="activity_tracker",
+        )
+        assert quiet_tracker_action_ids
+        assert all(
+            action_ids == ["view_azents_session", "azents_conversation_settings_open"]
+            for action_ids in quiet_tracker_action_ids
+        )
+        quiet_deliveries = _objects(active_state["deliveries"])
+        quiet_tracker_deliveries = [
+            delivery
+            for delivery in quiet_deliveries
+            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "activity_tracker"
+        ]
+        assert {
+            delivery["message_id"]
+            for delivery in quiet_tracker_deliveries
+            if isinstance(delivery.get("message_id"), str)
+        } == {quiet_tracker_deliveries[0]["message_id"]}
+        assert (
+            sum(
+                delivery.get("operation") == "create_message"
+                for delivery in quiet_tracker_deliveries
+            )
+            == 1
+        )
+        quiet_evidence = _objects(
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 2
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Quiet all-messages Discord input was not promoted",
+            )
+        )
+        assert {item["external_message_id"] for item in quiet_evidence} == {
+            external_message_id(initial_message_id),
+            external_message_id(quiet_message_id),
+        }
+        late_progress_index = len(_progress_request_evidence(openai_proxy_url))
+
+    late_message = message(
+        message_id=late_mention_message_id,
+        content=late_mention_text,
+        role_mentioned=False,
+        directly_mentioned=True,
+    )
+    # Redeliver the unmentioned source while the gateway restarts, then append a late
+    # mention. Ingress deduplication must preserve one logical quiet input and the
+    # same Work must converge on one replacement Tracker identity if provider history
+    # was reset.
+    configure_gateway([quiet_message, late_message], sequence=20)
+    restart_state = _discord_provider_state(discord_provider_fake_url)
+    restart_typing = _object(restart_state["typing"])
+    restart_snapshots = _list(restart_typing["snapshots"])
+    restart_pulses = _list(restart_typing["pulses"])
+    assert restart_snapshots == []
+    assert restart_pulses == []
+    restart_snapshot_index = len(restart_snapshots)
+    restart_pulse_index = len(restart_pulses)
+    with azents_external_channel_gateway_factory():
+        recovered_typing = _object(
+            wait_until(
+                lambda: active_typing_state_after(
+                    snapshot_index=restart_snapshot_index,
+                    pulse_index=restart_pulse_index,
+                ),
+                timeout=75,
+                interval=0.2,
+                message=(
+                    "Discord typing did not recover after External Channel Gateway "
+                    "restart"
+                ),
+            )
+        )
+        recovered_typing_evidence = _object(recovered_typing["typing"])
+        late_snapshot_index = len(_list(recovered_typing_evidence["snapshots"]))
+        late_pulse_index = len(_list(recovered_typing_evidence["pulses"]))
+        late_evidence = _objects(
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 3
+                    else None
+                ),
+                timeout=45,
+                interval=0.2,
+                message="Late Discord mention was not promoted once",
+            )
+        )
+        late_activity_state = _object(
+            wait_until(
+                lambda: (
+                    state
+                    if _successful_session_navigation_categories(
+                        state := _discord_provider_state(discord_provider_fake_url)
+                    ).count("activity_tracker")
+                    >= 1
+                    and active_typing_state_after(
+                        snapshot_index=late_snapshot_index,
+                        pulse_index=late_pulse_index,
+                    )
+                    is not None
+                    else None
+                ),
+                timeout=45,
+                interval=0.2,
+                message=(
+                    "Late explicit Discord mention did not publish the Activity "
+                    "Tracker while work remained active"
+                ),
+            )
+        )
+        late_tracker_action_ids = _successful_session_navigation_action_ids(
+            late_activity_state,
+            category="activity_tracker",
+        )
+        assert late_tracker_action_ids
+        assert all(
+            action_ids == ["view_azents_session", "azents_conversation_settings_open"]
+            for action_ids in late_tracker_action_ids
+        )
+        late_deliveries = _objects(late_activity_state["deliveries"])
+        late_tracker_deliveries = [
+            delivery
+            for delivery in late_deliveries
+            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "activity_tracker"
+        ]
+        assert {
+            delivery["message_id"]
+            for delivery in late_tracker_deliveries
+            if isinstance(delivery.get("message_id"), str)
+        } == {late_tracker_deliveries[0]["message_id"]}
+        assert (
+            sum(
+                delivery.get("operation") == "create_message"
+                for delivery in late_tracker_deliveries
+            )
+            == 1
+        )
+        assert not any(
+            delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "conversation_settings"
+            for delivery in late_deliveries
+        )
+
+        def late_progress_held() -> list[dict[str, object]] | None:
+            evidence = _progress_request_evidence(openai_proxy_url)[
+                late_progress_index:
+            ]
+            if not any(
+                item.get("binding") == binding.id
+                and item.get("marker_present") is True
+                and item.get("matched") is True
+                and item.get("stage") == "after_progress"
+                for item in evidence
+            ):
+                return None
+            return evidence
+
+        late_progress_evidence = _objects(
+            wait_until(
+                late_progress_held,
+                timeout=45,
+                interval=0.2,
+                message=(
+                    "Late Discord mention did not reach the held progress boundary"
+                ),
+            )
+        )
+        assert late_progress_evidence
+        assert recovered_typing["typing"] is not None
+        assert late_activity_state["typing"] is not None
+        promoted_bodies = {
+            _string(item["external_message_id"]): item["body"] for item in late_evidence
+        }
+        assert promoted_bodies == {
+            external_message_id(initial_message_id): initial_text,
+            external_message_id(quiet_message_id): quiet_text,
+            external_message_id(late_mention_message_id): late_mention_text,
+        }
+        assert (
+            len({_string(item["external_message_id"]) for item in late_evidence}) == 3
+        )
+        late_held_state = _discord_provider_state(discord_provider_fake_url)
+        late_typing = _object(late_held_state["typing"])
+        finish_snapshot_index = len(_list(late_typing["snapshots"]))
+        requests.post(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
+            timeout=5,
+        ).raise_for_status()
+        try:
+            wait_until(
+                session_is_idle,
+                timeout=90,
+                interval=0.2,
+                message="Discord quiet work did not settle after proxy-barrier release",
+            )
+        except TimeoutError as error:
+            live = list_live(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            channel_actions = _channel_action_tool_evidence(
+                azents_public_server_url,
+                token,
+                session.id,
+                call_ids=frozenset(
+                    {
+                        "call_external_channel_progress",
+                        "call_external_channel_outcome_progress",
+                        "call_external_channel_failure_progress",
+                        "call_external_channel_finish",
+                    }
+                ),
+            )
+            typing = _discord_provider_state(discord_provider_fake_url).get("typing")
+            pytest.fail(
+                f"{error}; live={live!r}; channel_actions={channel_actions!r}; "
+                f"typing={typing!r}"
+            )
+        try:
+            terminal_state = _object(
+                wait_until(
+                    lambda: empty_typing_state_after(
+                        snapshot_index=finish_snapshot_index,
+                    ),
+                    timeout=30,
+                    interval=0.2,
+                    message=(
+                        "Discord quiet work did not publish an empty typing snapshot"
+                    ),
+                )
+            )
+        except TimeoutError as error:
+            state = _discord_provider_state(discord_provider_fake_url)
+            typing = _object(state["typing"])
+            observed_snapshots = _list(typing["snapshots"])
+            observed_pulses = _list(typing["pulses"])
+            terminal_projection = (
+                external_api.external_channel_v1_list_session_channels(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    handle=handle,
+                    _headers=headers,
+                )
+            )
+            terminal_work = terminal_projection.items[0].work
+            terminal_work_evidence = (
+                None
+                if terminal_work is None
+                else terminal_work.model_dump(by_alias=True)
+            )
+            channel_actions = _channel_action_tool_evidence(
+                azents_public_server_url,
+                token,
+                session.id,
+                call_ids=frozenset(
+                    {
+                        "call_external_channel_progress",
+                        "call_external_channel_outcome_progress",
+                        "call_external_channel_failure_progress",
+                        "call_external_channel_finish",
+                    }
+                ),
+            )
+            pytest.fail(
+                f"{error}; finish_snapshot_index={finish_snapshot_index}; "
+                f"snapshot_count={len(observed_snapshots)}; "
+                f"pulse_count={len(observed_pulses)}; "
+                f"latest_snapshots={observed_snapshots[-3:]!r}; "
+                f"typing_requests="
+                f"{_int_dict(state['request_counts']).get('typing', 0)}; "
+                f"terminal_work={terminal_work_evidence!r}; "
+                f"channel_actions={channel_actions!r}"
+            )
+
+    terminal_typing = _object(terminal_state["typing"])
+    snapshots = _list(terminal_typing["snapshots"])
+    pulses = _list(terminal_typing["pulses"])
+    assert _object(snapshots[-1]).get("targets") == []
+    assert all(pulse == expected_typing_target for pulse in pulses)
+    rendered_typing = str(terminal_typing)
+    assert quiet_text not in rendered_typing
+    assert late_mention_text not in rendered_typing
+    assert _DISCORD_BOT_TOKEN not in rendered_typing
 
 
 def test_discord_configured_message_durably_provisions_conversation(
@@ -4719,7 +5654,7 @@ def test_discord_configured_message_durably_provisions_conversation(
     def active_discord_binding(
         *,
         excluded_session_ids: set[str],
-    ) -> tuple[Any, Any] | None:
+    ) -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -4738,7 +5673,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                 and projection.items[0].provider.value == "discord"
                 and projection.items[0].disconnected_at is None
             ):
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
     observed_session_ids = {
@@ -4751,8 +5686,7 @@ def test_discord_configured_message_durably_provisions_conversation(
     initial_bindings: list[tuple[str, str]] = []
     with azents_external_channel_gateway_factory():
         for setup_action_code, _, _, suffix in scenarios:
-            setup_custom_id = cast(
-                str,
+            setup_custom_id = _string(
                 wait_until(
                     lambda action_code=setup_action_code: (
                         _discord_settings_component_id(
@@ -4763,7 +5697,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                     timeout=30,
                     interval=0.2,
                     message="Discord provisioning setup control was not delivered",
-                ),
+                )
             )
             _select_discord_setup_location(
                 discord_provider_fake_url=discord_provider_fake_url,
@@ -4774,8 +5708,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                 user_id=participant_id,
                 custom_id=setup_custom_id,
             )
-            first_session, first_binding = cast(
-                tuple[Any, Any],
+            first_session, first_binding = _required(
                 wait_until(
                     lambda: active_discord_binding(
                         excluded_session_ids=observed_session_ids,
@@ -4783,7 +5716,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                     timeout=30,
                     interval=0.2,
                     message="Discord setup replay did not create the initial binding",
-                ),
+                )
             )
             first_session_id = first_session.id
             wait_until(
@@ -4823,7 +5756,7 @@ def test_discord_configured_message_durably_provisions_conversation(
         _,
     ) in enumerate(scenarios, start=1):
         second_message = second_messages[setup_action_code]
-        second_text = cast(str, second_message["content"])
+        second_text = _string(second_message["content"])
         configure_gateway((second_message,), sequence=10 * index)
         requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier",
@@ -4880,13 +5813,12 @@ def test_discord_configured_message_durably_provisions_conversation(
                     postgres_container,
                     connection_id=setup.connection.id,
                 )
-                matching = cast(list[dict[str, object]], observation["items"])
+                matching = _objects(observation["items"])
                 if len(matching) == 1 and matching[0]["owner_ready"] is expected_ready:
                     return matching[0]
                 return None
 
-            retained = cast(
-                dict[str, object],
+            retained = _object(
                 wait_until(
                     blocked_owner,
                     timeout=15,
@@ -4894,7 +5826,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                     message=(
                         "Configured Discord callback did not retain one durable owner"
                     ),
-                ),
+                )
             )
             if owner_ready_while_blocked:
                 assert isinstance(retained["session_id"], str)
@@ -4910,8 +5842,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                 f"{discord_provider_fake_url}/__testenv/barrier/release",
                 timeout=5,
             ).raise_for_status()
-            second_session, _ = cast(
-                tuple[Any, Any],
+            second_session, _ = _required(
                 wait_until(
                     lambda excluded=baseline_session_ids: active_discord_binding(
                         excluded_session_ids=excluded,
@@ -4921,11 +5852,10 @@ def test_discord_configured_message_durably_provisions_conversation(
                     message=(
                         "Configured Discord message did not converge on one binding"
                     ),
-                ),
+                )
             )
             second_session_id = second_session.id
-            second_evidence = cast(
-                list[dict[str, object]],
+            second_evidence = _objects(
                 wait_until(
                     lambda session_id=second_session_id: (
                         evidence
@@ -4945,12 +5875,12 @@ def test_discord_configured_message_durably_provisions_conversation(
                     message=(
                         "Configured Discord message was not promoted after provisioning"
                     ),
-                ),
+                )
             )
 
         assert second_evidence[0]["body"] == second_text
         state = _discord_provider_state(discord_provider_fake_url)
-        counts = cast(dict[str, int], state["request_counts"])
+        counts = _int_dict(state["request_counts"])
         assert counts.get("create_thread", 0) == (1 if setup_action_code == "st" else 0)
         assert second_text not in str(state)
         assert _DISCORD_BOT_TOKEN not in str(state)
@@ -5058,8 +5988,7 @@ def test_discord_message_command_selector_and_component_journey(
         }
         for agent_id in agent_ids
     }
-    message_command_id = cast(
-        str,
+    message_command_id = _string(
         wait_until(
             lambda: _discord_command_id(
                 discord_provider_fake_url,
@@ -5068,7 +5997,7 @@ def test_discord_message_command_selector_and_component_journey(
             timeout=15,
             interval=0.2,
             message="Discord Message Command ID was not reconciled",
-        ),
+        )
     )
     interaction = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
@@ -5118,18 +6047,11 @@ def test_discord_message_command_selector_and_component_journey(
     assert isinstance(selector, str)
     assert selector.startswith("azents-selector:")
     before_component = _discord_provider_state(discord_provider_fake_url)
-    before_request_counts = cast(
-        dict[str, int],
-        before_component["request_counts"],
-    )
+    before_request_counts = _int_dict(before_component["request_counts"])
     before_thread_count = before_request_counts.get("create_thread", 0)
     before_message_count = before_request_counts.get("create_message", 0)
-    before_operation_count = len(
-        cast(list[dict[str, object]], before_component["operations"])
-    )
-    before_delivery_count = len(
-        cast(list[dict[str, object]], before_component["deliveries"])
-    )
+    before_operation_count = len(_objects(before_component["operations"]))
+    before_delivery_count = len(_objects(before_component["deliveries"]))
     component = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -5157,10 +6079,7 @@ def test_discord_message_command_selector_and_component_journey(
             baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
         )
     pending_location_state = _discord_provider_state(discord_provider_fake_url)
-    pending_location_counts = cast(
-        dict[str, int],
-        pending_location_state["request_counts"],
-    )
+    pending_location_counts = _int_dict(pending_location_state["request_counts"])
     assert pending_location_counts.get("create_thread", 0) == before_thread_count
     assert pending_location_counts.get("create_message", 0) == before_message_count
     _open_discord_settings(
@@ -5171,8 +6090,7 @@ def test_discord_message_command_selector_and_component_journey(
         channel_id=_DISCORD_CHANNEL_ID,
         user_id="600000000000000002",
     )
-    setup_threads_custom_id = cast(
-        str,
+    setup_threads_custom_id = _string(
         wait_until(
             lambda: _discord_settings_component_id(
                 discord_provider_fake_url,
@@ -5181,7 +6099,7 @@ def test_discord_message_command_selector_and_component_journey(
             timeout=15,
             interval=0.2,
             message="Selected Discord route did not expose location controls",
-        ),
+        )
     )
     _select_discord_setup_location(
         discord_provider_fake_url=discord_provider_fake_url,
@@ -5192,8 +6110,7 @@ def test_discord_message_command_selector_and_component_journey(
         user_id="600000000000000002",
         custom_id=setup_threads_custom_id,
     )
-    state = cast(
-        dict[str, object],
+    state = _object(
         wait_until(
             lambda: (
                 (
@@ -5203,11 +6120,9 @@ def test_discord_message_command_selector_and_component_journey(
                             request_counts := provider_state.get("request_counts"),
                             dict,
                         )
-                        and cast(dict[str, int], request_counts).get("create_thread", 0)
+                        and _int_dict(request_counts).get("create_thread", 0)
                         > before_thread_count
-                        and cast(dict[str, int], request_counts).get(
-                            "create_message", 0
-                        )
+                        and _int_dict(request_counts).get("create_message", 0)
                         > before_message_count
                     )
                     else None
@@ -5223,23 +6138,25 @@ def test_discord_message_command_selector_and_component_journey(
                 "Discord location selection did not provision its thread and "
                 "continue the source"
             ),
-        ),
+        )
     )
     rendered = str(state)
-    interactions = cast(list[dict[str, object]], state["interactions"])
-    assert [item["response_type"] for item in interactions] == [4, 7, 4, 7]
-    operations = cast(list[dict[str, object]], state["operations"])[
-        before_operation_count:
+    interactions = _objects(state["interactions"])
+    assert [item["response_type"] for item in interactions] == [4, 7, 4, 6]
+    assert [item.get("completed_response_type") for item in interactions] == [
+        None,
+        None,
+        None,
+        7,
     ]
+    operations = _objects(state["operations"])[before_operation_count:]
     thread_channel_id = next(
         operation["thread_channel_id"]
         for operation in operations
         if operation.get("event") == "thread_create"
         and operation.get("outcome") == "delivered"
     )
-    deliveries = cast(list[dict[str, object]], state["deliveries"])[
-        before_delivery_count:
-    ]
+    deliveries = _objects(state["deliveries"])[before_delivery_count:]
     assert any(
         delivery.get("operation") == "create_message"
         and delivery.get("outcome") == "created"
@@ -5247,7 +6164,7 @@ def test_discord_message_command_selector_and_component_journey(
         for delivery in deliveries
     )
 
-    def selected_binding() -> tuple[Any, Any] | None:
+    def selected_binding() -> _SessionBinding | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_ids[1],
             _headers=headers,
@@ -5263,17 +6180,16 @@ def test_discord_message_command_selector_and_component_journey(
                 len(projection.items) == 1
                 and projection.items[0].provider.value == "discord"
             ):
-                return session, projection.items[0]
+                return _SessionBinding(session, projection.items[0])
         return None
 
-    selected_session, selected_channel = cast(
-        tuple[Any, Any],
+    selected_session, selected_channel = _required(
         wait_until(
             selected_binding,
             timeout=15,
             interval=0.2,
             message="Discord HTTP selector replay did not retain one Session binding",
-        ),
+        )
     )
     assert selected_session.agent_id == agent_ids[1]
     assert selected_channel.provider.value == "discord"
@@ -5283,8 +6199,7 @@ def test_discord_message_command_selector_and_component_journey(
         _headers=headers,
     )
     assert detail.id == selected_session.id
-    input_evidence = cast(
-        list[dict[str, object]],
+    input_evidence = _objects(
         wait_until(
             lambda: (
                 evidence
@@ -5301,15 +6216,14 @@ def test_discord_message_command_selector_and_component_journey(
             timeout=15,
             interval=0.2,
             message="Discord HTTP selector replay did not activate one mailbox input",
-        ),
+        )
     )
     assert input_evidence[0]["provider"] == "discord"
     assert input_evidence[0]["body"] == source_content
     expected_session_path = (
         f"/w/{handle}/agents/{agent_ids[1]}/sessions/{selected_session.id}"
     )
-    activation_state = cast(
-        dict[str, object],
+    activation_state = _object(
         wait_until(
             lambda: _completed_session_navigation_state(
                 _discord_provider_state(discord_provider_fake_url),
@@ -5321,7 +6235,7 @@ def test_discord_message_command_selector_and_component_journey(
                 "Discord HTTP selector replay did not deliver joined presence and "
                 "Activity Tracker controls"
             ),
-        ),
+        )
     )
     assert _successful_session_paths(activation_state) == [
         expected_session_path,

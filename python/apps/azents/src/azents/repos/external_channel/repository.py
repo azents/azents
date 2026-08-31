@@ -4,7 +4,7 @@ import datetime
 import json
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar, cast
+from typing import Any, NamedTuple, TypeVar, assert_never
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
+    AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
@@ -37,6 +38,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_progress import checking_progress_title
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
@@ -57,8 +59,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
 )
+from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.repos.external_channel.work import terminate_binding_with_plans
 from azents.repos.external_channel.work_state import (
+    CHANNEL_WORK_STATE_NAME_PREFIX,
     ChannelWorkState,
     ChannelWorkStateMutation,
     ExternalChannelWorkStateStore,
@@ -67,6 +71,7 @@ from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleReposito
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 from .data import (
+    DiscordGatewayTypingTarget,
     ExternalChannelAccessGrant,
     ExternalChannelAccessGrantCreate,
     ExternalChannelAccessRequest,
@@ -98,6 +103,7 @@ from .data import (
     ExternalChannelResourceCreate,
     ExternalChannelSetupClaim,
     ExternalChannelSetupClaimCreate,
+    SlackWorkPresenceTarget,
 )
 
 _RecordT = TypeVar("_RecordT", bound=BaseModel)
@@ -706,6 +712,28 @@ class ExternalChannelRepository:
         )
         return list(result)
 
+    async def list_slack_presence_connection_ids(
+        self,
+        session: AsyncSession,
+    ) -> list[str]:
+        """List Slack connections eligible for Work presence ownership."""
+        result = await session.scalars(
+            sa.select(RDBExternalChannelConnection.id)
+            .where(
+                RDBExternalChannelConnection.provider == ExternalChannelProvider.SLACK,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.encrypted_credentials.is_not(None),
+            )
+            .order_by(RDBExternalChannelConnection.id)
+        )
+        return list(result)
+
     async def list_discord_gateway_connection_ids(
         self,
         session: AsyncSession,
@@ -828,6 +856,151 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelConnectionConfiguration, rdb)
+
+    async def list_owned_discord_typing_targets(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+    ) -> tuple[DiscordGatewayTypingTarget, ...] | None:
+        """Project active Work onto current Discord Gateway typing targets."""
+        rows = (
+            (
+                await session.execute(
+                    sa.select(
+                        RDBExternalChannelConnection,
+                        RDBExternalChannelBinding,
+                        RDBExternalChannelResource,
+                        RDBToolkitState,
+                    )
+                    .select_from(RDBExternalChannelIngressLease)
+                    .join(
+                        RDBExternalChannelConnection,
+                        RDBExternalChannelIngressLease.connection_id
+                        == RDBExternalChannelConnection.id,
+                    )
+                    .join(
+                        RDBExternalChannelAppClaim,
+                        RDBExternalChannelAppClaim.connection_id
+                        == RDBExternalChannelConnection.id,
+                    )
+                    .outerjoin(
+                        RDBExternalChannelResource,
+                        sa.and_(
+                            RDBExternalChannelResource.connection_id
+                            == RDBExternalChannelConnection.id,
+                            RDBExternalChannelResource.status
+                            == ExternalChannelResourceStatus.ACTIVE,
+                        ),
+                    )
+                    .outerjoin(
+                        RDBExternalChannelBinding,
+                        sa.and_(
+                            RDBExternalChannelBinding.resource_id
+                            == RDBExternalChannelResource.id,
+                            RDBExternalChannelBinding.disconnected_at.is_(None),
+                        ),
+                    )
+                    .outerjoin(
+                        RDBExternalChannelAgentRoute,
+                        sa.and_(
+                            RDBExternalChannelAgentRoute.id
+                            == RDBExternalChannelBinding.route_id,
+                            RDBExternalChannelAgentRoute.connection_id
+                            == RDBExternalChannelConnection.id,
+                            RDBExternalChannelAgentRoute.connection_app_mode
+                            == RDBExternalChannelConnection.app_mode,
+                            RDBExternalChannelAgentRoute.catalog_status
+                            == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                        ),
+                    )
+                    .outerjoin(
+                        RDBAgent,
+                        sa.and_(
+                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                            RDBAgent.workspace_id
+                            == RDBExternalChannelConnection.workspace_id,
+                            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                        ),
+                    )
+                    .outerjoin(
+                        RDBAgentSession,
+                        sa.and_(
+                            RDBAgentSession.id
+                            == RDBExternalChannelBinding.agent_session_id,
+                            RDBAgentSession.agent_id == RDBAgent.id,
+                            RDBAgentSession.workspace_id == RDBAgent.workspace_id,
+                            RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                            RDBAgentSession.stop_requested_at.is_(None),
+                        ),
+                    )
+                    .outerjoin(
+                        RDBToolkitState,
+                        sa.and_(
+                            RDBToolkitState.agent_id == RDBAgent.id,
+                            RDBToolkitState.session_id == RDBAgentSession.id,
+                            RDBToolkitState.toolkit_namespace == "external_channel",
+                            RDBToolkitState.state_name
+                            == (
+                                sa.literal(CHANNEL_WORK_STATE_NAME_PREFIX)
+                                + RDBExternalChannelBinding.id
+                            ),
+                        ),
+                    )
+                    .where(
+                        _discord_gateway_lease_fence(
+                            connection_id=connection_id,
+                            lease_owner=lease_owner,
+                            lease_generation=lease_generation,
+                            now=now,
+                        )
+                    )
+                    .order_by(
+                        RDBExternalChannelResource.id,
+                        RDBExternalChannelBinding.id,
+                        RDBToolkitState.id,
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        if not rows:
+            return None
+
+        work_cycle_ids_by_target: dict[tuple[str, str], set[str]] = {}
+        for connection, binding, resource, toolkit_state in rows:
+            if binding is None or resource is None or toolkit_state is None:
+                continue
+            work = self.work_state_store._validate_state(
+                toolkit_state.state_json,
+                binding_id=binding.id,
+                schema_version=toolkit_state.schema_version,
+            )
+            if work.status is not ExternalChannelWorkStatus.ACTIVE:
+                continue
+            target = _discord_gateway_typing_target(
+                resource_type=resource.resource_type,
+                labels=resource.labels,
+                provider_tenant_id=connection.provider_tenant_id,
+            )
+            if target is None:
+                continue
+            work_cycle_ids_by_target.setdefault(target, set()).add(work.work_cycle_id)
+
+        return tuple(
+            DiscordGatewayTypingTarget(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                work_cycle_ids=tuple(sorted(work_cycle_ids)),
+            )
+            for (guild_id, channel_id), work_cycle_ids in sorted(
+                work_cycle_ids_by_target.items()
+            )
+        )
 
     async def renew_discord_gateway_lease(
         self,
@@ -1021,6 +1194,206 @@ class ExternalChannelRepository:
             .returning(RDBExternalChannelIngressLease.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def claim_slack_presence_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Claim one Slack connection for Work presence reconciliation."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider == ExternalChannelProvider.SLACK,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.encrypted_credentials.is_not(None),
+                sa.or_(
+                    RDBExternalChannelConnection.slack_presence_lease_owner
+                    == lease_owner,
+                    RDBExternalChannelConnection.slack_presence_lease_until.is_(None),
+                    RDBExternalChannelConnection.slack_presence_lease_until < now,
+                ),
+            )
+            .values(
+                slack_presence_lease_owner=lease_owner,
+                slack_presence_lease_until=lease_until,
+                slack_presence_heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelConnection)
+        )
+        return self._as(
+            ExternalChannelConnectionConfiguration,
+            result.scalar_one_or_none(),
+        )
+
+    async def renew_slack_presence_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        required_configuration_generation: int,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> bool:
+        """Renew one current Slack Work presence owner."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider == ExternalChannelProvider.SLACK,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.configuration_generation
+                == required_configuration_generation,
+                RDBExternalChannelConnection.slack_presence_lease_owner == lease_owner,
+                RDBExternalChannelConnection.slack_presence_lease_until >= now,
+            )
+            .values(
+                slack_presence_lease_until=lease_until,
+                slack_presence_heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def release_slack_presence_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Release one Slack Work presence lease without changing health."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider == ExternalChannelProvider.SLACK,
+                RDBExternalChannelConnection.slack_presence_lease_owner == lease_owner,
+            )
+            .values(
+                slack_presence_lease_owner=None,
+                slack_presence_lease_until=None,
+                slack_presence_heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def list_owned_slack_work_presence_targets(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        required_configuration_generation: int,
+        now: datetime.datetime,
+    ) -> tuple[SlackWorkPresenceTarget, ...] | None:
+        """Project current and latest Work under one Slack presence lease."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider == ExternalChannelProvider.SLACK,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.configuration_generation
+                == required_configuration_generation,
+                RDBExternalChannelConnection.slack_presence_lease_owner == lease_owner,
+                RDBExternalChannelConnection.slack_presence_lease_until >= now,
+            )
+        )
+        if connection is None:
+            return None
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelAgentRoute,
+                    RDBAgent,
+                    RDBAgentSession,
+                    RDBToolkitState,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id_snapshot,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
+                    RDBToolkitState,
+                    sa.and_(
+                        RDBToolkitState.agent_id == RDBAgent.id,
+                        RDBToolkitState.session_id == RDBAgentSession.id,
+                        RDBToolkitState.toolkit_namespace == "external_channel",
+                        RDBToolkitState.state_name
+                        == (
+                            sa.literal(CHANNEL_WORK_STATE_NAME_PREFIX)
+                            + RDBExternalChannelBinding.id
+                        ),
+                    ),
+                )
+                .where(
+                    RDBExternalChannelResource.connection_id == connection_id,
+                    RDBExternalChannelAgentRoute.connection_id == connection_id,
+                )
+                .order_by(RDBExternalChannelBinding.id)
+            )
+        ).tuples()
+        targets: list[SlackWorkPresenceTarget] = []
+        for binding, resource, route, agent, agent_session, toolkit_state in rows:
+            work = self.work_state_store._validate_state(
+                toolkit_state.state_json,
+                binding_id=binding.id,
+                schema_version=toolkit_state.schema_version,
+            )
+            target = _slack_work_presence_target(
+                connection=connection,
+                binding=binding,
+                resource=resource,
+                route=route,
+                agent=agent,
+                agent_session=agent_session,
+                work=work,
+            )
+            if target is not None:
+                targets.append(target)
+        return tuple(targets)
 
     async def claim_socket_connection(
         self,
@@ -1379,6 +1752,9 @@ class ExternalChannelRepository:
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = now
         if connection.transport is ExternalChannelTransport.SOCKET:
             connection.socket_heartbeat_at = now
             connection.socket_gap_detected_at = now
@@ -1470,6 +1846,9 @@ class ExternalChannelRepository:
         connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = now
         if connection.transport is ExternalChannelTransport.SOCKET:
             connection.socket_heartbeat_at = now
             connection.socket_gap_detected_at = now
@@ -3246,29 +3625,27 @@ class ExternalChannelRepository:
         limit: int,
     ) -> int:
         """Expire bounded pending requests without provider side effects."""
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
-                sa.update(RDBExternalChannelAccessRequest)
-                .where(
-                    RDBExternalChannelAccessRequest.id.in_(
-                        sa.select(RDBExternalChannelAccessRequest.id)
-                        .where(
-                            RDBExternalChannelAccessRequest.status
-                            == ExternalChannelAccessRequestStatus.PENDING,
-                            RDBExternalChannelAccessRequest.expires_at <= now,
-                        )
-                        .order_by(RDBExternalChannelAccessRequest.expires_at)
-                        .limit(limit)
+        result = await session.execute(
+            sa.update(RDBExternalChannelAccessRequest)
+            .where(
+                RDBExternalChannelAccessRequest.id.in_(
+                    sa.select(RDBExternalChannelAccessRequest.id)
+                    .where(
+                        RDBExternalChannelAccessRequest.status
+                        == ExternalChannelAccessRequestStatus.PENDING,
+                        RDBExternalChannelAccessRequest.expires_at <= now,
                     )
+                    .order_by(RDBExternalChannelAccessRequest.expires_at)
+                    .limit(limit)
                 )
-                .values(
-                    status=ExternalChannelAccessRequestStatus.EXPIRED,
-                    decided_at=now,
-                    decision_summary="The access request expired.",
-                )
-            ),
+            )
+            .values(
+                status=ExternalChannelAccessRequestStatus.EXPIRED,
+                decided_at=now,
+                decision_summary="The access request expired.",
+            )
         )
+        assert isinstance(result, CursorResult)
         return int(result.rowcount or 0)
 
     async def create_access_grant(
@@ -3575,6 +3952,106 @@ def _discord_gateway_lease_fence(
         RDBExternalChannelIngressLease.required_app_claim_generation
         == RDBExternalChannelAppClaim.claim_generation,
     )
+
+
+def _slack_work_presence_target(
+    *,
+    connection: RDBExternalChannelConnection,
+    binding: RDBExternalChannelBinding,
+    resource: RDBExternalChannelResource,
+    route: RDBExternalChannelAgentRoute,
+    agent: RDBAgent,
+    agent_session: RDBAgentSession,
+    work: ChannelWorkState,
+) -> SlackWorkPresenceTarget | None:
+    """Project one current or latest Work onto Slack provider presence."""
+    thread_ts = work.slack_presence_thread_ts
+    labels = resource.labels or {}
+    channel_id = labels.get("channel_id")
+    if (
+        not isinstance(channel_id, str)
+        or not channel_id
+        or not isinstance(thread_ts, str)
+        or not thread_ts
+    ):
+        return None
+    processing = (
+        work.status is ExternalChannelWorkStatus.ACTIVE
+        and binding.disconnected_at is None
+        and resource.status is ExternalChannelResourceStatus.ACTIVE
+        and route.agent_id == agent.id
+        and route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
+        and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
+        and agent_session.status is AgentSessionStatus.ACTIVE
+        and agent_session.stop_requested_at is None
+    )
+    kind = (
+        "thread_agent"
+        if resource.resource_type is ExternalChannelResourceType.THREAD
+        else "channel_loading"
+    )
+    initiator_user_id = work.slack_presence_initiator_user_id
+    if kind == "thread_agent" and processing and initiator_user_id is None:
+        return None
+    return SlackWorkPresenceTarget(
+        binding_id=binding.id,
+        work_cycle_id=work.work_cycle_id,
+        kind=kind,
+        desired_state="processing" if processing else "idle",
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        initiator_user_id=initiator_user_id,
+        status_text=(
+            (work.title or checking_progress_title())[:100]
+            if processing and kind == "channel_loading"
+            else None
+        ),
+        agent_name=agent.name,
+        customize_messages=(
+            connection.capabilities is not None
+            and connection.capabilities.get("customize_messages") is True
+        ),
+    )
+
+
+class _DiscordGatewayTypingTarget(NamedTuple):
+    """Discord Gateway guild and delivery channel target."""
+
+    guild_id: str
+    channel_id: str
+
+
+def _discord_gateway_typing_target(
+    *,
+    resource_type: ExternalChannelResourceType,
+    labels: dict[str, object] | None,
+    provider_tenant_id: str | None,
+) -> _DiscordGatewayTypingTarget | None:
+    """Resolve one current Discord delivery target from resource labels."""
+    if labels is None:
+        return None
+    guild_id = labels.get("guild_id")
+    if (
+        not isinstance(guild_id, str)
+        or not guild_id.isdigit()
+        or guild_id != provider_tenant_id
+    ):
+        return None
+    match resource_type:
+        case ExternalChannelResourceType.PARENT_CHANNEL:
+            channel_id = labels.get("parent_channel_id")
+        case ExternalChannelResourceType.THREAD:
+            delivery_channel_id = labels.get("delivery_channel_id")
+            channel_id = (
+                delivery_channel_id
+                if isinstance(delivery_channel_id, str) and delivery_channel_id
+                else labels.get("thread_id")
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+    if not isinstance(channel_id, str) or not channel_id.isdigit():
+        return None
+    return _DiscordGatewayTypingTarget(guild_id, channel_id)
 
 
 def _validate_interaction_projection_value(value: object, *, depth: int) -> None:

@@ -1,7 +1,8 @@
 """Persistent External Channel gateway runtime tests."""
 
 import asyncio
-from typing import cast
+from typing import Protocol, TypeVar
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,9 +16,21 @@ from azents.services.external_channel.gateway_runtime import (
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
+from azents.services.external_channel.slack_presence_manager import (
+    SlackWorkPresenceManagerService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
+from azents.testing.types import require_instance
+
+T = TypeVar("T")
+
+
+class _Manager(Protocol):
+    """Minimal Gateway manager test contract."""
+
+    async def run(self, shutdown_event: asyncio.Event) -> None: ...
 
 
 class _WaitingManager:
@@ -54,18 +67,33 @@ class _FailingManager:
         raise ValueError("manager failure")
 
 
+def _typed_manager(expected: type[T], manager: _Manager) -> T:
+    """Wrap one lifecycle implementation in a runtime-specced manager fake."""
+    mock = MagicMock(spec=expected)
+    mock.run = manager.run
+    return require_instance(mock, expected)
+
+
 def _runtime(
     *,
-    slack_manager: object,
-    discord_manager: object,
+    slack_manager: _Manager,
+    discord_manager: _Manager,
+    presence_manager: _Manager | None = None,
 ) -> ExternalChannelGatewayRuntime:
     return ExternalChannelGatewayRuntime(
-        slack_socket_manager=cast(SlackSocketManagerService, slack_manager),
-        discord_gateway_manager=cast(
+        slack_socket_manager=_typed_manager(
+            SlackSocketManagerService,
+            slack_manager,
+        ),
+        discord_gateway_manager=_typed_manager(
             DiscordGatewayManagerService,
             discord_manager,
         ),
-        ingress_recovery_service=cast(
+        slack_presence_manager=_typed_manager(
+            SlackWorkPresenceManagerService,
+            _WaitingManager() if presence_manager is None else presence_manager,
+        ),
+        ingress_recovery_service=_typed_manager(
             ExternalChannelIngressRecoveryService,
             _WaitingManager(),
         ),
@@ -77,23 +105,27 @@ async def test_runtime_runs_both_managers_until_shutdown() -> None:
     """All required producer loops share one graceful shutdown event."""
     slack_manager = _WaitingManager()
     discord_manager = _WaitingManager()
+    presence_manager = _WaitingManager()
     shutdown_event = asyncio.Event()
     task = asyncio.create_task(
         _runtime(
             slack_manager=slack_manager,
             discord_manager=discord_manager,
+            presence_manager=presence_manager,
         ).run(shutdown_event, mark_shutting_down=lambda: None)
     )
 
     await asyncio.gather(
         slack_manager.started.wait(),
         discord_manager.started.wait(),
+        presence_manager.started.wait(),
     )
     shutdown_event.set()
     await task
 
     assert slack_manager.stopped.is_set()
     assert discord_manager.stopped.is_set()
+    assert presence_manager.stopped.is_set()
 
 
 @pytest.mark.asyncio

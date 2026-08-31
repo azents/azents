@@ -12,12 +12,13 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.deps import get_config
 from azents.core.enums import ExternalChannelIngressProfile
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    DiscordGatewayTypingTarget,
     ExternalChannelConnectionConfiguration,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
@@ -185,12 +186,22 @@ class DiscordGatewayManagerService:
                 raise DiscordGatewayCredentialError(
                     "Discord Guild identity is unavailable."
                 )
+            callback_base_url = (
+                None
+                if self.config is None
+                else self.config.external_channel_discord_callback_url
+            )
+            callback_selector_hash = configuration.http_callback_selector_hash
+            if not callback_base_url or not callback_selector_hash:
+                raise DiscordGatewayTerminalError("interaction_endpoint_drift")
             await self._run_connection_with_lease(
                 connection_id=connection_id,
                 lease=lease,
                 bot_token=credentials.bot_token,
                 provider_app_id=configuration.provider_app_id,
                 target_guild_id=configuration.provider_tenant_id,
+                interactions_callback_base_url=callback_base_url,
+                interactions_callback_selector_hash=callback_selector_hash,
                 connected_bot_user_id=configuration.provider_bot_user_id,
                 configuration_generation=configuration.configuration_generation,
                 shutdown_event=shutdown_event,
@@ -242,6 +253,8 @@ class DiscordGatewayManagerService:
         bot_token: str,
         provider_app_id: str | None,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None,
         configuration_generation: int,
         shutdown_event: asyncio.Event,
@@ -250,6 +263,10 @@ class DiscordGatewayManagerService:
             self.gateway_client.run_connection(
                 bot_token=bot_token,
                 target_guild_id=target_guild_id,
+                interactions_callback_base_url=interactions_callback_base_url,
+                interactions_callback_selector_hash=(
+                    interactions_callback_selector_hash
+                ),
                 connected_bot_user_id=connected_bot_user_id,
                 handle_event=lambda event: self._admit_gateway_event(
                     connection_id=connection_id,
@@ -265,6 +282,10 @@ class DiscordGatewayManagerService:
                     lease=lease,
                     state=state,
                 ),
+                load_typing_targets=lambda: self._load_typing_targets(
+                    connection_id=connection_id,
+                    lease=lease,
+                ),
             )
         )
         shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -272,7 +293,7 @@ class DiscordGatewayManagerService:
             while True:
                 done, _ = await asyncio.wait(
                     (connection_task, shutdown_task),
-                    timeout=self.renew_interval.total_seconds(),
+                    timeout=self._renew_interval().total_seconds(),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if connection_task in done:
@@ -302,7 +323,7 @@ class DiscordGatewayManagerService:
                 connection_id=connection_id,
                 lease_owner=self.manager_id,
                 now=now,
-                lease_until=now + self.lease_duration,
+                lease_until=now + self._lease_duration(),
             )
             await session.commit()
             return claim
@@ -336,10 +357,50 @@ class DiscordGatewayManagerService:
                 lease_owner=self.manager_id,
                 lease_generation=lease.lease_generation,
                 now=now,
-                lease_until=now + self.lease_duration,
+                lease_until=now + self._lease_duration(),
             )
             await session.commit()
             return renewed
+
+    def _lease_override(self) -> ExternalChannelGatewayLeaseConfig | None:
+        """Return the validated testenv lease override when configured."""
+        if self.config is None:
+            return None
+        override = self.config.testenv_external_channel_gateway_lease
+        return (
+            override
+            if isinstance(override, ExternalChannelGatewayLeaseConfig)
+            else None
+        )
+
+    def _lease_duration(self) -> datetime.timedelta:
+        """Return the effective Gateway lease duration."""
+        override = self._lease_override()
+        return self.lease_duration if override is None else override.duration
+
+    def _renew_interval(self) -> datetime.timedelta:
+        """Return the effective Gateway lease renewal interval."""
+        override = self._lease_override()
+        return self.renew_interval if override is None else override.renewal_interval
+
+    async def _load_typing_targets(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+    ) -> tuple[DiscordGatewayTypingTarget, ...]:
+        """Load current typing targets only under the owning Gateway lease fence."""
+        async with self.session_manager() as session:
+            targets = await self.repository.list_owned_discord_typing_targets(
+                session,
+                connection_id=connection_id,
+                lease_owner=self.manager_id,
+                lease_generation=lease.lease_generation,
+                now=_utc_now(),
+            )
+        if targets is None:
+            raise DiscordGatewayLeaseLost("Discord Gateway typing authority is stale.")
+        return targets
 
     async def _record_gap(
         self,

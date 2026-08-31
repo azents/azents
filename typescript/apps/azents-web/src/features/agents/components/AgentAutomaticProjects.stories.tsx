@@ -5,7 +5,7 @@ import type {
   AutomaticProjectRow,
   AutomaticProjectsState,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerState } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerState } from "@/shared/agent-workspace/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const rows: AutomaticProjectRow[] = [
@@ -27,6 +27,15 @@ const closedPickerState: ProjectDirectoryPickerState = { type: "CLOSED" };
 const readyPickerState: ProjectDirectoryPickerState = {
   type: "SERVER",
   server: {
+    lifecycle: {
+      target: "running",
+      convergence: "stable",
+      provider: { connection: "connected", resource: "running" },
+      runner: { state: "ready" },
+      availability: "ready",
+      reason_code: null,
+      desired_generation: 3,
+    },
     runtime: {
       type: "RUNNING",
       runtime_id: "runtime-1",
@@ -63,6 +72,7 @@ const readyPickerState: ProjectDirectoryPickerState = {
   ],
   isRefreshing: false,
   isStarting: false,
+  isRestarting: false,
 };
 
 const commonArgs = {
@@ -77,6 +87,7 @@ const commonArgs = {
   onSelectProjectPickerDirectory: () => {},
   onRefreshProjectPicker: () => {},
   onStartRuntimeForProjectPicker: () => {},
+  onRestartRuntimeForProjectPicker: () => {},
   onRemoveProject: () => {},
   onMoveProject: () => {},
   onSave: () => Promise.resolve(),

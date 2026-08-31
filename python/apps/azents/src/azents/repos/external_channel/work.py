@@ -1,7 +1,7 @@
 """External Channel Work persistence and direct provider-effect planning."""
 
 import datetime
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Literal, assert_never
 
 import sqlalchemy as sa
@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -77,6 +78,8 @@ from azents.services.external_channel.provider_effect import (
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+
+INITIAL_PROGRESS_CLAIM_ATTEMPTS = 3
 
 
 class ExternalChannelWorkRepository:
@@ -640,104 +643,129 @@ class ExternalChannelWorkRepository:
         if row is None:
             return None
         binding, resource, route, connection = row
-        work = await self.work_state_store.load(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            binding_id=binding_id,
-        )
-        if (
-            work is None
-            or work.status is not ExternalChannelWorkStatus.ACTIVE
-            or work.work_cycle_id != work_cycle_id
-            or work.desired_progress is None
-            or any(part.part_ordinal == 0 for part in work.projection_parts)
-        ):
-            return None
-        if connection.provider is ExternalChannelProvider.SLACK:
-            rendered = render_slack_persisted_progress(
-                work.desired_progress,
-                work_id=work.work_cycle_id,
-                desired_progress_revision=work.desired_progress_revision,
+        for _ in range(INITIAL_PROGRESS_CLAIM_ATTEMPTS):
+            work = await self.work_state_store.load(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                binding_id=binding_id,
             )
-            payload = _provider_payload(
-                connection.provider,
-                resource.labels,
-                text=rendered.text,
-                blocks=rendered.blocks,
-                desired_progress_revision=work.desired_progress_revision,
-            )
-        else:
-            rendered_discord = render_discord_persisted_progress(
-                work.desired_progress,
-                work_id=work.work_cycle_id,
-                desired_progress_revision=work.desired_progress_revision,
-            )
-            if not rendered_discord.pages:
-                return None
-            page = rendered_discord.pages[0]
-            payload = _provider_payload(
-                connection.provider,
-                resource.labels,
-                text=page.text,
-                desired_progress_revision=work.desired_progress_revision,
-            )
-            payload["embeds"] = page.embeds
-        payload["work_id"] = work.work_cycle_id
-        payload["part_ordinal"] = 0
-        plan = await self.prepare_direct_control(
-            session,
-            connection_id=connection.id,
-            resource_id=resource.id,
-            route_id=route.id,
-            binding_id=binding.id,
-            operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-            request_payload=payload,
-            operation_seed=(
-                f"initial-progress:{work.work_cycle_id}:"
-                f"{work.desired_progress_revision}"
-            ),
-        )
-        if plan is None:
-            return None
-        assert work is not None
-        expected_work_cycle_id = work.work_cycle_id
-        expected_progress_revision = work.desired_progress_revision
-
-        def claim(
-            current: ChannelWorkState,
-        ) -> ChannelWorkStateMutation[bool]:
             if (
-                current.status is not ExternalChannelWorkStatus.ACTIVE
-                or current.work_cycle_id != expected_work_cycle_id
-                or current.desired_progress_revision != expected_progress_revision
-                or current.desired_progress is None
-                or any(part.part_ordinal == 0 for part in current.projection_parts)
+                work is None
+                or work.status is not ExternalChannelWorkStatus.ACTIVE
+                or work.work_cycle_id != work_cycle_id
+                or work.tracker_visibility == "hidden"
+                or work.desired_progress is None
+                or any(part.part_ordinal == 0 for part in work.projection_parts)
             ):
-                return ChannelWorkStateMutation(
-                    state=current,
-                    result=False,
-                    changed=False,
+                return None
+            if connection.provider is ExternalChannelProvider.SLACK:
+                rendered = render_slack_persisted_progress(
+                    work.desired_progress,
+                    work_id=work.work_cycle_id,
+                    desired_progress_revision=work.desired_progress_revision,
                 )
-            updated = current.model_copy(deep=True)
-            updated.projection_parts.append(
-                ChannelWorkProjectionPartState(
-                    part_ordinal=0,
-                    desired_progress_revision=current.desired_progress_revision,
-                    status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                    provider_message_key=None,
+                payload = _provider_payload(
+                    connection.provider,
+                    resource.labels,
+                    text=rendered.text,
+                    blocks=rendered.blocks,
+                    desired_progress_revision=work.desired_progress_revision,
                 )
+            else:
+                rendered_discord = render_discord_persisted_progress(
+                    work.desired_progress,
+                    work_id=work.work_cycle_id,
+                    desired_progress_revision=work.desired_progress_revision,
+                )
+                if not rendered_discord.pages:
+                    return None
+                page = rendered_discord.pages[0]
+                payload = _provider_payload(
+                    connection.provider,
+                    resource.labels,
+                    text=page.text,
+                    desired_progress_revision=work.desired_progress_revision,
+                )
+                payload["embeds"] = page.embeds
+            payload["work_id"] = work.work_cycle_id
+            payload["part_ordinal"] = 0
+            plan = await self.prepare_direct_control(
+                session,
+                connection_id=connection.id,
+                resource_id=resource.id,
+                route_id=route.id,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                request_payload=payload,
+                operation_seed=(
+                    f"initial-progress:{work.work_cycle_id}:"
+                    f"{work.desired_progress_revision}"
+                ),
             )
-            return ChannelWorkStateMutation(state=updated, result=True)
+            if plan is None:
+                return None
+            expected_work_cycle_id = work.work_cycle_id
+            expected_progress_revision = work.desired_progress_revision
 
-        claimed = await self.work_state_store.update_existing(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            binding_id=binding_id,
-            mutator=claim,
-        )
-        return plan if claimed is not None and claimed.result else None
+            def claim_for(
+                expected_work_cycle_id: str,
+                expected_progress_revision: int,
+            ) -> Callable[
+                [ChannelWorkState],
+                ChannelWorkStateMutation[Literal["claimed", "retry", "stop"]],
+            ]:
+                def claim(
+                    current: ChannelWorkState,
+                ) -> ChannelWorkStateMutation[Literal["claimed", "retry", "stop"]]:
+                    if (
+                        current.status is not ExternalChannelWorkStatus.ACTIVE
+                        or current.work_cycle_id != expected_work_cycle_id
+                        or current.tracker_visibility == "hidden"
+                        or current.desired_progress is None
+                        or any(
+                            part.part_ordinal == 0 for part in current.projection_parts
+                        )
+                    ):
+                        return ChannelWorkStateMutation(
+                            state=current,
+                            result="stop",
+                            changed=False,
+                        )
+                    if current.desired_progress_revision != expected_progress_revision:
+                        return ChannelWorkStateMutation(
+                            state=current,
+                            result="retry",
+                            changed=False,
+                        )
+                    updated = current.model_copy(deep=True)
+                    updated.projection_parts.append(
+                        ChannelWorkProjectionPartState(
+                            part_ordinal=0,
+                            desired_progress_revision=current.desired_progress_revision,
+                            status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                            provider_message_key=None,
+                        )
+                    )
+                    return ChannelWorkStateMutation(state=updated, result="claimed")
+
+                return claim
+
+            claimed = await self.work_state_store.update_existing(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                binding_id=binding_id,
+                mutator=claim_for(
+                    expected_work_cycle_id,
+                    expected_progress_revision,
+                ),
+            )
+            if claimed is None or claimed.result == "stop":
+                return None
+            if claimed.result == "claimed":
+                return plan
+        return None
 
     async def prepare_access_control_delete(
         self,
@@ -869,14 +897,21 @@ class ExternalChannelWorkRepository:
         session_id: str,
         binding_id: str,
         desired_progress: ExternalChannelDesiredProgress,
+        tracker_visibility: Literal["hidden", "visible"],
+        slack_presence_thread_ts: str | None,
+        slack_presence_initiator_user_id: str | None,
     ) -> ChannelWorkState:
-        """Create or reuse the one active Work cycle for an invoked binding."""
+        """Create, promote, or reuse the one active Work cycle for a binding."""
 
         def new_state() -> ChannelWorkState:
             return ChannelWorkState(
+                schema_version=3,
                 binding_id=binding_id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
+                tracker_visibility=tracker_visibility,
+                slack_presence_thread_ts=slack_presence_thread_ts,
+                slack_presence_initiator_user_id=(slack_presence_initiator_user_id),
                 title=desired_progress.title,
                 tasks=list(desired_progress.tasks),
                 state_revision=1,
@@ -890,6 +925,28 @@ class ExternalChannelWorkRepository:
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[ChannelWorkState]:
             if current.status is ExternalChannelWorkStatus.ACTIVE:
+                promote = (
+                    current.tracker_visibility == "hidden"
+                    and tracker_visibility == "visible"
+                )
+                fill_slack_presence = (
+                    current.slack_presence_thread_ts is None
+                    and slack_presence_thread_ts is not None
+                )
+                if promote or fill_slack_presence:
+                    updated = current.model_copy(deep=True)
+                    if promote:
+                        updated.tracker_visibility = "visible"
+                    if fill_slack_presence:
+                        updated.slack_presence_thread_ts = slack_presence_thread_ts
+                        updated.slack_presence_initiator_user_id = (
+                            slack_presence_initiator_user_id
+                        )
+                    updated.state_revision += 1
+                    return ChannelWorkStateMutation(
+                        state=updated,
+                        result=updated,
+                    )
                 return ChannelWorkStateMutation(
                     state=current,
                     result=current,
@@ -1164,13 +1221,22 @@ class ExternalChannelWorkRepository:
             raise ValueError("External Channel resource is unavailable.")
         workspace = await session.get(RDBWorkspace, agent.workspace_id)
 
-        def default_work() -> ChannelWorkState:
+        def new_work(
+            tracker_visibility: Literal["hidden", "visible"],
+        ) -> ChannelWorkState:
             if mode is ExternalChannelActionMode.IGNORE:
                 raise ValueError("Ignore requires active Channel Work.")
             return ChannelWorkState(
+                schema_version=3,
                 binding_id=binding.id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
+                tracker_visibility=tracker_visibility,
+                slack_presence_thread_ts=_slack_resource_thread_ts(
+                    connection.provider,
+                    resource,
+                ),
+                slack_presence_initiator_user_id=None,
                 title=None,
                 tasks=[],
                 state_revision=1,
@@ -1180,6 +1246,9 @@ class ExternalChannelWorkRepository:
                 projection_parts=[],
             )
 
+        def default_work() -> ChannelWorkState:
+            return new_work("visible")
+
         def transition(
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[ChannelActionTransition]:
@@ -1187,7 +1256,7 @@ class ExternalChannelWorkRepository:
                 if current.status is not ExternalChannelWorkStatus.ACTIVE:
                     raise ValueError("Ignore requires active Channel Work.")
             work = (
-                default_work()
+                new_work(current.tracker_visibility)
                 if current.status is ExternalChannelWorkStatus.FINISHED
                 else current.model_copy(deep=True)
             )
@@ -1300,6 +1369,8 @@ class ExternalChannelWorkRepository:
                         title=next_title,
                         tasks=next_tasks,
                     )
+                    if work.tracker_visibility == "hidden":
+                        work.tracker_visibility = "visible"
                     work.title = next_title
                     work.tasks = next_tasks
                     work.state_revision += 1
@@ -1353,7 +1424,7 @@ class ExternalChannelWorkRepository:
                                 if part.provider_message_key is not None
                                 else ExternalChannelDeliveryOperation.PROGRESS_CREATE
                             )
-                        if operation is None:
+                        if operation is None or work.tracker_visibility == "hidden":
                             continue
                         payload = _provider_payload(
                             connection.provider,
@@ -1381,7 +1452,9 @@ class ExternalChannelWorkRepository:
                         )
                     for part_ordinal, part in sorted(projection_parts.items()):
                         if (
-                            part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                            work.tracker_visibility == "visible"
+                            and part.status
+                            is ExternalChannelWorkProjectionStatus.PRESENT
                             and part.provider_message_key is not None
                         ):
                             append_effect(
@@ -1741,6 +1814,21 @@ def _provider_payload(
     return payload
 
 
+def _slack_resource_thread_ts(
+    provider: ExternalChannelProvider,
+    resource: RDBExternalChannelResource,
+) -> str | None:
+    """Return the retained Slack Thread root for a replacement Work cycle."""
+    if (
+        provider is not ExternalChannelProvider.SLACK
+        or resource.resource_type is not ExternalChannelResourceType.THREAD
+        or resource.labels is None
+    ):
+        return None
+    value = resource.labels.get("thread_ts")
+    return value if isinstance(value, str) and value else None
+
+
 def _reply_parts(
     *,
     provider: ExternalChannelProvider,
@@ -1914,6 +2002,8 @@ def projection_state(
         for part in projection_parts
     ):
         return "unknown"
+    if work.tracker_visibility == "hidden" and not projection_parts:
+        return "none"
     if work.desired_progress is None:
         if any(
             part.status is ExternalChannelWorkProjectionStatus.FAILED

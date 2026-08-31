@@ -183,6 +183,10 @@ class RDBExternalChannelConnection(RDBModel):
         "ix_external_channel_connections_socket_lease_until",
         "socket_lease_until",
     )
+    IX_SLACK_PRESENCE_LEASE_UNTIL = sa.Index(
+        "ix_external_channel_connections_slack_presence_lease_until",
+        "slack_presence_lease_until",
+    )
     UQ_INSTALLATION_IDENTITY = sa.Index(
         "uq_external_channel_connections_installation_identity",
         "provider",
@@ -314,6 +318,21 @@ class RDBExternalChannelConnection(RDBModel):
         nullable=True,
         default=None,
     )
+    slack_presence_lease_owner: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    slack_presence_lease_until: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    slack_presence_heartbeat_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
     ingress_profile: Mapped[ExternalChannelIngressProfile] = mapped_column(
         external_channel_ingress_profile_enum,
         nullable=False,
@@ -344,6 +363,7 @@ class RDBExternalChannelConnection(RDBModel):
         IX_WORKSPACE_ID,
         IX_STATUS,
         IX_SOCKET_LEASE_UNTIL,
+        IX_SLACK_PRESENCE_LEASE_UNTIL,
         UQ_INSTALLATION_IDENTITY,
         UQ_HTTP_CALLBACK_SELECTOR_HASH,
         UQ_ID_APP_MODE,

@@ -1,6 +1,7 @@
 """Compact signed Discord conversation-settings component scopes."""
 
 import base64
+import binascii
 import datetime
 import hashlib
 import hmac
@@ -71,11 +72,15 @@ def build_discord_settings_custom_id(
     binding_updated_at: datetime.datetime | None = None,
 ) -> str:
     """Build one signed component ID from opaque durable IDs and generations."""
-    _require_identifier(origin_interaction_id)
+    thread_action = action in {"thread_mention_only", "thread_all_messages"}
     fields: list[str] = [
         _DISCORD_SETTINGS_PREFIX,
         _action_code(action),
-        origin_interaction_id,
+        (
+            _compact_identifier(origin_interaction_id)
+            if thread_action
+            else _identifier(origin_interaction_id)
+        ),
     ]
     if action in {"setup_channel", "setup_threads"}:
         setup_claim_id = _identifier(setup_claim_id)
@@ -91,8 +96,8 @@ def build_discord_settings_custom_id(
         setting_id = _identifier(setting_id)
         _require_positive_int(settings_generation)
         fields.extend((setting_id, str(settings_generation)))
-    elif action in {"thread_mention_only", "thread_all_messages"}:
-        binding_id = _identifier(binding_id)
+    elif thread_action:
+        binding_id = _compact_identifier(binding_id)
         if binding_updated_at is None or binding_updated_at.tzinfo is None:
             raise ValueError("Discord binding settings scope is invalid.")
         fields.extend((binding_id, _binding_version(binding_updated_at)))
@@ -122,8 +127,12 @@ def parse_discord_settings_custom_id(
         signature, _signature(secret=secret, fields=unsigned_fields)
     ):
         raise ValueError("Discord settings scope is invalid.")
-    origin_interaction_id = unsigned_fields[2]
-    _require_identifier(origin_interaction_id)
+    thread_action = action in {"thread_mention_only", "thread_all_messages"}
+    origin_interaction_id = (
+        _expanded_identifier(unsigned_fields[2])
+        if thread_action
+        else _identifier(unsigned_fields[2])
+    )
     extra = unsigned_fields[3:]
     if action in {"open", "open_binding"}:
         if extra:
@@ -172,7 +181,7 @@ def parse_discord_settings_custom_id(
             binding_id=None,
             binding_version=None,
         )
-    if action in {"thread_mention_only", "thread_all_messages"}:
+    if thread_action:
         if len(extra) != 2:
             raise ValueError("Discord settings scope is invalid.")
         binding_version = extra[1]
@@ -188,7 +197,7 @@ def parse_discord_settings_custom_id(
             source_revision=None,
             setting_id=None,
             settings_generation=None,
-            binding_id=_identifier(extra[0]),
+            binding_id=_expanded_identifier(extra[0]),
             binding_version=binding_version,
         )
     raise AssertionError("Discord settings action is not exhaustive.")
@@ -272,8 +281,28 @@ def _binding_version(updated_at: datetime.datetime) -> str:
     return hashlib.sha256(updated_at.isoformat().encode()).hexdigest()[:16]
 
 
-def _require_identifier(value: str | None) -> None:
-    _identifier(value)
+def _compact_identifier(value: str | None) -> str:
+    identifier = _identifier(value)
+    if len(identifier) != 32 or any(
+        character not in "0123456789abcdef" for character in identifier
+    ):
+        raise ValueError("Discord settings scope is invalid.")
+    return base64.urlsafe_b64encode(bytes.fromhex(identifier)).decode().rstrip("=")
+
+
+def _expanded_identifier(value: str) -> str:
+    if len(value) != 22:
+        raise ValueError("Discord settings scope is invalid.")
+    try:
+        decoded = base64.b64decode(f"{value}==", altchars=b"-_", validate=True)
+    except binascii.Error as error:
+        raise ValueError("Discord settings scope is invalid.") from error
+    if len(decoded) != 16:
+        raise ValueError("Discord settings scope is invalid.")
+    identifier = decoded.hex()
+    if _compact_identifier(identifier) != value:
+        raise ValueError("Discord settings scope is invalid.")
+    return identifier
 
 
 def _identifier(value: str | None) -> str:

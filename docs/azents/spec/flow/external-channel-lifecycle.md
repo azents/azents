@@ -14,8 +14,12 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/external_channel/discord_activation.py
+  - python/apps/azents/src/azents/services/external_channel/discord_api.py
+  - python/apps/azents/src/azents/services/external_channel/discord_endpoint.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
@@ -31,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-16
-spec_version: 37
+last_verified_at: 2026-08-29
+spec_version: 40
 ---
 
 # External Channel Lifecycle
@@ -43,6 +47,8 @@ Disconnecting a connected binding terminally sets `disconnected_at`, ends active
 Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
 when needed. Slack renders the presence control with Block Kit and Discord
 uses an Embed; both include the current Agent name and one `View session` button.
+The next Discord Gateway typing reconciliation removes the binding's delivery channel
+unless another active Work cycle for the same Bot/channel still contributes it.
 Provider conversation positions and already projected AgentSession history remain.
 The timestamp is the only binding connectedness authority; no lifecycle path clears
 it or reactivates history. Repeating a manual binding disconnect does not create a
@@ -66,7 +72,8 @@ same mutation returns the not-found-shaped management result.
 `channel_action ignore` is not a binding lifecycle transition. It silently finishes
 only the current active Channel Work cycle, leaves the binding connected, and creates
 no leave-presence or Activity Tracker cleanup plan. Recorded task status does not block
-the transition, and the finished cycle no longer participates in idle continuation.
+the transition, and the finished cycle no longer participates in idle continuation or
+Slack Work presence or Discord typing renewal.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -99,9 +106,10 @@ state.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
-identity, capability, health, lease, and gap projections and immediately validates
-the replacement configuration. No lifecycle status prevents editing a visible
-connection, and no transport fallback occurs.
+identity, capability, health, Socket lease, Work presence lease, and gap projections,
+increments the configuration generation, and immediately validates the replacement
+configuration. No lifecycle status prevents editing a visible connection, and no
+transport fallback occurs.
 
 Editing a visible Discord connection replaces the submitted Application identity,
 target Guild configuration, and complete Bot credential set in one fenced operation.
@@ -113,12 +121,13 @@ reconciliation, then closes it before the activation attempt returns.
 Callback activation first persists the new selector hash and Discord Application public
 key under the unchanged credential and configuration-generation fences, commits that
 provisional PING-only authority, then asks Discord to register the endpoint. A failed
-registration of the endpoint or required Guild-scoped `Ask an Azents Agent` Message
-Command clears that provisional authority and moves the connection to
-`reconnect_required`; normal interactions are rejected until the final activation
-commit. The External Channel Gateway's Discord manager can claim only the newly
-activated configuration; a stale manager cannot continue mutation after replacement
-or disconnect. Endpoint registration uses the narrow Bot-authenticated
+registration, a successful response that does not report the exact requested
+endpoint, or a required Guild-scoped `Ask an Azents Agent` Message Command failure
+clears that provisional authority and moves the connection to `reconnect_required`;
+normal interactions are rejected until the final activation commit. The External
+Channel Gateway's Discord manager can claim only the newly activated configuration;
+a stale manager cannot continue mutation after replacement or disconnect. Endpoint
+registration uses the narrow Bot-authenticated
 current-Application direct-transport gap because the adopted public `discord.py`
 implementation cannot transmit the endpoint field. The gap is removed when that SDK
 capability becomes usable. Registration does not require the user to copy the opaque
@@ -186,9 +195,16 @@ disconnect still clears credentials and sets binding terminal timestamps.
 Discord Gateway credential and non-reconnectable intent or close-code failures
 atomically record the fenced gap, release the current Gateway lease, and move only
 connection health to `reconnect_required`; they preserve route relationships,
-bindings, and work. During SDK-owned recovery, `disconnect` records a fenced degraded
-gap and `ready` or `resumed` marks the same lease active and clears the gap. Azents does
-not run a second Gateway reconnect or Resume loop.
+bindings, and work. During login, the public SDK Application metadata must report an
+Interaction Endpoint with the configured callback origin and path and a selector whose
+hash matches the active connection. An absent or mismatched endpoint records
+`interaction_endpoint_drift` through the same terminal lease fence without retaining
+the raw selector. During SDK-owned recovery, `disconnect` records a fenced degraded
+gap and `ready` or `resumed` marks the same lease active and clears the gap. Azents
+not run a second Gateway reconnect or Resume loop. The current Gateway owner also
+reconciles process-local typing tasks from active Work under the same lease and
+generation fences. A restart or Resume restores still-active targets; Work finished
+during the gap is absent. Typing provider failure does not change connection health.
 
 Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
 replacement records a degraded gap, successful establishment marks active, and
@@ -222,7 +238,9 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
    leave-presence plan.
 
 Provider presence and cleanup effects run once after commit. Failure, ambiguity, or
-interruption does not roll back Session archive and creates no recovery work.
+interruption does not roll back Session archive and creates no recovery work. Finished
+archived Work disappears from the next Discord typing target projection; no explicit
+provider stop mutation exists.
 External Channel file transfer adds no stored byte object or file-specific cleanup
 participant.
 
@@ -292,6 +310,15 @@ before finalization.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 40) — Added Slack Work presence lease reset to
+  configuration replacement and terminal connection cleanup, and excluded finished
+  Work from both Slack presence and Discord typing renewal.
+- **2026-08-28** (spec_version 39) — Added lifecycle removal and restart recovery
+  rules for lease-fenced Discord typing targets without introducing durable typing
+  state or provider stop operations.
+- **2026-08-25** (spec_version 38) — Required Discord activation to confirm the
+  provider-reported Interaction Endpoint postcondition and made Gateway login
+  terminalize absent or mismatched endpoint authority as reconnect-required.
 - **2026-08-16** (spec_version 37) — Added Scheduled Task Binding termination,
   Session archive/restore, started-cycle preservation, and purge absence rules.
 

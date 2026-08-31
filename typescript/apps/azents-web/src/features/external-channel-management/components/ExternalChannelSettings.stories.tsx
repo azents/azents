@@ -65,6 +65,9 @@ const connection: ManagedConnection = {
     post_messages: true,
     update_messages: true,
     delete_messages: true,
+    download_files: true,
+    upload_files: true,
+    customize_messages: true,
   },
   provider_config: null,
   last_verified_at: "2026-07-22T04:30:00Z",
@@ -342,6 +345,57 @@ export const Degraded = {
             "Socket reconnect exceeded the observation window.",
         },
       ],
+      associatedMultiApps: [associatedMultiApp],
+      grants: [grant],
+      blocks: [],
+    },
+  },
+} satisfies Story;
+
+export const MissingPermissions = {
+  args: {
+    state: {
+      type: "LOADED",
+      defaultResponseMode: "all_messages",
+      connections: [
+        {
+          ...connection,
+          capabilities: {
+            ...connection.capabilities,
+            upload_files: false,
+            customize_messages: false,
+          },
+        },
+      ],
+      associatedMultiApps: [associatedMultiApp],
+      grants: [grant],
+      blocks: [],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Granted 6")).toBeVisible();
+    await expect(canvas.getByText("Missing 2")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^view details$/i }),
+    );
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole(
+      "dialog",
+    );
+    await expect(within(dialog).getByText("Action required")).toBeVisible();
+    await expect(within(dialog).getByText("Upload files")).toBeVisible();
+    await expect(
+      within(dialog).getByText("Required Slack scope: files:write"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const PermissionsNotChecked = {
+  args: {
+    state: {
+      type: "LOADED",
+      defaultResponseMode: "all_messages",
+      connections: [{ ...connection, capabilities: null }],
       associatedMultiApps: [associatedMultiApp],
       grants: [grant],
       blocks: [],

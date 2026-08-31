@@ -7,7 +7,7 @@ Agent Runtime lifecycle command response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
-**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
+**lifecycle** | [**AgentRuntimeLifecyclePresentationResponse**](AgentRuntimeLifecyclePresentationResponse.md) |  | 
 **configuration** | [**AgentRuntimeConfigurationStatusResponse**](AgentRuntimeConfigurationStatusResponse.md) |  | 
 **command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 
 **desired_generation** | **int** |  | 

@@ -1,4 +1,4 @@
-FROM python:3.14-bookworm@sha256:8771427e2ac3e39208c1632f17e8b09e464333d262844a03705cc5e0023c16e2 AS base
+FROM python:3.14-bookworm@sha256:ecac9e212daacda8a702eae372fceebc0ee36f5805abe087880367e8d061fa5b AS base
 
 ARG ROOT_DIR=/app
 
@@ -6,7 +6,7 @@ ENV VIRTUAL_ENV="${ROOT_DIR}/.venv"
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 FROM base AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.11.33@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.6@sha256:88bc6eb1ccd4b82efd0e1b530caffabddf50dc2bf612e66c14ea25b8ee8a4d3d /uv /uvx /bin/
 
 WORKDIR $ROOT_DIR
 

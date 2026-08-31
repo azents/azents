@@ -92,6 +92,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
     RuntimeConfigurationState,
 )
@@ -340,6 +341,9 @@ def _runtime_configuration_state(
         _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT
     ),
     reason_code: str | None = None,
+    sequence: int = 1,
+    target_generation: int = 7,
+    applied: RuntimeConfigurationAppliedSlot | None = None,
 ) -> RuntimeConfigurationState:
     """Create one bounded desired Runtime configuration state."""
     now = datetime(2026, 8, 11, tzinfo=UTC)
@@ -351,9 +355,9 @@ def _runtime_configuration_state(
     return RuntimeConfigurationState(
         runtime_id="runtime-1",
         desired=RuntimeConfigurationSlot(
-            sequence=1,
+            sequence=sequence,
             status=status,
-            target_generation=7,
+            target_generation=target_generation,
             digest=digest,
             document=desired_document,
             reason_code=reason_code,
@@ -362,7 +366,7 @@ def _runtime_configuration_state(
             provider_acknowledged_at=None,
             runner_observed_at=None,
         ),
-        applied=None,
+        applied=applied,
         created_at=now,
         updated_at=now,
     )
@@ -378,6 +382,7 @@ class _FakeRunnerOperations:
         self.file_operation_calls: list[tuple[str, str | None]] = []
         self.read_calls: list[str] = []
         self.read_ranges: list[tuple[str, int, int | None]] = []
+        self.text_read_ranges: list[tuple[str, int, int]] = []
         self.stat_calls: list[str] = []
         self.stat_started_count = 0
         self.stat_started_event: asyncio.Event | None = None
@@ -565,22 +570,27 @@ class _FakeRunnerOperations:
         runner_generation: int,
         owner_session_id: str | None = None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded decoded file range for the text tool."""
+        """Read one bounded decoded character range for the text tool."""
         del runtime_id, runner_generation, deadline_at
         self.file_operation_calls.append(("read_text", owner_session_id))
         self.read_calls.append(path)
-        self.read_ranges.append((path, offset, max_bytes))
+        self.text_read_ranges.append((path, character_offset, max_characters))
         if self.read_unavailable_message is not None:
             raise RuntimeRunnerOperationUnavailable(self.read_unavailable_message)
         if self.read_text_failure is not None:
             raise self.read_text_failure
+        text = self.files[path].decode(encoding)
+        chunk = text[character_offset : character_offset + max_characters]
         return RuntimeFileTextReadResult(
-            text=self.files[path][offset : offset + max_bytes].decode(encoding),
+            text=chunk,
+            start_character=character_offset,
+            end_character=character_offset + len(chunk),
+            truncated=character_offset + len(chunk) < len(text),
             final_cursor="0-1",
         )
 
@@ -855,21 +865,28 @@ def _make_toolkit(
             object(),
             requested_agent_id,
         )
-        if runtime.provider_observed_state is RuntimeProviderObservedState.FAILED:
+        runner_ready = (
+            runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.runner_state is RuntimeRunnerState.READY
+            and runtime.runner_generation > 0
+            and runtime.workspace_path is not None
+        )
+        if (
+            runtime.provider_observed_state is RuntimeProviderObservedState.FAILED
+            and not runner_ready
+        ):
             raise RuntimeStorageError("Runtime failed")
         if (
             runtime.provider_connection_state
             is RuntimeProviderConnectionState.DISCONNECTED
+            and not runner_ready
         ):
             raise RuntimeStorageError("Runtime Provider is disconnected")
         if runtime.desired_state is not RuntimeDesiredState.RUNNING:
             if options.get("start_if_stopped", True) is False:
                 raise RuntimeStorageError("Runtime is not running")
             await agent_runtime_service.ensure_started_for_agent(requested_agent_id)
-        if (
-            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
-            or runtime.runner_state is not RuntimeRunnerState.READY
-        ):
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             wait_timeout_seconds = options.get("wait_timeout_seconds", 120.0)
             if wait_timeout_seconds == 0.0:
                 raise RuntimeStorageError("Runtime is still starting")
@@ -877,10 +894,7 @@ def _make_toolkit(
                 object(),
                 requested_agent_id,
             )
-        if (
-            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
-            or runtime.runner_state is not RuntimeRunnerState.READY
-        ):
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             raise RuntimeStorageError("Runtime runner is not ready")
         return RuntimeOperationTarget(
             id=runtime.id,
@@ -1618,6 +1632,50 @@ class TestRuntimeToolkitUpdateContext:
         runtime_service.ensure_started_for_agent.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_prompt_uses_applied_profile_for_ready_runner(self) -> None:
+        """A blocked future selection does not fence the ready applied Runtime."""
+        toolkit = _make_toolkit(
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+        )
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        profile_repository = runtime_service.runtime_profile_repository
+        profile_repository.get_configuration_state.return_value = (
+            _runtime_configuration_state(
+                status=RuntimeConfigurationStateStatus.BLOCKED,
+                digest=None,
+                document=None,
+                reason_code="provider_disabled",
+                sequence=2,
+                applied=RuntimeConfigurationAppliedSlot(
+                    sequence=1,
+                    target_generation=7,
+                    digest="a" * 64,
+                    document=_runtime_configuration_document(),
+                    applied_at=datetime(2026, 8, 11, tzinfo=UTC),
+                ),
+            )
+        )
+        await toolkit.update_context(_make_context())
+
+        prompt = await toolkit.get_static_prompt(_make_context())
+        tool = _find_tool(
+            (await toolkit.update_context(_make_context())).tools,
+            "exec_command",
+        )
+        result = await tool.handler(json.dumps({"command": "pwd"}))
+
+        assert "Runtime-dependent operations are currently unavailable." not in prompt
+        assert isinstance(result, FunctionToolResult)
+        assert cast(Any, toolkit)._expected_runtime_authority == (
+            RuntimeOperationAuthority(
+                configuration_sequence=1,
+                configuration_digest="a" * 64,
+                desired_generation=7,
+            )
+        )
+
+    @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
         """Prompt includes the current Runner-reported workspace path."""
         toolkit = _make_toolkit(agent_id="agent-1")
@@ -1935,7 +1993,6 @@ class TestRuntimeToolkitUpdateContext:
 
         second_task = asyncio.create_task(run_second())
         await second_started.wait()
-        await asyncio.sleep(0)
         assert runner_operations.stat_started_count == 1
 
         runner_operations.stat_continue_event.set()
@@ -2066,6 +2123,32 @@ async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> N
 
 
 @pytest.mark.asyncio
+async def test_runtime_text_storage_maps_runner_disconnect_to_storage_error() -> None:
+    """A disconnected Runner remains a controlled text-read failure."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    runner_operations.read_unavailable_message = "runner disconnected"
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        agent_runtime_service=AsyncMock(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    with pytest.raises(RuntimeStorageError, match="runner disconnected"):
+        await storage.get_text(
+            "/workspace/agent/report.txt",
+            agent_id="agent-1",
+            offset=0,
+            limit=3,
+            encoding="utf-8",
+        )
+
+
+@pytest.mark.asyncio
 async def test_runtime_text_storage_maps_runner_decode_error() -> None:
     """A Runner text decode failure remains a strict Unicode decode failure."""
     runner_operations = _FakeRunnerOperations({"/workspace/agent/report.txt": b"\xff"})
@@ -2087,8 +2170,37 @@ async def test_runtime_text_storage_maps_runner_decode_error() -> None:
             "/workspace/agent/report.txt",
             agent_id="agent-1",
             offset=0,
-            max_bytes=1,
+            limit=1,
             encoding="utf-8",
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
+    """A Runner encoding rejection remains an explicit lookup failure."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    runner_operations.read_text_failure = RuntimeRunnerOperationFailedError(
+        "Unsupported text encoding: missing-codec",
+        code="FILE_READ_TEXT_UNSUPPORTED_ENCODING",
+    )
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        agent_runtime_service=AsyncMock(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    with pytest.raises(LookupError, match="missing-codec"):
+        await storage.get_text(
+            "/workspace/agent/report.txt",
+            agent_id="agent-1",
+            offset=0,
+            limit=3,
+            encoding="missing-codec",
         )
 
 
@@ -2589,17 +2701,18 @@ class TestProcessToolHandler:
         assert "empty polls default to 5000 ms" in write_yield["description"]
 
     @pytest.mark.asyncio
-    async def test_exec_command_waits_when_provider_not_running(
+    async def test_exec_command_waits_when_runner_not_ready(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """exec_command waits until Provider is ready unless running."""
+        """exec_command waits until the Runner can serve operations."""
         monkeypatch.setattr(
             builtin_module,
             "_RUNTIME_READY_WAIT_TIMEOUT_SECONDS",
             0.0,
         )
         toolkit = _make_toolkit(
-            provider_observed_state=RuntimeProviderObservedState.STOPPED
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            runner_state=RuntimeRunnerState.STARTING,
         )
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
@@ -2696,10 +2809,11 @@ class TestProcessToolHandler:
 
     @pytest.mark.asyncio
     async def test_exec_command_fails_fast_when_provider_disconnected(self) -> None:
-        """Runtime with disconnected Provider fails explicitly."""
+        """Disconnected Provider fails when no ready Runner can serve operations."""
         toolkit = _make_toolkit(
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.UNKNOWN,
         )
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")

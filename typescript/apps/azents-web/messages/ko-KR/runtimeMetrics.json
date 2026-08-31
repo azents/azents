@@ -1,6 +1,6 @@
 {
   "title": "시스템 메트릭",
-  "description": "Runner에서 관측한 최근 1시간의 사용량입니다.",
+  "description": "Runtime에서 보고한 최근 1시간의 리소스 사용량입니다.",
   "loading": "Runtime 메트릭을 불러오는 중…",
   "errorTitle": "Runtime 메트릭을 불러오지 못했습니다",
   "scope": "범위: {scope}",
@@ -16,7 +16,7 @@
     "unavailable": "사용 불가",
     "unsupported": "지원하지 않음",
     "stopped": "Runtime 중지됨",
-    "disconnected": "Runner 연결 끊김"
+    "disconnected": "Runtime 연결 끊김"
   },
   "metrics": {
     "cpu": "CPU",

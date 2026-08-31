@@ -23,6 +23,54 @@ export interface SelectableModelCandidate {
   normalized_capabilities: ModelCapabilities;
 }
 
+export interface ModelContextRange {
+  defaultInputTokens: number | null;
+  maxInputTokens: number | null;
+}
+
+export type ModelContextBadgeValue =
+  | { type: "SINGLE"; tokens: number }
+  | { type: "RANGE"; defaultTokens: number; maxTokens: number }
+  | null;
+
+export function resolveModelContextRange(
+  contextWindow?: ModelCapabilities["context_window"] | null,
+): ModelContextRange {
+  const maxInputTokens = contextWindow?.max_input_tokens ?? null;
+  const advertisedDefaultInputTokens =
+    contextWindow?.default_input_tokens ?? maxInputTokens;
+  return {
+    defaultInputTokens:
+      advertisedDefaultInputTokens == null || maxInputTokens == null
+        ? advertisedDefaultInputTokens
+        : Math.min(advertisedDefaultInputTokens, maxInputTokens),
+    maxInputTokens,
+  };
+}
+
+export function modelContextBadgeValue(
+  contextWindow?: ModelCapabilities["context_window"] | null,
+): ModelContextBadgeValue {
+  const context = resolveModelContextRange(contextWindow);
+  if (context.defaultInputTokens == null) {
+    return null;
+  }
+  if (
+    context.maxInputTokens != null &&
+    context.defaultInputTokens !== context.maxInputTokens
+  ) {
+    return {
+      type: "RANGE",
+      defaultTokens: Math.round(context.defaultInputTokens / 1000),
+      maxTokens: Math.round(context.maxInputTokens / 1000),
+    };
+  }
+  return {
+    type: "SINGLE",
+    tokens: Math.round(context.defaultInputTokens / 1000),
+  };
+}
+
 export interface SelectableModelOptionFormValue {
   id: string;
   label: string;

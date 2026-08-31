@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import hmac
 import json
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urlencode
 
 import aiohttp
@@ -261,12 +261,19 @@ def test_slack_file_url_allows_https_and_exact_test_origin(
     assert not slack_file_url_allowed("file:///tmp/F1")
 
 
-def _signature(body: bytes, timestamp: int | None = None) -> tuple[str, str]:
+class _Signature(NamedTuple):
+    """Slack request timestamp and computed signature."""
+
+    timestamp: str
+    signature: str
+
+
+def _signature(body: bytes, timestamp: int | None = None) -> _Signature:
     request_timestamp = timestamp if timestamp is not None else int(_NOW.timestamp())
     timestamp_header = str(request_timestamp)
     base = b"v0:" + timestamp_header.encode() + b":" + body
     signature = "v0=" + hmac.new(_SECRET.encode(), base, hashlib.sha256).hexdigest()
-    return timestamp_header, signature
+    return _Signature(timestamp_header, signature)
 
 
 def _event_body() -> bytes:
@@ -850,8 +857,8 @@ async def test_auth_test_derives_optional_internal_capabilities_independently(
 ) -> None:
     """Optional scopes never gate unrelated text connection behavior."""
     required_scopes = (
-        "app_mentions:read,channels:history,channels:read,groups:history,"
-        "groups:read,chat:write,commands,users:read"
+        "assistant:write,app_mentions:read,channels:history,channels:read,"
+        "groups:history,groups:read,chat:write,commands,users:read"
     )
 
     def handler(request: httpx.Request) -> httpx.Response:

@@ -9,9 +9,8 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import timedelta
 
-import httpx
+import httpx2 as httpx
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
@@ -84,32 +83,23 @@ async def _mcp_session(
     :param timeout: Timeout in seconds
     :param use_streamable_http: True for Streamable HTTP, False for SSE
     :param proxy_url: Egress proxy URL; direct connection when None
-    :param auth: httpx Auth handler for per-request signing such as SigV4
+    :param auth: httpx2 Auth handler for per-request signing such as SigV4
     """
-    timeout_td = timedelta(seconds=timeout)
-
     if use_streamable_http:
-        client = httpx.AsyncClient(
+        async with httpx.AsyncClient(
             headers=headers,
             timeout=httpx.Timeout(timeout, read=300.0),
             proxy=proxy_url,
             auth=auth,
-        )
-        try:
-            async with streamable_http_client(server_url, http_client=client) as (
-                r,
-                w,
-                _,
-            ):
-                async with ClientSession(
-                    r, w, read_timeout_seconds=timeout_td
-                ) as session:
+        ) as client:
+            async with streamable_http_client(
+                server_url,
+                http_client=client,
+            ) as (r, w):
+                async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
                     await session.initialize()
                     yield session
-        finally:
-            await client.aclose()
-    elif proxy_url or auth:
-        outer_auth = auth
+    elif proxy_url is not None:
 
         def _make_httpx_client(
             headers: dict[str, str] | None = None,
@@ -119,7 +109,7 @@ async def _mcp_session(
             return httpx.AsyncClient(
                 headers=headers,
                 timeout=timeout,
-                auth=auth or outer_auth,
+                auth=auth,
                 follow_redirects=True,
                 proxy=proxy_url,
             )
@@ -129,13 +119,19 @@ async def _mcp_session(
             headers=headers,
             timeout=timeout,
             httpx_client_factory=_make_httpx_client,
+            auth=auth,
         ) as (r, w):
-            async with ClientSession(r, w, read_timeout_seconds=timeout_td) as session:
+            async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
                 await session.initialize()
                 yield session
     else:
-        async with sse_client(server_url, headers=headers, timeout=timeout) as (r, w):
-            async with ClientSession(r, w, read_timeout_seconds=timeout_td) as session:
+        async with sse_client(
+            server_url,
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+        ) as (r, w):
+            async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
                 await session.initialize()
                 yield session
 

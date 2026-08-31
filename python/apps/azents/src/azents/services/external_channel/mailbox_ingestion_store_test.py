@@ -5,7 +5,6 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
@@ -242,6 +241,18 @@ def test_response_mode_accepts_ordinary_message_for_all_messages() -> None:
     )
 
 
+def _session(
+    *,
+    commit: AsyncMock | None = None,
+    rollback: AsyncMock | None = None,
+) -> AsyncSession:
+    """Build one runtime-specced AsyncSession fake."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = commit or AsyncMock()
+    session.rollback = rollback or AsyncMock()
+    return session
+
+
 def _store(
     *,
     repository: ExternalChannelRepository,
@@ -307,10 +318,11 @@ async def test_configured_binding_rejects_a_stopping_session() -> None:
         match="configured Session is unavailable",
     ):
         await store.create_configured_binding(
-            cast(AsyncSession, object()),
+            _session(),
             resource_id="resource-1",
             route_id="route-1",
             response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            tracker_visibility="visible",
         )
 
     ensure_active_work = store.work_repository.ensure_active_work
@@ -385,11 +397,10 @@ async def _accepted_control_plan_case(
     admission_succeeds: bool = True,
     access_granted: bool = True,
     separate_target: bool = False,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
+    invocation: bool = True,
 ) -> SimpleNamespace:
-    session = cast(
-        AsyncSession,
-        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
-    )
+    session = _session()
 
     @asynccontextmanager
     async def session_context() -> AsyncIterator[AsyncSession]:
@@ -427,6 +438,19 @@ async def _accepted_control_plan_case(
     )
 
     request = _slack_request()
+    request = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(
+            request.locator,
+            provider=provider,
+            provider_event_type=(
+                "discord_message_create"
+                if provider is ExternalChannelProvider.DISCORD
+                else request.locator.provider_event_type
+            ),
+            invocation=invocation,
+        ),
+    )
     connection = ExternalChannelConnection.model_construct(id="connection-1")
     position = ExternalChannelConversationPosition.model_construct(
         id="position-1",
@@ -488,10 +512,8 @@ async def _accepted_control_plan_case(
     )
     work = SimpleNamespace(work_cycle_id="work-1")
     presence_plan = make_provider_effect_plan("joined-presence")
-    settings_plan = make_provider_effect_plan("binding-settings")
     progress_plan = make_provider_effect_plan("initial-progress")
     presence_intent = AsyncMock(return_value=presence_plan)
-    settings_intent = AsyncMock(return_value=settings_plan)
 
     store._lock_authority = AsyncMock(return_value=connection)
     repository.lock_conversation_position = AsyncMock(return_value=position)
@@ -511,7 +533,6 @@ async def _accepted_control_plan_case(
     )
     work_repository.ensure_active_work = AsyncMock(return_value=work)
     store._create_session_presence_intent = presence_intent
-    store._create_binding_settings_on_demand_intent = settings_intent
     store._create_initial_progress_intent = AsyncMock(return_value=progress_plan)
     repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
     store._initialize_thread_position = AsyncMock()
@@ -534,9 +555,7 @@ async def _accepted_control_plan_case(
         acceptance=acceptance,
         work_repository=work_repository,
         presence_intent=presence_intent,
-        settings_intent=settings_intent,
         presence_plan=presence_plan,
-        settings_plan=settings_plan,
         progress_plan=progress_plan,
         repository=repository,
         agent_session_repository=store.agent_session_repository,
@@ -557,22 +576,58 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
     assert call["session_id"] == "session-1"
     assert call["binding_id"] == "binding-1"
     assert call["desired_progress"].state == "checking"
+    assert call["tracker_visibility"] == "visible"
+    assert call["slack_presence_thread_ts"] == "thread-1"
+    assert call["slack_presence_initiator_user_id"] == "participant-1"
     case.presence_intent.assert_awaited_once()
-    case.settings_intent.assert_not_awaited()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 
 
 async def test_existing_binding_admission_excludes_joined_presence() -> None:
-    """An existing Binding mention returns settings and progress without joined."""
+    """An existing Binding mention returns only its normal Tracker plan."""
     case = await _accepted_control_plan_case(existing_binding=True)
 
-    assert case.acceptance.control_plans == (
-        case.settings_plan,
-        case.progress_plan,
-    )
+    assert case.acceptance.control_plans == (case.progress_plan,)
     case.presence_intent.assert_not_awaited()
-    case.settings_intent.assert_awaited_once()
+
+
+async def test_existing_discord_binding_uses_tracker_without_settings_message() -> None:
+    """Discord follow-up settings access is carried by the visible Tracker."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        provider=ExternalChannelProvider.DISCORD,
+    )
+
+    assert case.acceptance.control_plans == (case.progress_plan,)
+    case.presence_intent.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("provider", "invocation", "tracker_visibility"),
+    [
+        (ExternalChannelProvider.SLACK, False, "hidden"),
+        (ExternalChannelProvider.SLACK, True, "visible"),
+        (ExternalChannelProvider.DISCORD, False, "hidden"),
+        (ExternalChannelProvider.DISCORD, True, "visible"),
+    ],
+)
+async def test_admission_derives_tracker_visibility_from_provider_invocation(
+    provider: ExternalChannelProvider,
+    invocation: bool,
+    tracker_visibility: str,
+) -> None:
+    """Ordinary all-messages input starts hidden until explicit invocation."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        provider=provider,
+        invocation=invocation,
+    )
+
+    assert (
+        case.work_repository.ensure_active_work.await_args.kwargs["tracker_visibility"]
+        == tracker_visibility
+    )
 
 
 async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
@@ -589,7 +644,6 @@ async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
     )
     case.work_repository.ensure_active_work.assert_not_awaited()
     case.presence_intent.assert_not_awaited()
-    case.settings_intent.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_not_awaited()
 
 
@@ -636,9 +690,12 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         agent_session_id="session-1",
     )
     work = ChannelWorkState(
+        schema_version=3,
         binding_id=binding.id,
         work_cycle_id="work-cycle-1",
         status=ExternalChannelWorkStatus.ACTIVE,
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=None,
         tasks=[],
         state_revision=1,
@@ -646,8 +703,9 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         desired_progress=None,
         finished_at=None,
         projection_parts=[],
+        tracker_visibility="visible",
     )
-    session = cast(AsyncSession, MagicMock())
+    session = _session()
 
     result = await store._create_initial_progress_intent(
         session,
@@ -712,7 +770,7 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
     )
 
     result = await store._create_session_presence_intent(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         resource=resource,
         binding=binding,
     )
@@ -725,49 +783,6 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "joined",
-        "tenant_id": "tenant-1",
-        "channel_id": "channel-1",
-        "thread_ts": "thread-1",
-    }
-
-
-async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> None:
-    """The next eligible mention creates one non-rollout settings entry point."""
-    repository = MagicMock()
-    work_repository = MagicMock()
-    plan = make_provider_effect_plan("binding-settings")
-    work_repository.prepare_direct_control = AsyncMock(return_value=plan)
-    store = _store(repository=repository, work_repository=work_repository)
-    resource = ExternalChannelResource.model_construct(
-        id="resource-1",
-        connection_id="connection-1",
-        labels={
-            "provider": "slack",
-            "tenant_id": "tenant-1",
-            "channel_id": "channel-1",
-            "thread_ts": "thread-1",
-        },
-    )
-    binding = ExternalChannelBinding.model_construct(
-        id="binding-1",
-        resource_id=resource.id,
-        route_id="route-1",
-    )
-
-    result = await store._create_binding_settings_on_demand_intent(
-        cast(AsyncSession, MagicMock()),
-        resource=resource,
-        binding=binding,
-    )
-
-    assert result == plan
-    call = work_repository.prepare_direct_control.await_args
-    assert call is not None
-    call = call.kwargs
-    assert call["binding_id"] == "binding-1"
-    assert call["request_payload"] == {
-        "control_kind": "binding_settings_on_demand",
-        "control_version": 3,
         "tenant_id": "tenant-1",
         "channel_id": "channel-1",
         "thread_ts": "thread-1",
@@ -796,7 +811,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
     )
 
     conversation = await store._resolve_conversation(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=_slack_request(),
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
         source_resource=ExternalChannelResource.model_construct(id="resource-1"),
@@ -811,10 +826,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
 async def test_setup_required_commits_claim_without_conversation_side_effects() -> None:
     """Authorized setup admission creates no Binding, Session, mailbox, or wake."""
     commit = AsyncMock()
-    session = cast(
-        AsyncSession,
-        SimpleNamespace(commit=commit, rollback=AsyncMock()),
-    )
+    session = _session(commit=commit)
     repository = MagicMock()
     repository.get_active_block = AsyncMock(return_value=None)
     repository.get_active_access_grant = AsyncMock(return_value=object())
@@ -968,7 +980,7 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     route = ExternalChannelAgentRoute.model_construct(id="route-1")
 
     result = await store._ensure_setup_claim(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         position=position,
         source_resource=source_resource,
@@ -1038,7 +1050,7 @@ async def test_duplicate_slack_event_types_reuse_setup_claim_source() -> None:
     store = _store(repository=repository)
 
     result = await store._ensure_setup_claim(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         position=ExternalChannelConversationPosition.model_construct(id="position-1"),
         source_resource=ExternalChannelResource.model_construct(id="source-1"),
@@ -1079,7 +1091,7 @@ async def test_discord_thread_resolves_multi_default_from_parent_channel() -> No
     )
 
     route = await store._resolve_route(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         connection=ExternalChannelConnection.model_construct(
             id="connection-1",
@@ -1141,13 +1153,13 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
     resource = ExternalChannelResource.model_construct(id="resource-1")
 
     first = await store._create_binding(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         route=route,
         resource=resource,
         response_mode=None,
     )
     repeated = await store._create_binding(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         route=route,
         resource=resource,
         response_mode=None,

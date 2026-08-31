@@ -7,14 +7,14 @@ dependencies = [
     "requests==2.34.2",
     "websockets==16.1.1",
     "boto3==1.40.61",
-    "types-boto3[s3]==1.43.72",
+    "types-boto3[s3]==1.43.81",
     "pytest==9.1.1",
     "testcontainers[postgres]==4.15.0",
     "docker==7.2.0",
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     "python-on-whales==0.81.0",
     "selenium==4.47.0",
-    "redis==7.4.1",
+    "redis==8.1.0",
     # local dependencies
     "az-common",
     "azents-admin-client",
@@ -22,7 +22,7 @@ dependencies = [
     "azents-runtime-control",
     # type stubs
     "types-requests==2.33.0.20260712",
-    "types-docker==7.2.0.20260813",
+    "types-docker==7.2.0.20260819",
 ]
 
 [dependency-groups]

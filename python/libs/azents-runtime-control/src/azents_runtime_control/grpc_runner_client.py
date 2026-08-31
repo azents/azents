@@ -758,9 +758,15 @@ def _operation_payload(
         result = {"path": payload.path, "offset": payload.offset}
         if payload.HasField("max_bytes"):
             result["max_bytes"] = payload.max_bytes
-        if payload.encoding:
-            result["encoding"] = payload.encoding
         return result
+    if payload_kind == "file_read_text":
+        payload = operation.file_read_text
+        return {
+            "path": payload.path,
+            "character_offset": payload.character_offset,
+            "max_characters": payload.max_characters,
+            "encoding": payload.encoding,
+        }
     if payload_kind == "file_write":
         return {
             "path": operation.file_write.path,
@@ -963,6 +969,17 @@ def _copy_final_success(
     if "bytes_read" in payload:
         message.file_read.bytes_read = _int_payload(payload, "bytes_read")
         return
+    if "start_character" in payload:
+        message.file_read_text.start_character = _int_payload(
+            payload,
+            "start_character",
+        )
+        message.file_read_text.end_character = _int_payload(
+            payload,
+            "end_character",
+        )
+        message.file_read_text.truncated = _bool_payload(payload, "truncated")
+        return
     if "bytes_written" in payload:
         message.file_write.bytes_written = _int_payload(payload, "bytes_written")
         return
@@ -1131,6 +1148,12 @@ def _final_success_payload(
         return {"exit_code": message.bash.exit_code}
     if result_kind == "file_read":
         return {"bytes_read": message.file_read.bytes_read}
+    if result_kind == "file_read_text":
+        return {
+            "start_character": message.file_read_text.start_character,
+            "end_character": message.file_read_text.end_character,
+            "truncated": message.file_read_text.truncated,
+        }
     if result_kind == "file_write":
         return {"bytes_written": message.file_write.bytes_written}
     if result_kind == "file_apply_patch":

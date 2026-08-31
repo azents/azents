@@ -5,6 +5,8 @@ import {
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
   isSubagentGuidanceWithinLimit,
+  modelContextBadgeValue,
+  resolveModelContextRange,
   type SelectableModelOptionFormValue,
   selectableModelOptionInputsFromFormValues,
 } from "./model-selection.ts";
@@ -87,4 +89,75 @@ void test("subagent guidance is bounded to 500 characters", () => {
   assert.equal(isSubagentGuidanceWithinLimit("x".repeat(500)), true);
   assert.equal(isSubagentGuidanceWithinLimit("x".repeat(501)), false);
   assert.equal(isSubagentGuidanceWithinLimit(null), true);
+});
+
+void test("model context range preserves distinct default and maximum values", () => {
+  assert.deepEqual(
+    resolveModelContextRange({
+      default_input_tokens: 272_000,
+      max_input_tokens: 872_000,
+    }),
+    {
+      defaultInputTokens: 272_000,
+      maxInputTokens: 872_000,
+    },
+  );
+});
+
+void test("model context range treats a legacy maximum as the default", () => {
+  assert.deepEqual(
+    resolveModelContextRange({
+      max_input_tokens: 128_000,
+    }),
+    {
+      defaultInputTokens: 128_000,
+      maxInputTokens: 128_000,
+    },
+  );
+});
+
+void test("model context range clamps an inconsistent default to the maximum", () => {
+  assert.deepEqual(
+    resolveModelContextRange({
+      default_input_tokens: 272_000,
+      max_input_tokens: 128_000,
+    }),
+    {
+      defaultInputTokens: 128_000,
+      maxInputTokens: 128_000,
+    },
+  );
+});
+
+void test("model context badge distinguishes a range from a legacy single value", () => {
+  assert.deepEqual(
+    modelContextBadgeValue({
+      default_input_tokens: 272_000,
+      max_input_tokens: 872_000,
+    }),
+    {
+      type: "RANGE",
+      defaultTokens: 272,
+      maxTokens: 872,
+    },
+  );
+  assert.deepEqual(
+    modelContextBadgeValue({
+      max_input_tokens: 128_000,
+    }),
+    {
+      type: "SINGLE",
+      tokens: 128,
+    },
+  );
+  assert.deepEqual(
+    modelContextBadgeValue({
+      default_input_tokens: 272_000,
+      max_input_tokens: 128_000,
+    }),
+    {
+      type: "SINGLE",
+      tokens: 128,
+    },
+  );
 });

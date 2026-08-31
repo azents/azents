@@ -1,17 +1,27 @@
 """High-level discord.py Gateway integration."""
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol, TypeGuard
 
 import discord
 
+from azents.repos.external_channel.data import DiscordGatewayTypingTarget
+from azents.services.external_channel.discord_endpoint import (
+    discord_interactions_endpoint_matches,
+)
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
     project_discord_sdk_gateway_message,
 )
 
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
+_TYPING_RECONCILE_INTERVAL_SECONDS = 5.0
+_TYPING_RENEW_INTERVAL_SECONDS = 8.0
+_TYPING_RETRY_INTERVAL_SECONDS = 2.0
+
+logger = logging.getLogger(__name__)
 
 type DiscordMessageChannel = (
     discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
@@ -48,6 +58,10 @@ type DiscordGatewayLifecycleHandler = Callable[
     Awaitable[None],
 ]
 type DiscordGatewayCallback = Callable[[], Awaitable[None]]
+type DiscordGatewayTypingTargetLoader = Callable[
+    [],
+    Awaitable[tuple[DiscordGatewayTypingTarget, ...] | None],
+]
 
 
 class DiscordGatewayRunner(Protocol):
@@ -58,9 +72,12 @@ class DiscordGatewayRunner(Protocol):
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
     ) -> None:
         """Run until the SDK client closes or a terminal failure occurs."""
         ...
@@ -73,6 +90,8 @@ class _DiscordLibraryClient(discord.Client):
         self,
         *,
         target_guild_id: int,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
@@ -87,11 +106,26 @@ class _DiscordLibraryClient(discord.Client):
             chunk_guilds_at_startup=False,
         )
         self.target_guild_id = target_guild_id
+        self.interactions_callback_base_url = interactions_callback_base_url
+        self.interactions_callback_selector_hash = interactions_callback_selector_hash
         self.connected_bot_user_id = connected_bot_user_id
         self.handle_event = handle_event
         self.handle_lifecycle = handle_lifecycle
         self.event_lock = asyncio.Lock()
         self.event_error: Exception | None = None
+
+    async def setup_hook(self) -> None:
+        """Reject a logged-in Application whose HTTP callback authority drifted."""
+        application = self.application
+        endpoint_url = (
+            None if application is None else application.interactions_endpoint_url
+        )
+        if not discord_interactions_endpoint_matches(
+            endpoint_url=endpoint_url,
+            callback_base_url=self.interactions_callback_base_url,
+            selector_hash=self.interactions_callback_selector_hash,
+        ):
+            raise DiscordGatewayTerminalError("interaction_endpoint_drift")
 
     async def on_message(self, message: discord.Message) -> None:
         """Admit one typed message-create callback."""
@@ -170,30 +204,56 @@ class DiscordGatewayClient:
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
     ) -> None:
         """Let discord.py own discovery, heartbeat, reconnect, and Resume."""
         if not target_guild_id.isdigit():
             raise DiscordGatewayError("Discord Guild identity is invalid.")
+
+        async def lifecycle(state: DiscordGatewayLifecycleState) -> None:
+            await handle_lifecycle(state)
+            await typing_runtime.handle_lifecycle(state)
+
         client = _DiscordLibraryClient(
             target_guild_id=int(target_guild_id),
+            interactions_callback_base_url=interactions_callback_base_url,
+            interactions_callback_selector_hash=(interactions_callback_selector_hash),
             connected_bot_user_id=connected_bot_user_id,
             handle_event=handle_event,
-            handle_lifecycle=handle_lifecycle,
+            handle_lifecycle=lifecycle,
+        )
+        typing_runtime = _DiscordGatewayTypingRuntime(
+            client=client,
+            target_guild_id=target_guild_id,
+            load_typing_targets=load_typing_targets,
+        )
+
+        typing_task = asyncio.create_task(
+            typing_runtime.run(),
+            name=f"discord-gateway-typing:{target_guild_id}",
         )
         try:
             await client.start(bot_token, reconnect=True)
         except discord.LoginFailure as error:
+            if typing_runtime.error is not None:
+                raise typing_runtime.error from error
             raise DiscordGatewayCredentialError(
                 "Discord rejected the configured Bot credential."
             ) from error
         except discord.PrivilegedIntentsRequired as error:
+            if typing_runtime.error is not None:
+                raise typing_runtime.error from error
             raise DiscordGatewayIntentsError(
                 "Discord rejected the required Message Content intent."
             ) from error
         except discord.ConnectionClosed as error:
+            if typing_runtime.error is not None:
+                raise typing_runtime.error from error
             raise DiscordGatewayTerminalError(
                 _closed_connection_reason(error)
             ) from error
@@ -203,10 +263,13 @@ class DiscordGatewayClient:
             discord.InvalidData,
             OSError,
         ) as error:
+            if typing_runtime.error is not None:
+                raise typing_runtime.error from error
             raise DiscordGatewayError(
                 "Discord Gateway transport is unavailable."
             ) from error
         finally:
+            await typing_runtime.stop(typing_task)
             if not client.is_closed():
                 await client.close()
         if client.event_error is not None:
@@ -215,7 +278,176 @@ class DiscordGatewayClient:
             raise DiscordGatewayError(
                 "Discord typed callback processing failed."
             ) from client.event_error
+        if typing_runtime.error is not None:
+            raise typing_runtime.error
         raise DiscordGatewayError("Discord Gateway client stopped unexpectedly.")
+
+
+class _DiscordGatewayTypingRuntime:
+    """Maintain public-SDK typing indicators for one active Gateway client."""
+
+    def __init__(
+        self,
+        *,
+        client: _DiscordLibraryClient,
+        target_guild_id: str,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        self.client = client
+        self.target_guild_id = target_guild_id
+        self.load_typing_targets = load_typing_targets
+        self.ready_event = asyncio.Event()
+        self.reconcile_event = asyncio.Event()
+        self.lock = asyncio.Lock()
+        self.accepting_targets = False
+        self.tasks: dict[str, asyncio.Task[None]] = {}
+        self.error: DiscordGatewayError | None = None
+
+    async def handle_lifecycle(self, state: DiscordGatewayLifecycleState) -> None:
+        """Start or stop target reconciliation for one SDK lifecycle transition."""
+        match state:
+            case "ready" | "resumed":
+                async with self.lock:
+                    self.accepting_targets = True
+                    self.ready_event.set()
+                    self.reconcile_event.set()
+            case "disconnected":
+                await self._deactivate()
+
+    async def run(self) -> None:
+        """Reconcile target state until SDK shutdown or source failure."""
+        try:
+            while True:
+                await self.ready_event.wait()
+                self.reconcile_event.clear()
+                await self._reconcile()
+                try:
+                    await asyncio.wait_for(
+                        self.reconcile_event.wait(),
+                        timeout=_TYPING_RECONCILE_INTERVAL_SECONDS,
+                    )
+                except TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            raise
+        except DiscordGatewayError as error:
+            self.error = error
+            await self._deactivate()
+            await self.client.close()
+        except Exception as error:
+            self.error = DiscordGatewayError("Discord typing target processing failed.")
+            logger.warning(
+                "Discord typing target processing failed.",
+                extra={"error_type": type(error).__name__},
+            )
+            await self._deactivate()
+            await self.client.close()
+        finally:
+            await self._deactivate()
+
+    async def stop(self, task: asyncio.Task[None]) -> None:
+        """Cancel and join the runtime task before releasing the SDK client."""
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _reconcile(self) -> None:
+        targets = await self.load_typing_targets()
+        if targets is None:
+            raise DiscordGatewayError(
+                "Discord Gateway typing target authority is unavailable."
+            )
+        desired = _typing_targets_by_channel(
+            targets,
+            target_guild_id=self.target_guild_id,
+        )
+        async with self.lock:
+            if not self.accepting_targets:
+                return
+            removed_channel_ids = self.tasks.keys() - desired.keys()
+            removed_tasks = tuple(
+                self.tasks.pop(channel_id) for channel_id in removed_channel_ids
+            )
+            await self._cancel_tasks_locked(removed_tasks)
+            for channel_id, target in desired.items():
+                existing = self.tasks.get(channel_id)
+                if existing is not None:
+                    if existing.done():
+                        existing.result()
+                    continue
+                self.tasks[channel_id] = asyncio.create_task(
+                    self._renew_typing(target),
+                    name=(
+                        "discord-gateway-typing-channel:"
+                        f"{target.guild_id}:{target.channel_id}"
+                    ),
+                )
+
+    async def _deactivate(self) -> None:
+        """Prevent further renewal and join all active channel tasks."""
+        async with self.lock:
+            self.accepting_targets = False
+            self.ready_event.clear()
+            self.reconcile_event.set()
+            await self._cancel_tasks_locked(tuple(self.tasks.values()))
+            self.tasks.clear()
+
+    async def _renew_typing(self, target: DiscordGatewayTypingTarget) -> None:
+        """Refresh one provider typing indicator until its target is removed."""
+        channel = self.client.get_partial_messageable(
+            int(target.channel_id),
+            guild_id=int(target.guild_id),
+        )
+        while True:
+            retry = False
+            try:
+                await channel.typing()
+            except asyncio.CancelledError:
+                raise
+            except discord.HTTPException, OSError:
+                retry = True
+                logger.warning(
+                    "Discord typing refresh failed.",
+                    extra={
+                        "discord_guild_id": target.guild_id,
+                        "discord_channel_id": target.channel_id,
+                    },
+                )
+            await asyncio.sleep(
+                _TYPING_RETRY_INTERVAL_SECONDS
+                if retry
+                else _TYPING_RENEW_INTERVAL_SECONDS
+            )
+
+    async def _cancel_tasks_locked(
+        self,
+        tasks: tuple[asyncio.Task[None], ...],
+    ) -> None:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _typing_targets_by_channel(
+    targets: tuple[DiscordGatewayTypingTarget, ...],
+    *,
+    target_guild_id: str,
+) -> dict[str, DiscordGatewayTypingTarget]:
+    """Validate the current Guild and collapse already grouped channel targets."""
+    by_channel: dict[str, DiscordGatewayTypingTarget] = {}
+    for target in targets:
+        if (
+            target.guild_id != target_guild_id
+            or not target.guild_id.isdigit()
+            or not target.channel_id.isdigit()
+            or not target.work_cycle_ids
+        ):
+            raise DiscordGatewayError("Discord typing target is invalid.")
+        by_channel[target.channel_id] = target
+    return by_channel
 
 
 def _is_message_channel(channel: object) -> TypeGuard[DiscordMessageChannel]:

@@ -2,6 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +104,13 @@ def _set_discord_thread_auto_archive_duration(
     provider_config = dict(connection.provider_config or {})
     provider_config["thread_auto_archive_duration_minutes"] = duration
     connection.provider_config = provider_config
+
+
+class ExternalChannelConnectionRow(NamedTuple):
+    """Connection and its owning Agent route."""
+
+    connection: RDBExternalChannelConnection
+    route: RDBExternalChannelAgentRoute
 
 
 class ExternalChannelManagementRepository:
@@ -487,6 +495,7 @@ class ExternalChannelManagementRepository:
         connection.http_callback_selector_hash = None
         connection.encrypted_credentials = encrypted_credentials
         connection.capabilities = None
+        connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
@@ -497,6 +506,9 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = None
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
@@ -1079,7 +1091,7 @@ class ExternalChannelManagementRepository:
         connection_id: str,
         lock: bool = False,
         include_disconnected: bool = False,
-    ) -> tuple[RDBExternalChannelConnection, RDBExternalChannelAgentRoute] | None:
+    ) -> ExternalChannelConnectionRow | None:
         route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
         if include_disconnected:
             route_owner = sa.or_(
@@ -1120,7 +1132,7 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         if not lock:
-            return row[0], row[1]
+            return ExternalChannelConnectionRow(row[0], row[1])
         connection_snapshot, route_snapshot = row
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection)
@@ -1156,7 +1168,7 @@ class ExternalChannelManagementRepository:
         )
         if route is None:
             return None
-        return connection, route
+        return ExternalChannelConnectionRow(connection, route)
 
     async def replace_slack_configuration(
         self,
@@ -1187,6 +1199,7 @@ class ExternalChannelManagementRepository:
         connection.http_callback_selector_hash = None
         connection.encrypted_credentials = encrypted_credentials
         connection.capabilities = None
+        connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
@@ -1197,6 +1210,9 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = None
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
@@ -2129,6 +2145,9 @@ def _reset_discord_configuration(
     connection.socket_heartbeat_at = None
     connection.socket_gap_detected_at = None
     connection.socket_gap_reason = None
+    connection.slack_presence_lease_owner = None
+    connection.slack_presence_lease_until = None
+    connection.slack_presence_heartbeat_at = None
 
 
 async def _release_discord_app_claim(

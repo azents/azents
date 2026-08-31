@@ -12,7 +12,7 @@ import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
 from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
@@ -49,6 +49,39 @@ Preserve provider-hosted tool semantics across compaction.
 ## Next Actions
 - Continue the deterministic provider semantic transcript verification.
 """
+
+
+class _DynamicWorktreeScenario(NamedTuple):
+    """Dynamic worktree operation, exact path, and force flag."""
+
+    operation: str
+    path: str
+    force: bool
+
+
+@runtime_checkable
+class _ChunkReadable(Protocol):
+    """Response stream that exposes a non-blocking buffered chunk read."""
+
+    def read1(self, size: int = -1) -> bytes:
+        """Read at most one buffered chunk."""
+        ...
+
+
+def _object(value: object) -> dict[str, object]:
+    """Validate one request or provider object with string keys."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ValueError("Expected an object with string keys.")
+    return value
+
+
+def _list(value: object) -> list[object]:
+    """Validate one request or provider list."""
+    if not isinstance(value, list):
+        raise ValueError("Expected a list.")
+    return value
+
+
 _SEMANTIC_FOLLOW_UP_RESPONSES = {
     _SEMANTIC_SAME_NATIVE_PROMPT: _SEMANTIC_SAME_NATIVE_RESPONSE,
     _SEMANTIC_CROSS_NATIVE_PROMPT: _SEMANTIC_CROSS_NATIVE_RESPONSE,
@@ -111,11 +144,33 @@ _CAPTURED_MODEL_PROMPTS = {
     "xAI image generation disabled",
 }
 _EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
+_EXTERNAL_CHANNEL_QUIET_WORK_MARKER = "Discord quiet work presence E2E"
+_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER = "Discord quiet work setup E2E"
 _EXTERNAL_CHANNEL_SEARCH_CALL_ID = "call_external_channel_tool_search"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID = "call_external_channel_outcome_progress"
 _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_progress"
+_EXTERNAL_CHANNEL_PROGRESS_CALL_IDS = frozenset(
+    {
+        _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+        _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
+        _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
+        _EXTERNAL_CHANNEL_FINISH_CALL_ID,
+    }
+)
+_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID = (
+    "call_external_channel_quiet_work_setup_search"
+)
+_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID = (
+    "call_external_channel_quiet_work_setup_finish"
+)
+_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH = "/v1/_external_channel_quiet_work_barrier"
+_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_RELEASE_PATH = (
+    f"{_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH}/release"
+)
+_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_TIMEOUT_SECONDS = 60.0
+_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING = re.compile(r"[A-Za-z0-9_-]{1,256}")
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_DISCORD_TITLE_MARKER = "Private Discord Gateway invocation"
@@ -216,7 +271,7 @@ _DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID = "call_dynamic_worktree_external_fini
 
 def _dynamic_worktree_scenario(
     request: dict[str, object],
-) -> tuple[str, str, bool] | None:
+) -> _DynamicWorktreeScenario | None:
     """Return the deterministic dynamic-worktree operation and exact path."""
     serialized = json.dumps(request, ensure_ascii=False)
     create_prefix = json.dumps(
@@ -235,7 +290,7 @@ def _dynamic_worktree_scenario(
             "Agent-managed Git worktree creation reached terminal status"
         )
         if source_path and create_request_index > create_reminder_index:
-            return ("create", source_path, False)
+            return _DynamicWorktreeScenario("create", source_path, False)
     if user_text is not None and user_text.startswith(_DYNAMIC_WORKTREE_REMOVE_PREFIX):
         path_and_force = user_text.removeprefix(_DYNAMIC_WORKTREE_REMOVE_PREFIX)
         force = path_and_force.endswith(_DYNAMIC_WORKTREE_FORCE_TRUE_SUFFIX)
@@ -249,31 +304,31 @@ def _dynamic_worktree_scenario(
             "Agent-managed Git worktree removal reached terminal status"
         )
         if worktree_path and remove_request_index > remove_reminder_index:
-            return ("remove", worktree_path, force)
+            return _DynamicWorktreeScenario("remove", worktree_path, force)
     markers = (
         (
             serialized.rfind(_DYNAMIC_WORKTREE_CREATE_CALL_ID),
-            ("create", "", False),
+            _DynamicWorktreeScenario("create", "", False),
         ),
         (
             serialized.rfind(
                 "Agent-managed Git worktree creation reached terminal status"
             ),
-            ("create", "", False),
+            _DynamicWorktreeScenario("create", "", False),
         ),
         (
             serialized.rfind(_DYNAMIC_WORKTREE_REMOVE_DIRTY_CALL_ID),
-            ("remove", "", False),
+            _DynamicWorktreeScenario("remove", "", False),
         ),
         (
             serialized.rfind(_DYNAMIC_WORKTREE_REMOVE_FORCE_CALL_ID),
-            ("remove", "", True),
+            _DynamicWorktreeScenario("remove", "", True),
         ),
         (
             serialized.rfind(
                 "Agent-managed Git worktree removal reached terminal status"
             ),
-            (
+            _DynamicWorktreeScenario(
                 "remove",
                 "",
                 serialized.rfind("Force used: true.")
@@ -346,11 +401,11 @@ def _last_user_text(request: dict[str, object]) -> str | None:
         return input_value
     if not isinstance(input_value, list):
         return None
-    input_items = cast(list[object], input_value)
+    input_items = _list(input_value)
     for raw_item in reversed(input_items):
         if not isinstance(raw_item, dict):
             continue
-        item = cast(dict[str, object], raw_item)
+        item = _object(raw_item)
         if item.get("role") != "user":
             continue
         content = item.get("content")
@@ -359,10 +414,10 @@ def _last_user_text(request: dict[str, object]) -> str | None:
         if not isinstance(content, list):
             return None
         text_parts: list[str] = []
-        for raw_part in cast(list[object], content):
+        for raw_part in _list(content):
             if not isinstance(raw_part, dict):
                 continue
-            part = cast(dict[str, object], raw_part)
+            part = _object(raw_part)
             text = part.get("text")
             if part.get("type") in {"input_text", "text"} and isinstance(text, str):
                 text_parts.append(text)
@@ -375,10 +430,10 @@ def _request_has_named_tool(request: dict[str, object], name: str) -> bool:
     tools = request.get("tools")
     if not isinstance(tools, list):
         return False
-    for raw_tool in cast(list[object], tools):
+    for raw_tool in _list(tools):
         if not isinstance(raw_tool, dict):
             continue
-        tool = cast(dict[str, object], raw_tool)
+        tool = _object(raw_tool)
         if tool.get("name") == name:
             return True
     return False
@@ -394,10 +449,10 @@ def _request_has_named_tool_type(
     tools = request.get("tools")
     if not isinstance(tools, list):
         return False
-    for raw_tool in cast(list[object], tools):
+    for raw_tool in _list(tools):
         if not isinstance(raw_tool, dict):
             continue
-        tool = cast(dict[str, object], raw_tool)
+        tool = _object(raw_tool)
         if tool.get("name") == name and tool.get("type") == tool_type:
             return True
     return False
@@ -406,7 +461,7 @@ def _request_has_named_tool_type(
 def request_has_tool_output(value: object, call_id: str) -> bool:
     """Find one completed tool output in nested Responses or Chat input."""
     if isinstance(value, dict):
-        item = cast(dict[str, object], value)
+        item = _object(value)
         item_type = item.get("type")
         if (
             isinstance(item_type, str)
@@ -418,10 +473,7 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
             return True
         return any(request_has_tool_output(child, call_id) for child in item.values())
     if isinstance(value, list):
-        return any(
-            request_has_tool_output(child, call_id)
-            for child in cast(list[object], value)
-        )
+        return any(request_has_tool_output(child, call_id) for child in _list(value))
     return False
 
 
@@ -444,11 +496,11 @@ def apply_patch_scenario(request: dict[str, object]) -> str | None:
                 message_scenarios.append("traversal")
             return
         if isinstance(value, list):
-            for child in cast(list[object], value):
+            for child in _list(value):
                 visit_message(child)
             return
         if isinstance(value, dict):
-            for child in cast(dict[str, object], value).values():
+            for child in _object(value).values():
                 visit_message(child)
 
     visit_message(input_value)
@@ -477,10 +529,10 @@ def apply_patch_scenario(request: dict[str, object]) -> str | None:
     }
     if not isinstance(input_value, list):
         return None
-    for raw_item in reversed(cast(list[object], input_value)):
+    for raw_item in reversed(_list(input_value)):
         if not isinstance(raw_item, dict):
             continue
-        item = cast(dict[str, object], raw_item)
+        item = _object(raw_item)
         call_id = item.get("call_id", item.get("tool_call_id"))
         if isinstance(call_id, str):
             scenario = call_scenarios.get(call_id)
@@ -503,7 +555,7 @@ def external_channel_file_tool_output_evidence(
 
     def visit(item: object) -> None:
         if isinstance(item, dict):
-            payload = cast(dict[str, object], item)
+            payload = _object(item)
             call_id = payload.get("call_id")
             item_type = payload.get("type")
             if (
@@ -531,7 +583,7 @@ def external_channel_file_tool_output_evidence(
             for child in payload.values():
                 visit(child)
         elif isinstance(item, list):
-            for child in cast(list[object], item):
+            for child in _list(item):
                 visit(child)
 
     visit(value)
@@ -548,16 +600,94 @@ def external_channel_binding(request: dict[str, object]) -> str | None:
     return None if compaction_match is None else compaction_match.group(1)
 
 
+def _latest_external_channel_progress_marker(
+    request: dict[str, object],
+) -> bool:
+    """Return whether the current logical user turn starts progress work."""
+    latest_user_text = _last_user_text(request)
+    return latest_user_text is not None and (
+        _EXTERNAL_CHANNEL_PROGRESS_MARKER in latest_user_text
+        or _EXTERNAL_CHANNEL_QUIET_WORK_MARKER in latest_user_text
+    )
+
+
+def has_current_external_channel_progress_result(
+    request: dict[str, object],
+) -> bool:
+    """Return whether a current tool result follows the latest user turn."""
+    return any(
+        has_current_tool_output(request, call_id)
+        for call_id in _EXTERNAL_CHANNEL_PROGRESS_CALL_IDS
+    )
+
+
+def has_current_tool_output(request: dict[str, object], call_id: str) -> bool:
+    """Return whether one tool output follows the latest logical user turn."""
+    input_value = request.get("input", request.get("messages"))
+    if not isinstance(input_value, list):
+        return False
+    input_items = _list(input_value)
+    latest_user_index = max(
+        (
+            index
+            for index, raw_item in enumerate(input_items)
+            if isinstance(raw_item, dict) and _object(raw_item).get("role") == "user"
+        ),
+        default=-1,
+    )
+    if latest_user_index < 0:
+        return False
+    return any(
+        request_has_tool_output(raw_item, call_id)
+        for raw_item in input_items[latest_user_index + 1 :]
+    )
+
+
 def is_external_channel_progress_request(request: dict[str, object]) -> bool:
     """Recognize the deterministic progress journey by stable request markers."""
-    serialized = json.dumps(request, ensure_ascii=False)
     return (
-        _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
+        _latest_external_channel_progress_marker(request)
         and external_channel_binding(request) is not None
         and (
             _request_has_named_tool(request, "tool_search")
             or _request_has_named_tool(request, "channel_action")
         )
+    )
+
+
+def is_external_channel_quiet_work_request(
+    request: dict[str, object],
+) -> bool:
+    """Recognize the Discord-only quiet-work progress journey."""
+    latest_user_text = _last_user_text(request)
+    return (
+        latest_user_text is not None
+        and _EXTERNAL_CHANNEL_QUIET_WORK_MARKER in latest_user_text
+        and is_external_channel_progress_request(request)
+    )
+
+
+def is_external_channel_quiet_work_setup_request(
+    request: dict[str, object],
+) -> bool:
+    """Recognize the isolated setup flow that establishes quiet-work Binding."""
+    latest_user_text = _last_user_text(request)
+    has_setup_result = request_has_tool_output(
+        request,
+        _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
+    ) or request_has_tool_output(
+        request,
+        _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+    )
+    return (
+        latest_user_text is not None
+        and _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER in latest_user_text
+        and (
+            has_setup_result
+            or _request_has_named_tool(request, "tool_search")
+            or _request_has_named_tool(request, "channel_action")
+        )
+        and external_channel_binding(request) is not None
     )
 
 
@@ -603,7 +733,7 @@ def wait_for_external_channel_discord_title_barrier() -> bool:
         if not isinstance(evidence, dict):
             time.sleep(0.01)
             continue
-        barrier = cast(dict[str, object], evidence)
+        barrier = _object(evidence)
         if (
             barrier.get("operation") == "create_message"
             and barrier.get("occurrence") == 2
@@ -618,12 +748,16 @@ def external_channel_progress_evidence(
     request: dict[str, object],
 ) -> dict[str, object]:
     """Return sanitized evidence about one deterministic progress request."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    latest_user_text = _last_user_text(request)
     return {
         "binding": external_channel_binding(request),
-        "marker_present": _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized,
-        "resolved_user_reference": "@User UREVIEWER" in serialized,
-        "resolved_channel_reference": "#e2e" in serialized,
+        "marker_present": _latest_external_channel_progress_marker(request),
+        "resolved_user_reference": (
+            latest_user_text is not None and "@User UREVIEWER" in latest_user_text
+        ),
+        "resolved_channel_reference": (
+            latest_user_text is not None and "#e2e" in latest_user_text
+        ),
         "search_tool_available": _request_has_named_tool(
             request,
             "tool_search",
@@ -758,6 +892,155 @@ class _ProviderToolLiveBarrier:
 _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
 
 
+class _ExternalChannelQuietWorkBarrier:
+    """Coordinate Discord quiet-work progress with a deterministic E2E boundary."""
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_TIMEOUT_SECONDS,
+    ) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._lock = threading.Lock()
+        self._armed = False
+        self._binding: str | None = None
+        self._generation = 0
+        self._progress_issued = False
+        self._timed_out = False
+        self._reached = threading.Event()
+        self._released = threading.Event()
+
+    def arm(self, binding: str) -> None:
+        """Reset and arm the barrier for one quiet-work continuation."""
+        with self._lock:
+            self._released.set()
+            self._armed = True
+            self._binding = binding
+            self._generation += 1
+            self._progress_issued = False
+            self._timed_out = False
+            self._reached = threading.Event()
+            self._released = threading.Event()
+
+    def evidence(self) -> dict[str, bool]:
+        """Return safe barrier state without retaining request content."""
+        with self._lock:
+            armed = self._armed
+            timed_out = self._timed_out
+        return {
+            "armed": armed,
+            "reached": self._reached.is_set(),
+            "released": self._released.is_set(),
+            "timed_out": timed_out,
+        }
+
+    def is_armed_for(self, binding: str | None) -> bool:
+        """Return whether this deterministic boundary covers one Binding."""
+        with self._lock:
+            return self._armed and binding is not None and self._binding == binding
+
+    def mark_progress_issued(self, binding: str) -> None:
+        """Record the first quiet-work progress call emitted by this proxy."""
+        with self._lock:
+            if self._armed and self._binding == binding:
+                self._progress_issued = True
+
+    def has_progress_issued_for(self, binding: str | None) -> bool:
+        """Return whether one scoped continuation must enter the barrier."""
+        with self._lock:
+            return (
+                self._armed
+                and binding is not None
+                and self._binding == binding
+                and self._progress_issued
+            )
+
+    def take_progress_issued(self, binding: str) -> bool:
+        """Consume one scoped issued-progress continuation boundary."""
+        with self._lock:
+            if not self._armed or self._binding != binding or not self._progress_issued:
+                return False
+            self._progress_issued = False
+            return True
+
+    def release(self) -> None:
+        """Release the current quiet-work continuation."""
+        with self._lock:
+            released = self._released
+        released.set()
+
+    def wait_until_reached(self, timeout: float) -> bool:
+        """Wait until the model continuation reaches the held boundary."""
+        return self._reached.wait(timeout=timeout)
+
+    def wait_for_release(self, binding: str) -> bool:
+        """Hold the next continuation action until release or bounded timeout."""
+        with self._lock:
+            if not self._armed or self._binding != binding:
+                return True
+            generation = self._generation
+            reached = self._reached
+            released_event = self._released
+        reached.set()
+        released = released_event.wait(timeout=self._timeout_seconds)
+        if not released:
+            with self._lock:
+                if generation == self._generation:
+                    self._timed_out = True
+        return released
+
+
+_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER = _ExternalChannelQuietWorkBarrier()
+
+
+class _ExternalChannelProgressSequenceRegistry:
+    """Track active deterministic progress sequences by opaque Binding."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._bindings: set[str] = set()
+
+    def clear(self, binding: str) -> None:
+        """Clear one completed deterministic progress sequence."""
+        with self._lock:
+            self._bindings.discard(binding)
+
+    def clear_all(self) -> None:
+        """Clear all sequences when their deterministic journal resets."""
+        with self._lock:
+            self._bindings.clear()
+
+    def is_active(self, binding: str | None) -> bool:
+        """Return whether one Binding has an active progress sequence."""
+        with self._lock:
+            return binding is not None and binding in self._bindings
+
+    def start(self, binding: str) -> None:
+        """Register one progress sequence started by the latest user turn."""
+        with self._lock:
+            self._bindings.add(binding)
+
+
+_EXTERNAL_CHANNEL_PROGRESS_SEQUENCES = _ExternalChannelProgressSequenceRegistry()
+
+
+def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
+    """Decode the one bounded Binding used to arm the quiet-work barrier."""
+    try:
+        payload: object = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    binding = _object(payload).get("binding")
+    if (
+        not isinstance(binding, str)
+        or _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING.fullmatch(binding) is None
+    ):
+        return None
+    return binding
+
+
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
@@ -784,6 +1067,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == _PROVIDER_TOOL_LIVE_BARRIER_PATH:
             self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
             return
+        if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH:
+            self._write_json(200, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
+            return
         journal = self._journal_for_path()
         if journal is not None:
             with _State.lock:
@@ -802,6 +1088,8 @@ class _Handler(BaseHTTPRequestHandler):
                 journal.clear()
                 if journal is _State.subscription_usage_requests:
                     _State.subscription_usage_sequences.clear()
+            if journal is _State.external_channel_progress_requests:
+                _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.clear_all()
             self._write_json(200, {"cleared": True})
             return
         self._proxy()
@@ -815,6 +1103,21 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == _PROVIDER_TOOL_LIVE_BARRIER_RELEASE_PATH:
             _PROVIDER_TOOL_LIVE_BARRIER.release()
             self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
+            return
+        if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH:
+            binding = _external_channel_quiet_work_barrier_binding(self._read_body())
+            if binding is None:
+                self._write_json(
+                    400,
+                    {"error": {"message": "A bounded nonblank Binding is required."}},
+                )
+                return
+            _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.arm(binding)
+            self._write_json(201, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
+            return
+        if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_RELEASE_PATH:
+            _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.release()
+            self._write_json(200, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
             return
         body = self._read_body()
         if self.path == _OAUTH_CONNECTION_SCENARIO_PATH:
@@ -845,7 +1148,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(request_value, dict):
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
-        request = cast(dict[str, object], request_value)
+        request = _object(request_value)
         user_text = _last_user_text(request)
         compaction_request = _is_semantic_compaction_request(request)
         if is_external_channel_slack_response_mode_title_request(request):
@@ -1433,14 +1736,133 @@ class _Handler(BaseHTTPRequestHandler):
                     },
                 )
                 return
-        if self.path == "/v1/responses" and is_external_channel_progress_request(
-            request
+        if (
+            self.path == "/v1/responses"
+            and is_external_channel_quiet_work_setup_request(request)
         ):
             binding = external_channel_binding(request)
             if binding is not None:
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+                ):
+                    self._write_text_response(
+                        request,
+                        "Discord quiet-work setup E2E completed.",
+                        response_id="resp_external_channel_quiet_work_setup_completed",
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
+                ):
+                    if _request_has_named_tool(request, "channel_action"):
+                        self._write_function_call_response(
+                            request,
+                            call_id=_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+                            name="channel_action",
+                            arguments={
+                                "mode": "finish",
+                                "binding": binding,
+                                "message": (
+                                    "Discord quiet-work setup binding established."
+                                ),
+                            },
+                        )
+                        return
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": (
+                                    "Discord quiet-work setup did not expose "
+                                    "channel_action."
+                                )
+                            }
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "channel_action"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": (
+                                "Discord quiet-work setup binding established."
+                            ),
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "tool_search"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
+                        name="tool_search",
+                        arguments={
+                            "query": "establish Discord quiet-work binding",
+                            "limit": 5,
+                        },
+                    )
+                    return
+            self._write_json(
+                409,
+                {
+                    "error": {
+                        "message": (
+                            "Discord quiet-work setup did not expose a required tool."
+                        )
+                    }
+                },
+            )
+            return
+        progress_request = is_external_channel_progress_request(request)
+        binding = external_channel_binding(request)
+        progress_continuation = _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_active(
+            binding
+        ) and has_current_external_channel_progress_result(request)
+        if (
+            self.path == "/v1/responses"
+            and binding is not None
+            and (
+                progress_request
+                or progress_continuation
+                or _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
+            )
+        ):
+            if progress_request:
+                _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.start(binding)
+            if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.take_progress_issued(binding):
+                if not _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.wait_for_release(binding):
+                    self._write_json(
+                        503,
+                        {
+                            "error": {
+                                "message": (
+                                    "Discord quiet-work E2E barrier timed out "
+                                    "before release."
+                                )
+                            }
+                        },
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id=_EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
+                    name="channel_action",
+                    arguments={
+                        "mode": "continue",
+                        "binding": binding,
+                        "title": "Investigating error logs…",
+                    },
+                )
+                return
+            if progress_request or progress_continuation:
                 if (
                     _request_has_named_tool(request, "tool_search")
-                    and not request_has_tool_output(
+                    and not has_current_tool_output(
                         request,
                         _EXTERNAL_CHANNEL_SEARCH_CALL_ID,
                     )
@@ -1456,17 +1878,18 @@ class _Handler(BaseHTTPRequestHandler):
                         },
                     )
                     return
-                if request_has_tool_output(
+                if has_current_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_FINISH_CALL_ID,
                 ):
+                    _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.clear(binding)
                     self._write_text_response(
                         request,
                         "External Channel progress E2E completed.",
                         response_id="resp_external_channel_progress_completed",
                     )
                     return
-                if request_has_tool_output(
+                if has_current_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
                 ):
@@ -1481,7 +1904,7 @@ class _Handler(BaseHTTPRequestHandler):
                         },
                     )
                     return
-                if request_has_tool_output(
+                if has_current_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
                 ):
@@ -1496,7 +1919,7 @@ class _Handler(BaseHTTPRequestHandler):
                         },
                     )
                     return
-                if request_has_tool_output(
+                if has_current_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
                 ):
@@ -1511,6 +1934,7 @@ class _Handler(BaseHTTPRequestHandler):
                         },
                     )
                     return
+                _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.mark_progress_issued(binding)
                 self._write_function_call_response(
                     request,
                     call_id=_EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
@@ -1603,7 +2027,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._write_json(400, {"error": "invalid request"})
             return
-        request = cast(dict[str, object], payload)
+        request = _object(payload)
         provider = request.get("provider")
         scenario = request.get("scenario")
         access_token = request.get("access_token")
@@ -1670,7 +2094,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._write_json(400, {"error": "invalid request"})
             return
-        request = cast(dict[str, object], payload)
+        request = _object(payload)
         connection_id = request.get("device_auth_id")
         if (
             not isinstance(connection_id, str)
@@ -2029,7 +2453,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(request_value, dict):
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
-        request = cast(dict[str, object], request_value)
+        request = _object(request_value)
         prompt = request.get("prompt")
         if not isinstance(prompt, str):
             self._write_json(400, {"error": {"message": "prompt is required"}})
@@ -2755,7 +3179,11 @@ class _Handler(BaseHTTPRequestHandler):
                     self.send_header(key, value)
             self.send_header("Connection", "close")
             self.end_headers()
-            read_chunk = getattr(response, "read1", response.read)
+            read_chunk = (
+                response.read1
+                if isinstance(response, _ChunkReadable)
+                else response.read
+            )
             while chunk := read_chunk(64 * 1024):
                 self.wfile.write(chunk)
                 self.wfile.flush()

@@ -33,9 +33,13 @@ class _SeededBinding:
 def _work(binding_id: str, *, title: str | None = None) -> ChannelWorkState:
     """Build one active Work payload."""
     return ChannelWorkState(
+        schema_version=3,
         binding_id=binding_id,
         work_cycle_id=f"cycle-{binding_id}",
         status=ExternalChannelWorkStatus.ACTIVE,
+        tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=title,
         tasks=[],
         state_revision=1,
@@ -478,12 +482,39 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
         await _cleanup_binding(rdb_engine, seeded)
 
 
-def test_work_state_rejects_unsupported_payload_schema_version() -> None:
+def test_work_state_requires_schema_version_two_and_tracker_visibility() -> None:
     """Payload validation fails closed for unsupported schema versions."""
     with pytest.raises(ValidationError):
         ChannelWorkState.model_validate(
             {
                 **_work("binding-schema").model_dump(mode="json"),
-                "schema_version": 2,
+                "schema_version": 1,
+            }
+        )
+    with pytest.raises(ValidationError):
+        ChannelWorkState.model_validate(
+            {
+                key: value
+                for key, value in _work("binding-missing-schema")
+                .model_dump(mode="json")
+                .items()
+                if key != "schema_version"
+            }
+        )
+    with pytest.raises(ValidationError):
+        ChannelWorkState.model_validate(
+            {
+                **_work("binding-visibility").model_dump(mode="json"),
+                "tracker_visibility": "unknown",
+            }
+        )
+    with pytest.raises(ValidationError):
+        ChannelWorkState.model_validate(
+            {
+                key: value
+                for key, value in _work("binding-missing-visibility")
+                .model_dump(mode="json")
+                .items()
+                if key != "tracker_visibility"
             }
         )

@@ -13,14 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
+    RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
@@ -43,10 +43,12 @@ from azents.runtime.transfer.workspace_download import (
     WorkspaceDownloadRequest,
 )
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeLifecycleSnapshot,
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.chat.workspace import AgentWorkspaceFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
 
@@ -88,37 +90,47 @@ class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
         return None
 
 
-class _FakeRuntimeRepository(AgentRuntimeRepository):
-    def __init__(self, runtime: AgentRuntime | None) -> None:
-        self._runtime = runtime
-
-    async def get_by_agent_id(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> AgentRuntime | None:
-        del session, agent_id
-        return self._runtime
-
-    async def ensure_for_agent(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        *,
-        default_runtime_provider_id: str | None = None,
-    ) -> AgentRuntime:
-        del session, agent_id, default_runtime_provider_id
-        if self._runtime is None:
-            self._runtime = _make_agent_runtime()
-        return self._runtime
-
-
 class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
     """Resolve a target from the configured Runtime fixture."""
 
     def __init__(self, runtime: AgentRuntime | None) -> None:
         self.runtime = runtime
         self.resolve_calls: list[tuple[float, bool]] = []
+
+    async def get_lifecycle_snapshot(
+        self,
+        agent_id: str,
+    ) -> AgentRuntimeLifecycleSnapshot:
+        """Return the shared lifecycle fixture."""
+        del agent_id
+        runtime = self.runtime
+        if runtime is None:
+            return AgentRuntimeLifecycleSnapshot(
+                runtime=None,
+                lifecycle=None,
+                actions=AgentRuntimeActions(
+                    start=False,
+                    stop=False,
+                    restart=False,
+                    reset=False,
+                    use_runner=False,
+                ),
+            )
+        service = object.__new__(AgentRuntimeService)
+        configuration = None
+        return AgentRuntimeLifecycleSnapshot(
+            runtime=runtime,
+            lifecycle=service.calculate_lifecycle(
+                runtime,
+                configuration=configuration,
+                removing=False,
+            ),
+            actions=service._calculate_lifecycle_actions(
+                runtime,
+                configuration=configuration,
+                removing=False,
+            ),
+        )
 
     async def resolve_operation_target(
         self,
@@ -135,8 +147,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
         runtime = self.runtime
         if (
             runtime is None
-            or runtime.provider_observed_state
-            is not RuntimeProviderObservedState.RUNNING
+            or runtime.desired_state is not RuntimeDesiredState.RUNNING
             or runtime.runner_state is not RuntimeRunnerState.READY
             or runtime.workspace_path is None
         ):
@@ -273,16 +284,21 @@ class _FakeRunnerOperations:
         runner_generation: int,
         owner_session_id: str | None = None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime.datetime,
     ) -> RuntimeFileTextReadResult:
-        """Return one bounded decoded preview range."""
+        """Return one bounded decoded preview character range."""
         del runtime_id, runner_generation, owner_session_id, deadline_at
-        self.text_read_calls.append((path, offset, max_bytes, encoding))
+        self.text_read_calls.append((path, character_offset, max_characters, encoding))
+        text = self.files[path].decode(encoding)
+        chunk = text[character_offset : character_offset + max_characters]
         return RuntimeFileTextReadResult(
-            text=self.files[path][offset : offset + max_bytes].decode(encoding),
+            text=chunk,
+            start_character=character_offset,
+            end_character=character_offset + len(chunk),
+            truncated=character_offset + len(chunk) < len(text),
             final_cursor="0-1",
         )
 
@@ -439,7 +455,6 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
     )
@@ -448,6 +463,9 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
 
     assert isinstance(result, Success)
     state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.lifecycle.convergence == "stable"
     assert state.runtime.type == "RUNNING"
     assert state.workspace.type == "READY"
     assert state.actions.stop is not None
@@ -465,6 +483,71 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_workspace_keeps_ready_runner_when_host_controls_disconnect() -> None:
+    """Runner access remains available without Provider host authority."""
+    runtime = _make_agent_runtime(
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
+    )
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.workspace.type == "READY"
+    assert state.actions.start is None
+    assert state.actions.stop is None
+    assert state.actions.restart is None
+    assert state.actions.reset is None
+    assert runner_operations.list_calls == [
+        ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_keeps_ready_runner_during_provider_transition() -> None:
+    """Provider host convergence does not fence qualified Runner access."""
+    runtime = _make_agent_runtime(
+        provider_observed_state=RuntimeProviderObservedState.STARTING,
+        desired_state=RuntimeDesiredState.RUNNING,
+    )
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.lifecycle.convergence == "stable"
+    assert state.runtime.type == "STARTING"
+    assert state.workspace.type == "READY"
+    assert state.actions.start is None
+    assert state.actions.stop is not None
+    assert state.actions.restart is None
+    assert state.actions.reset is not None
+    assert runner_operations.list_calls == [
+        ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> None:
     """Provider-observed Runtime exposes recovery before Runner is ready."""
     runtime = _make_agent_runtime(runner_state=RuntimeRunnerState.DISCONNECTED)
@@ -473,7 +556,6 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
     )
@@ -481,6 +563,9 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
     result = await service.get_workspace("agent-1", "user-1")
 
     assert isinstance(result, Success)
+    assert result.value.lifecycle is not None
+    assert result.value.lifecycle.availability == "runner_unavailable"
+    assert result.value.lifecycle.reason_code == "runner_disconnected"
     assert result.value.runtime.type == "RUNNING"
     assert result.value.workspace.type == "CONTROL_UNAVAILABLE"
     assert result.value.actions.restart is not None
@@ -496,7 +581,6 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -524,7 +608,6 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -550,7 +633,6 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -568,12 +650,12 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
     runtime = _make_agent_runtime(
         provider_observed_state=RuntimeProviderObservedState.STOPPED,
         desired_state=RuntimeDesiredState.RUNNING,
+        runner_state=RuntimeRunnerState.STARTING,
     )
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -598,7 +680,6 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -621,7 +702,6 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -641,6 +721,30 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
 
 
 @pytest.mark.asyncio
+async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
+    """Multibyte text is bounded by decoded characters and reports truncation."""
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    file_path = (AGENT_WORKSPACE_ROOT / "large.txt").as_posix()
+    runner_operations.files[file_path] = ("가" * (64 * 1024 + 1)).encode()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.read_path("agent-1", "user-1", file_path)
+
+    assert isinstance(result, Success)
+    assert result.value.type == "FILE"
+    assert result.value.text is not None
+    assert len(result.value.text) == 64 * 1024
+    assert result.value.truncated is True
+
+
+@pytest.mark.asyncio
 async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
     """Complete Workspace downloads avoid the Runner Control file body path."""
     runtime = _make_agent_runtime()
@@ -650,7 +754,6 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
         runtime_workspace_download_service=cast(
@@ -690,7 +793,6 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -739,7 +841,6 @@ async def test_read_path_marks_git_repository_directories() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -768,7 +869,6 @@ async def test_stat_path_returns_inspector_metadata() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -795,7 +895,6 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -817,7 +916,6 @@ async def test_delete_path_rejects_workspace_root() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -841,7 +939,6 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -866,7 +963,6 @@ async def test_move_path_calls_runner_for_rename() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -897,7 +993,6 @@ async def test_bulk_delete_paths_calls_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -923,7 +1018,6 @@ async def test_bulk_move_paths_calls_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -950,6 +1044,9 @@ def _make_agent_runtime(
     *,
     workspace_path: str | None = AGENT_WORKSPACE_ROOT.as_posix(),
     provider_observed_state: RuntimeProviderObservedState | None = None,
+    provider_connection_state: RuntimeProviderConnectionState = (
+        RuntimeProviderConnectionState.CONNECTED
+    ),
     desired_state: RuntimeDesiredState | None = None,
     desired_generation: int = 7,
     runner_state: RuntimeRunnerState = RuntimeRunnerState.READY,
@@ -969,6 +1066,7 @@ def _make_agent_runtime(
         terminal_delete_acknowledgement_kind=None,
         desired_state=desired_state,
         desired_generation=desired_generation,
+        provider_connection_state=provider_connection_state,
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
         runner_generation=1,

@@ -99,12 +99,24 @@ def render_discord_session_presence(
 
 def render_discord_session_navigation_components(
     session_url: str,
+    *,
+    settings_custom_id: str | None,
 ) -> list[dict[str, object]]:
     """Render one reusable Discord Session navigation action row."""
+    components: list[dict[str, object]] = [_session_navigation_button(session_url)]
+    if settings_custom_id is not None:
+        components.append(
+            {
+                "type": 2,
+                "style": 2,
+                "label": "Conversation settings",
+                "custom_id": settings_custom_id,
+            }
+        )
     return [
         {
             "type": 1,
-            "components": [_session_navigation_button(session_url)],
+            "components": components,
         }
     ]
 
@@ -159,43 +171,6 @@ def render_discord_setup_required(
                         "label": "Answer in threads",
                         "custom_id": threads_custom_id,
                     },
-                ],
-            }
-        ],
-    )
-
-
-def render_discord_binding_settings_on_demand(
-    *,
-    agent_name: str,
-    settings_custom_id: str,
-) -> DiscordSessionPresencePresentation:
-    """Render settings access after an eligible mention in an existing Binding."""
-    escaped_name = (
-        agent_name.replace("\\", "\\\\")
-        .replace("*", "\\*")
-        .replace("_", "\\_")
-        .replace("~", "\\~")
-        .replace("`", "\\`")
-    )
-    return DiscordSessionPresencePresentation(
-        text="",
-        embeds=[
-            {
-                "description": f"Conversation settings for **{escaped_name}**.",
-                "color": _TRACKER_COLOR,
-            }
-        ],
-        components=[
-            {
-                "type": 1,
-                "components": [
-                    {
-                        "type": 2,
-                        "style": 2,
-                        "label": "Conversation settings",
-                        "custom_id": settings_custom_id,
-                    }
                 ],
             }
         ],

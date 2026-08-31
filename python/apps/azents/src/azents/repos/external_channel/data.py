@@ -1,5 +1,6 @@
 """Provider-generic External Channel repository data records."""
 
+import dataclasses
 import datetime
 from typing import Any, Literal
 
@@ -131,6 +132,31 @@ class ExternalChannelConnectionConfiguration(_Record):
     socket_gap_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class DiscordGatewayTypingTarget:
+    """One active Discord Gateway typing target."""
+
+    guild_id: str
+    channel_id: str
+    work_cycle_ids: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SlackWorkPresenceTarget:
+    """One desired Slack Work presence projection."""
+
+    binding_id: str
+    work_cycle_id: str
+    kind: Literal["channel_loading", "thread_agent"]
+    desired_state: Literal["processing", "idle"]
+    channel_id: str
+    thread_ts: str
+    initiator_user_id: str | None
+    status_text: str | None
+    agent_name: str
+    customize_messages: bool
 
 
 class ExternalChannelConversationPosition(_Record):

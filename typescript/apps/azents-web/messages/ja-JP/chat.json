@@ -115,30 +115,19 @@
     "metricsTab": "メトリクス",
     "settingsTab": "設定",
     "settingsTitle": "Runtime 設定",
-    "settingsSubtitle": "Runtime の起動、停止、状態を管理します。",
+    "settingsSubtitle": "Runtime の状態と設定を確認し、現在利用できる操作を実行します。",
+    "hostControlsTitle": "ホスト操作",
+    "hostControlsDescription": "Provider 権限が利用できる場合に Runtime の開始、停止、再起動、リセットを実行します。",
     "configurationTitle": "ランタイムの状態",
     "configurationLoading": "ランタイム構成を読み込んでいます…",
-    "configurationTechnicalDetails": "技術情報",
-    "configurationCurrent": "現在の構成",
-    "configurationDesired": "新しい構成",
-    "configurationApplied": "現在適用中の構成",
-    "configurationNoDesired": "解決済みの期待する構成はありません。",
-    "configurationNoApplied": "ランタイムに適用された構成はありません。",
-    "configurationEvidence": {
-      "sequence": "構成シーケンス",
-      "profile": "Runtime Profile",
-      "infrastructure": "インフラストラクチャ",
-      "generation": "Generation",
-      "digest": "Digest"
-    },
+    "configurationDesired": "選択した設定",
+    "configurationApplied": "現在適用中の設定",
     "configurationNetworkTitle": "実効ネットワーク",
     "configurationNetworkMode": "モード: {mode}",
     "configurationNetworkProtocol": "外部プロトコル範囲: {protocol}",
     "configurationNetworkDomains": "ドメイン権限: {mode}",
     "configurationNetworkHttpsInspected": "HTTPS トラフィックは Runtime の信頼設定を使用して検査されます。",
     "configurationNetworkHttpsNotInspected": "HTTPS トラフィックは管理対象 Runtime プロキシでは検査されません。",
-    "configurationNetworkRecreationRequired": "このネットワーク構成を適用するには Runtime を再作成してください。",
-    "configurationNetworkBlocked": "このネットワーク構成は現在ブロックされています。",
     "configurationNetworkModes": {
       "direct": "直接ネットワーク",
       "proxy_required": "検査付き HTTP プロキシ必須",
@@ -155,29 +144,29 @@
     },
     "configurationStatus": {
       "profile_required": {
-        "label": "設定が必要",
-        "description": "Runtime を使用するには、まず実行環境を選択してください。"
+        "label": "設定が必要です",
+        "description": "Runtime を起動する前に Runtime Profile を選択してください。"
       },
       "configuration_blocked": {
-        "label": "確認が必要",
-        "description": "選択した Runtime 設定は現在使用できません。設定を確認してください。"
+        "label": "確認が必要です",
+        "description": "選択した設定を適用できません。Runtime 設定で利用可能な項目を選択してください。"
       },
       "configured_not_created": {
-        "label": "起動準備完了",
-        "description": "設定が完了しました。Runtime を起動すると適用されます。"
+        "label": "起動できます",
+        "description": "Runtime の起動時に選択した設定が適用されます。"
       },
       "waiting_for_recreation": {
-        "label": "適用が必要",
-        "description": "新しい設定を適用するには、Runtime を再作成してください。"
+        "label": "再起動が必要です",
+        "description": "Runtime は現在適用中の設定で動作しています。選択した設定を適用するには再起動してください。"
       },
       "applied": {
-        "label": "正常",
-        "description": "最新の設定が適用され、Runtime を使用できます。"
+        "label": "適用済み",
+        "description": "Runtime には選択した設定が適用されています。"
       }
     },
-    "stopRuntimeDescription": "Workspace ファイルを削除せずに、実行中の Runtime pod を停止します。",
+    "stopRuntimeDescription": "Agent Workspace のファイルを削除せずに Runtime を停止します。",
     "runtimeNotRunningHint": "Runtime が実行されていないため、停止する項目はありません。",
-    "runtimeControlUnavailableHint": "現在 Runtime control は利用できません。",
+    "runtimeControlUnavailableHint": "現在利用できるホスト操作はありません。",
     "noSession": "まずAgent Workspaceを開始してください。",
     "loadingWorkspace": "Agent Workspaceを読み込み中…",
     "inactiveTitle": "Runtimeは実行されていません",
@@ -185,8 +174,8 @@
     "restoreFailedTitle": "Runtimeの復元に失敗しました",
     "restoreFailedDescription": "以前のAgent Workspace状態を復元できませんでした。",
     "runtimeFailedTitle": "Runtimeに失敗しました",
-    "runtimeFailedDescription": "Runtime providerが失敗状態を報告しました。",
-    "controlUnavailableTitle": "Runtime control 接続を利用できません",
+    "runtimeFailedDescription": "管理対象の実行環境で問題が発生しました。",
+    "controlUnavailableTitle": "Runtime 接続を利用できません",
     "retryRestore": "復元を再試行",
     "cancel": "キャンセル",
     "browserPath": "パス",
@@ -235,8 +224,13 @@
     "createWorktree": "Worktree を作成",
     "restoringRuntime": "Runtimeを準備中…",
     "resetRuntime": "Runtimeを初期化",
+    "resetDestructiveTitle": "Agent Workspace データが削除されます",
     "resetRuntimeConfirm": "Agent Workspaceのファイルと保存済みRuntime状態を破棄し、空のRuntimeを開始します。この操作は取り消せません。",
-    "restartRuntime": "Podを再起動",
+    "restartRuntime": "Runtimeを再起動",
+    "restartConfirmTitle": "Runtime を再起動しますか？",
+    "restartConfirmDescription": "Runtime の再起動中は一時的に利用できません。",
+    "restartPreservationNotice": "Agent Workspace ファイルと保持された Runtime ストレージは維持されます。",
+    "confirmRestart": "Runtime を再起動",
     "startRuntime": "Runtimeを開始",
     "startingRuntime": "Runtimeを開始中…",
     "stopRuntime": "Runtimeを停止",
@@ -284,15 +278,6 @@
       "unavailable": "利用不可",
       "error": "エラー"
     },
-    "configurationReasons": {
-      "sourceMismatch": "保存されているRuntime Profileの参照が、単一の正確なProvider経路を構成していません。",
-      "profileDisabled": "選択したRuntime ProfileまたはProvider Profileが無効です。",
-      "providerUnavailable": "指定されたRuntime Providerは無効、切断中、またはこのワークスペースで利用不可です。",
-      "capabilityUnavailable": "Providerの現在のcapabilityでは、選択したProfileを満たせません。",
-      "profileInvalid": "選択したProfileの定義が無効です。",
-      "unknown": "目的のRuntime構成を解決できませんでした。"
-    },
-    "configurationMissingCapabilities": "不足しているcapability: {capabilities}",
     "runtimeFreeTitle": "管理対象ランタイムがありません",
     "runtimeFreeDescription": "モデルとリモート機能は引き続き利用できますが、エージェントワークスペースのファイルとプロジェクトには管理対象ランタイムが必要です。",
     "addRuntime": "ランタイムを追加",
@@ -305,7 +290,13 @@
       "deleting_runtime": "物理ランタイムを削除中",
       "finalizing": "削除を完了処理中",
       "completed": "削除完了"
-    }
+    },
+    "configurationConfiguredValues": "設定を確認",
+    "configurationProfile": "Runtime Profile",
+    "configurationExecutionProfile": "Infrastructure Profile",
+    "configurationValueUnavailable": "未選択",
+    "resettingRuntime": "Runtime をリセット中…",
+    "recoveringRuntime": "Runtime を復旧中…"
   },
   "toolCall": {
     "preparing": "コマンドを作成中…",

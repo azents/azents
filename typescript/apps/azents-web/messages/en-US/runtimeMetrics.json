@@ -1,6 +1,6 @@
 {
   "title": "System metrics",
-  "description": "Runner-visible usage over the most recent hour.",
+  "description": "Resource usage reported by the Runtime during the most recent hour.",
   "loading": "Loading Runtime metrics…",
   "errorTitle": "Could not load Runtime metrics",
   "scope": "Scope: {scope}",
@@ -16,7 +16,7 @@
     "unavailable": "Unavailable",
     "unsupported": "Unsupported",
     "stopped": "Runtime stopped",
-    "disconnected": "Runner disconnected"
+    "disconnected": "Runtime disconnected"
   },
   "metrics": {
     "cpu": "CPU",

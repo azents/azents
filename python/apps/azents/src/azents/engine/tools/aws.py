@@ -15,7 +15,7 @@ from datetime import timedelta
 from textwrap import dedent
 from typing import ClassVar
 
-import httpx
+import httpx2 as httpx
 from azcommon.datetime import tznow
 from botocore.auth import SigV4Auth as BotoSigV4Auth
 from botocore.awsrequest import AWSRequest
@@ -94,7 +94,9 @@ class AwsSecrets(BaseModel):
 
 
 class AwsSigV4Auth(httpx.Auth):
-    """Add AWS SigV4 signature to httpx request."""
+    """Add AWS SigV4 signature to httpx2 request."""
+
+    requires_request_body = True
 
     def __init__(
         self,
@@ -417,7 +419,7 @@ def _build_aws_tool_snapshot(
             raw_name=tool.name,
             model_name=tool.name,
             description=tool.description or "",
-            input_schema=tool.inputSchema,
+            input_schema=tool.input_schema,
             server_url=_AWS_MCP_ENDPOINT,
             use_streamable_http=use_streamable_http,
         )

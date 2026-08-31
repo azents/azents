@@ -2,7 +2,6 @@
 
 import datetime
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import sqlalchemy as sa
@@ -51,6 +50,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 10, 1, tzinfo=datetime.UTC)
 
@@ -72,77 +72,87 @@ def _owner(
     lease_owner: str | None = "owner-1",
     lease_generation: int = 1,
     lease_expires_at: datetime.datetime | None = None,
-) -> SimpleNamespace:
+) -> RDBExternalChannelIngressOwner:
     """Build one mutable ORM-shaped drain row."""
-    return SimpleNamespace(
-        id="owner-1",
-        connection_id="connection-1",
-        target_resource_id="resource-1",
-        route_id="route-1",
-        participation_setting_id=None,
-        participation_settings_generation=None,
-        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
-        binding_id="binding-1",
-        session_id="session-1",
-        preparation_attempt_count=0,
-        preparation_next_attempt_at=None,
-        lease_owner=lease_owner,
-        lease_generation=lease_generation,
-        lease_acquired_at=_NOW if lease_owner is not None else None,
-        lease_expires_at=lease_expires_at
-        if lease_expires_at is not None
-        else (_NOW + datetime.timedelta(minutes=5) if lease_owner else None),
-        first_batch_pending=first_batch_pending,
-        current_batch_id=None,
-        current_batch_started_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
+    return require_instance(
+        MagicMock(
+            spec=RDBExternalChannelIngressOwner,
+            id="owner-1",
+            connection_id="connection-1",
+            target_resource_id="resource-1",
+            route_id="route-1",
+            participation_setting_id=None,
+            participation_settings_generation=None,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            binding_id="binding-1",
+            session_id="session-1",
+            preparation_attempt_count=0,
+            preparation_next_attempt_at=None,
+            lease_owner=lease_owner,
+            lease_generation=lease_generation,
+            lease_acquired_at=_NOW if lease_owner is not None else None,
+            lease_expires_at=(
+                lease_expires_at
+                if lease_expires_at is not None
+                else (_NOW + datetime.timedelta(minutes=5) if lease_owner else None)
+            ),
+            first_batch_pending=first_batch_pending,
+            current_batch_id=None,
+            current_batch_started_at=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        ),
+        RDBExternalChannelIngressOwner,
     )
 
 
-def _item(index: int) -> SimpleNamespace:
+def _item(index: int) -> RDBExternalChannelIngressItem:
     """Build one mutable ORM-shaped active queue row."""
     position = f"{index:020d}"
-    return SimpleNamespace(
-        id=f"item-{index}",
-        owner_id="owner-1",
-        queue_key=f"{index:032d}",
-        deduplication_key=f"{index:064d}",
-        provider_event_id=f"event-{index}",
-        connection_id="connection-1",
-        provider=ExternalChannelProvider.SLACK,
-        ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
-        configuration_generation=1,
-        authority_kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
-        authority_lease_owner=None,
-        authority_lease_generation=None,
-        provider_event_type="message",
-        provider_tenant_id="tenant-1",
-        scope_kind=ExternalChannelConversationScopeKind.THREAD,
-        provider_channel_id="channel-1",
-        provider_parent_channel_id=None,
-        provider_thread_key="thread-1",
-        delivery_thread_key="thread-1",
-        provider_resource_key="resource-1",
-        source_resource_id="resource-1",
-        conversation_position_id="position-1",
-        principal_id="principal-1",
-        trigger_provider_message_key=f"message-{index}",
-        trigger_provider_message_id=str(index),
-        trigger_position=position,
-        provider_user_id="user-1",
-        invocation=True,
-        expected_file_count=None,
-        invocation_id=f"invocation-{index}",
-        initial_title_eligible=False,
-        state=ExternalChannelIngressItemState.PENDING,
-        attempt_count=0,
-        next_attempt_at=None,
-        processing_owner=None,
-        processing_generation=None,
-        batch_id=None,
-        created_at=_NOW,
-        updated_at=_NOW,
+    return require_instance(
+        MagicMock(
+            spec=RDBExternalChannelIngressItem,
+            id=f"item-{index}",
+            owner_id="owner-1",
+            queue_key=f"{index:032d}",
+            deduplication_key=f"{index:064d}",
+            provider_event_id=f"event-{index}",
+            connection_id="connection-1",
+            provider=ExternalChannelProvider.SLACK,
+            ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+            configuration_generation=1,
+            authority_kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
+            authority_lease_owner=None,
+            authority_lease_generation=None,
+            provider_event_type="message",
+            provider_tenant_id="tenant-1",
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="channel-1",
+            provider_parent_channel_id=None,
+            provider_thread_key="thread-1",
+            delivery_thread_key="thread-1",
+            provider_resource_key="resource-1",
+            source_resource_id="resource-1",
+            conversation_position_id="position-1",
+            principal_id="principal-1",
+            trigger_provider_message_key=f"message-{index}",
+            trigger_provider_message_id=str(index),
+            trigger_position=position,
+            provider_user_id="user-1",
+            invocation=True,
+            expected_file_count=None,
+            invocation_id=f"invocation-{index}",
+            initial_title_eligible=False,
+            state=ExternalChannelIngressItemState.PENDING,
+            attempt_count=0,
+            next_attempt_at=None,
+            processing_owner=None,
+            processing_generation=None,
+            batch_id=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        ),
+        RDBExternalChannelIngressItem,
     )
 
 
@@ -240,6 +250,29 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
+async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -> None:
+    """Provisioning reads the first queued trigger while its owner remains locked."""
+    repository = ExternalChannelIngressQueueRepository()
+    session = _session()
+    first = _item(1)
+    first.provider = ExternalChannelProvider.DISCORD
+    first.invocation = False
+    session.scalar.return_value = first
+
+    item = await repository.lock_first_authoritative_item(
+        session,
+        owner_id="owner-1",
+    )
+
+    assert item is not None
+    assert item.id == first.id
+    assert item.provider is ExternalChannelProvider.DISCORD
+    assert item.invocation is False
+    statement = session.scalar.await_args.args[0]
+    assert statement._limit_clause.value == 1  # noqa: SLF001
+    assert statement._for_update_arg is not None  # noqa: SLF001
+
+
 async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -> None:
     """Provisioning marks the first invocation only after Session creation commits."""
     repository = ExternalChannelIngressQueueRepository()
@@ -252,7 +285,7 @@ async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -
 
     await repository.mark_owner_ready(
         session,
-        owner=cast(RDBExternalChannelIngressOwner, owner),
+        owner=owner,
         binding_id="binding-created",
         session_id="session-created",
         initial_title_eligible=True,
@@ -339,7 +372,7 @@ async def test_retry_moves_same_item_and_original_age_to_queue_tail() -> None:
 
     await repository.move_to_retry_tail(
         session,
-        item=cast(RDBExternalChannelIngressItem, item),
+        item=item,
         next_attempt_at=next_attempt_at,
     )
 
@@ -387,7 +420,7 @@ def test_ready_owner_is_not_reused_for_an_unready_target() -> None:
     owner = _owner(first_batch_pending=True)
 
     compatible = repository._reconcile_owner(  # noqa: SLF001
-        cast(RDBExternalChannelIngressOwner, owner),
+        owner,
         expected=ExternalChannelIngressOwnerCreate(
             connection_id="connection-1",
             target_resource_id="resource-1",
@@ -413,7 +446,7 @@ def test_unready_owner_adopts_a_compatible_ready_binding() -> None:
     owner.participation_settings_generation = 1
 
     compatible = repository._reconcile_owner(  # noqa: SLF001
-        cast(RDBExternalChannelIngressOwner, owner),
+        owner,
         expected=ExternalChannelIngressOwnerCreate(
             connection_id="connection-1",
             target_resource_id="resource-1",

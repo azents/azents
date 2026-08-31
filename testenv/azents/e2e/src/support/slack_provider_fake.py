@@ -13,7 +13,7 @@ import time
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
-from typing import ClassVar, cast
+from typing import ClassVar, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 _HTTP_PORT = 8083
@@ -22,6 +22,87 @@ _MAX_CONFIGURED_FILE_BYTES = 8 * 1024 * 1024
 _MAX_SCENARIO_SEQUENCE_LENGTH = 10
 _MAX_RETRY_AFTER_SECONDS = 300
 _APPROVAL_PATH = re.compile(r"/external-channel/access/([^/?\s]+)")
+
+
+class _UploadAllocation(NamedTuple):
+    """Allocated fake upload identity and path."""
+
+    file_id: str
+    upload_path: str
+
+
+class _RecordedView(NamedTuple):
+    """Recorded provider view identity and hash."""
+
+    view_id: str
+    view_hash: str
+
+
+class _CompletedUploads(NamedTuple):
+    """Upload completion status and aggregate received bytes."""
+
+    completed: bool
+    total_bytes: int
+
+
+class _SelectorControlEvidence(NamedTuple):
+    """Selector action IDs and its opaque admission identity."""
+
+    action_ids: list[str]
+    selector_admission_id: str | None
+
+
+def _object(value: object) -> dict[str, object]:
+    """Validate one provider object with string keys."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ValueError("Expected an object with string keys.")
+    return value
+
+
+def _list(value: object) -> list[object]:
+    """Validate one provider list."""
+    if not isinstance(value, list):
+        raise ValueError("Expected a list.")
+    return value
+
+
+def _mapping(value: object) -> dict[object, object]:
+    """Validate one provider mapping."""
+    if not isinstance(value, dict):
+        raise ValueError("Expected an object.")
+    return {key: item for key, item in value.items()}
+
+
+def _strings(value: object) -> list[str]:
+    """Validate one provider string list."""
+    values = _list(value)
+    if not all(isinstance(item, str) for item in values):
+        raise ValueError("Expected a list of strings.")
+    return [item for item in values if isinstance(item, str)]
+
+
+def _ints(value: object) -> list[int]:
+    """Validate one provider integer list."""
+    values = _list(value)
+    if not all(isinstance(item, int) and not isinstance(item, bool) for item in values):
+        raise ValueError("Expected a list of integers.")
+    return [
+        item for item in values if isinstance(item, int) and not isinstance(item, bool)
+    ]
+
+
+def _string(value: object) -> str:
+    """Validate one provider string."""
+    if not isinstance(value, str):
+        raise ValueError("Expected a string.")
+    return value
+
+
+def _socket(value: object) -> socket.socket:
+    """Validate the accepted Socket Mode connection."""
+    if not isinstance(value, socket.socket):
+        raise TypeError("Expected a socket connection.")
+    return value
 
 
 class FakeState:
@@ -44,6 +125,7 @@ class FakeState:
             self.provider_team_id = "T-E2E"
             self.provider_bot_user_id = "U-BOT-E2E"
             self.granted_scopes = (
+                "assistant:write",
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
@@ -61,6 +143,10 @@ class FakeState:
                 "chat.delete": "delivered",
             }
             self.delivery_scenario_sequences: dict[str, list[str]] = {}
+            self.presence_scenarios: dict[str, str] = {
+                "assistant.threads.setStatus": "delivered",
+                "agents.sessions.setStatus": "delivered",
+            }
             self.file_scenarios: dict[str, str] = {
                 "files.info": "available",
                 "file.download": "available",
@@ -81,6 +167,7 @@ class FakeState:
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
+            self.presence: list[dict[str, object]] = []
             self.views: list[dict[str, object]] = []
             self._transient_views: dict[str, dict[str, object]] = {}
             self.socket_connections = 0
@@ -109,6 +196,7 @@ class FakeState:
             "granted_scopes",
             "delivery_scenarios",
             "delivery_scenario_sequences",
+            "presence_scenarios",
             "file_scenarios",
             "view_scenarios",
             "files",
@@ -128,60 +216,73 @@ class FakeState:
                 "provider_bot_user_id",
             ):
                 value = payload.get(name)
-                if value is not None:
-                    if not isinstance(value, str):
-                        raise ValueError(f"{name} must be a string.")
-                    setattr(self, name, value)
+                if value is None:
+                    continue
+                if not isinstance(value, str):
+                    raise ValueError(f"{name} must be a string.")
+                match name:
+                    case "auth_scenario":
+                        self.auth_scenario = value
+                    case "membership_scenario":
+                        self.membership_scenario = value
+                    case "history_scenario":
+                        self.history_scenario = value
+                    case "permalink_scenario":
+                        self.permalink_scenario = value
+                    case "provider_app_id":
+                        self.provider_app_id = value
+                    case "provider_team_id":
+                        self.provider_team_id = value
+                    case "provider_bot_user_id":
+                        self.provider_bot_user_id = value
             granted_scopes = payload.get("granted_scopes")
             if granted_scopes is not None:
                 if not isinstance(granted_scopes, list) or not all(
-                    isinstance(scope, str)
-                    for scope in cast(list[object], granted_scopes)
+                    isinstance(scope, str) for scope in _list(granted_scopes)
                 ):
                     raise ValueError("granted_scopes must be a list of strings.")
-                self.granted_scopes = tuple(cast(list[str], granted_scopes))
+                self.granted_scopes = tuple(_strings(granted_scopes))
             delivery_scenarios = payload.get("delivery_scenarios")
             if delivery_scenarios is not None:
                 if not isinstance(delivery_scenarios, dict):
                     raise ValueError("delivery_scenarios must be an object.")
                 self.delivery_scenarios = {
                     str(key): str(value)
-                    for key, value in cast(
-                        dict[object, object],
-                        delivery_scenarios,
-                    ).items()
+                    for key, value in _mapping(delivery_scenarios).items()
                 }
             delivery_scenario_sequences = payload.get("delivery_scenario_sequences")
             if delivery_scenario_sequences is not None:
                 if not isinstance(delivery_scenario_sequences, dict):
                     raise ValueError("delivery_scenario_sequences must be an object.")
-                sequences = cast(
-                    dict[object, object],
-                    delivery_scenario_sequences,
-                )
+                sequences = _mapping(delivery_scenario_sequences)
                 typed_sequences: dict[str, list[str]] = {}
                 for key, value in sequences.items():
                     if not isinstance(key, str) or not isinstance(value, list):
                         raise ValueError(
                             "delivery_scenario_sequences must contain string lists."
                         )
-                    items = cast(list[object], value)
+                    items = _list(value)
                     if not items or not all(isinstance(item, str) for item in items):
                         raise ValueError(
                             "delivery_scenario_sequences must contain string lists."
                         )
-                    typed_sequences[key] = [cast(str, item) for item in items]
+                    typed_sequences[key] = [_string(item) for item in items]
                 self.delivery_scenario_sequences = typed_sequences
+            presence_scenarios = payload.get("presence_scenarios")
+            if presence_scenarios is not None:
+                if not isinstance(presence_scenarios, dict):
+                    raise ValueError("presence_scenarios must be an object.")
+                self.presence_scenarios = {
+                    str(key): str(value)
+                    for key, value in _mapping(presence_scenarios).items()
+                }
             file_scenarios = payload.get("file_scenarios")
             if file_scenarios is not None:
                 if not isinstance(file_scenarios, dict):
                     raise ValueError("file_scenarios must be an object.")
                 self.file_scenarios = {
                     str(key): str(value)
-                    for key, value in cast(
-                        dict[object, object],
-                        file_scenarios,
-                    ).items()
+                    for key, value in _mapping(file_scenarios).items()
                 }
             view_scenarios = payload.get("view_scenarios")
             if view_scenarios is not None:
@@ -189,10 +290,7 @@ class FakeState:
                     raise ValueError("view_scenarios must be an object.")
                 self.view_scenarios = {
                     str(key): str(value)
-                    for key, value in cast(
-                        dict[object, object],
-                        view_scenarios,
-                    ).items()
+                    for key, value in _mapping(view_scenarios).items()
                 }
             files = payload.get("files")
             if files is not None:
@@ -206,7 +304,7 @@ class FakeState:
                     raise ValueError(
                         "history_scenario_sequence must contain 1-10 strings."
                     )
-                scenario_items = cast(list[object], history_scenario_sequence)
+                scenario_items = _list(history_scenario_sequence)
                 if (
                     not scenario_items
                     or len(scenario_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
@@ -215,7 +313,7 @@ class FakeState:
                     raise ValueError(
                         "history_scenario_sequence must contain 1-10 strings."
                     )
-                self.history_scenario_sequence = list(cast(list[str], scenario_items))
+                self.history_scenario_sequence = list(_strings(scenario_items))
             retry_after_seconds = payload.get("history_retry_after_seconds")
             if retry_after_seconds is not None:
                 if not isinstance(retry_after_seconds, list):
@@ -223,7 +321,7 @@ class FakeState:
                         "history_retry_after_seconds must contain 1-10 integers "
                         "from 1 to 300."
                     )
-                retry_items = cast(list[object], retry_after_seconds)
+                retry_items = _list(retry_after_seconds)
                 if (
                     not retry_items
                     or len(retry_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
@@ -238,13 +336,14 @@ class FakeState:
                         "history_retry_after_seconds must contain 1-10 integers "
                         "from 1 to 300."
                     )
-                self.history_retry_after_seconds = list(cast(list[int], retry_items))
+                self.history_retry_after_seconds = list(_ints(retry_items))
             socket_sessions = payload.get("socket_sessions")
             if socket_sessions is not None:
                 self.socket_sessions = _socket_sessions(socket_sessions)
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
+            self.presence = []
             self.views = []
             self._transient_views = {}
             self.uploads = {}
@@ -304,7 +403,7 @@ class FakeState:
                 "Barrier requires a Slack history operation and positive occurrence."
             )
         with self.lock:
-            self._operation_barrier_operation = cast(str, operation)
+            self._operation_barrier_operation = _string(operation)
             self._operation_barrier_occurrence = occurrence
             self._operation_barrier_reached.clear()
             self._operation_barrier_release.clear()
@@ -348,7 +447,7 @@ class FakeState:
             self._message_sequence += 1
             return f"1721600100.{self._message_sequence:06d}"
 
-    def next_upload(self, *, expected_length: int) -> tuple[str, str]:
+    def next_upload(self, *, expected_length: int) -> _UploadAllocation:
         """Allocate one deterministic temporary upload identity and path."""
         with self.lock:
             self._upload_sequence += 1
@@ -359,7 +458,7 @@ class FakeState:
                 "received_length": None,
                 "uploaded": False,
             }
-            return file_id, upload_path
+            return _UploadAllocation(file_id, upload_path)
 
     def record_upload(
         self,
@@ -389,7 +488,7 @@ class FakeState:
         private_metadata: str | None,
         route_ids: list[str],
         has_submit: bool,
-    ) -> tuple[str, str]:
+    ) -> _RecordedView:
         """Record bounded view evidence without persisting signed metadata."""
         with self.lock:
             self._view_sequence += 1
@@ -411,7 +510,7 @@ class FakeState:
                 "private_metadata": private_metadata,
                 "route_ids": route_ids,
             }
-            return view_id, view_hash
+            return _RecordedView(view_id, view_hash)
 
     def transient_view(self, control_scope: str) -> dict[str, object] | None:
         """Return one test-local signed view handoff outside persistent evidence."""
@@ -422,19 +521,19 @@ class FakeState:
     def completed_uploads(
         self,
         file_ids: list[str],
-    ) -> tuple[bool, int]:
+    ) -> _CompletedUploads:
         """Return whether every ordered ID uploaded and its aggregate byte count."""
         with self.lock:
             total_bytes = 0
             for file_id in file_ids:
                 upload = self.uploads.get(file_id)
                 if upload is None or upload.get("uploaded") is not True:
-                    return False, 0
+                    return _CompletedUploads(False, 0)
                 received_length = upload.get("received_length")
                 if not isinstance(received_length, int):
-                    return False, 0
+                    return _CompletedUploads(False, 0)
                 total_bytes += received_length
-            return True, total_bytes
+            return _CompletedUploads(True, total_bytes)
 
     def evidence(self) -> dict[str, object]:
         """Return sanitized evidence suitable for test assertions and failure output."""
@@ -443,6 +542,7 @@ class FakeState:
                 "request_counts": dict(self.request_counts),
                 "requests": list(self.requests),
                 "deliveries": list(self.deliveries),
+                "presence": list(self.presence),
                 "views": list(self.views),
                 "socket": {
                     "connections": self.socket_connections,
@@ -567,6 +667,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation in {"chat.postMessage", "chat.update", "chat.delete"}:
             self._delivery(operation, body)
             return
+        if operation in {
+            "assistant.threads.setStatus",
+            "agents.sessions.setStatus",
+        }:
+            self._presence(operation, body)
+            return
         if operation in {"views.open", "views.update"}:
             self._view_mutation(operation, body)
             return
@@ -630,7 +736,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if self._common_failure(scenario):
             return
         view = body.get("view")
-        typed_view = cast(dict[str, object], view) if isinstance(view, dict) else {}
+        typed_view = _object(view) if isinstance(view, dict) else {}
         route_ids = _selector_route_ids(typed_view)
         callback_id = _optional_string(typed_view, "callback_id")
         private_metadata = _optional_string(typed_view, "private_metadata")
@@ -960,13 +1066,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if selector_admission_id is not None:
             delivery["selector_admission_id"] = selector_admission_id
         blocks = body.get("blocks")
-        typed_blocks = cast(list[object], blocks) if isinstance(blocks, list) else []
+        typed_blocks = _list(blocks) if isinstance(blocks, list) else []
         if (
             operation == "chat.update"
             and isinstance(blocks, list)
             and any(
-                isinstance(block, dict)
-                and cast(dict[str, object], block).get("type") == "plan"
+                isinstance(block, dict) and _object(block).get("type") == "plan"
                 for block in typed_blocks
             )
         ):
@@ -975,6 +1080,31 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "ts": timestamp})
+
+    def _presence(self, operation: str, body: dict[str, object]) -> None:
+        """Record sanitized Slack Work status without retaining titles or users."""
+        with self.state.lock:
+            scenario = self.state.presence_scenarios.get(operation, "delivered")
+        if scenario == "feature_disabled":
+            self._json_response(200, {"ok": False, "error": "feature_disabled"})
+            return
+        if scenario == "missing_scope":
+            self._json_response(200, {"ok": False, "error": "missing_scope"})
+            return
+        if self._common_failure(scenario):
+            return
+        status = _optional_string(body, "status")
+        evidence: dict[str, object] = {
+            "operation": operation,
+            "channel": _optional_string(body, "channel_id"),
+            "thread_ts": _optional_string(body, "thread_ts"),
+            "desired_state": ("idle" if status in {"", "active"} else "processing"),
+            "has_initiator": _optional_string(body, "initiator_user_id") is not None,
+            "outcome": "delivered",
+        }
+        with self.state.lock:
+            self.state.presence.append(evidence)
+        self._json_response(200, {"ok": True})
 
     def _file_failure(self, scenario: str) -> bool:
         if scenario == "ambiguous":
@@ -1051,7 +1181,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return {}
         except json.JSONDecodeError:
             return {}
-        return cast(dict[str, object], payload) if isinstance(payload, dict) else {}
+        return _object(payload) if isinstance(payload, dict) else {}
 
     def _json_response(
         self,
@@ -1096,7 +1226,7 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
 
     def handle(self) -> None:
         """Perform the handshake, send configured envelopes, and capture ACKs."""
-        request = cast(socket.socket, self.request)
+        request = _socket(self.request)
         request.settimeout(self.socket_timeout_seconds)
         headers = _read_http_headers(request)
         key = headers.get("sec-websocket-key")
@@ -1173,10 +1303,10 @@ def _object_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         raise ValueError("Expected a list of objects.")
     result: list[dict[str, object]] = []
-    for item in cast(list[object], value):
+    for item in _list(value):
         if not isinstance(item, dict):
             raise ValueError("Expected a list of objects.")
-        result.append(cast(dict[str, object], item))
+        result.append(_object(item))
     return result
 
 
@@ -1234,7 +1364,7 @@ def _form_value(key: str, values: list[str]) -> object:
 def _object_pages(value: object) -> list[list[dict[str, object]]]:
     if not isinstance(value, list):
         raise ValueError("history_pages must be a list.")
-    return [_object_list(page) for page in cast(list[object], value)]
+    return [_object_list(page) for page in _list(value)]
 
 
 def _configured_files(value: object) -> dict[str, dict[str, object]]:
@@ -1301,7 +1431,7 @@ def _approval_request_id(payload: dict[str, object]) -> str | None:
 
 def _selector_control_evidence(
     payload: dict[str, object],
-) -> tuple[list[str], str | None]:
+) -> _SelectorControlEvidence:
     """Return selector action IDs and its opaque admission without visible copy."""
     action_ids: list[str] = []
     selector_admission_id: str | None = None
@@ -1315,7 +1445,7 @@ def _selector_control_evidence(
                 value = element.get("value")
                 if isinstance(value, str) and value:
                     selector_admission_id = value
-    return action_ids, selector_admission_id
+    return _SelectorControlEvidence(action_ids, selector_admission_id)
 
 
 def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
@@ -1339,7 +1469,7 @@ def _body_metadata(body: dict[str, object]) -> dict[str, object]:
         metadata["length"] = length
     files = body.get("files")
     if isinstance(files, list):
-        metadata["file_count"] = len(cast(list[object], files))
+        metadata["file_count"] = len(_list(files))
     return metadata
 
 
@@ -1367,7 +1497,7 @@ def _session_presence_state(body: dict[str, object]) -> str | None:
         text = block.get("text")
         if not isinstance(text, dict):
             continue
-        rendered = cast(dict[str, object], text).get("text")
+        rendered = _object(text).get("text")
         if not isinstance(rendered, str):
             continue
         if rendered.endswith(" joined this conversation."):
@@ -1384,7 +1514,7 @@ def _selector_route_ids(view: dict[str, object]) -> list[str]:
         element = block.get("element")
         if not isinstance(element, dict):
             continue
-        options = cast(dict[str, object], element).get("options")
+        options = _object(element).get("options")
         for option in _object_list_or_empty(options):
             value = option.get("value")
             if isinstance(value, str) and value:
@@ -1486,7 +1616,7 @@ def _receive_websocket_acknowledgement(connection: socket.socket) -> str | None:
                 continue
             if not isinstance(payload, dict):
                 continue
-            acknowledged_id = cast(dict[str, object], payload).get("envelope_id")
+            acknowledged_id = _object(payload).get("envelope_id")
             if isinstance(acknowledged_id, str):
                 return acknowledged_id
     finally:

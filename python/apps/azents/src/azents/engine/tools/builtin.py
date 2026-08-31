@@ -24,7 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
+    RuntimeDesiredState,
     RuntimeProviderObservedState,
+    RuntimeRunnerState,
 )
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
@@ -126,6 +128,7 @@ from azents.services.file_storage import (
     GrepFileMatch,
     GrepLineMatch,
     GrepResult,
+    TextReadResult,
 )
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import (
@@ -140,6 +143,15 @@ from azents.services.session_working_folder_binding import (
 from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _RuntimeBehaviorPromptResult:
+    """Rendered Runtime behavior prompt and its operation authority."""
+
+    prompt: str
+    expected_authority: RuntimeOperationAuthority | None
+
 
 # ---------------------------------------------------------------------------
 # Memory prompt
@@ -1105,8 +1117,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return static runtime/files prompt for the current run."""
         if not await self._runtime_toolkit_allowed():
             return ""
-        behavior_prompt, expected_authority = await self._load_runtime_behavior_prompt()
-        self._expected_runtime_authority = expected_authority
+        behavior = await self._load_runtime_behavior_prompt()
+        self._expected_runtime_authority = behavior.expected_authority
         projection_target = await self._resolve_projection_runtime_target()
         projection_binding = await self._resolve_projection_binding(projection_target)
         projects = (
@@ -1131,8 +1143,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 else None
             ),
         )
-        if behavior_prompt:
-            return f"{prompt}\n\n{behavior_prompt}"
+        if behavior.prompt:
+            return f"{prompt}\n\n{behavior.prompt}"
         return prompt
 
     def _required_runtime_authority(self) -> RuntimeOperationAuthority:
@@ -1144,45 +1156,76 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
     async def _load_runtime_behavior_prompt(
         self,
-    ) -> tuple[str, RuntimeOperationAuthority | None]:
-        """Render desired Profile behavior without consulting Runner readiness."""
+    ) -> _RuntimeBehaviorPromptResult:
+        """Render behavior for the configuration serving Runtime operations."""
         async with self.session_manager() as session:
             runtime = await self.agent_runtime_repo.get_by_agent_id(
                 session,
                 self._runtime_agent_id,
             )
             if runtime is None:
-                return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+                return _RuntimeBehaviorPromptResult(
+                    prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                    expected_authority=None,
+                )
             profile_repository = self.agent_runtime_service.runtime_profile_repository
             state = await profile_repository.get_configuration_state(
                 session,
                 runtime_id=runtime.id,
             )
         if state is None:
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=None,
+            )
         desired = state.desired
+        applied = state.applied
+        operation_configuration = desired
+        if (
+            applied is not None
+            and applied.target_generation == runtime.desired_generation
+            and runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.runner_state is RuntimeRunnerState.READY
+            and runtime.runner_generation > 0
+            and runtime.workspace_path is not None
+        ):
+            operation_configuration = applied
         expected_authority = RuntimeOperationAuthority(
-            configuration_sequence=desired.sequence,
-            configuration_digest=desired.digest or "",
-            desired_generation=desired.target_generation,
+            configuration_sequence=operation_configuration.sequence,
+            configuration_digest=operation_configuration.digest or "",
+            desired_generation=operation_configuration.target_generation,
         )
         if (
-            desired.status is not RuntimeConfigurationStateStatus.READY
-            or desired.document is None
-            or desired.digest is None
-            or desired.document.resolved_configuration is None
+            operation_configuration is desired
+            and desired.status is not RuntimeConfigurationStateStatus.READY
+        ) or (
+            operation_configuration.document is None
+            or operation_configuration.digest is None
+            or operation_configuration.document.resolved_configuration is None
         ):
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        effective_profile = desired.document.resolved_configuration.get(
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
+        effective_profile = operation_configuration.document.resolved_configuration.get(
             "effective_profile"
         )
         if not isinstance(effective_profile, dict):
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
         try:
             parse_runtime_infrastructure_profile_spec(effective_profile)
         except ValidationError:
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        return ("", expected_authority)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
+        return _RuntimeBehaviorPromptResult(
+            prompt="",
+            expected_authority=expected_authority,
+        )
 
     async def _make_instruction_context(
         self,
@@ -1639,10 +1682,10 @@ class RuntimeRunnerFileStorage:
         *,
         agent_id: str,
         offset: int,
-        max_bytes: int,
+        limit: int,
         encoding: str,
-    ) -> str:
-        """Read one bounded decoded range through the Runtime Runner."""
+    ) -> TextReadResult:
+        """Read one bounded decoded character range through the Runtime Runner."""
         runtime = await self._ready_runtime(agent_id)
         try:
             self._count_runtime_operation()
@@ -1651,12 +1694,17 @@ class RuntimeRunnerFileStorage:
                 runner_generation=runtime.runner_generation,
                 owner_session_id=self.owner_session_id,
                 path=path,
-                offset=offset,
-                max_bytes=max_bytes,
+                character_offset=offset,
+                max_characters=limit,
                 encoding=encoding,
                 deadline_at=_runtime_file_operation_deadline(),
             )
-            return result.text
+            return TextReadResult(
+                text=result.text,
+                start_character=result.start_character,
+                end_character=result.end_character,
+                truncated=result.truncated,
+            )
         except RuntimeRunnerOperationFailedError as exc:
             if exc.code == "FILE_READ_TEXT_DECODE_ERROR":
                 raise UnicodeDecodeError(
@@ -1666,7 +1714,14 @@ class RuntimeRunnerFileStorage:
                     0,
                     "Runtime file range cannot be decoded",
                 ) from exc
+            if exc.code == "FILE_READ_TEXT_UNSUPPORTED_ENCODING":
+                raise LookupError(f"Unsupported text encoding: {encoding}") from exc
             _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
 
     async def read_range(
         self,
@@ -1725,7 +1780,7 @@ class RuntimeRunnerFileStorage:
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
         agent_id: str,
     ) -> RuntimeAttachment:
@@ -1745,7 +1800,7 @@ class RuntimeRunnerFileStorage:
             _raise_storage_error(exc)
         return RuntimeAttachment(
             uri=path,
-            media_type=media_type,
+            media_type=media_type or guess_media_type(path),
             size=result.bytes_written,
             name=PurePosixPath(path).name,
             text_preview=None,
@@ -1910,7 +1965,7 @@ class RuntimeRunnerFileStorage:
             searched_file_count=result.searched_file_count,
             matched_file_count=result.matched_file_count,
             truncated=result.truncated,
-            stopped_reason=getattr(result, "stopped_reason", None),
+            stopped_reason=result.stopped_reason,
         )
 
     def begin_runtime_operation_count(self) -> Token[int | None]:

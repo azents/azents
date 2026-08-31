@@ -2,12 +2,17 @@
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager
-from typing import cast
 
 import httpx
 
+from azents.core.external_channel_projection import (
+    is_external_channel_projection,
+    is_external_channel_projection_list,
+)
+from azents.repos.external_channel.data import DiscordGatewayTypingTarget
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
     project_discord_message,
@@ -18,6 +23,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayEventHandler,
     DiscordGatewayIntentsError,
     DiscordGatewayLifecycleHandler,
+    DiscordGatewayTypingTargetLoader,
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKApplication,
@@ -36,6 +42,12 @@ from azents.services.external_channel.discord_sdk import (
 )
 
 _MAX_GATEWAY_IDLE_SECONDS = 3600.0
+_TYPING_SNAPSHOT_INTERVAL_SECONDS = 0.1
+_TYPING_SNAPSHOT_RETRY_INTERVAL_SECONDS = 0.01
+_TYPING_SNAPSHOT_PUBLISH_ATTEMPTS = 2
+_TYPING_SNAPSHOT_MAX_TARGETS = 100
+
+logger = logging.getLogger(__name__)
 
 
 class DiscordTestenvSDKClientFactory:
@@ -59,6 +71,32 @@ class DiscordTestenvSDKClientFactory:
             session = _DiscordTestenvSDKSession(client, self._fixture_base_url)
             await session.initialize()
             yield session
+
+
+class DiscordTestenvInteractionResponseClient:
+    """Complete deferred responses through the deterministic provider fixture."""
+
+    def __init__(self, fixture_base_url: str) -> None:
+        self.fixture_base_url = fixture_base_url.rstrip("/")
+
+    async def edit_original(
+        self,
+        *,
+        application_id: str,
+        interaction_token: str,
+        response: dict[str, object],
+    ) -> None:
+        """Record one deferred interaction completion without retaining its token."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            result = await client.post(
+                f"{self.fixture_base_url}/__testenv/interaction-response",
+                json={
+                    "application_id": application_id,
+                    "interaction_token": interaction_token,
+                    "response": response,
+                },
+            )
+            result.raise_for_status()
 
 
 class _DiscordTestenvSDKSession:
@@ -355,27 +393,36 @@ class _DiscordTestenvSDKSession:
             payload: object = response.json()
         except ValueError as error:
             raise DiscordSDKUnavailable from error
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise DiscordSDKUnavailable("Discord SDK fixture response is invalid.")
-        return cast(dict[str, object], payload)
+        return payload
 
 
 class DiscordTestenvGatewayRunner:
     """Drive deterministic Gateway callbacks through an injected fixture contract."""
 
     def __init__(self, fixture_base_url: str) -> None:
-        self._url = f"{fixture_base_url.rstrip('/')}/__testenv/gateway"
+        base_url = fixture_base_url.rstrip("/")
+        self._gateway_url = f"{base_url}/__testenv/gateway"
+        self._typing_url = f"{base_url}/__testenv/typing"
 
     async def run_connection(
         self,
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
     ) -> None:
-        del bot_token
+        del (
+            bot_token,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+        )
         resumed = False
         channel_names: dict[str, str] = {}
         managed_roles: dict[str, str] = {}
@@ -383,7 +430,7 @@ class DiscordTestenvGatewayRunner:
             while True:
                 payload = await _gateway_attempt(
                     client,
-                    self._url,
+                    self._gateway_url,
                     target_guild_id=target_guild_id,
                     resumed=resumed,
                 )
@@ -406,6 +453,11 @@ class DiscordTestenvGatewayRunner:
                 if scenario != "open":
                     raise DiscordGatewayError(
                         "Discord deterministic Gateway scenario is unsupported."
+                    )
+                typing_targets = await load_typing_targets()
+                if typing_targets is None:
+                    raise DiscordGatewayError(
+                        "Discord Gateway typing target authority is unavailable."
                     )
                 await handle_lifecycle("resumed" if resumed else "ready")
                 for dispatch in _object_list(payload, "dispatches"):
@@ -454,8 +506,13 @@ class DiscordTestenvGatewayRunner:
                             message=projection,
                         )
                     )
-                while True:
-                    await asyncio.sleep(_MAX_GATEWAY_IDLE_SECONDS)
+                await _run_typing_snapshots(
+                    client=client,
+                    url=self._typing_url,
+                    target_guild_id=target_guild_id,
+                    initial_targets=typing_targets,
+                    load_typing_targets=load_typing_targets,
+                )
 
 
 async def _gateway_attempt(
@@ -488,11 +545,91 @@ async def _gateway_attempt(
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture response is invalid."
         ) from error
-    if not isinstance(payload, dict):
+    if not is_external_channel_projection(payload):
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture response is invalid."
         )
-    return cast(dict[str, object], payload)
+    return payload
+
+
+async def _run_typing_snapshots(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    target_guild_id: str,
+    initial_targets: tuple[DiscordGatewayTypingTarget, ...],
+    load_typing_targets: DiscordGatewayTypingTargetLoader,
+) -> None:
+    """Publish complete safe typing snapshots until the Gateway is cancelled."""
+    targets = initial_targets
+    while True:
+        await _publish_typing_snapshot(
+            client=client,
+            url=url,
+            targets=_typing_snapshot_targets(
+                targets,
+                target_guild_id=target_guild_id,
+            ),
+        )
+        await asyncio.sleep(_TYPING_SNAPSHOT_INTERVAL_SECONDS)
+        targets = await load_typing_targets()
+        if targets is None:
+            raise DiscordGatewayError(
+                "Discord Gateway typing target authority is unavailable."
+            )
+
+
+async def _publish_typing_snapshot(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    targets: list[dict[str, object]],
+) -> None:
+    """Best-effort publish one snapshot with a bounded provider retry."""
+    for attempt in range(_TYPING_SNAPSHOT_PUBLISH_ATTEMPTS):
+        try:
+            response = await client.post(url, json={"targets": targets})
+        except asyncio.CancelledError:
+            raise
+        except (httpx.HTTPError, OSError) as error:
+            logger.warning(
+                "Discord testenv typing snapshot delivery failed.",
+                extra={"error_type": type(error).__name__},
+            )
+        else:
+            if response.is_success:
+                return
+            logger.warning(
+                "Discord testenv typing snapshot was rejected.",
+                extra={"status_code": response.status_code},
+            )
+        if attempt + 1 < _TYPING_SNAPSHOT_PUBLISH_ATTEMPTS:
+            await asyncio.sleep(_TYPING_SNAPSHOT_RETRY_INTERVAL_SECONDS)
+
+
+def _typing_snapshot_targets(
+    targets: tuple[DiscordGatewayTypingTarget, ...],
+    *,
+    target_guild_id: str,
+) -> list[dict[str, object]]:
+    """Validate and redact active Work identities into fixture-safe targets."""
+    by_channel: dict[str, dict[str, object]] = {}
+    for target in targets:
+        if (
+            target.guild_id != target_guild_id
+            or not target.guild_id.isdigit()
+            or not target.channel_id.isdigit()
+            or not target.work_cycle_ids
+        ):
+            raise DiscordGatewayError("Discord typing target is invalid.")
+        by_channel[target.channel_id] = {
+            "guild_id": target.guild_id,
+            "channel_id": target.channel_id,
+            "work_cycle_count": len(target.work_cycle_ids),
+        }
+    if len(by_channel) > _TYPING_SNAPSHOT_MAX_TARGETS:
+        raise DiscordGatewayError("Discord typing target count is invalid.")
+    return list(by_channel.values())
 
 
 def _fixture_sdk_error(response: httpx.Response) -> DiscordSDKError:
@@ -522,9 +659,9 @@ def _required_object(
     key: str,
 ) -> dict[str, object]:
     value = payload.get(key)
-    if not isinstance(value, dict):
+    if not is_external_channel_projection(value):
         raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return cast(dict[str, object], value)
+    return value
 
 
 def _object_list(
@@ -532,9 +669,9 @@ def _object_list(
     key: str,
 ) -> list[dict[str, object]]:
     value = payload.get(key)
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+    if not is_external_channel_projection_list(value):
         raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return [cast(dict[str, object], item) for item in value]
+    return value
 
 
 def _command(payload: Mapping[str, object]) -> DiscordSDKCommand:
@@ -589,23 +726,21 @@ def _capture_gateway_guild(
     channels = payload.get("channels")
     if isinstance(channels, list):
         for raw_channel in channels:
-            if not isinstance(raw_channel, dict):
+            if not is_external_channel_projection(raw_channel):
                 continue
-            channel = cast(dict[str, object], raw_channel)
-            channel_id = channel.get("id")
-            name = channel.get("name")
+            channel_id = raw_channel.get("id")
+            name = raw_channel.get("name")
             if isinstance(channel_id, str) and isinstance(name, str):
                 channel_names[channel_id] = name
     roles = payload.get("roles")
     if isinstance(roles, list):
         for raw_role in roles:
-            if not isinstance(raw_role, dict):
+            if not is_external_channel_projection(raw_role):
                 continue
-            role = cast(dict[str, object], raw_role)
-            role_id = role.get("id")
-            tags = role.get("tags")
-            if not isinstance(role_id, str) or not isinstance(tags, dict):
+            role_id = raw_role.get("id")
+            tags = raw_role.get("tags")
+            if not isinstance(role_id, str) or not is_external_channel_projection(tags):
                 continue
-            bot_id = cast(dict[str, object], tags).get("bot_id")
+            bot_id = tags.get("bot_id")
             if isinstance(bot_id, str):
                 managed_roles[role_id] = bot_id

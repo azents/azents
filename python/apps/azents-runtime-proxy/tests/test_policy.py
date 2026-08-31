@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from cryptography import x509
@@ -17,6 +18,13 @@ from azents_runtime_proxy.policy import (
     load_proxy_policy,
     parse_proxy_policy,
 )
+
+
+class _CertificateEvidence(NamedTuple):
+    """Generated certificate path and its SHA-256 fingerprint."""
+
+    path: Path
+    fingerprint: str
 
 
 def _document() -> dict[str, object]:
@@ -95,9 +103,9 @@ def test_policy_parser_rejects_unknown_and_noncanonical_fields() -> None:
 def test_policy_loader_verifies_canonical_digest_artifact_and_ca(
     tmp_path: Path,
 ) -> None:
-    certificate_path, fingerprint = _certificate(tmp_path)
+    evidence = _certificate(tmp_path)
     document = _document()
-    document["ca_fingerprint"] = fingerprint
+    document["ca_fingerprint"] = evidence.fingerprint
     raw = json.dumps(document, sort_keys=True, separators=(",", ":"))
     policy_path = tmp_path / "policy.json"
     policy_path.write_text(raw, encoding="utf-8")
@@ -107,7 +115,7 @@ def test_policy_loader_verifies_canonical_digest_artifact_and_ca(
         policy_path,
         expected_policy_digest=digest,
         expected_artifact_digest="c" * 64,
-        public_ca_path=certificate_path,
+        public_ca_path=evidence.path,
     )
 
     assert policy.digest == digest
@@ -116,11 +124,11 @@ def test_policy_loader_verifies_canonical_digest_artifact_and_ca(
             policy_path,
             expected_policy_digest="e" * 64,
             expected_artifact_digest="c" * 64,
-            public_ca_path=certificate_path,
+            public_ca_path=evidence.path,
         )
 
 
-def _certificate(tmp_path: Path) -> tuple[Path, str]:
+def _certificate(tmp_path: Path) -> _CertificateEvidence:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name((x509.NameAttribute(NameOID.COMMON_NAME, "test-ca"),))
     certificate = (
@@ -138,4 +146,4 @@ def _certificate(tmp_path: Path) -> tuple[Path, str]:
     fingerprint = hashlib.sha256(
         certificate.public_bytes(serialization.Encoding.DER)
     ).hexdigest()
-    return path, fingerprint
+    return _CertificateEvidence(path=path, fingerprint=fingerprint)

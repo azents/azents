@@ -7,7 +7,6 @@ import threading
 import time
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
-from typing import cast
 
 import pytest
 import requests
@@ -19,6 +18,13 @@ from support.slack_provider_fake import (
     SlackWebSocketHandler,
     ThreadingSocketServer,
 )
+
+
+def _object(value: object) -> dict[str, object]:
+    """Validate one fake evidence object with string keys."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError("Expected an object with string keys.")
+    return value
 
 
 @pytest.fixture
@@ -134,6 +140,61 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert history.status_code == 429
     assert history.headers["Retry-After"] == "1"
     assert update == {"ok": False, "error": "token_revoked"}
+
+
+def test_slack_fake_records_sanitized_channel_and_thread_presence(
+    slack_fake_url: str,
+) -> None:
+    """Expose native Work status evidence without retaining status text or users."""
+    channel = requests.post(
+        f"{slack_fake_url}/api/assistant.threads.setStatus",
+        json={
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "status": "Private work title",
+            "username": "Private Agent",
+        },
+        timeout=5,
+    )
+    thread = requests.post(
+        f"{slack_fake_url}/api/agents.sessions.setStatus",
+        json={
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000200",
+            "status": "processing",
+            "initiator_user_id": "U-PRIVATE",
+        },
+        timeout=5,
+    )
+
+    channel.raise_for_status()
+    thread.raise_for_status()
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert evidence["presence"] == [
+        {
+            "operation": "assistant.threads.setStatus",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "desired_state": "processing",
+            "has_initiator": False,
+            "outcome": "delivered",
+        },
+        {
+            "operation": "agents.sessions.setStatus",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000200",
+            "desired_state": "processing",
+            "has_initiator": True,
+            "outcome": "delivered",
+        },
+    ]
+    assert "Private work title" not in rendered
+    assert "Private Agent" not in rendered
+    assert "U-PRIVATE" not in rendered
 
 
 def test_slack_fake_sequences_retry_after_and_blocks_exact_history(
@@ -884,9 +945,7 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
         thread.join(timeout=5)
 
     evidence = state.evidence()
-    socket_evidence = evidence["socket"]
-    assert isinstance(socket_evidence, dict)
-    socket_evidence_object = cast(dict[str, object], socket_evidence)
+    socket_evidence_object = _object(evidence["socket"])
     assert socket_evidence_object["connections"] == 1
     assert socket_evidence_object["envelope_ids"] == ["Env-1"]
     assert socket_evidence_object["acknowledgements"] == ["Env-1"]

@@ -5,7 +5,6 @@ import dataclasses
 import json
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta, timezone
-from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -17,9 +16,12 @@ from azents_runtime_control.system_metrics import (
 from redis.asyncio import Redis
 
 from azents.runtime.coordination.data import (
+    JsonValue,
     RuntimeBodyChunk,
     RuntimeConnectionKind,
+    RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationStatus,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeOperationTransferDirection,
@@ -93,21 +95,40 @@ class FakeRedisConnectionStore:
         self,
         script: str,
         numkeys: int,
-        key: str,
         *args: object,
-    ) -> int:
-        del numkeys
+    ) -> int | str:
+        keys = [str(value) for value in args[:numkeys]]
+        values = args[numkeys:]
+        if "INCR" in script:
+            generation_key, connection_key = keys
+            generation = int(self.data.get(generation_key, "0")) + 1
+            self.data[generation_key] = str(generation)
+            payload = _json_object(str(values[0]))
+            payload["generation"] = generation
+            encoded = json.dumps(payload)
+            self.data[connection_key] = encoded
+            return encoded
+        key = keys[0]
         raw = self.data.get(key)
         if raw is None:
             return 0
-        payload = json.loads(raw)
-        if int(payload["generation"]) != int(cast(int, args[0])):
+        payload = _json_object(raw)
+        stored_generation = payload.get("generation")
+        expected_generation = values[0]
+        if (
+            isinstance(stored_generation, bool)
+            or not isinstance(stored_generation, int | str)
+            or isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int | str)
+        ):
+            raise ValueError("Fake Redis generation must be an integer")
+        if int(stored_generation) != int(expected_generation):
             return 0
         if "DEL" in script:
             self.data.pop(key, None)
             return 1
         if "SET" in script:
-            self.data[key] = str(args[1])
+            self.data[key] = str(values[1])
             return 1
         return 0
 
@@ -124,7 +145,6 @@ async def redis_store(
             RedisRuntimeCoordinationStore(
                 client,
                 stream_ttl_seconds=3600,
-                connection_generation_ttl_seconds=604800,
             ),
             client,
         )
@@ -295,8 +315,10 @@ async def test_operation_metadata_heartbeat_status_and_delete(
     created_at = _now()
     metadata = RuntimeOperationMetadata(
         operation_id="op-1",
+        request_id="req-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=1,
         operation_type="test.operation",
         transfer_id=None,
@@ -304,6 +326,7 @@ async def test_operation_metadata_heartbeat_status_and_delete(
         transfer_dispatch_id=None,
         transfer_direction=None,
         request_stream_id="runner:runtime-1",
+        request_cursor=None,
         reply_stream_id="reply:req-1",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=created_at,
@@ -344,8 +367,10 @@ async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
     created_at = _now()
     metadata = RuntimeOperationMetadata(
         operation_id="transfer-operation",
+        request_id="transfer-request",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=3,
         operation_type="file.transfer.v1",
         transfer_id="transfer-1",
@@ -353,6 +378,7 @@ async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
         transfer_dispatch_id="dispatch-1",
         transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
         request_stream_id="runner:runtime-1:generation:3",
+        request_cursor=None,
         reply_stream_id="reply:transfer-operation",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=created_at,
@@ -371,6 +397,19 @@ async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
     assert ensured == [metadata, metadata]
     conflicting = dataclasses.replace(metadata, generation=4)
     assert await store.ensure_operation_metadata(conflicting, ttl_seconds=60) is None
+    conflicting_subject = dataclasses.replace(
+        metadata,
+        target_subject_id="runtime-2",
+    )
+    assert (
+        await store.ensure_operation_metadata(conflicting_subject, ttl_seconds=60)
+        is None
+    )
+    conflicting_request = dataclasses.replace(metadata, request_id="other-request")
+    assert (
+        await store.ensure_operation_metadata(conflicting_request, ttl_seconds=60)
+        is None
+    )
     conflicting_direction = dataclasses.replace(
         metadata,
         transfer_direction=RuntimeOperationTransferDirection.UPLOAD,
@@ -398,8 +437,10 @@ async def test_try_start_operation_is_atomic(
     created_at = _now()
     metadata = RuntimeOperationMetadata(
         operation_id="op-start-1",
+        request_id="req-start",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=1,
         operation_type="test.operation",
         transfer_id=None,
@@ -407,6 +448,7 @@ async def test_try_start_operation_is_atomic(
         transfer_dispatch_id=None,
         transfer_direction=None,
         request_stream_id="runner:runtime-1",
+        request_cursor=None,
         reply_stream_id="reply:req-start",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=created_at,
@@ -457,8 +499,10 @@ async def test_cancel_requested_status_records_timestamp_and_blocks_start(
     cancel_requested_at = created_at + timedelta(seconds=1)
     metadata = RuntimeOperationMetadata(
         operation_id="op-cancel-1",
+        request_id="req-cancel",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=1,
         operation_type="test.operation",
         transfer_id=None,
@@ -466,6 +510,7 @@ async def test_cancel_requested_status_records_timestamp_and_blocks_start(
         transfer_dispatch_id=None,
         transfer_direction=None,
         request_stream_id="runner:runtime-1",
+        request_cursor=None,
         reply_stream_id="reply:req-cancel",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=created_at,
@@ -504,8 +549,10 @@ async def test_append_reply_for_operation_rejects_late_final(
     created_at = _now()
     metadata = RuntimeOperationMetadata(
         operation_id="op-final-1",
+        request_id="req-final",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=1,
         operation_type="test.operation",
         transfer_id=None,
@@ -513,6 +560,7 @@ async def test_append_reply_for_operation_rejects_late_final(
         transfer_dispatch_id=None,
         transfer_direction=None,
         request_stream_id="runner:runtime-1",
+        request_cursor=None,
         reply_stream_id="reply:req-final",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=created_at,
@@ -547,6 +595,208 @@ async def test_append_reply_for_operation_rejects_late_final(
     replies = await store.read_replies("reply:req-final", after_cursor=None, limit=10)
     assert len(replies) == 1
     assert replies[0].event.payload["message"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_registration_keeps_highest_generation_current(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Concurrent registration cannot restore a lower current generation."""
+    connected_at = _now()
+    registered = await asyncio.gather(
+        *(
+            store.register_connection(
+                kind=RuntimeConnectionKind.RUNNER,
+                subject_id="runtime-1",
+                connection_id=f"runner-{index}",
+                owner_replica_id=f"control-{index}",
+                connected_at=connected_at,
+                heartbeat_at=connected_at,
+                ttl_seconds=60,
+                metadata={},
+            )
+            for index in range(20)
+        )
+    )
+
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+
+    assert current is not None
+    assert current.generation == max(record.generation for record in registered)
+
+
+@pytest.mark.asyncio
+async def test_operation_request_append_rejects_replaced_connection(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A replaced generation cannot create metadata or append a request."""
+    connected_at = _now()
+    first = await _register_runner(store, connected_at=connected_at)
+    envelope = _operation_envelope("req-stale", generation=first.generation)
+    metadata = _operation_metadata(envelope)
+    await _register_runner(
+        store,
+        connected_at=connected_at + timedelta(seconds=1),
+    )
+
+    result = await store.append_operation_request_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=first.generation,
+        metadata=metadata,
+        envelope=envelope,
+        ttl_seconds=60,
+    )
+
+    assert result.status is RuntimeFencedMutationStatus.STALE_GENERATION
+    assert result.value is None
+    assert await store.get_operation(metadata.operation_id) is None
+    assert (
+        await store.claim_next_request(
+            metadata.request_stream_id,
+            consumer_group="runtime-1:generation-1",
+            consumer_id="control-a",
+            block_ms=0,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_operation_request_append_is_idempotent(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Retrying one exact admitted request preserves a single stream entry."""
+    connected_at = _now()
+    accepted = await _register_runner(store, connected_at=connected_at)
+    envelope = _operation_envelope("req-idempotent", generation=accepted.generation)
+    metadata = _operation_metadata(envelope)
+
+    first = await store.append_operation_request_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=accepted.generation,
+        metadata=metadata,
+        envelope=envelope,
+        ttl_seconds=60,
+    )
+    second = await store.append_operation_request_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=accepted.generation,
+        metadata=metadata,
+        envelope=envelope,
+        ttl_seconds=60,
+    )
+    claimed = await store.claim_next_request(
+        metadata.request_stream_id,
+        consumer_group="runtime-1:generation-1",
+        consumer_id="control-a",
+        block_ms=0,
+    )
+    duplicate = await store.claim_next_request(
+        metadata.request_stream_id,
+        consumer_group="runtime-1:generation-1",
+        consumer_id="control-a",
+        block_ms=0,
+    )
+
+    assert first.status is RuntimeFencedMutationStatus.APPLIED
+    assert second.status is RuntimeFencedMutationStatus.APPLIED
+    assert first.value is not None
+    assert second.value is not None
+    assert first.value.request_cursor == second.value.request_cursor
+    assert claimed is not None
+    assert claimed.envelope == envelope
+    assert duplicate is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_start_and_reply_reject_replaced_connection(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A replaced Runner cannot cancel, start, or finalize its operation."""
+    connected_at = _now()
+    first = await _register_runner(store, connected_at=connected_at)
+    envelope = _operation_envelope("req-fenced", generation=first.generation)
+    metadata = _operation_metadata(envelope)
+    appended = await store.append_operation_request_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=first.generation,
+        metadata=metadata,
+        envelope=envelope,
+        ttl_seconds=60,
+    )
+    assert appended.status is RuntimeFencedMutationStatus.APPLIED
+    await _register_runner(
+        store,
+        connected_at=connected_at + timedelta(seconds=1),
+    )
+    mutation_at = connected_at + timedelta(seconds=2)
+    cancellation = await store.request_operation_cancel_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=first.generation,
+        operation_id=metadata.operation_id,
+        expected_runtime_id="runtime-1",
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        envelope=RuntimeRequestEnvelope(
+            request_id="req-cancel",
+            runtime_id="runtime-1",
+            target=RuntimeCoordinationTarget.RUNNER,
+            generation=first.generation,
+            operation_type="operation.cancel",
+            payload={"operation_id": metadata.operation_id},
+            reply_stream_id=metadata.reply_stream_id,
+            deadline_at=metadata.deadline_at,
+            body_stream_id=None,
+        ),
+        updated_at=mutation_at,
+    )
+    started = await store.try_start_operation_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=first.generation,
+        operation_id=metadata.operation_id,
+        expected_runtime_id="runtime-1",
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        updated_at=mutation_at,
+    )
+    replied = await store.append_operation_reply_if_connection_current(
+        connection_kind=RuntimeConnectionKind.RUNNER,
+        connection_subject_id="runtime-1",
+        connection_generation=first.generation,
+        operation_id=metadata.operation_id,
+        expected_runtime_id="runtime-1",
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        stream_id=metadata.reply_stream_id,
+        event=RuntimeReplyEvent(
+            request_id=metadata.request_id,
+            runtime_id=metadata.runtime_id,
+            generation=metadata.generation,
+            event_type=RuntimeReplyEventType.FINAL_SUCCESS,
+            payload={"success": True},
+            created_at=mutation_at,
+            final=True,
+        ),
+    )
+    current = await store.get_operation(metadata.operation_id)
+    replies = await store.read_replies(
+        metadata.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+
+    assert cancellation.status is RuntimeFencedMutationStatus.STALE_GENERATION
+    assert started.status is RuntimeFencedMutationStatus.STALE_GENERATION
+    assert replied.status is RuntimeFencedMutationStatus.STALE_GENERATION
+    assert current is not None
+    assert current.status is RuntimeOperationStatus.ACTIVE
+    assert replies == []
 
 
 @pytest.mark.asyncio
@@ -787,7 +1037,9 @@ async def test_connection_registry_issues_generation_fences(
 async def test_redis_connection_revoke_is_generation_fenced() -> None:
     """Redis stale revokes must not delete a newer connection generation."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     connected_at = _now()
     first = await store.register_connection(
         kind=RuntimeConnectionKind.RUNNER,
@@ -830,7 +1082,9 @@ async def test_redis_connection_revoke_is_generation_fenced() -> None:
 async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
     """Redis stale heartbeats must not overwrite a newer connection generation."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     connected_at = _now()
     first = await store.register_connection(
         kind=RuntimeConnectionKind.RUNNER,
@@ -875,7 +1129,9 @@ async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
 async def test_redis_get_connection_does_not_delete_reconnected_generation() -> None:
     """Expired-record cleanup must not delete a concurrent reconnect."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     key = "azents:agent-runtime:coordination:connection:runner:runtime-1"
     now = _now()
     fake_redis.data[key] = _fake_connection_json(
@@ -969,10 +1225,10 @@ async def test_redis_empty_request_stream_created_by_group_has_ttl(
 
 
 @pytest.mark.asyncio
-async def test_redis_connection_generation_has_ttl(
+async def test_redis_connection_generation_is_persistent(
     redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
 ) -> None:
-    """TTL is set on connection generation counter."""
+    """Connection generation counters remain after current connections expire."""
     store, redis = redis_store
     connected_at = _now()
 
@@ -991,8 +1247,48 @@ async def test_redis_connection_generation_has_ttl(
         await redis.ttl(
             "azents:agent-runtime:coordination:connection-generation:runner:runtime-1"
         )
-        > 0
+        == -1
     )
+
+
+@pytest.mark.asyncio
+async def test_redis_registration_removes_legacy_generation_counter_ttl(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """Registration increments a legacy counter and atomically removes its TTL."""
+    store, redis = redis_store
+    key = "azents:agent-runtime:coordination:connection-generation:provider:provider-1"
+    await redis.set(key, "41", ex=60)
+    assert await redis.ttl(key) > 0
+
+    connected_at = _now()
+    first = await store.register_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+        connection_id="provider-a",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+    assert first.generation == 42
+    assert await redis.ttl(key) == -1
+
+    second = await store.register_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+        connection_id="provider-b",
+        owner_replica_id="control-b",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+    assert second.generation == 43
+    assert await redis.ttl(key) == -1
 
 
 def _fake_connection_json(
@@ -1042,6 +1338,33 @@ def _metrics_sample(
     )
 
 
+def _json_object(raw: str) -> dict[str, JsonValue]:
+    value: object = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Fake Redis payload must be an object")
+    result: dict[str, JsonValue] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError("Fake Redis payload keys must be strings")
+        result[key] = _json_value(item)
+    return result
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        result: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("Fake Redis payload keys must be strings")
+            result[key] = _json_value(item)
+        return result
+    raise ValueError("Fake Redis payload contains a non-JSON value")
+
+
 def _request_envelope(request_id: str) -> RuntimeRequestEnvelope:
     return RuntimeRequestEnvelope(
         request_id=request_id,
@@ -1053,6 +1376,75 @@ def _request_envelope(request_id: str) -> RuntimeRequestEnvelope:
         reply_stream_id=f"reply:{request_id}",
         deadline_at=_now() + timedelta(seconds=30),
         body_stream_id=None,
+    )
+
+
+async def _register_runner(
+    store: RuntimeCoordinationStore,
+    *,
+    connected_at: datetime,
+) -> RuntimeConnectionRecord:
+    return await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id=f"runner-{connected_at.timestamp()}",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+
+def _operation_envelope(
+    request_id: str,
+    *,
+    generation: int,
+) -> RuntimeRequestEnvelope:
+    deadline_at = _now() + timedelta(seconds=30)
+    return RuntimeRequestEnvelope(
+        request_id=request_id,
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        generation=generation,
+        operation_type="bash",
+        payload={"command": "echo ok"},
+        reply_stream_id=f"runner:runtime-1:generation:{generation}:replies",
+        deadline_at=deadline_at,
+        body_stream_id=None,
+    )
+
+
+def _operation_metadata(
+    envelope: RuntimeRequestEnvelope,
+) -> RuntimeOperationMetadata:
+    created_at = _now()
+    return RuntimeOperationMetadata(
+        operation_id=f"operation:{envelope.request_id}",
+        request_id=envelope.request_id,
+        runtime_id=envelope.runtime_id,
+        target=envelope.target,
+        target_subject_id=envelope.runtime_id,
+        generation=envelope.generation,
+        operation_type=envelope.operation_type,
+        transfer_id=None,
+        transfer_attempt_id=None,
+        transfer_dispatch_id=None,
+        transfer_direction=None,
+        request_stream_id=(
+            f"runner:runtime-1:generation:{envelope.generation}:requests"
+        ),
+        request_cursor=None,
+        reply_stream_id=envelope.reply_stream_id,
+        status=RuntimeOperationStatus.ACTIVE,
+        created_at=created_at,
+        updated_at=created_at,
+        deadline_at=envelope.deadline_at,
+        body_stream_id=envelope.body_stream_id,
+        last_heartbeat_at=None,
+        last_event_at=None,
+        cancel_requested_at=None,
+        final_event_cursor=None,
     )
 
 

@@ -34,6 +34,16 @@ class GrepResult:
     stopped_reason: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class TextReadResult:
+    """Decoded character range returned by text storage."""
+
+    text: str
+    start_character: int
+    end_character: int
+    truncated: bool
+
+
 class FileStorage(Protocol):
     """Common file storage interface used by Runtime file tool."""
 
@@ -45,10 +55,10 @@ class FileStorage(Protocol):
         *,
         agent_id: str,
         offset: int,
-        max_bytes: int,
+        limit: int,
         encoding: str,
-    ) -> str:
-        """Read one bounded range with the requested text encoding."""
+    ) -> TextReadResult:
+        """Read one bounded decoded character range."""
         ...
 
     async def stat(
@@ -64,7 +74,7 @@ class FileStorage(Protocol):
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
         agent_id: str,
     ) -> RuntimeAttachment: ...

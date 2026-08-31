@@ -797,6 +797,7 @@
       "select": "選択",
       "never": "なし",
       "contextBadge": "{tokens}k コンテキスト",
+      "contextRangeBadge": "既定 {defaultTokens}k · 最大 {maxTokens}k",
       "reasoningBadge": "推論",
       "hostedToolsBadge": "ホスト型ツール",
       "toolCallingBadge": "ツール呼び出し",
@@ -858,10 +859,14 @@
       "dragHandleLabel": "Reorder model",
       "settingsAction": "モデル設定",
       "settingsTitle": "{label}の設定",
-      "contextWindowTokensLabel": "最大コンテキストウィンドウ",
+      "contextWindowTokensLabel": "コンテキストウィンドウ上限",
       "maxOutputTokensLabel": "最大出力トークン数",
       "capabilityLimit": "カタログ上の上限: {tokens}トークン。上限を超える値も保存できますが、実行時に調整されます。",
       "capabilityLimitUnknown": "カタログに上限情報がありません。プロバイダーの上限が優先されます。",
+      "contextCapabilityRange": "ユーザー上限がない場合はモデルの既定値 {defaultTokens} トークンを使用します。カタログ上の最大値は {maxTokens} トークンで、それを超える値は保存されても実行時に最大値へ調整されます。",
+      "contextCapabilitySingle": "ユーザー上限がない場合は {tokens} トークンを使用します。カタログ上の最大値も {tokens} トークンで、それを超える値は保存されても実行時に最大値へ調整されます。",
+      "contextCapabilityDefaultOnly": "ユーザー上限がない場合はモデルの既定値 {tokens} トークンを使用します。カタログに最大値がないため、プロバイダーの上限が優先されます。",
+      "useModelDefault": "モデルの既定値を使用",
       "noTokenCap": "ユーザー上限なし",
       "builtinToolsLabel": "組み込みツール",
       "builtinToolWebSearch": "ウェブ検索",
@@ -916,6 +921,58 @@
       "socketGapTitle": "Socket delivery gap を検出しました",
       "socketGapDescription": "続行する前に接続を検証し、チャンネル履歴を確認してください。",
       "capabilitiesUnavailable": "検証後に機能を利用できます。",
+      "permissions": {
+        "title": "チャンネル権限",
+        "notChecked": "未確認",
+        "notCheckedDescription": "接続を検証すると、付与済み権限と不足している権限を確認できます。",
+        "grantedSummary": "付与済み {count}",
+        "missingSummary": "不足 {count}",
+        "allGrantedDescription": "必要なチャンネル権限がすべて付与されています。",
+        "missingDescription": "一部の機能を使用するには、不足している権限を追加する必要があります。",
+        "viewDetails": "詳細を見る",
+        "modalTitle": "チャンネル権限",
+        "modalDescription": "前回の接続検証で確認された権限の状態です。",
+        "actionRequiredTitle": "権限の設定が必要です",
+        "slackAction": "下記に scope が表示されている場合は Slack App の OAuth & Permissions に追加してください。scope がない場合は App Manifest とイベント設定を再適用してください。その後 Reinstall to Workspace を選択し、この画面でもう一度検証してください。",
+        "discordAction": "Discord Developer Portal と対象サーバーで Bot のインストールと権限を確認してから、この画面でもう一度検証してください。",
+        "slackScope": "必要な Slack scope: {scope}",
+        "missingSection": "不足している権限（{count}）",
+        "grantedSection": "付与済み権限（{count}）",
+        "items": {
+          "inbound_events": {
+            "label": "メッセージを受信",
+            "description": "チャンネルの新しいメッセージとイベントを受信します。"
+          },
+          "thread_history": {
+            "label": "会話履歴を読む",
+            "description": "会話とスレッドの過去のメッセージを読み取ります。"
+          },
+          "post_messages": {
+            "label": "メッセージを送信",
+            "description": "チャンネルとスレッドに返信を送信します。"
+          },
+          "update_messages": {
+            "label": "メッセージを編集",
+            "description": "Bot が送信したメッセージを編集します。"
+          },
+          "delete_messages": {
+            "label": "メッセージを削除",
+            "description": "Bot が送信したメッセージを削除します。"
+          },
+          "download_files": {
+            "label": "ファイルをダウンロード",
+            "description": "チャンネルに添付されたファイルを読み込み、取得します。"
+          },
+          "upload_files": {
+            "label": "ファイルをアップロード",
+            "description": "Runtime で作成したファイルをチャンネルに送信します。"
+          },
+          "customize_messages": {
+            "label": "メッセージ表示をカスタマイズ",
+            "description": "Agent の名前とアバターで Slack メッセージを表示します。"
+          }
+        }
+      },
       "discordActivationFailureTitle": "Discord 接続の対応が必要です",
       "discordFailure": {
         "discord_credentials_invalid": {
@@ -966,7 +1023,7 @@
       "accessTitle": "参加者アクセス",
       "accessDescription": "有効な呼び出し権限とブロック済みの外部参加者を確認します。",
       "openAccessEnabled": "誰でも会話を開始できるようにする",
-      "openAccessEnabledDescription": "無効にすると、人は明示的なアクセス承認が必要です。",
+      "openAccessEnabledDescription": "この設定を無効にすると、管理者が承認した参加者だけが会話を開始できます。",
       "emptyAccess": "有効な grant または block はありません。",
       "associatedMultiAppsTitle": "関連するワークスペース App",
       "associatedMultiAppsDescription": "対応する Slack・Discord の会話をこのエージェントへルーティングできる、ワークスペース所有の Multi App です。ワークスペース設定で管理できます。",
@@ -1145,7 +1202,7 @@
       "description": "シェル、ファイルシステム、ワークスペース、プロジェクト、Git、ビルド、テスト機能を提供する分離環境を管理します。",
       "loadErrorTitle": "ランタイム設定を読み込めませんでした",
       "actionErrorTitle": "ランタイム操作に失敗しました",
-      "authorityNotice": "利用可否と操作は、現在のケイパビリティとランタイム状態に基づいてサーバーが算出します。",
+      "authorityNotice": "現在この Runtime で利用できる操作のみ表示されます。",
       "refresh": "更新",
       "cancel": "キャンセル",
       "profileLabel": "ランタイムプロファイル",
@@ -1178,17 +1235,22 @@
       },
       "managed": {
         "profileTitle": "ランタイム構成",
-        "profileDescription": "プロファイルを変更すると希望構成が更新されます。再作成はサーバーが必要と判断した場合にのみ行われます。",
+        "profileDescription": "使用する Runtime Profile を選択します。現在の Runtime と異なる場合は、再起動時に適用されます。",
         "saveProfile": "プロファイルを保存"
       },
       "lifecycle": {
         "title": "一時的なランタイム操作",
-        "description": "ケイパビリティを削除せず、現在のランタイムを起動、停止、再起動、リセットします。",
+        "description": "現在の Runtime を管理します。起動、停止、再起動では Agent Workspace のファイルが保持され、リセットでは削除されます。",
         "start": "起動",
         "stop": "停止",
         "restart": "再起動",
+        "restartConfirmTitle": "Runtime を再起動しますか？",
+        "restartConfirmDescription": "Runtime の再起動中は一時的に利用できません。",
+        "restartPreservationNotice": "Agent Workspace ファイルと保持された Runtime ストレージは維持されます。",
+        "confirmRestart": "Runtime を再起動",
         "reset": "リセット",
         "resetConfirmTitle": "ランタイム状態をリセットしますか？",
+        "resetDestructiveTitle": "Agent Workspace データが削除されます",
         "resetConfirmDescription": "現在のワークスペースファイルと保持されたランタイム状態を破棄し、空のランタイムを準備します。元に戻せません。",
         "confirmReset": "リセット"
       },

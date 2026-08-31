@@ -189,8 +189,7 @@ def _container_info(name: str, raw_info: object) -> DockerContainerInfo:
 
 
 def _container_name_from_object(container: DockerContainer) -> str:
-    raw_id = getattr(container, "id", None)
-    return raw_id if isinstance(raw_id, str) else ""
+    return container.id
 
 
 def _mapping(value: object) -> dict[str, object]:

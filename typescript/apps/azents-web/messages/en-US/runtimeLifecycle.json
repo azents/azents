@@ -1,0 +1,69 @@
+{
+  "title": "Runtime status",
+  "description": "Check whether the Runtime is available and whether its managed execution environment can be controlled.",
+  "fields": {
+    "executionEnvironment": "Execution environment",
+    "runtimeConnection": "Runtime connection",
+    "hostControls": "Host controls"
+  },
+  "status": {
+    "ready": "Ready",
+    "stopped": "Stopped",
+    "starting": "Starting",
+    "stopping": "Stopping",
+    "resetting": "Resetting",
+    "recovering": "Recovering",
+    "providerDisconnected": "Host controls unavailable",
+    "runnerUnavailable": "Connection unavailable",
+    "configurationBlocked": "Setup required",
+    "failed": "Needs attention",
+    "removing": "Removing"
+  },
+  "executionEnvironment": {
+    "unknown": "Status unavailable",
+    "stopped": "Stopped",
+    "starting": "Starting",
+    "running": "Running",
+    "stopping": "Stopping",
+    "recovering": "Recovering",
+    "resetting": "Resetting",
+    "failed": "Needs attention"
+  },
+  "runtimeConnection": {
+    "unknown": "Checking connection",
+    "disconnected": "Disconnected",
+    "starting": "Connecting",
+    "ready": "Connected",
+    "degraded": "Limited",
+    "failed": "Unavailable"
+  },
+  "hostControls": {
+    "connected": "Available",
+    "disconnected": "Unavailable"
+  },
+  "reasons": {
+    "runtimeRemovalInProgress": "The Runtime is being permanently removed. Runtime access and controls will remain unavailable until removal finishes.",
+    "runtimeFailed": "The Runtime could not reach the requested state. Use an available recovery action or try again.",
+    "providerFailed": "The managed execution environment reported a failure. Restart it if that action is available.",
+    "runtimeRecreationRequired": "The selected settings differ from the currently applied settings. Restart the Runtime to apply them.",
+    "providerDisabled": "The selected execution environment is unavailable. Choose another Runtime Profile.",
+    "providerWorkspaceUnavailable": "This Workspace cannot currently use the selected execution environment.",
+    "providerDisconnected": "Host controls are temporarily unavailable. The Runtime can still be used while its connection remains active.",
+    "providerCapabilityUnavailable": "The selected execution environment does not support all required settings.",
+    "providerCapabilityInvalid": "The execution environment reported settings that cannot be used.",
+    "profileDocumentInvalid": "The selected Runtime Profile contains invalid settings.",
+    "profileIncompatible": "The selected Runtime Profile cannot be used with this execution environment.",
+    "runtimeConfigurationBlocked": "The selected Runtime settings cannot currently be applied. Review the Runtime Profile.",
+    "runtimeProfileRequired": "Choose an available Runtime Profile before starting the Runtime.",
+    "runtimeResetting": "The Runtime is being reset. Agent Workspace files are being deleted.",
+    "runtimeRecovering": "The execution environment is recovering. The Runtime connection will return when recovery finishes.",
+    "runtimeStarting": "The Runtime is starting. It will become available after the connection is established.",
+    "runtimeStopping": "The Runtime is stopping. Agent Workspace files are preserved.",
+    "runnerUnknown": "Checking the Runtime connection.",
+    "runnerDisconnected": "The execution environment is running, but the Runtime connection is unavailable. Restart it if that action is available.",
+    "runnerStarting": "The execution environment is running while the Runtime connection starts.",
+    "runnerDegraded": "The Runtime connection is limited. Some operations may be unavailable.",
+    "runnerFailed": "The Runtime connection failed. Restart the Runtime if that action is available.",
+    "unknown": "The Runtime is temporarily unavailable. Refresh the status or use an available recovery action."
+  }
+}

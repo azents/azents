@@ -89,8 +89,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-19
-spec_version: 67
+last_verified_at: 2026-08-27
+spec_version: 69
 ---
 
 # Agent Domain Spec
@@ -334,9 +334,11 @@ Create/update requests accept selectable model options as the current model cont
   omission leaves the selection unchanged, explicit null clears it, and a non-null value replaces
   it. The request must include `expected_runtime_profile_selection_version`.
 - Runtime Profile selection changes do not directly issue a lifecycle command or recreate physical
-  compute. They overwrite the authoritative desired current configuration state at a higher
-  Runtime configuration sequence, and current lifecycle guards decide whether explicit recreation
-  is required.
+  compute. The exact selection-version-fenced mutation atomically overwrites the authoritative
+  desired current configuration state at a higher Runtime configuration sequence; an explicit
+  clear writes `unconfigured/runtime_profile_required`, clears desired Provider/Runner
+  acknowledgement evidence, and preserves any applied incarnation. Current lifecycle guards decide
+  whether explicit recreation is required.
 - Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
@@ -535,7 +537,18 @@ Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` 
 
 ## 5. Context Window / Compaction
 
-`effective_context_window_tokens` in Agent response is calculated from the default main option's capability-clamped context cap and the default lightweight option's capability-clamped context cap. A user cap may be larger than the model limit, in which case the model limit wins. `effective_auto_compaction_threshold_tokens` is 90% of the effective context window.
+Each selectable model snapshot can carry a default input window and a maximum
+input window. A missing default resolves to the maximum. For each option, an unset
+`context_window_tokens` cap uses the resolved default; an explicit cap uses the
+requested value up to the resolved maximum. LiteLLM metadata and the 128,000-token
+fallback fill only missing capability limits.
+
+`effective_context_window_tokens` in Agent response is calculated from the smaller
+of the default main option's resolved effective input window and the default
+lightweight option's resolved effective input window. A user cap may be larger than
+the model maximum, in which case the maximum wins.
+`effective_auto_compaction_threshold_tokens` is 90% of the effective context
+window.
 
 Prepared foreground turns use the prompt-selected option instead of the default main option for the foreground side of the same calculation. Automatic compaction runs with the lightweight model snapshot; the lightweight option context cap participates in input budgeting, but its `max_output_tokens` setting does not replace the compactor's dynamic summary output budget.
 
@@ -572,6 +585,12 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-08-27** (spec_version 69) — Resolved per-option input windows from a
+  distinct model default, model maximum, and nullable user cap before combining
+  main and lightweight limits.
+- **2026-08-25** (spec_version 68) — Made explicit managed-Agent Runtime Profile selection clear
+  atomically supersede the desired configuration with higher-sequence
+  `unconfigured/runtime_profile_required` authority while retaining applied Runtime evidence.
 - **2026-08-18** (spec_version 66) — Made committed avatar replacement and
   removal atomically retain durable superseded-blob cleanup responsibility, with
   row-serialized mutations and scheduler-owned bounded retry.

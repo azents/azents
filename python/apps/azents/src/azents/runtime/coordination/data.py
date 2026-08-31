@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 from datetime import datetime
+from typing import NamedTuple
 
 from azents_runtime_control.system_metrics import (
     RunnerSystemMetricObservation,
@@ -56,6 +57,23 @@ class RuntimeConnectionKind(enum.StrEnum):
 
     PROVIDER = "provider"
     RUNNER = "runner"
+
+
+class RuntimeFencedMutationStatus(enum.StrEnum):
+    """Outcome of one connection-generation-fenced store mutation."""
+
+    APPLIED = "applied"
+    CONNECTION_MISSING = "connection_missing"
+    STALE_GENERATION = "stale_generation"
+    OPERATION_REJECTED = "operation_rejected"
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFencedMutationResult[ValueT]:
+    """Typed result for one atomic connection-generation-fenced mutation."""
+
+    status: RuntimeFencedMutationStatus
+    value: ValueT | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,8 +147,10 @@ class RuntimeOperationMetadata:
     """Short-lived metadata for an active Runtime operation."""
 
     operation_id: str
+    request_id: str
     runtime_id: str
     target: RuntimeCoordinationTarget
+    target_subject_id: str
     generation: int
     operation_type: str
     transfer_id: str | None
@@ -138,6 +158,7 @@ class RuntimeOperationMetadata:
     transfer_dispatch_id: str | None
     transfer_direction: RuntimeOperationTransferDirection | None
     request_stream_id: str
+    request_cursor: str | None
     reply_stream_id: str
     status: RuntimeOperationStatus
     created_at: datetime
@@ -171,6 +192,13 @@ class RuntimeOperationMetadata:
             and self.transfer_direction is not None
         ):
             raise ValueError("Only transfer operations may have a transfer direction")
+
+
+class RuntimeOperationReplyAppend(NamedTuple):
+    """Atomic operation reply append result."""
+
+    cursor: str
+    metadata: RuntimeOperationMetadata
 
 
 @dataclasses.dataclass(frozen=True)

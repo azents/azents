@@ -6,11 +6,13 @@ description: Analyze and ship Azents E2E reliability and required-CI performance
 # E2E CI Optimization
 
 Own the complete improvement loop. For every recurring or scheduled improvement run,
-ship one feasible improvement whenever at least one actionable candidate exists. If the
-highest-impact candidate is blocked, continue down the ranked candidate list and select
-the best candidate that can be implemented and validated safely in the current run.
-Analysis-only completion is valid only when the requester explicitly asks for analysis or
-the investigation establishes that no feasible candidate exists.
+ship the smallest coverage-preserving candidate set that can meet acceptance whenever
+actionable candidates exist. Start with the highest-confidence change, but do not stop
+after one implementation when modeled or measured impact remains below acceptance.
+Continue adding compatible, separately explainable safe changes in the same cycle until
+the combined result is accepted or every remaining candidate is infeasible.
+Analysis-only completion is valid only when the requester explicitly asks for analysis
+or the investigation establishes that no feasible candidate exists.
 
 Reuse these skills instead of duplicating their procedures:
 
@@ -28,11 +30,16 @@ Determine the requested stopping point before execution:
 - **Analysis only**: collect evidence, rank candidates, and recommend the next action.
 - **Implementation**: continue through focused validation and review.
 - **Ship or improve**: continue through PR creation, at least two successful same-SHA
-  CI measurements, measured acceptance or rejection, and PR body update.
+  CI measurements, measured acceptance, or a final exhausted-candidate rejection, and
+  PR body update.
 - **Recurring or scheduled improvement**: exhaust the ranked candidate list until one
-  feasible improvement is selected, then complete the ship flow for that improvement.
-  Finish without an implementation only when every discovered candidate is infeasible,
-  and report the concrete blocker for each candidate.
+  or more compatible changes form the smallest feasible candidate set likely to meet
+  acceptance, then complete the ship flow for that set. If measurement misses
+  acceptance, add the next compatible, separately explainable coverage-preserving
+  candidate and repeat on the new SHA. Finish without an accepted implementation only
+  when every discovered candidate is infeasible or the measured combined result
+  remains below acceptance after all feasible candidates are exhausted. Report the
+  concrete blocker or measured shortfall for each remaining candidate.
 
 Treat requests such as "improve E2E", "optimize E2E CI", or "find and fix the next
 candidate" as ship requests unless the requester limits the scope.
@@ -100,6 +107,16 @@ Reliability value may justify work below the performance threshold.
 Include every new producer, dependency, artifact transfer, pull, load, setup, and
 teardown cost. Reject optimizations that only move existing work to a new prerequisite.
 
+Build an acceptance budget before editing:
+
+1. Model the smallest high-confidence change.
+2. If it is unlikely to clear acceptance after lane takeover, combine it with the next
+   compatible, separately explainable coverage-preserving candidate.
+3. Continue until the modeled candidate set can clear acceptance or no feasible
+   combination remains.
+4. Keep each change separately explainable and validate its mechanism even when CI
+   acceptance is measured for the combined set.
+
 ## 3. Validate the candidate
 
 For a reliability candidate:
@@ -126,6 +143,25 @@ editing.
 
 Preserve product behavior and required coverage. Do not write directly to the product
 database from E2E tests or substrate.
+
+Treat test-level optimization as first-class implementation work. A safe candidate may
+change:
+
+- E2E test code and scenario structure;
+- fixtures, provider fakes, barriers, and readiness evidence;
+- test-support code and deterministic configuration;
+- CI setup or artifact handling;
+- production code when the bottleneck is a real product mechanism.
+
+Prefer the narrowest layer that removes measured waste while retaining the same
+observable behavior and failure boundary. Several compatible changes may be shipped in
+one candidate set when one change cannot meet acceptance alone.
+
+Never manufacture acceptance by deleting tests, weakening assertions, reducing the
+covered state matrix, replacing abrupt failure with graceful cleanup, bypassing real
+lease/recovery/lifecycle behavior, extending timeouts, or adding sleeps. Adding runners
+or other CI resources requires explicit requester approval, and the acceptance model
+must include their complete cost.
 
 Validation order:
 
@@ -176,6 +212,18 @@ After the first complete PR CI succeeds:
 
 Do not claim a result from one favorable run.
 
+When the result is not accepted:
+
+1. Preserve the completed attempt artifacts and record the measured shortfall.
+2. Return to candidate ranking when another compatible, separately explainable
+   coverage-preserving change is feasible.
+3. Add that change to the same candidate set, rerun focused validation and review, and
+   produce a new commit SHA.
+4. Restart the complete two-successful-attempt measurement for that unchanged new SHA.
+5. Stop with `inconclusive` or `rejected` only after feasible candidates are exhausted,
+   evidence cannot distinguish the result, or the remaining changes require an
+   unapproved coverage, reliability, or runner tradeoff.
+
 ## 7. Update the PR with measured evidence
 
 Replace expected impact in the PR body with:
@@ -188,14 +236,16 @@ Replace expected impact in the PR body with:
 - mechanism evidence from artifacts;
 - pass/fail and final classification.
 
-If the result is rejected, say so directly and recommend closing or revising the PR.
-Do not preserve an ineffective optimization merely because implementation is complete.
+If the final result is rejected, say so directly and recommend closing the PR. When
+another feasible candidate remains, revise the implementation instead of treating the
+first below-threshold measurement as final. Do not preserve an ineffective optimization
+merely because implementation is complete.
 
 ## Final report
 
 Report:
 
-- selected candidate and why it ranked first;
+- selected candidate set and why each change was included;
 - implementation summary;
 - review result;
 - PR URL;

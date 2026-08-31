@@ -26,7 +26,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { AgentWorkspaceDirectoryPickerModal } from "@/features/agent-workspace/components/AgentWorkspaceDirectoryPickerModal";
+import { AgentWorkspaceDirectoryPickerModal } from "@/shared/agent-workspace/components/AgentWorkspaceDirectoryPickerModal";
 import {
   automaticProjectsEditingDisabled,
   automaticProjectsSaveEnabled,
@@ -35,7 +35,7 @@ import type {
   AutomaticProjectRow,
   AutomaticProjectsState,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerEntry } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerEntry } from "@/shared/agent-workspace/types";
 
 interface AgentAutomaticProjectsProps {
   handle: string;
@@ -52,6 +52,7 @@ interface AgentAutomaticProjectsProps {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onRemoveProject: (path: string) => void;
   onMoveProject: (path: string, direction: "up" | "down") => void;
   onSave: () => Promise<void>;
@@ -158,6 +159,7 @@ export function AgentAutomaticProjects({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
+  onRestartRuntimeForProjectPicker,
   onRemoveProject,
   onMoveProject,
   onSave,
@@ -430,6 +432,7 @@ export function AgentAutomaticProjects({
         onSelectDirectory={onSelectProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        onRestartRuntime={onRestartRuntimeForProjectPicker}
       />
     </Box>
   );

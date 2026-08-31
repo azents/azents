@@ -1,15 +1,12 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-23T22:32:41Z",
+    "checked_at": "2026-08-30T22:26:30Z",
     "checked_ruleset_revisions": [
       "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
       "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
-      "4a479f485555c3db64112b8892b6197298114771f2b1cf0078dcf192dd701a78",
-      "6f64a6d2a170eb2b8238c8c3d3df974431c91026518e92a5344fe3b8310579f3",
-      "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
       "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0"
     ],
-    "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
+    "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -193,184 +190,184 @@
       "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
     },
     "infra/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "infra/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "proto/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "proto/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "proto/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T00:14:08Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/apps/azents-container-policy-gateway/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-27T23:00:55Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "eaf95d6ba2e795b9fb6a884dbf7a1a9046823e90"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-28T22:58:02Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "fe7c9ccc2fe4ecd6f41b20b9fb81aa34a2b08fc2"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-29T23:28:36Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "312bd1d63fa13c3ce4c198db4ac1b19700e3c314"
     },
     "python/apps/azents-runtime-proxy/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-30T22:26:30Z",
+      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
+      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
     },
     "python/apps/azents-runtime-proxy/**::bucket-8-of-8": {
       "checked_at": null,
@@ -961,7 +958,29 @@
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md"
     ],
-    "6f64a6d2a170eb2b8238c8c3d3df974431c91026518e92a5344fe3b8310579f3": [
+    "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/infra/argocd-valuesobject-full-replacement.md",
+      ".claude/conventions/infra/fluentbit-explicit-kubernetes-filter.md",
+      ".claude/conventions/infra/iam-role-description-ascii-only.md",
+      ".claude/conventions/infra/kustomize-namespace-must-match.md",
+      ".claude/conventions/infra/module-separation-by-role.md",
+      ".claude/conventions/infra/resource-naming-prefix.md",
+      ".claude/conventions/infra/snake-case-vs-camel-case.md"
+    ],
+    "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
@@ -993,29 +1012,8 @@
       ".claude/conventions/typescript/server-component-by-default.md",
       ".claude/conventions/typescript/storybook-provider-structure.md",
       ".claude/conventions/typescript/trpc-cache-invalidation.md",
-      ".claude/conventions/typescript/use-generated-public-client.md"
-    ],
-    "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/infra/argocd-valuesobject-full-replacement.md",
-      ".claude/conventions/infra/fluentbit-explicit-kubernetes-filter.md",
-      ".claude/conventions/infra/iam-role-description-ascii-only.md",
-      ".claude/conventions/infra/kustomize-namespace-must-match.md",
-      ".claude/conventions/infra/module-separation-by-role.md",
-      ".claude/conventions/infra/resource-naming-prefix.md",
-      ".claude/conventions/infra/snake-case-vs-camel-case.md"
+      ".claude/conventions/typescript/use-generated-public-client.md",
+      ".claude/conventions/typescript/user-relevant-status-copy.md"
     ],
     "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",

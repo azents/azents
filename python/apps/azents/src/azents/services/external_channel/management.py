@@ -4,7 +4,7 @@ import datetime
 import json
 import re
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -161,6 +161,13 @@ class DiscordThreadAutoArchiveDurationSetting(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes
+
+
+class ManagedAgentAccess(NamedTuple):
+    """Current Agent-level access grants and blocks."""
+
+    grants: list[ManagedGrant]
+    blocks: list[ManagedBlock]
 
 
 @dataclass
@@ -1434,7 +1441,7 @@ class ExternalChannelManagementService:
         workspace_id: str,
         agent_id: str,
         workspace_user_id: str,
-    ) -> tuple[list[ManagedGrant], list[ManagedBlock]]:
+    ) -> ManagedAgentAccess:
         await self._require_agent(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -1442,7 +1449,7 @@ class ExternalChannelManagementService:
             admin=False,
         )
         async with self.session_manager() as session:
-            return (
+            return ManagedAgentAccess(
                 await self.repository.list_grants(
                     session,
                     agent_id=agent_id,
@@ -1754,6 +1761,14 @@ def slack_manifest_guidance(
             "description": f"{normalized_name[:60]} powered by Azents",
         },
         "features": {
+            "agent_view": {
+                "agent_description": (f"{normalized_name[:240]} powered by Azents"),
+            },
+            "app_home": {
+                "home_tab_enabled": False,
+                "messages_tab_enabled": True,
+                "messages_tab_read_only_enabled": True,
+            },
             "bot_user": {
                 "display_name": bot_name,
                 "always_online": False,

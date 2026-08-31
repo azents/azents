@@ -20,8 +20,8 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictInt
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse
+from azentspublicclient.models.agent_runtime_lifecycle_presentation_response import AgentRuntimeLifecyclePresentationResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
-from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType
 from typing import Optional, Set
 from typing_extensions import Self
@@ -31,12 +31,12 @@ class AgentRuntimeLifecycleResponse(BaseModel):
     Agent Runtime lifecycle command response.
     """ # noqa: E501
     runtime: AgentRuntimeRawStateResponse
-    state: AgentRuntimeSummaryResponse
+    lifecycle: AgentRuntimeLifecyclePresentationResponse
     configuration: AgentRuntimeConfigurationStatusResponse
     command_type: RuntimeLifecycleCommandType
     desired_generation: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["runtime", "state", "configuration", "command_type", "desired_generation"]
+    __properties: ClassVar[List[str]] = ["runtime", "lifecycle", "configuration", "command_type", "desired_generation"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,9 +82,9 @@ class AgentRuntimeLifecycleResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of runtime
         if self.runtime:
             _dict['runtime'] = self.runtime.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of state
-        if self.state:
-            _dict['state'] = self.state.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of lifecycle
+        if self.lifecycle:
+            _dict['lifecycle'] = self.lifecycle.to_dict()
         # override the default output from pydantic by calling `to_dict()` of configuration
         if self.configuration:
             _dict['configuration'] = self.configuration.to_dict()
@@ -106,7 +106,7 @@ class AgentRuntimeLifecycleResponse(BaseModel):
 
         _obj = cls.model_validate({
             "runtime": AgentRuntimeRawStateResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
-            "state": AgentRuntimeSummaryResponse.from_dict(obj["state"]) if obj.get("state") is not None else None,
+            "lifecycle": AgentRuntimeLifecyclePresentationResponse.from_dict(obj["lifecycle"]) if obj.get("lifecycle") is not None else None,
             "configuration": AgentRuntimeConfigurationStatusResponse.from_dict(obj["configuration"]) if obj.get("configuration") is not None else None,
             "command_type": obj.get("command_type"),
             "desired_generation": obj.get("desired_generation")

@@ -17,7 +17,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from azents.services.external_channel.discord_http import (
-    DiscordHTTPAdmissionService,
+    DiscordHTTPIngressService,
 )
 from azents.services.external_channel.discord_interaction import (
     MAX_DISCORD_INTERACTION_BODY_BYTES,
@@ -43,8 +43,8 @@ async def receive_discord_interaction(
     request: Request,
     background_tasks: BackgroundTasks,
     service: Annotated[
-        DiscordHTTPAdmissionService,
-        Depends(DiscordHTTPAdmissionService),
+        DiscordHTTPIngressService,
+        Depends(DiscordHTTPIngressService),
     ],
     x_signature_ed25519: Annotated[
         str | None,
@@ -81,6 +81,11 @@ async def receive_discord_interaction(
         ) from error
     if result.ping:
         return JSONResponse(content={"type": 1})
+    if result.settings_component_handoff is not None:
+        background_tasks.add_task(
+            service.run_settings_component_handoff,
+            result.settings_component_handoff,
+        )
     if result.response is not None:
         if result.control_plans:
             if result.control_delivery_connection_id is None:

@@ -280,7 +280,7 @@ def _runtime_free_output() -> AgentRuntimeReadOutput:
         removal_impact=None,
         removal=None,
         runtime=None,
-        state=None,
+        lifecycle=None,
         configuration=None,
         actions=AgentRuntimePublicActions(
             add=False,

@@ -190,26 +190,29 @@ class RuntimeRunnerOperationAdapter:
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Run bounded decoded file read operation and convert to engine result."""
+        """Run decoded character-range operation and convert to engine result."""
         result = await _translate_runtime_errors(
             self._client.read_text_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
                 path=path,
-                offset=offset,
-                max_bytes=max_bytes,
+                character_offset=character_offset,
+                max_characters=max_characters,
                 encoding=encoding,
                 deadline_at=deadline_at,
             )
         )
         return RuntimeFileTextReadResult(
             text=result.text,
+            start_character=result.start_character,
+            end_character=result.end_character,
+            truncated=result.truncated,
             final_cursor=result.final_cursor,
         )
 

@@ -811,6 +811,9 @@ class ExternalChannelLifecycleRepository:
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = now
         if connection.transport is ExternalChannelTransport.SOCKET:
             connection.socket_heartbeat_at = now
             connection.socket_gap_detected_at = now

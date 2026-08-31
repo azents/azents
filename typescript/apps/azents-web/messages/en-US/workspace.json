@@ -797,6 +797,7 @@
       "select": "Select",
       "never": "Never",
       "contextBadge": "{tokens}k context",
+      "contextRangeBadge": "{defaultTokens}k default · {maxTokens}k max",
       "reasoningBadge": "Reasoning",
       "hostedToolsBadge": "Hosted tools",
       "toolCallingBadge": "Tool calling",
@@ -858,10 +859,14 @@
       "dragHandleLabel": "Reorder model",
       "settingsAction": "Model settings",
       "settingsTitle": "Settings for {label}",
-      "contextWindowTokensLabel": "Max context window",
+      "contextWindowTokensLabel": "Context window cap",
       "maxOutputTokensLabel": "Max output tokens",
       "capabilityLimit": "Catalog capability: {tokens} tokens. Higher values are saved but clamped at runtime.",
       "capabilityLimitUnknown": "No catalog limit is available. The provider remains authoritative.",
+      "contextCapabilityRange": "No user cap uses the model default of {defaultTokens} tokens. The catalog maximum is {maxTokens} tokens; higher values are saved but clamped at runtime.",
+      "contextCapabilitySingle": "No user cap uses {tokens} tokens. The catalog maximum is also {tokens} tokens; higher values are saved but clamped at runtime.",
+      "contextCapabilityDefaultOnly": "No user cap uses the model default of {tokens} tokens. No catalog maximum is available, so the provider remains authoritative.",
+      "useModelDefault": "Use model default",
       "noTokenCap": "No user cap",
       "builtinToolsLabel": "Built-in tools",
       "builtinToolWebSearch": "Web search",
@@ -916,6 +921,58 @@
       "socketGapTitle": "Socket delivery gap detected",
       "socketGapDescription": "Validate the connection and review channel history before continuing.",
       "capabilitiesUnavailable": "Capabilities are available after validation.",
+      "permissions": {
+        "title": "Channel permissions",
+        "notChecked": "Not checked",
+        "notCheckedDescription": "Validate this connection to check which permissions are granted.",
+        "grantedSummary": "Granted {count}",
+        "missingSummary": "Missing {count}",
+        "allGrantedDescription": "All required channel permissions are available.",
+        "missingDescription": "Some channel features are unavailable until the missing permissions are granted.",
+        "viewDetails": "View details",
+        "modalTitle": "Channel permissions",
+        "modalDescription": "These permission results come from the latest connection validation.",
+        "actionRequiredTitle": "Action required",
+        "slackAction": "In the Slack App settings, add any scopes shown below under OAuth & Permissions. If no scope is shown, reapply the App Manifest and event settings. Select Reinstall to Workspace, then validate this connection again.",
+        "discordAction": "In Discord Developer Portal and the target server, check the Bot installation and permissions, then validate this connection again.",
+        "slackScope": "Required Slack scope: {scope}",
+        "missingSection": "Missing ({count})",
+        "grantedSection": "Granted ({count})",
+        "items": {
+          "inbound_events": {
+            "label": "Receive messages",
+            "description": "Receive new messages and events from the channel."
+          },
+          "thread_history": {
+            "label": "Read conversation history",
+            "description": "Read earlier messages in conversations and threads."
+          },
+          "post_messages": {
+            "label": "Post messages",
+            "description": "Send replies to channels and threads."
+          },
+          "update_messages": {
+            "label": "Update messages",
+            "description": "Edit messages sent by the Bot."
+          },
+          "delete_messages": {
+            "label": "Delete messages",
+            "description": "Delete messages sent by the Bot."
+          },
+          "download_files": {
+            "label": "Download files",
+            "description": "Read and retrieve files attached in the channel."
+          },
+          "upload_files": {
+            "label": "Upload files",
+            "description": "Send files created in the Runtime to the channel."
+          },
+          "customize_messages": {
+            "label": "Customize message identity",
+            "description": "Show Slack messages with the Agent name and avatar."
+          }
+        }
+      },
       "discordActivationFailureTitle": "Discord connection needs attention",
       "discordFailure": {
         "discord_credentials_invalid": {
@@ -966,7 +1023,7 @@
       "accessTitle": "Participant access",
       "accessDescription": "Review active invocation grants and blocked external participants.",
       "openAccessEnabled": "Allow anyone to start a conversation",
-      "openAccessEnabledDescription": "When disabled, people need an explicit access approval.",
+      "openAccessEnabledDescription": "When this is off, only participants approved by an administrator can start a conversation.",
       "emptyAccess": "No active grants or blocks.",
       "associatedMultiAppsTitle": "Associated Workspace Apps",
       "associatedMultiAppsDescription": "Workspace-owned Slack and Discord Multi Apps that can route supported conversations to this Agent. Manage them from Workspace settings.",
@@ -1145,7 +1202,7 @@
       "description": "Manage the isolated environment that provides shell, filesystem, Workspace, Project, Git, build, and test capabilities.",
       "loadErrorTitle": "Could not load Runtime settings",
       "actionErrorTitle": "Runtime action failed",
-      "authorityNotice": "Availability and actions are computed by the server from the current capability and Runtime state.",
+      "authorityNotice": "Only actions currently available for this Runtime are shown.",
       "refresh": "Refresh",
       "cancel": "Cancel",
       "profileLabel": "Runtime Profile",
@@ -1178,17 +1235,22 @@
       },
       "managed": {
         "profileTitle": "Runtime configuration",
-        "profileDescription": "Changing the Profile updates desired configuration. Recreation occurs only when required by the server.",
+        "profileDescription": "Choose the Runtime Profile to use. If it differs from the active Runtime, restart to apply it.",
         "saveProfile": "Save Profile"
       },
       "lifecycle": {
         "title": "Temporary Runtime controls",
-        "description": "Start, stop, restart, or reset the current managed Runtime without removing the capability.",
+        "description": "Manage the current Runtime. Start, Stop, and Restart preserve Agent Workspace files; Reset deletes them.",
         "start": "Start",
         "stop": "Stop",
         "restart": "Restart",
+        "restartConfirmTitle": "Restart Runtime?",
+        "restartConfirmDescription": "The Runtime will be temporarily unavailable while it restarts.",
+        "restartPreservationNotice": "Agent Workspace files and preserved Runtime storage are retained.",
+        "confirmRestart": "Restart Runtime",
         "reset": "Reset",
         "resetConfirmTitle": "Reset Runtime state?",
+        "resetDestructiveTitle": "Agent Workspace data will be deleted",
         "resetConfirmDescription": "Reset discards current Runtime workspace files and preserved Runtime state, then prepares an empty Runtime. This cannot be undone.",
         "confirmReset": "Reset Runtime"
       },

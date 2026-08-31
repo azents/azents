@@ -37,7 +37,6 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_progress import checking_progress
 from azents.core.external_channel_session_presence import (
-    binding_settings_on_demand_payload,
     session_presence_payload,
     setup_required_payload,
 )
@@ -186,6 +185,7 @@ class ExternalChannelMailboxIngestionStore:
         resource_id: str,
         route_id: str,
         response_mode: ExternalChannelResponseMode,
+        tracker_visibility: Literal["hidden", "visible"],
     ) -> ExternalChannelConfiguredBindingResult:
         """Create or reuse configured Session state in the caller transaction."""
         resource = await self.repository.lock_resource(
@@ -237,6 +237,9 @@ class ExternalChannelMailboxIngestionStore:
             session_id=binding.agent_session_id,
             binding_id=binding.id,
             desired_progress=checking_progress(),
+            tracker_visibility=tracker_visibility,
+            slack_presence_thread_ts=_resource_slack_presence_thread_ts(resource),
+            slack_presence_initiator_user_id=None,
         )
         presence_plan = (
             None
@@ -657,6 +660,19 @@ class ExternalChannelMailboxIngestionStore:
                 session_id=binding.agent_session_id,
                 binding_id=binding.id,
                 desired_progress=checking_progress(),
+                tracker_visibility=_tracker_visibility(
+                    provider=request.locator.provider,
+                    invocation=request.locator.invocation,
+                ),
+                slack_presence_thread_ts=_request_slack_presence_thread_ts(
+                    request=request,
+                    resource=conversation.resource,
+                ),
+                slack_presence_initiator_user_id=(
+                    request.locator.provider_user_id
+                    if request.locator.provider is ExternalChannelProvider.SLACK
+                    else None
+                ),
             )
             session_presence_id = (
                 None
@@ -666,15 +682,6 @@ class ExternalChannelMailboxIngestionStore:
                     resource=conversation.resource,
                     binding=binding,
                 )
-            )
-            settings_control_id = (
-                await self._create_binding_settings_on_demand_intent(
-                    session,
-                    resource=conversation.resource,
-                    binding=binding,
-                )
-                if existing_binding and request.locator.invocation
-                else None
             )
             progress_id = await self._create_initial_progress_intent(
                 session,
@@ -798,7 +805,6 @@ class ExternalChannelMailboxIngestionStore:
                 else tuple(
                     plan
                     for plan in (
-                        settings_control_id,
                         session_presence_id,
                         progress_id,
                     )
@@ -1879,25 +1885,6 @@ class ExternalChannelMailboxIngestionStore:
             operation_seed=f"joined-presence:{binding.id}",
         )
 
-    async def _create_binding_settings_on_demand_intent(
-        self,
-        session: AsyncSession,
-        *,
-        resource: ExternalChannelResource,
-        binding: ExternalChannelBinding,
-    ) -> ProviderEffectPlan | None:
-        """Plan settings access after the next eligible mention."""
-        return await self.work_repository.prepare_direct_control(
-            session,
-            connection_id=resource.connection_id,
-            resource_id=resource.id,
-            route_id=binding.route_id,
-            binding_id=binding.id,
-            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-            request_payload=binding_settings_on_demand_payload(resource.labels),
-            operation_seed=f"binding-settings:{binding.id}",
-        )
-
     async def _create_setup_control_intent(
         self,
         session: AsyncSession,
@@ -2127,6 +2114,31 @@ def _resource_labels(request: ExternalChannelIngestionRequest) -> dict[str, obje
     }
 
 
+def _resource_slack_presence_thread_ts(
+    resource: ExternalChannelResource,
+) -> str | None:
+    """Return the retained Slack thread root for presence projection."""
+    if (
+        resource.resource_type is not ExternalChannelResourceType.THREAD
+        or resource.labels is None
+    ):
+        return None
+    value = resource.labels.get("thread_ts")
+    return value if isinstance(value, str) and value else None
+
+
+def _request_slack_presence_thread_ts(
+    *,
+    request: ExternalChannelIngestionRequest,
+    resource: ExternalChannelResource,
+) -> str | None:
+    """Return the provider status anchor for the current Slack Work cycle."""
+    if request.locator.provider is not ExternalChannelProvider.SLACK:
+        return None
+    retained = _resource_slack_presence_thread_ts(resource)
+    return retained or request.locator.trigger_provider_message_id
+
+
 def _provider_parent_channel_id(
     request: ExternalChannelIngestionRequest,
 ) -> str:
@@ -2228,6 +2240,16 @@ def _rejected(
 
 def _route_has_automatic_access(route: ExternalChannelAgentRoute) -> bool:
     return route.open_access_enabled
+
+
+def _tracker_visibility(
+    *,
+    provider: ExternalChannelProvider,
+    invocation: bool,
+) -> Literal["hidden", "visible"]:
+    """Derive conversational Tracker eligibility from explicit invocation."""
+    del provider
+    return "visible" if invocation else "hidden"
 
 
 def _response_mode_ignored_reason(

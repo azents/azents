@@ -145,10 +145,12 @@ class _DiscordClientDouble:
         events: list[str],
         *,
         fail_endpoint: bool = False,
+        mismatched_endpoint: bool = False,
         command_error: DiscordAPIError | None = None,
     ) -> None:
         self.events = events
         self.fail_endpoint = fail_endpoint
+        self.mismatched_endpoint = mismatched_endpoint
         self.command_error = command_error
         self.endpoint_url: str | None = None
 
@@ -177,12 +179,15 @@ class _DiscordClientDouble:
         *,
         bot_token: str,
         endpoint_url: str,
-    ) -> None:
+    ) -> str:
         assert bot_token == "discord-bot-token"
         self.events.append("endpoint")
         self.endpoint_url = endpoint_url
         if self.fail_endpoint:
             raise DiscordAPIUnavailable
+        if self.mismatched_endpoint:
+            return "https://callbacks.example/unexpected"
+        return endpoint_url
 
     async def reconcile_required_guild_commands(
         self,
@@ -461,6 +466,46 @@ async def test_provider_endpoint_failure_does_not_activate(
         repository.clear_kwargs["callback_selector_hash"]
         == repository.prepare_kwargs["callback_selector_hash"]
     )
+
+
+@pytest.mark.asyncio
+async def test_provider_endpoint_postcondition_mismatch_does_not_activate(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """A mismatched provider callback response cannot become active authority."""
+    configuration = _configuration(codec)
+    events: list[str] = []
+    repository = _RepositoryDouble(
+        configuration=configuration,
+        events=events,
+        activate_result=_active_connection(configuration),
+    )
+    service = _service(
+        callback_url="https://callbacks.example",
+        repository=repository,
+        codec=codec,
+        client=_DiscordClientDouble(events, mismatched_endpoint=True),
+        events=events,
+    )
+
+    snapshot = await service.activate(connection_id=configuration.id)
+
+    assert snapshot.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+    assert snapshot.code == "discord_callback_configuration_invalid"
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "clear",
+        "commit",
+        "failure",
+        "commit",
+    ]
+    assert repository.activation_kwargs is None
+    assert repository.clear_kwargs is not None
 
 
 @pytest.mark.asyncio

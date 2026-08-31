@@ -1,11 +1,10 @@
 """External Channel management orchestration tests."""
 
 import datetime
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +40,11 @@ from azents.repos.external_channel.management_data import (
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
 )
+from azents.services.external_channel.conversation import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationLockLease,
+    ExternalChannelParticipationLock,
+)
 from azents.services.external_channel.data import (
     DiscordConnectionConfiguration,
     DiscordConnectionCredentials,
@@ -53,15 +57,34 @@ from azents.services.external_channel.management import (
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.testing.external_channel import make_provider_effect_plan
+from azents.testing.types import require_instance
+
+
+class _Lease:
+    """Owned coordination lease for management tests."""
+
+    def __init__(self, assert_owned: Callable[[], Awaitable[None]]) -> None:
+        self._assert_owned = assert_owned
+
+    async def assert_owned(self) -> None:
+        """Run the configured ownership observation."""
+        await self._assert_owned()
 
 
 class _Lock:
     """Provide one owned coordination lease for management tests."""
 
-    def acquire(self, **_: object) -> object:
+    def acquire(
+        self,
+        **_: object,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
         @asynccontextmanager
-        async def owned() -> AsyncGenerator[object, None]:
-            yield SimpleNamespace(assert_owned=AsyncMock())
+        async def owned() -> AsyncGenerator[ExternalChannelConversationLockLease, None]:
+            lease: ExternalChannelConversationLockLease = MagicMock(
+                spec=ExternalChannelConversationLockLease
+            )
+            lease.assert_owned = AsyncMock()
+            yield lease
 
         return owned()
 
@@ -73,18 +96,21 @@ class _RecordingLock:
         self.name = name
         self.events = events
 
-    def acquire(self, **_: object) -> object:
+    def acquire(
+        self,
+        **_: object,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
         self.events.append(f"{self.name}:acquire")
 
         @asynccontextmanager
-        async def owned() -> AsyncGenerator[object, None]:
+        async def owned() -> AsyncGenerator[ExternalChannelConversationLockLease, None]:
             self.events.append(f"{self.name}:enter")
 
             async def assert_owned() -> None:
                 self.events.append(f"{self.name}:owned")
 
             try:
-                yield SimpleNamespace(assert_owned=assert_owned)
+                yield _Lease(assert_owned)
             finally:
                 self.events.append(f"{self.name}:exit")
 
@@ -143,8 +169,8 @@ def _management_service(
     agent_repository: AsyncMock,
     agent_admin_repository: AsyncMock,
     action_service: AsyncMock | None = None,
-    conversation_lock: object | None = None,
-    participation_lock: object | None = None,
+    conversation_lock: ExternalChannelConversationLock | None = None,
+    participation_lock: ExternalChannelParticipationLock | None = None,
 ) -> ExternalChannelManagementService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -162,14 +188,10 @@ def _management_service(
         discord_activation_service=AsyncMock(),
         action_service=AsyncMock() if action_service is None else action_service,
         access_service=AsyncMock(),
-        conversation_lock=cast(
-            Any,
-            _Lock() if conversation_lock is None else conversation_lock,
-        ),
-        participation_lock=cast(
-            Any,
-            _Lock() if participation_lock is None else participation_lock,
-        ),
+        conversation_lock=_Lock() if conversation_lock is None else conversation_lock,
+        participation_lock=_Lock()
+        if participation_lock is None
+        else participation_lock,
     )
 
 
@@ -594,8 +616,8 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
     managed = _connection().model_copy(
         update={
@@ -659,11 +681,12 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
     )
     agent_admin_repository = AsyncMock()
     agent_admin_repository.is_admin.return_value = True
-    connection_service = cast(
-        ExternalChannelConnectionService,
-        SimpleNamespace(
-            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+    connection_service = require_instance(
+        MagicMock(
+            spec=ExternalChannelConnectionService,
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token")),
         ),
+        ExternalChannelConnectionService,
     )
     service = ExternalChannelManagementService(
         session_manager=session_manager,
@@ -677,8 +700,8 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     await service.update_discord(
@@ -740,11 +763,12 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         return object()
 
     activation_service.activate.side_effect = activate
-    connection_service = cast(
-        ExternalChannelConnectionService,
-        SimpleNamespace(
-            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+    connection_service = require_instance(
+        MagicMock(
+            spec=ExternalChannelConnectionService,
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token")),
         ),
+        ExternalChannelConnectionService,
     )
     service = ExternalChannelManagementService(
         session_manager=session_manager,
@@ -758,8 +782,8 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     await service.update_multi_discord(
@@ -800,11 +824,12 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
     repository.replace_multi_discord_configuration.return_value = object()
     activation_service = AsyncMock()
     activation_service.activate.side_effect = ValueError("Discord callback failed.")
-    connection_service = cast(
-        ExternalChannelConnectionService,
-        SimpleNamespace(
-            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+    connection_service = require_instance(
+        MagicMock(
+            spec=ExternalChannelConnectionService,
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token")),
         ),
+        ExternalChannelConnectionService,
     )
     service = ExternalChannelManagementService(
         session_manager=session_manager,
@@ -818,8 +843,8 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     with pytest.raises(ValueError, match="Discord callback failed"):
@@ -840,9 +865,9 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
 
 async def test_replace_discord_configuration_invalidates_prior_authority() -> None:
     """Credential replacement clears callback, identity, health, and lease state."""
-    connection = cast(
-        RDBExternalChannelConnection,
-        SimpleNamespace(
+    connection = require_instance(
+        MagicMock(
+            spec=RDBExternalChannelConnection,
             id="connection-1",
             provider=ExternalChannelProvider.DISCORD,
             transport=ExternalChannelTransport.HTTP,
@@ -864,14 +889,16 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
             socket_gap_detected_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
             socket_gap_reason="gap",
         ),
+        RDBExternalChannelConnection,
     )
-    route = cast(
-        RDBExternalChannelAgentRoute,
-        SimpleNamespace(
+    route = require_instance(
+        MagicMock(
+            spec=RDBExternalChannelAgentRoute,
             id="route-1",
             agent_id="agent-1",
             open_access_enabled=True,
         ),
+        RDBExternalChannelAgentRoute,
     )
     session = AsyncMock(spec=AsyncSession)
     repository = ExternalChannelManagementRepository()
@@ -919,17 +946,21 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
 
 def test_discord_thread_duration_update_preserves_unknown_configuration() -> None:
     """A policy-only update replaces one key without narrowing stored JSON."""
-    connection = SimpleNamespace(
-        provider_config={
-            "provider": "discord",
-            "target_guild_id": "guild-1",
-            "thread_auto_archive_duration_minutes": 1440,
-            "future_policy": {"enabled": True},
-        }
+    connection = require_instance(
+        MagicMock(
+            spec=RDBExternalChannelConnection,
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
+                "future_policy": {"enabled": True},
+            },
+        ),
+        RDBExternalChannelConnection,
     )
 
     _set_discord_thread_auto_archive_duration(
-        connection,  # ty: ignore[invalid-argument-type] # The policy helper reads only provider_config in this focused test.
+        connection,
         duration=10080,
     )
 
@@ -978,10 +1009,19 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "files:read" in guidance.bot_scopes
     assert "files:write" in guidance.bot_scopes
     assert "commands" in guidance.bot_scopes
+    assert "assistant:write" in guidance.bot_scopes
     assert "request_url" not in subscriptions
     assert settings["interactivity"] == {"is_enabled": True}
     features = guidance.manifest["features"]
     assert is_external_channel_projection(features)
+    assert features["agent_view"] == {
+        "agent_description": "Incident Agent powered by Azents"
+    }
+    assert features["app_home"] == {
+        "home_tab_enabled": False,
+        "messages_tab_enabled": True,
+        "messages_tab_read_only_enabled": True,
+    }
     assert features["slash_commands"] == [
         {
             "command": "/azents",
@@ -1059,8 +1099,8 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
         discord_activation_service=AsyncMock(),
         action_service=AsyncMock(),
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     result = await service.add_multi_route(
@@ -1182,8 +1222,8 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     result = await service.disconnect_connection(
@@ -1268,8 +1308,8 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
     result = await service.disconnect_multi_connection(

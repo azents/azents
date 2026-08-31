@@ -11,7 +11,7 @@ from azents.core.slack_external_channel_progress import (
     SLACK_FALLBACK_TEXT_MAX_LENGTH,
     render_slack_persisted_progress,
     render_slack_progress,
-    render_slack_session_navigation_actions,
+    render_slack_session_actions,
     render_slack_session_presence,
 )
 
@@ -250,8 +250,12 @@ def test_session_presence_contains_copy_and_navigation() -> None:
     }
 
 
-def test_session_navigation_actions_use_the_canonical_tracker_control() -> None:
-    assert render_slack_session_navigation_actions(_SESSION_URL) == {
+def test_session_actions_use_the_canonical_tracker_controls() -> None:
+    assert render_slack_session_actions(
+        session_url=_SESSION_URL,
+        settings_action_id="azents_conversation_settings_open",
+        settings_action_value="signed-settings-locator",
+    ) == {
         "type": "actions",
         "elements": [
             {
@@ -262,6 +266,15 @@ def test_session_navigation_actions_use_the_canonical_tracker_control() -> None:
                     "text": "View session",
                 },
                 "url": _SESSION_URL,
-            }
+            },
+            {
+                "type": "button",
+                "action_id": "azents_conversation_settings_open",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Conversation settings",
+                },
+                "value": "signed-settings-locator",
+            },
         ],
     }

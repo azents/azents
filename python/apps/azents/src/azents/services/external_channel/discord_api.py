@@ -213,8 +213,8 @@ class DiscordInteractionEndpointTransport(Protocol):
         *,
         bot_token: str,
         endpoint_url: str,
-    ) -> None:
-        """Configure the current Bot-owned Application callback."""
+    ) -> str:
+        """Configure and return the current Bot-owned Application callback."""
         ...
 
 
@@ -229,7 +229,7 @@ class DiscordInteractionEndpointHTTPTransport:
         *,
         bot_token: str,
         endpoint_url: str,
-    ) -> None:
+    ) -> str:
         """Configure one exact Interaction Endpoint through the SDK gap route."""
         try:
             response = await self.http_client.patch(
@@ -240,6 +240,16 @@ class DiscordInteractionEndpointHTTPTransport:
         except httpx.RequestError as error:
             raise DiscordAPIUnavailable from error
         _raise_for_callback_configuration_response(response)
+        try:
+            payload: object = response.json()
+        except ValueError as error:
+            raise DiscordAPIConfigurationInvalid from error
+        if not isinstance(payload, dict):
+            raise DiscordAPIConfigurationInvalid
+        configured_endpoint = payload.get("interactions_endpoint_url")
+        if not isinstance(configured_endpoint, str) or not configured_endpoint:
+            raise DiscordAPIConfigurationInvalid
+        return configured_endpoint
 
 
 class DiscordGuildCommandCreateHTTPTransport:
@@ -326,9 +336,9 @@ class DiscordAPIClient:
         *,
         bot_token: str,
         endpoint_url: str,
-    ) -> None:
-        """Configure the requesting Bot's outgoing interaction endpoint."""
-        await self.interaction_endpoint_transport.configure(
+    ) -> str:
+        """Configure and return the requesting Bot's interaction endpoint."""
+        return await self.interaction_endpoint_transport.configure(
             bot_token=bot_token,
             endpoint_url=endpoint_url,
         )

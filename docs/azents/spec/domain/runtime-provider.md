@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-18
-spec_version: 27
+last_verified_at: 2026-08-26
+spec_version: 28
 ---
 
 # Runtime Provider
@@ -69,10 +69,12 @@ Provider authentication is a separate durable binding domain. A connection selec
 Providers are optional. A Provider must be enabled, active, Workspace-eligible, and currently
 advertise a valid capability contract that satisfies the exact selected infrastructure Profile
 before the Runtime configuration can become ready. A live connection is separate operational
-readiness required before lifecycle dispatch or operation qualification. Decommissioning,
-force-retired, disabled, invalid-capability, and incompatible Providers remain durable for Admin
-inventory but cannot satisfy new Runtime creation or recreation; disconnected Providers retain
-their valid configuration identity while physical work waits for reconnect.
+readiness required before lifecycle dispatch and compute creation or replacement. It does not
+fence ordinary operations through an already-ready current-generation Runner serving retained
+applied configuration. Decommissioning, force-retired, disabled, invalid-capability, and
+incompatible Providers remain durable for Admin inventory but cannot satisfy new Runtime creation
+or recreation; disconnected Providers retain their valid configuration identity while new physical
+work waits for reconnect.
 
 ## Policy and capability state
 
@@ -314,6 +316,9 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **28 (2026-08-26):** Separated Provider host-management authority from existing
+  ready-Runner data-plane operations while retaining Provider connection requirements
+  for lifecycle dispatch and compute creation or replacement.
 - **27 (2026-08-18):** Corrected Kubernetes Provider deployment authority to include
   namespace-scoped strict-network Service, ConfigMap, NetworkPolicy, and logical-Runtime CA Secret
   operations while preserving server-only TokenReview and credential-Secret-free authentication.

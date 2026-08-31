@@ -1,5 +1,8 @@
 """Deterministic External Channel progress proxy tests."""
 
+import json
+import threading
+
 from support import image_generation_openai_proxy as proxy
 
 
@@ -154,3 +157,324 @@ def test_progress_proxy_records_unresolved_provider_references() -> None:
         "search_tool_available": True,
         "progress_tool_available": False,
     }
+
+
+def test_quiet_work_barrier_ignores_unmatched_progress_request() -> None:
+    """The Discord-only barrier does not activate the existing Slack journey."""
+    request = _request()
+
+    assert proxy.is_external_channel_progress_request(request) is True
+    assert proxy.is_external_channel_quiet_work_request(request) is False
+
+
+def test_quiet_work_setup_uses_an_isolated_marker_and_call_ids() -> None:
+    """Setup cannot leave normal progress results in the shared transcript."""
+    request: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": ("Binding: binding-quiet-123\nDiscord quiet work setup E2E"),
+            }
+        ],
+        "tools": [{"type": "function", "name": "channel_action"}],
+    }
+
+    assert proxy.is_external_channel_quiet_work_setup_request(request) is True
+    assert proxy.is_external_channel_progress_request(request) is False
+    assert proxy._EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID not in {
+        proxy._EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+        proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+        proxy._EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
+        proxy._EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
+        proxy._EXTERNAL_CHANNEL_FINISH_CALL_ID,
+    }
+
+
+def test_quiet_work_setup_continues_from_its_unique_search_result() -> None:
+    """Tool discovery in setup continues only through its isolated call ID."""
+    request: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "### Binding `binding-quiet-123`\nDiscord quiet work setup E2E"
+                ),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": proxy._EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
+                "output": "{}",
+            },
+        ],
+        "tools": [{"type": "function", "name": "channel_action"}],
+    }
+
+    assert proxy.is_external_channel_quiet_work_setup_request(request) is True
+    assert proxy.is_external_channel_progress_request(request) is False
+
+
+def test_quiet_work_setup_history_does_not_intercept_later_progress() -> None:
+    """A later quiet turn is not reclassified from historical setup output."""
+    request: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": ("Binding: binding-quiet-123\nDiscord quiet work setup E2E"),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": proxy._EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+                "output": "{}",
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Binding: binding-quiet-123\n"
+                    "Discord quiet work presence E2E. "
+                    "Provider-native Channel Work progress E2E."
+                ),
+            },
+        ],
+        "tools": [{"type": "function", "name": "channel_action"}],
+    }
+    barrier = proxy._ExternalChannelQuietWorkBarrier()
+    barrier.arm("binding-quiet-123")
+    barrier.mark_progress_issued("binding-quiet-123")
+
+    assert proxy.is_external_channel_quiet_work_setup_request(request) is False
+    assert proxy.is_external_channel_progress_request(request) is True
+    assert barrier.take_progress_issued("binding-quiet-123") is True
+
+
+def test_quiet_work_barrier_arm_requires_a_bounded_binding() -> None:
+    """The arm endpoint accepts one opaque, bounded Binding handle."""
+    assert (
+        proxy._external_channel_quiet_work_barrier_binding(
+            b'{"binding":"binding-quiet-123"}'
+        )
+        == "binding-quiet-123"
+    )
+    assert proxy._external_channel_quiet_work_barrier_binding(b"{}") is None
+    assert (
+        proxy._external_channel_quiet_work_barrier_binding(b'{"binding":" "}') is None
+    )
+    assert (
+        proxy._external_channel_quiet_work_barrier_binding(
+            b'{"binding":"binding/invalid"}'
+        )
+        is None
+    )
+    assert (
+        proxy._external_channel_quiet_work_barrier_binding(
+            b'{"binding":"' + (b"a" * 257) + b'"}'
+        )
+        is None
+    )
+
+
+def test_quiet_work_barrier_initial_issuance_is_not_held() -> None:
+    """Issuing the first progress call records, but does not reach, the barrier."""
+    barrier = proxy._ExternalChannelQuietWorkBarrier(timeout_seconds=1)
+    barrier.arm("binding-quiet-123")
+
+    barrier.mark_progress_issued("binding-quiet-123")
+
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+    assert barrier.has_progress_issued_for("binding-quiet-123") is True
+
+
+def test_quiet_work_barrier_holds_one_sparse_continuation_until_release() -> None:
+    """Issued state holds the next scoped continuation without parsing output."""
+    sparse_continuation: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": "### Binding `binding-quiet-123`",
+            }
+        ],
+        "tools": [],
+    }
+    barrier = proxy._ExternalChannelQuietWorkBarrier(timeout_seconds=1)
+    barrier.arm("binding-quiet-123")
+    barrier.mark_progress_issued("binding-quiet-123")
+    result: list[bool] = []
+
+    assert proxy.is_external_channel_progress_request(sparse_continuation) is False
+    assert proxy.external_channel_binding(sparse_continuation) == "binding-quiet-123"
+    assert barrier.take_progress_issued("binding-quiet-123") is True
+    waiter = threading.Thread(
+        target=lambda: result.append(barrier.wait_for_release("binding-quiet-123"))
+    )
+    waiter.start()
+
+    assert barrier.wait_until_reached(timeout=1)
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": True,
+        "released": False,
+        "timed_out": False,
+    }
+
+    barrier.release()
+    waiter.join(timeout=1)
+
+    assert not waiter.is_alive()
+    assert result == [True]
+    assert barrier.has_progress_issued_for("binding-quiet-123") is False
+    assert barrier.take_progress_issued("binding-quiet-123") is False
+
+    barrier.arm("binding-rearmed-456")
+
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+    assert barrier.wait_for_release("binding-quiet-123") is True
+    assert barrier.evidence()["reached"] is False
+
+
+def test_quiet_work_barrier_records_bounded_timeout() -> None:
+    """An armed boundary fails deterministically when no release arrives."""
+    barrier = proxy._ExternalChannelQuietWorkBarrier(timeout_seconds=0.01)
+    barrier.arm("binding-quiet-123")
+
+    assert barrier.wait_for_release("binding-quiet-123") is False
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": True,
+        "released": False,
+        "timed_out": True,
+    }
+
+
+def test_quiet_work_barrier_evidence_never_retains_request_payload() -> None:
+    """The barrier reports booleans only, even for secret-bearing source input."""
+    request = _request()
+    request["input"] = [
+        {
+            "role": "user",
+            "content": (
+                "Binding: binding-secret-123\n"
+                "Discord quiet work presence E2E\n"
+                "bot_token=xoxb-secret signing_secret=private-body"
+            ),
+        }
+    ]
+    request["tools"] = [{"type": "function", "name": "channel_action"}]
+    barrier = proxy._ExternalChannelQuietWorkBarrier()
+    barrier.arm("binding-secret-123")
+
+    assert proxy.is_external_channel_quiet_work_request(request) is True
+    evidence = barrier.evidence()
+
+    assert evidence == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+    serialized = json.dumps(evidence)
+    assert "binding-secret-123" not in serialized
+    assert "xoxb-secret" not in serialized
+    assert "private-body" not in serialized
+
+
+def test_quiet_work_barrier_ignores_a_different_binding() -> None:
+    """One armed Binding never holds unrelated External Channel work."""
+    barrier = proxy._ExternalChannelQuietWorkBarrier(timeout_seconds=0.01)
+    barrier.arm("binding-quiet-123")
+    barrier.mark_progress_issued("binding-quiet-123")
+
+    assert barrier.has_progress_issued_for("binding-other-456") is False
+    assert barrier.take_progress_issued("binding-other-456") is False
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+
+
+def test_progress_registry_matches_markerless_compacted_continuation() -> None:
+    """An active Binding recognizes current results after compaction."""
+    request: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "## Channel Work Snapshot\n\n"
+                    "### Binding `binding-quiet-123`\n"
+                    "- Current work title: Investigating error logs"
+                ),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_external_channel_progress",
+                "output": "{}",
+            },
+        ],
+        "tools": [{"type": "function", "name": "channel_action"}],
+    }
+    registry = proxy._ExternalChannelProgressSequenceRegistry()
+    registry.start("binding-quiet-123")
+
+    assert proxy.is_external_channel_progress_request(request) is False
+    assert proxy.has_current_external_channel_progress_result(request) is True
+    assert registry.is_active(proxy.external_channel_binding(request)) is True
+    assert proxy.is_external_channel_quiet_work_request(request) is False
+    assert proxy.external_channel_binding(request) == "binding-quiet-123"
+
+
+def test_completed_history_does_not_match_a_new_unmarked_late_mention() -> None:
+    """Historical tool results cannot restart progress for a later user turn."""
+    request: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "Binding: binding-quiet-123\n"
+                    "Discord quiet work presence E2E. "
+                    "Provider-native Channel Work progress E2E."
+                ),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": proxy._EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                "output": "{}",
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Binding: binding-quiet-123\n"
+                    "late explicit mention during quiet work"
+                ),
+            },
+        ],
+        "tools": [{"type": "function", "name": "channel_action"}],
+    }
+    registry = proxy._ExternalChannelProgressSequenceRegistry()
+    registry.start("binding-quiet-123")
+    registry.clear("binding-quiet-123")
+
+    assert proxy.is_external_channel_progress_request(request) is False
+    assert proxy.has_current_external_channel_progress_result(request) is False
+    assert registry.is_active("binding-quiet-123") is False
+
+
+def test_progress_registry_clear_all_resets_active_bindings() -> None:
+    """Journal reset removes all active deterministic progress sequences."""
+    registry = proxy._ExternalChannelProgressSequenceRegistry()
+    registry.start("binding-one")
+    registry.start("binding-two")
+
+    registry.clear_all()
+
+    assert registry.is_active("binding-one") is False
+    assert registry.is_active("binding-two") is False

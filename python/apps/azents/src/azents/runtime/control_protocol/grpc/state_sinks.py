@@ -130,6 +130,29 @@ class RuntimeProviderReportRepositorySink:
                 RuntimeProviderConnectionState.CONNECTED,
             )
 
+    async def complete_restart_handoff(
+        self,
+        report: SharedRuntimeProviderReport,
+    ) -> bool:
+        """Rearm one current successful Restart completion as Start."""
+        async with self.session_manager() as session:
+            if not await self.runtime_repository.provider_report_matches_binding(
+                session,
+                runtime_id=report.runtime_id,
+                provider_logical_id=report.provider_id,
+            ):
+                raise ValueError(
+                    "Runtime Provider report does not match the immutable "
+                    "Runtime Provider binding."
+                )
+            runtime = await self.runtime_repository.complete_restart_handoff(
+                session,
+                report.runtime_id,
+                provider_generation=report.provider_generation,
+                desired_generation=report.observed_desired_generation,
+            )
+        return runtime is not None
+
     async def _record_provider_configuration_evidence(
         self,
         session: AsyncSession,

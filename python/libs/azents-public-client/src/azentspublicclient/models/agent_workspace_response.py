@@ -18,7 +18,8 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.agent_runtime_lifecycle_presentation_response import AgentRuntimeLifecyclePresentationResponse
 from azentspublicclient.models.agent_workspace_actions_response import AgentWorkspaceActionsResponse
 from azentspublicclient.models.agent_workspace_runtime_response import AgentWorkspaceRuntimeResponse
 from azentspublicclient.models.workspace import Workspace
@@ -29,11 +30,12 @@ class AgentWorkspaceResponse(BaseModel):
     """
     Agent Workspace panel bootstrap response.
     """ # noqa: E501
+    lifecycle: Optional[AgentRuntimeLifecyclePresentationResponse]
     runtime: AgentWorkspaceRuntimeResponse = Field(description="Provider runtime status")
     workspace: Workspace
     actions: AgentWorkspaceActionsResponse = Field(description="Runtime lifecycle actions")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["runtime", "workspace", "actions"]
+    __properties: ClassVar[List[str]] = ["lifecycle", "runtime", "workspace", "actions"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +78,9 @@ class AgentWorkspaceResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of lifecycle
+        if self.lifecycle:
+            _dict['lifecycle'] = self.lifecycle.to_dict()
         # override the default output from pydantic by calling `to_dict()` of runtime
         if self.runtime:
             _dict['runtime'] = self.runtime.to_dict()
@@ -90,6 +95,11 @@ class AgentWorkspaceResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if lifecycle (nullable) is None
+        # and model_fields_set contains the field
+        if self.lifecycle is None and "lifecycle" in self.model_fields_set:
+            _dict['lifecycle'] = None
+
         return _dict
 
     @classmethod
@@ -102,6 +112,7 @@ class AgentWorkspaceResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "lifecycle": AgentRuntimeLifecyclePresentationResponse.from_dict(obj["lifecycle"]) if obj.get("lifecycle") is not None else None,
             "runtime": AgentWorkspaceRuntimeResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
             "workspace": Workspace.from_dict(obj["workspace"]) if obj.get("workspace") is not None else None,
             "actions": AgentWorkspaceActionsResponse.from_dict(obj["actions"]) if obj.get("actions") is not None else None
