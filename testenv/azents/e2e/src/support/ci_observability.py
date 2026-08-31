@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,32 @@ class ImageBuildTiming(TypedDict):
     cache_backend: str
     cache_scope: str | None
     cache_export_enabled: bool
+
+
+_TEST_PHASE_RECORD_KEYS = frozenset(
+    {"record_type", "node_id", "phase", "duration_seconds", "outcome"}
+)
+_FIXTURE_RECORD_KEYS = frozenset(
+    {
+        "record_type",
+        "fixture",
+        "scope",
+        "node_id",
+        "phase",
+        "duration_seconds",
+        "outcome",
+    }
+)
+_IMAGE_BUILD_TIMING_KEYS = frozenset(
+    {
+        "image",
+        "duration_seconds",
+        "completed",
+        "cache_backend",
+        "cache_scope",
+        "cache_export_enabled",
+    }
+)
 
 
 def parse_junit(path: Path) -> JUnitSummary:
@@ -212,22 +238,115 @@ def parse_timings(path: Path) -> tuple[TimingRecord, ...]:
     """Parse safe timing records produced by the E2E pytest hooks."""
     records: list[TimingRecord] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        payload = json.loads(line)
-        if payload["record_type"] == "test_phase":
-            records.append(cast(_TestPhaseRecord, payload))
-        elif payload["record_type"] == "fixture":
-            records.append(cast(_FixtureRecord, payload))
+        payload = _json_object(line, record_name="timing record")
+        record_type = _required_string(payload, "record_type")
+        if record_type == "test_phase":
+            _require_exact_keys(
+                payload,
+                _TEST_PHASE_RECORD_KEYS,
+                record_name="test phase timing record",
+            )
+            records.append(
+                _TestPhaseRecord(
+                    record_type="test_phase",
+                    node_id=_required_string(payload, "node_id"),
+                    phase=_required_string(payload, "phase"),
+                    duration_seconds=_required_float(payload, "duration_seconds"),
+                    outcome=_required_string(payload, "outcome"),
+                )
+            )
+        elif record_type == "fixture":
+            _require_exact_keys(
+                payload,
+                _FIXTURE_RECORD_KEYS,
+                record_name="fixture timing record",
+            )
+            records.append(
+                _FixtureRecord(
+                    record_type="fixture",
+                    fixture=_required_string(payload, "fixture"),
+                    scope=_required_string(payload, "scope"),
+                    node_id=_required_string(payload, "node_id"),
+                    phase=_required_string(payload, "phase"),
+                    duration_seconds=_required_float(payload, "duration_seconds"),
+                    outcome=_required_string(payload, "outcome"),
+                )
+            )
         else:
-            raise ValueError(f"unsupported timing record: {payload['record_type']}")
+            raise ValueError(f"unsupported timing record: {record_type}")
     return tuple(records)
 
 
 def parse_image_build_timings(path: Path) -> tuple[ImageBuildTiming, ...]:
     """Parse safe image build timings produced by E2E fixtures."""
     return tuple(
-        cast(ImageBuildTiming, json.loads(line))
+        _parse_image_build_timing(line)
         for line in path.read_text(encoding="utf-8").splitlines()
     )
+
+
+def _parse_image_build_timing(line: str) -> ImageBuildTiming:
+    payload = _json_object(line, record_name="image build timing record")
+    _require_exact_keys(
+        payload,
+        _IMAGE_BUILD_TIMING_KEYS,
+        record_name="image build timing record",
+    )
+    return ImageBuildTiming(
+        image=_required_string(payload, "image"),
+        duration_seconds=_required_float(payload, "duration_seconds"),
+        completed=_required_bool(payload, "completed"),
+        cache_backend=_required_string(payload, "cache_backend"),
+        cache_scope=_optional_string(payload, "cache_scope"),
+        cache_export_enabled=_required_bool(payload, "cache_export_enabled"),
+    )
+
+
+def _json_object(line: str, *, record_name: str) -> dict[str, object]:
+    payload: object = json.loads(line)
+    if not isinstance(payload, dict) or any(
+        not isinstance(key, str) for key in payload
+    ):
+        raise ValueError(f"{record_name} must be an object with string keys")
+    return payload
+
+
+def _require_exact_keys(
+    payload: dict[str, object],
+    expected: frozenset[str],
+    *,
+    record_name: str,
+) -> None:
+    if set(payload) != expected:
+        raise ValueError(f"{record_name} fields are invalid")
+
+
+def _required_string(payload: dict[str, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _required_float(payload: dict[str, object], field: str) -> float:
+    value = payload.get(field)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{field} must be a number")
+    return float(value)
+
+
+def _required_bool(payload: dict[str, object], field: str) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
+def _optional_string(payload: dict[str, object], field: str) -> str | None:
+    value = payload.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"{field} must be a string or null")
+    return value
 
 
 def _render_timing_summary(records: tuple[TimingRecord, ...]) -> list[str]:
