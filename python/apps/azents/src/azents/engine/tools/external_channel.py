@@ -357,7 +357,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         )
         if not works:
             return None
-        handles = [work.binding_id for work in works]
+        handles = [work.binding_id for work in works if not work.awaiting_input]
+        if not handles:
+            return None
         return SessionIdleResult(
             continuations=[
                 ExternalChannelSessionContinuationInput(
@@ -671,6 +673,7 @@ def render_channel_work_compaction_snapshot(
                 f"- Provider: {work.provider.value}",
                 f"- Resource: {work.resource_label}",
                 f"- Current work title: {work.title or 'Not declared yet'}",
+                *(["- Awaiting participant input"] if work.awaiting_input else []),
                 "- Tasks:",
             ]
         )

@@ -60,7 +60,11 @@ from azents.services.scheduled_task.channel import (
 )
 
 
-def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
+def _snapshot(
+    binding_id: str = "binding-1",
+    *,
+    awaiting_input: bool = False,
+) -> ChannelWorkSnapshot:
     return ChannelWorkSnapshot(
         binding_id=binding_id,
         provider=ExternalChannelProvider.SLACK,
@@ -76,7 +80,7 @@ def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
                 sources=[],
             )
         ],
-        awaiting_input=False,
+        awaiting_input=awaiting_input,
     )
 
 
@@ -667,7 +671,12 @@ def test_channel_action_rejects_empty_file_lists() -> None:
 @pytest.mark.asyncio
 async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() -> None:
     """Prompt layers retain only discovery and unfinished-work continuity."""
-    service = _ActionService([_snapshot("binding-1"), _snapshot("binding-2")])
+    service = _ActionService(
+        [
+            _snapshot("binding-1", awaiting_input=True),
+            _snapshot("binding-2"),
+        ]
+    )
     toolkit = _toolkit(service)
 
     direct_prompt = await toolkit.get_static_prompt(_turn_context())
@@ -699,6 +708,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert compacted is not None
     assert compacted.summary.count("## Channel Work Snapshot") == 1
     assert "binding-2" in compacted.summary
+    assert "Awaiting participant input" in compacted.summary
     assert "State revision" not in compacted.summary
     assert "Progress projection" not in compacted.summary
     assert "Latest action" not in compacted.summary
@@ -715,8 +725,33 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     )
     assert idle is not None
     assert len(idle.continuations) == 1
-    assert idle.continuations[0].metadata["active_bindings"] == ("binding-1,binding-2")
+    assert idle.continuations[0].metadata["active_bindings"] == "binding-2"
     assert set(idle.continuations[0].metadata) == {"source", "active_bindings"}
+
+
+@pytest.mark.asyncio
+async def test_idle_hook_emits_nothing_when_every_binding_awaits_input() -> None:
+    """Awaiting Work remains active without scheduling autonomous continuation."""
+    toolkit = _toolkit(
+        _ActionService(
+            [
+                _snapshot("binding-1", awaiting_input=True),
+                _snapshot("binding-2", awaiting_input=True),
+            ]
+        )
+    )
+
+    idle = await toolkit._on_session_idle(
+        SessionIdleHookContext(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            run_id="run-1",
+            reason="completed",
+        )
+    )
+
+    assert idle is None
 
 
 @pytest.mark.asyncio

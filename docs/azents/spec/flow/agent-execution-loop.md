@@ -86,7 +86,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-08-31
-spec_version: 163
+spec_version: 164
 ---
 
 # Agent Execution Loop
@@ -1315,9 +1315,10 @@ concise `<provider_reference_mappings>` XML block after the contiguous batch. It
 rewriting the source body.
 
 When an active binding exists, runtime adds the direct `channel_action` tool and
-the current binding/work snapshot. Its schema always permits `finish`, `continue`, and
-`ignore`; ordinary, initial External Channel, continuation, mixed, and tool-follow-up
-input boundaries use the same schema and binding authorization. Normal assistant text
+the current binding/work snapshot. Its schema always permits `finish`, `continue`,
+`request_input`, and `ignore`; ordinary, initial External Channel, continuation,
+mixed, and tool-follow-up input boundaries use the same schema and binding
+authorization. Normal assistant text
 is retained only in Azents history and is never implicitly published to the provider. A
 `channel_action` call commits canonical work before its process-local provider
 effects execute outside the transaction. The normal client-tool call and result
@@ -1326,9 +1327,11 @@ is created. `ignore` finishes existing active Work regardless of recorded task s
 with an empty provider-effect plan and no later continuation for that Work.
 
 After a successful run, unfinished Channel Work is an idle-continuation source.
-Continuation remains eligible until every relevant binding finishes or clears
-its tasks. One completed binding does not cancel continuation required by
-another binding in the same root Session. The idle hook returns a typed External
+Awaiting Work remains active and visible to compaction but is not an External Channel
+continuation source. Only newly created same-binding human input or explicit
+`continue` clears its awaiting marker and advances the Work revision. One completed or
+awaiting binding does not cancel continuation required by another ready binding in the
+same root Session. The idle hook returns a typed External
 Channel continuation, which the worker stores as an
 `external_channel_continuation` mailbox item. Promotion creates the same dedicated
 event kind, and model lowering renders only the External Channel Work reminder.
@@ -1338,6 +1341,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-31** (spec_version 164) — Added `request_input`, delivery-confirmed
+  awaiting state, same-binding resume fencing, and ready-only External Channel idle
+  continuation while retaining awaiting Work in compaction.
 - **2026-08-27** (spec_version 162) — Resolved foreground, lightweight, and
   subagent input windows from distinct model defaults, model maximums, and nullable
   option caps before preparing immutable Run limits.

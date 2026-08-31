@@ -65,8 +65,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-29
-spec_version: 66
+last_verified_at: 2026-08-31
+spec_version: 67
 ---
 
 # External Channel
@@ -228,8 +228,16 @@ contain multiple independent bindings.
   never moves back to hidden within that cycle. Existing Work rows retain their current
   visibility through schema migration, and Scheduled Task-owned Trackers keep their
   separate unconditional lifecycle.
-- Every model input boundary exposes `channel_action ignore` beside `finish` and
-  `continue`. `ignore` accepts no publication or Work-update fields and uses the same
+- Every model input boundary exposes `request_input` and `ignore` beside `finish` and
+  `continue`. `request_input` requires an ordinary participant-visible message,
+  preserves active Work, and stores nullable requesting Run identity in version-4
+  binding-scoped Toolkit State only after every reply part is confirmed delivered.
+  The exact Work cycle and `state_revision` fence late settlement. Newly created
+  canonical human input through the same binding and explicit `continue` clear the
+  marker and advance the revision; duplicate, failed, provisioning-only, unrelated
+  binding, and non-External-Channel activity do not. Awaiting Work is excluded from
+  idle continuation and Discord typing, projects Slack presence as idle, and retains
+  its Tracker and tasks. `ignore` accepts no publication or Work-update fields and uses the same
   active Session, Agent, binding, route, connection, and resource validation as other
   Channel Actions. It finishes existing active Work regardless of recorded task
   status: desired progress is cleared, current provider projection observation is
@@ -518,6 +526,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-08-31** (spec_version 67) — Added version-4 binding-scoped awaiting input,
+  delivery-confirmed `request_input`, same-binding resume authority, ready-only
+  continuation, and idle Slack/Discord processing presence while retaining Trackers.
 - **2026-08-29** (spec_version 66) — Added configuration-fenced Slack Work presence
   leases and canonical channel/thread status coordinates, made ordinary Slack
   all-messages Work Tracker-hidden like Discord, placed signed settings access on

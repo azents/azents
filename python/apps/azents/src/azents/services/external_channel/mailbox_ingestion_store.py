@@ -753,6 +753,17 @@ class ExternalChannelMailboxIngestionStore:
                 if enqueue.mailbox_item.idempotency_key == trigger_idempotency_key
             )
             created = trigger_enqueue.created
+            if created:
+                resumed_work = await self.work_repository.resume_from_human_input(
+                    session,
+                    agent_id=agent_id,
+                    session_id=binding.agent_session_id,
+                    binding_id=binding.id,
+                )
+                if resumed_work is None:
+                    raise RuntimeError(
+                        "External Channel Work disappeared after mailbox admission."
+                    )
             if not replay_after_position:
                 advance = self.repository.advance_conversation_position_if_current
                 advanced = await advance(

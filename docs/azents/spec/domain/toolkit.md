@@ -59,8 +59,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-08-29
-spec_version: 100
+last_verified_at: 2026-08-31
+spec_version: 101
 ---
 
 # Toolkit
@@ -803,8 +803,8 @@ unprefixed executable entry only when the current root AgentSession has an activ
 External Channel binding. Tool Search defers its model-visible schema when enabled;
 otherwise the complete catalog exposes it directly. A minimal static prompt always
 states that ordinary assistant output is not delivered externally and that external
-publication, continuation, and silent completion use `channel_action`. Only the Tool
-Search-enabled variant adds the discovery instruction.
+publication, participant-input requests, continuation, and silent completion use
+`channel_action`.
 
 Normal turns do not inject canonical Channel Work snapshots dynamically. Tool-specific
 mode, binding, task-list, and file guidance belongs to the relevant tool description
@@ -813,7 +813,8 @@ External Channel turn or continuation and for an ordinary user who explicitly as
 for external publication. Active bindings or prior External Channel history alone do
 not classify the current ordinary user input as an External Channel request.
 Compaction preserves only unfinished work continuity: binding, provider, resource
-label, current title, and ordered tasks. It omits state revisions, provider projection
+label, current title, ordered tasks, and a provider-neutral awaiting-participant-input
+indicator. It omits state revisions, requesting Run identity, provider projection
 diagnostics, and provider-effect outcomes.
 
 Ingress creates the current work cycle before Agent execution and creates an initial
@@ -833,8 +834,13 @@ an ellipsis. Tasks have stable IDs, `pending`, `in_progress`, `completed`, or
 `failed` state, and optional details, output, and labeled URL sources. One update
 supports at most 49 tasks, and its complete desired progress snapshot must fit the
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
-updates the retained Tracker; message-only continuation leaves progress unchanged.
-`finish` requires a final reply, ends the work cycle, and attempts Tracker deletion
+updates the retained Tracker; every continue invalidates older awaiting settlement,
+while message-only continuation leaves progress unchanged. `request_input` requires a
+participant-visible message, preserves active Work, and establishes binding-scoped
+awaiting state only after every reply part is confirmed delivered. Failed, unknown, or
+stale delivery stays ready. Newly created same-binding human input or `continue`
+resumes the Work. `finish` requires a final reply, ends the work cycle, and attempts
+Tracker deletion
 only after the direct reply effect is delivered. An
 `ignore` is always present beside `finish` and `continue`. It accepts no message,
 title, task update, or files and finishes existing active Work regardless of recorded
@@ -873,6 +879,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-31** (spec_version 101) — Added `request_input` through the existing
+  static prompt, Tool description, field schema, and validator structure; exposed
+  delivery-confirmed awaiting state in Tool results and compaction without a dynamic
+  prompt.
 - **2026-08-29** (spec_version 100) — Advanced External Channel Work state to
   schema version 3 with nullable Slack presence coordinates and made initial Slack
   Tracker creation follow the provider-neutral visibility and promotion lifecycle.

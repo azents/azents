@@ -399,6 +399,7 @@ async def _accepted_control_plan_case(
     separate_target: bool = False,
     provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     invocation: bool = True,
+    mailbox_created: bool = True,
 ) -> SimpleNamespace:
     session = _session()
 
@@ -412,7 +413,7 @@ async def _accepted_control_plan_case(
     mailbox_service.enqueue_many = AsyncMock(
         side_effect=lambda _session, inputs: [
             SimpleNamespace(
-                created=True,
+                created=mailbox_created,
                 mailbox_item=SimpleNamespace(
                     id=f"mailbox-{index}",
                     idempotency_key=input.idempotency_key,
@@ -532,6 +533,7 @@ async def _accepted_control_plan_case(
         return_value=SimpleNamespace(binding=binding, session_created=True)
     )
     work_repository.ensure_active_work = AsyncMock(return_value=work)
+    work_repository.resume_from_human_input = AsyncMock(return_value=work)
     store._create_session_presence_intent = presence_intent
     store._create_initial_progress_intent = AsyncMock(return_value=progress_plan)
     repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
@@ -582,6 +584,12 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
     case.presence_intent.assert_awaited_once()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
+    case.work_repository.resume_from_human_input.assert_awaited_once_with(
+        case.session,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+    )
 
 
 async def test_existing_binding_admission_excludes_joined_presence() -> None:
@@ -590,6 +598,18 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
 
     assert case.acceptance.control_plans == (case.progress_plan,)
     case.presence_intent.assert_not_awaited()
+
+
+async def test_duplicate_binding_input_does_not_resume_awaiting_work() -> None:
+    """A duplicate mailbox item cannot invalidate an older input request."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        mailbox_created=False,
+    )
+
+    assert case.acceptance.status == "duplicate"
+    assert case.acceptance.control_plans == ()
+    case.work_repository.resume_from_human_input.assert_not_awaited()
 
 
 async def test_existing_discord_binding_uses_tracker_without_settings_message() -> None:

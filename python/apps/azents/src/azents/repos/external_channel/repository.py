@@ -980,7 +980,10 @@ class ExternalChannelRepository:
                 binding_id=binding.id,
                 schema_version=toolkit_state.schema_version,
             )
-            if work.status is not ExternalChannelWorkStatus.ACTIVE:
+            if (
+                work.status is not ExternalChannelWorkStatus.ACTIVE
+                or work.awaiting_input_run_id is not None
+            ):
                 continue
             target = _discord_gateway_typing_target(
                 resource_type=resource.resource_type,
@@ -2820,6 +2823,7 @@ class ExternalChannelRepository:
                                 state.desired_progress_revision + 1
                             ),
                             "desired_progress": None,
+                            "awaiting_input_run_id": None,
                             "finished_at": now,
                         }
                     ),
@@ -3977,6 +3981,7 @@ def _slack_work_presence_target(
         return None
     processing = (
         work.status is ExternalChannelWorkStatus.ACTIVE
+        and work.awaiting_input_run_id is None
         and binding.disconnected_at is None
         and resource.status is ExternalChannelResourceStatus.ACTIVE
         and route.agent_id == agent.id

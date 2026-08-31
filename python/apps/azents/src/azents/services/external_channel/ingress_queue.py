@@ -621,6 +621,7 @@ class ExternalChannelIngressDrainService:
             order_group = uuid7().hex
             order_sequence = 0
             enqueues: list[MailboxEnqueue] = []
+            trigger_mailbox_keys: set[str] = set()
             visible_tracker_mailbox_keys: set[str] = set()
             slack_presence_by_mailbox_key: dict[str, tuple[str, str]] = {}
             target_resource: ExternalChannelResource | None = None
@@ -699,14 +700,19 @@ class ExternalChannelIngressDrainService:
                                 invocation_id=invocation_id,
                                 provider_message_key=message.provider_message_key,
                             )
-                            if item.invocation:
+                            trigger_message = (
+                                message.provider_message_key
+                                == item.trigger_provider_message_key
+                            )
+                            if trigger_message:
+                                trigger_mailbox_keys.add(mailbox_idempotency_key)
+                            if item.invocation and trigger_message:
                                 visible_tracker_mailbox_keys.add(
                                     mailbox_idempotency_key
                                 )
                             if (
                                 item.provider is ExternalChannelProvider.SLACK
-                                and message.provider_message_key
-                                == item.trigger_provider_message_key
+                                and trigger_message
                                 and item.provider_user_id is not None
                             ):
                                 slack_presence_by_mailbox_key[
@@ -791,6 +797,19 @@ class ExternalChannelIngressDrainService:
                 if not enqueues
                 else await self.mailbox_service.enqueue_many(session, enqueues)
             )
+            trigger_result = next(
+                (
+                    result
+                    for enqueue, result in zip(enqueues, mailbox_results, strict=True)
+                    if enqueue.idempotency_key in trigger_mailbox_keys
+                ),
+                None,
+            )
+            created_trigger = (
+                trigger_result
+                if trigger_result is not None and trigger_result.created
+                else None
+            )
             slack_presence = next(
                 (
                     slack_presence_by_mailbox_key[enqueue.idempotency_key]
@@ -813,7 +832,7 @@ class ExternalChannelIngressDrainService:
                 )
                 else "hidden"
             )
-            if any(result.created for result in mailbox_results):
+            if created_trigger is not None:
                 if target_resource is None or target_binding is None:
                     raise RuntimeError(
                         "External Channel final control ownership disappeared."
@@ -840,6 +859,16 @@ class ExternalChannelIngressDrainService:
                         None if slack_presence is None else slack_presence[1]
                     ),
                 )
+                resumed_work = await self.work_repository.resume_from_human_input(
+                    session,
+                    agent_id=target_session.agent_id,
+                    session_id=batch.session_id,
+                    binding_id=batch.binding_id,
+                )
+                if resumed_work is None:
+                    raise RuntimeError(
+                        "External Channel Work disappeared after mailbox admission."
+                    )
                 progress_plan = await self.work_repository.prepare_initial_progress(
                     session,
                     agent_id=target_session.agent_id,
@@ -860,7 +889,7 @@ class ExternalChannelIngressDrainService:
                     await session.rollback()
                     await self._reset_claim(batch)
                     return True
-            if mailbox_results:
+            if created_trigger is not None:
                 admitted_session = (
                     await self.agent_session_repository.admit_input_wakeup(
                         session,
@@ -871,7 +900,9 @@ class ExternalChannelIngressDrainService:
                     await session.rollback()
                     await self._reset_claim(batch)
                     return True
-                wake = (mailbox_results[0].mailbox_item.id, batch.session_id)
+                wake = (created_trigger.mailbox_item.id, batch.session_id)
+            elif trigger_result is not None:
+                wake = (trigger_result.mailbox_item.id, batch.session_id)
             for failure in bounded_failures:
                 message = (
                     "External Channel ingress trigger was missing; item ignored"
