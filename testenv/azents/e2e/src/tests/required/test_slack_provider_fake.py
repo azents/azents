@@ -19,6 +19,8 @@ from support.slack_provider_fake import (
     ThreadingSocketServer,
 )
 
+_SERVER_POLL_INTERVAL_SECONDS = 0.01
+
 
 def _object(value: object) -> dict[str, object]:
     """Validate one fake evidence object with string keys."""
@@ -35,7 +37,11 @@ def slack_fake_url() -> Generator[str, None, None]:
         state = FakeState()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), IsolatedHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     thread.start()
     try:
         host = server.server_address[0]
@@ -921,7 +927,11 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
 
     IsolatedWebSocketHandler.state = state
     server = ThreadingSocketServer(("127.0.0.1", 0), IsolatedWebSocketHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     thread.start()
     host = server.server_address[0]
     port = server.server_address[1]
