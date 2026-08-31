@@ -946,17 +946,21 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
 
 def test_discord_thread_duration_update_preserves_unknown_configuration() -> None:
     """A policy-only update replaces one key without narrowing stored JSON."""
-    connection = SimpleNamespace(
-        provider_config={
-            "provider": "discord",
-            "target_guild_id": "guild-1",
-            "thread_auto_archive_duration_minutes": 1440,
-            "future_policy": {"enabled": True},
-        }
+    connection = require_instance(
+        MagicMock(
+            spec=RDBExternalChannelConnection,
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
+                "future_policy": {"enabled": True},
+            },
+        ),
+        RDBExternalChannelConnection,
     )
 
     _set_discord_thread_auto_archive_duration(
-        connection,  # ty: ignore[invalid-argument-type] # The policy helper reads only provider_config in this focused test.
+        connection,
         duration=10080,
     )
 
