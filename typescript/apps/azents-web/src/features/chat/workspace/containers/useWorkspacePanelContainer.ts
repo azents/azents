@@ -17,6 +17,7 @@ import {
   type ProjectGitRefPreviewState,
   type ProjectRegistrationMode,
   type WorkspaceBrowserMode,
+  type WorkspaceDirectoryLoadState,
   type WorkspaceEntry,
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
@@ -104,19 +105,6 @@ function defaultStartingRef(refs: GitRefEntryResponse[]): string | null {
   return refs.find((ref) => ref.default)?.ref ?? refs.at(0)?.ref ?? null;
 }
 
-function repositoryTypeForPath(
-  entriesByPath: Record<string, WorkspaceEntry[]>,
-  path: string,
-): "git" | null {
-  for (const entries of Object.values(entriesByPath)) {
-    const entry = entries.find((candidate) => candidate.path === path);
-    if (entry?.repositoryType === "git") {
-      return "git";
-    }
-  }
-  return null;
-}
-
 function removeDeletedWorkspaceEntries(
   entriesByPath: Record<string, WorkspaceEntry[]>,
   deletedPaths: string[],
@@ -151,6 +139,9 @@ export function useWorkspacePanelContainer({
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [directoryEntriesByPath, setDirectoryEntriesByPath] = useState<
     Record<string, WorkspaceEntry[]>
+  >({});
+  const [directoryLoadStatesByPath, setDirectoryLoadStatesByPath] = useState<
+    Record<string, WorkspaceDirectoryLoadState>
   >({});
   const utils = trpc.useUtils();
   const agentQuery = trpc.agent.get.useQuery({ handle, agentId });
@@ -195,20 +186,25 @@ export function useWorkspacePanelContainer({
     string | null
   >(null);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isInspectingRepository, setIsInspectingRepository] = useState(false);
   const autoRefreshKeyRef = useRef<string | null>(null);
+  const repositoryInspectionRequestRef = useRef(0);
 
   useEffect(() => {
+    repositoryInspectionRequestRef.current += 1;
     setCurrentDirectoryPath(null);
     setSelectedFilePath(null);
     setSelectedPaths([]);
     setWorkspaceView("browser");
     setBrowserMode("projects");
     setDirectoryEntriesByPath({});
+    setDirectoryLoadStatesByPath({});
     setRegistrationPath(null);
     setRegistrationRepositoryType(null);
     setRegistrationMode("existing_project");
     setRegistrationStartingRef(null);
     setRegistrationSubmitError(null);
+    setIsInspectingRepository(false);
   }, [agentId, sessionId]);
 
   const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
@@ -342,6 +338,8 @@ export function useWorkspacePanelContainer({
         ),
     },
   );
+  const directoryQueryFailed = directoryQuery.isError;
+  const refetchDirectory = directoryQuery.refetch;
 
   const selectedEntry = useMemo(() => {
     if (!selectedFilePath) {
@@ -536,6 +534,7 @@ export function useWorkspacePanelContainer({
       clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
+      setDirectoryLoadStatesByPath({});
       await Promise.all([
         utils.chat.getAgentWorkspace.invalidate({
           agentId: variables.agentId,
@@ -558,6 +557,7 @@ export function useWorkspacePanelContainer({
       clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
+      setDirectoryLoadStatesByPath({});
       await Promise.all([
         utils.chat.getAgentWorkspace.invalidate({
           agentId: variables.agentId,
@@ -655,11 +655,28 @@ export function useWorkspacePanelContainer({
     }
   }, [agentId, handle, resetRuntimeMutation, runtimeQuery.data?.actions.reset]);
 
-  const onOpenDirectory = useCallback((path: string) => {
-    setCurrentDirectoryPath(path);
-    setSelectedFilePath(path);
-    setWorkspaceView("browser");
-  }, []);
+  const onOpenDirectory = useCallback(
+    (path: string) => {
+      if (!(path in directoryEntriesByPath)) {
+        setDirectoryLoadStatesByPath((previous) => ({
+          ...previous,
+          [path]: { type: "LOADING" },
+        }));
+      }
+      if (path === activeDirectoryPath && directoryQueryFailed) {
+        void refetchDirectory();
+      }
+      setCurrentDirectoryPath(path);
+      setSelectedFilePath(path);
+      setWorkspaceView("browser");
+    },
+    [
+      activeDirectoryPath,
+      directoryEntriesByPath,
+      directoryQueryFailed,
+      refetchDirectory,
+    ],
+  );
 
   const onOpenFile = useCallback((path: string) => {
     setSelectedFilePath(path);
@@ -817,20 +834,38 @@ export function useWorkspacePanelContainer({
 
   const onSelectProjectPickerDirectory = useCallback(
     (entry: ProjectDirectoryPickerEntry): void => {
-      const repositoryType =
-        entry.repositoryType ??
-        repositoryTypeForPath(directoryEntriesByPath, entry.path);
-      if (repositoryType === "git") {
-        setRegistrationPath(entry.path);
-        setRegistrationRepositoryType("git");
-        setRegistrationMode("existing_project");
-        setRegistrationStartingRef(null);
-        setRegistrationSubmitError(null);
-        return;
-      }
-      onRegisterProject(entry.path);
+      const requestId = repositoryInspectionRequestRef.current + 1;
+      repositoryInspectionRequestRef.current = requestId;
+      setRegisterProjectError(null);
+      setIsInspectingRepository(true);
+      void utils.chat.getAgentWorkspaceRepositoryType
+        .fetch({ agentId, path: entry.path })
+        .then((result) => {
+          if (repositoryInspectionRequestRef.current !== requestId) {
+            return;
+          }
+          if (result.repository_type === "git") {
+            setRegistrationPath(entry.path);
+            setRegistrationRepositoryType("git");
+            setRegistrationMode("existing_project");
+            setRegistrationStartingRef(null);
+            setRegistrationSubmitError(null);
+            return;
+          }
+          onRegisterProject(entry.path);
+        })
+        .catch((error: unknown) => {
+          if (repositoryInspectionRequestRef.current === requestId) {
+            setRegisterProjectError(getErrorMessage(error));
+          }
+        })
+        .finally(() => {
+          if (repositoryInspectionRequestRef.current === requestId) {
+            setIsInspectingRepository(false);
+          }
+        });
     },
-    [directoryEntriesByPath, onRegisterProject],
+    [agentId, onRegisterProject, utils.chat.getAgentWorkspaceRepositoryType],
   );
 
   const projectPicker = useAgentWorkspaceDirectoryPickerContainer({
@@ -842,8 +877,11 @@ export function useWorkspacePanelContainer({
   });
 
   const onOpenProjectPicker = useCallback((): void => {
+    if (isInspectingRepository) {
+      return;
+    }
     projectPicker.open();
-  }, [projectPicker]);
+  }, [isInspectingRepository, projectPicker]);
 
   const onCloseProjectRegistration = useCallback((): void => {
     setRegistrationPath(null);
@@ -956,7 +994,42 @@ export function useWorkspacePanelContainer({
       ...previous,
       [mappedDirectory.path]: mappedDirectory.entries,
     }));
+    setDirectoryLoadStatesByPath((previous) => ({
+      ...previous,
+      [mappedDirectory.path]: { type: "LOADED" },
+    }));
   }, [directoryQuery.data]);
+
+  useEffect(() => {
+    if (
+      activeDirectoryPath === "" ||
+      activeDirectoryPath in directoryEntriesByPath
+    ) {
+      return;
+    }
+    if (directoryQuery.isError) {
+      setDirectoryLoadStatesByPath((previous) => ({
+        ...previous,
+        [activeDirectoryPath]: {
+          type: "ERROR",
+          message: getErrorMessage(directoryQuery.error),
+        },
+      }));
+      return;
+    }
+    if (directoryQuery.isFetching) {
+      setDirectoryLoadStatesByPath((previous) => ({
+        ...previous,
+        [activeDirectoryPath]: { type: "LOADING" },
+      }));
+    }
+  }, [
+    activeDirectoryPath,
+    directoryEntriesByPath,
+    directoryQuery.error,
+    directoryQuery.isError,
+    directoryQuery.isFetching,
+  ]);
 
   const state = useMemo<WorkspacePanelState>(() => {
     if (runtimeQuery.isError) {
@@ -1047,6 +1120,7 @@ export function useWorkspacePanelContainer({
       browserMode,
       directory,
       directoryEntriesByPath,
+      directoryLoadStatesByPath,
       fileState,
       workspaceView,
       selectedFilePath,
@@ -1102,6 +1176,7 @@ export function useWorkspacePanelContainer({
     deletePathMutation.isPending,
     deleteWorktreeProjectMutation.isPending,
     directoryEntriesByPath,
+    directoryLoadStatesByPath,
     directoryQuery.data,
     directoryQuery.isFetching,
     fileQuery.data,
@@ -1200,7 +1275,8 @@ export function useWorkspacePanelContainer({
                 registerProjectMutation.isPending ||
                 createWorktreeProjectMutation.isPending,
             },
-      isRegisteringProject: registerProjectMutation.isPending,
+      isRegisteringProject:
+        registerProjectMutation.isPending || isInspectingRepository,
       isCreatingWorktree: createWorktreeProjectMutation.isPending,
       registerProjectError,
       pendingDeleteProjectId,
@@ -1209,6 +1285,7 @@ export function useWorkspacePanelContainer({
     createWorktreeProjectMutation.isPending,
     gitRefPreviewState,
     pendingDeleteProjectId,
+    isInspectingRepository,
     projectsQuery.data?.items,
     projectsQuery.error,
     projectsQuery.isError,

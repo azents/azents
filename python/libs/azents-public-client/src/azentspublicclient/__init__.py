@@ -134,6 +134,7 @@ __all__ = [
     "AgentWorkspaceMutationResponse",
     "AgentWorkspaceReadFailedAccessResponse",
     "AgentWorkspaceReadyAccessResponse",
+    "AgentWorkspaceRepositoryTypeResponse",
     "AgentWorkspaceResponse",
     "AgentWorkspaceRuntimeResponse",
     "AgentWorkspaceStatResponse",
@@ -639,6 +640,7 @@ from azentspublicclient.models.agent_workspace_move_response import AgentWorkspa
 from azentspublicclient.models.agent_workspace_mutation_response import AgentWorkspaceMutationResponse as AgentWorkspaceMutationResponse
 from azentspublicclient.models.agent_workspace_read_failed_access_response import AgentWorkspaceReadFailedAccessResponse as AgentWorkspaceReadFailedAccessResponse
 from azentspublicclient.models.agent_workspace_ready_access_response import AgentWorkspaceReadyAccessResponse as AgentWorkspaceReadyAccessResponse
+from azentspublicclient.models.agent_workspace_repository_type_response import AgentWorkspaceRepositoryTypeResponse as AgentWorkspaceRepositoryTypeResponse
 from azentspublicclient.models.agent_workspace_response import AgentWorkspaceResponse as AgentWorkspaceResponse
 from azentspublicclient.models.agent_workspace_runtime_response import AgentWorkspaceRuntimeResponse as AgentWorkspaceRuntimeResponse
 from azentspublicclient.models.agent_workspace_stat_response import AgentWorkspaceStatResponse as AgentWorkspaceStatResponse

@@ -184,6 +184,8 @@
     "collapseAll": "Collapse all",
     "refresh": "Refresh",
     "parentDirectory": "Parent directory",
+    "loadingDirectory": "Loading directory…",
+    "directoryLoadFailed": "Couldn’t load directory: {message}",
     "emptyDirectory": "This directory is empty.",
     "noSearchResults": "No search results.",
     "directory": "Directory",

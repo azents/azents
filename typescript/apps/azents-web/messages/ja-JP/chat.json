@@ -184,6 +184,8 @@
     "collapseAll": "すべて折りたたむ",
     "refresh": "更新",
     "parentDirectory": "親ディレクトリ",
+    "loadingDirectory": "ディレクトリを読み込み中…",
+    "directoryLoadFailed": "ディレクトリを読み込めませんでした: {message}",
     "emptyDirectory": "このディレクトリは空です。",
     "noSearchResults": "検索結果がありません。",
     "directory": "ディレクトリ",

@@ -36,6 +36,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeFileTextReadResult,
     RuntimeRunnerOperationFailedError,
+    RuntimeRunnerOperationUnavailable,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.runtime.transfer.workspace_download import (
@@ -49,7 +50,10 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
-from azents.services.chat.workspace import AgentWorkspaceFileService
+from azents.services.chat.workspace import (
+    AgentWorkspaceFileReadError,
+    AgentWorkspaceFileService,
+)
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
@@ -179,6 +183,7 @@ class _FakeRunnerOperations:
         self.move_calls: list[tuple[str, int, str, str, bool]] = []
         self.bulk_delete_calls: list[tuple[str, int, tuple[str, ...], bool]] = []
         self.bulk_move_calls: list[tuple[str, int, tuple[str, ...], str, bool]] = []
+        self.stat_error: RuntimeError | None = None
 
     async def bulk_move_files(
         self,
@@ -233,6 +238,19 @@ class _FakeRunnerOperations:
     ) -> RuntimeFileListResult:
         del recursive, exclude_patterns, deadline_at
         self.list_calls.append((runtime_id, runner_generation, path))
+        file_data = self.files.get(path)
+        if file_data is not None:
+            return RuntimeFileListResult(
+                entries=(
+                    RuntimeFileListEntry(
+                        path=path,
+                        type="file",
+                        size_bytes=len(file_data),
+                        modified_at="2026-05-24T00:00:00+00:00",
+                    ),
+                ),
+                final_cursor="0-1",
+            )
         entries: list[RuntimeFileListEntry] = []
         for directory_path in sorted(self.directories):
             if directory_path == path or directory_path.rsplit("/", 1)[0] != path:
@@ -313,6 +331,8 @@ class _FakeRunnerOperations:
     ) -> RuntimeFileStatResult:
         del deadline_at
         self.stat_calls.append((runtime_id, runner_generation, path))
+        if self.stat_error is not None:
+            raise self.stat_error
         data = self.files.get(path)
         if data is not None:
             return RuntimeFileStatResult(
@@ -695,7 +715,7 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_path_uses_stat_to_return_file_preview() -> None:
+async def test_read_path_returns_file_preview_without_preliminary_stat() -> None:
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
@@ -716,8 +736,8 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
     assert result.value.text == "# Workspace\n"
     assert runner_operations.read_calls == []
     assert runner_operations.text_read_calls == [(file_path, 0, 64 * 1024, "utf-8")]
-    assert runner_operations.stat_calls == [("runtime-1", 1, file_path)]
-    assert runner_operations.list_calls == []
+    assert runner_operations.stat_calls == []
+    assert runner_operations.list_calls == [("runtime-1", 1, file_path)]
 
 
 @pytest.mark.asyncio
@@ -786,7 +806,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_path_uses_stat_to_return_directory_listing() -> None:
+async def test_read_path_returns_nonempty_directory_with_one_runner_operation() -> None:
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
@@ -810,9 +830,7 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
         "README.md",
         "test-file.txt",
     ]
-    assert runner_operations.stat_calls == [
-        ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
-    ]
+    assert runner_operations.stat_calls == []
     assert runner_operations.read_calls == []
     assert runner_operations.list_calls == [
         ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
@@ -820,7 +838,38 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_path_marks_git_repository_directories() -> None:
+async def test_read_path_stats_only_after_an_empty_directory_listing() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    empty_directory_path = AGENT_WORKSPACE_ROOT / "empty"
+    runner_operations.directories.add(empty_directory_path.as_posix())
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.read_path(
+        "agent-1",
+        "user-1",
+        empty_directory_path.as_posix(),
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.type == "DIRECTORY"
+    assert result.value.entries == []
+    assert runner_operations.list_calls == [
+        ("runtime-1", 1, empty_directory_path.as_posix())
+    ]
+    assert runner_operations.stat_calls == [
+        ("runtime-1", 1, empty_directory_path.as_posix())
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_path_does_not_probe_child_repository_metadata() -> None:
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     plain_path = (AGENT_WORKSPACE_ROOT / "plain").as_posix()
@@ -857,11 +906,95 @@ async def test_read_path_marks_git_repository_directories() -> None:
         entry.name: entry.repository_type for entry in result.value.entries
     }
     assert repository_types["plain"] is None
-    assert repository_types["repo-dir"] == "git"
-    assert repository_types["repo-worktree"] == "git"
+    assert repository_types["repo-dir"] is None
+    assert repository_types["repo-worktree"] is None
+    assert runner_operations.stat_calls == []
 
 
 @pytest.mark.asyncio
+async def test_repository_type_inspects_only_selected_directory() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    git_directory_path = AGENT_WORKSPACE_ROOT / "repo-dir"
+    runner_operations.directories.update(
+        {
+            git_directory_path.as_posix(),
+            (git_directory_path / ".git").as_posix(),
+        }
+    )
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_repository_type(
+        "agent-1",
+        "user-1",
+        git_directory_path.as_posix(),
+    )
+
+    assert result == Success("git")
+    assert runner_operations.list_calls == []
+    assert runner_operations.stat_calls == [
+        ("runtime-1", 1, (git_directory_path / ".git").as_posix())
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repository_type_returns_none_when_git_marker_is_missing() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    plain_directory_path = AGENT_WORKSPACE_ROOT / "plain"
+    runner_operations.directories.add(plain_directory_path.as_posix())
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_repository_type(
+        "agent-1",
+        "user-1",
+        plain_directory_path.as_posix(),
+    )
+
+    assert result == Success(None)
+    assert runner_operations.stat_calls == [
+        ("runtime-1", 1, (plain_directory_path / ".git").as_posix())
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repository_type_propagates_runner_unavailability() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    runner_operations.stat_error = RuntimeRunnerOperationUnavailable(
+        "Runtime Runner control is unavailable."
+    )
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_repository_type(
+        "agent-1",
+        "user-1",
+        (AGENT_WORKSPACE_ROOT / "repo").as_posix(),
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, AgentWorkspaceFileReadError)
+    assert result.error.detail == "Runtime Runner control is unavailable."
+
+
 async def test_stat_path_returns_inspector_metadata() -> None:
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()

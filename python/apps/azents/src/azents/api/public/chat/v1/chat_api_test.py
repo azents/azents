@@ -6,6 +6,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
+import pytest
 from azcommon.result import Failure, Result, Success
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
@@ -27,6 +28,7 @@ from azents.api.public.chat.v1 import (
     delete_mailbox_item,
     get_agent_session,
     get_agent_session_sidebar,
+    get_agent_workspace_repository_type,
     get_subagent_tree,
     get_team_primary_agent_session,
     list_agent_sessions,
@@ -140,6 +142,10 @@ from azents.services.chat.live_events import (
     InMemoryLiveEventStore,
     LiveEventStore,
     mailbox_item_to_pending_projection,
+)
+from azents.services.chat.workspace import (
+    AgentWorkspaceFileReadError,
+    AgentWorkspaceFileService,
 )
 from azents.services.chat_write import (
     AcceptedChatWriteRequest,
@@ -315,6 +321,47 @@ def test_public_session_hard_delete_route_is_absent() -> None:
         and "DELETE" in (getattr(route, "methods", None) or set())
         for route in chat_router.routes
     )
+
+
+async def test_get_agent_workspace_repository_type_returns_selected_result() -> None:
+    """Repository inspection returns the selected directory's explicit result."""
+    workspace_service = Mock(spec=AgentWorkspaceFileService)
+    workspace_service.get_repository_type = AsyncMock(return_value=Success("git"))
+
+    response = await get_agent_workspace_repository_type(
+        agent_id="0123456789abcdef0123456789abcdef",
+        current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+        workspace_service=workspace_service,
+        path="/runtime/home/repository",
+    )
+
+    assert response.repository_type == "git"
+    workspace_service.get_repository_type.assert_awaited_once_with(
+        agent_id="0123456789abcdef0123456789abcdef",
+        user_id="user-1",
+        raw_path="/runtime/home/repository",
+    )
+
+
+async def test_get_agent_workspace_repository_type_maps_inspection_error() -> None:
+    """Repository inspection exposes an actionable expected Workspace error."""
+    workspace_service = Mock(spec=AgentWorkspaceFileService)
+    workspace_service.get_repository_type = AsyncMock(
+        return_value=Failure(
+            AgentWorkspaceFileReadError(detail="Runtime Runner control is unavailable.")
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_agent_workspace_repository_type(
+            agent_id="0123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            workspace_service=workspace_service,
+            path="/runtime/home/repository",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Runtime Runner control is unavailable."
 
 
 async def test_health_check_ack_requires_current_confirmed_generation() -> None:

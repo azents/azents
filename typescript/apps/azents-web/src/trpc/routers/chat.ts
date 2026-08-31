@@ -31,6 +31,7 @@ import {
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentSessionSidebar,
   chatV1GetAgentWorkspace,
+  chatV1GetAgentWorkspaceRepositoryType,
   chatV1GetSessionProjectBrowserManifest,
   chatV1GetSubagentTree,
   chatV1IssueWsTicket,
@@ -1276,6 +1277,33 @@ export const chatRouter = router({
           404: "NOT_FOUND",
           409: "CONFLICT",
           413: "PAYLOAD_TOO_LARGE",
+        });
+      }
+    }),
+
+  getAgentWorkspaceRepositoryType: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        path: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetAgentWorkspaceRepositoryType({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          query: { path: input.path },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

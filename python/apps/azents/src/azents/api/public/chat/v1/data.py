@@ -1417,6 +1417,14 @@ AgentWorkspaceFileResponseUnion = (
 )
 
 
+class AgentWorkspaceRepositoryTypeResponse(BaseModel):
+    """Repository metadata for one explicitly inspected Workspace directory."""
+
+    repository_type: Literal["git"] | None = Field(
+        description="Detected repository type",
+    )
+
+
 class AgentWorkspaceStatResponse(BaseModel):
     """Agent Workspace path metadata response."""
 

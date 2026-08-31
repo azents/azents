@@ -198,6 +198,7 @@ from .data import (
     AgentWorkspaceMoveRequest,
     AgentWorkspaceMoveResponse,
     AgentWorkspaceMutationResponse,
+    AgentWorkspaceRepositoryTypeResponse,
     AgentWorkspaceResponse,
     AgentWorkspaceStatResponse,
     ChatCommandWriteRequest,
@@ -2785,6 +2786,35 @@ async def stat_agent_workspace_path(
     match result:
         case Success(value):
             return AgentWorkspaceStatResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/workspace/repository-type")
+async def get_agent_workspace_repository_type(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+    path: Annotated[
+        str,
+        Query(description="Agent Workspace directory to inspect"),
+    ],
+) -> AgentWorkspaceRepositoryTypeResponse:
+    """Inspect repository metadata for one selected Agent Workspace directory."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.get_repository_type(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_path=path,
+    )
+    match result:
+        case Success(repository_type):
+            return AgentWorkspaceRepositoryTypeResponse(
+                repository_type=repository_type,
+            )
         case Failure(error):
             _raise_workspace_error(error)
             raise AssertionError("unreachable")
