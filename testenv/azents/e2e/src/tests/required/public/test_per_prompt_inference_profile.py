@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import cast
+from typing import NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -25,6 +25,7 @@ from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
+from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import authenticate_user, unique, wait_until
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
@@ -42,6 +43,14 @@ _INHERITED_DISABLED_TARGET_MESSAGE = "Subagent inherit disabled parent target"
 _INHERITED_DISABLED_TARGET_TASK = "Inherited disabled parent target task"
 _EFFORT_ONLY_DISABLED_TARGET_MESSAGE = "Subagent effort-only disabled parent target"
 _EFFORT_ONLY_DISABLED_TARGET_TASK = "Effort-only disabled parent target task"
+
+
+class ProfileAgentSetup(NamedTuple):
+    """Prepared Agent identity and its primary Session."""
+
+    token: str
+    agent_id: str
+    primary_session_id: str
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -75,7 +84,7 @@ def _setup_profile_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-) -> tuple[str, str, str]:
+) -> ProfileAgentSetup:
     """Create a workspace and Agent with deterministic Quality/Fast targets."""
     uniq = unique()
     token, _, _ = authenticate_user(
@@ -216,7 +225,27 @@ def _setup_profile_agent(
     session_id = session.get("id")
     if not isinstance(session_id, str):
         raise AssertionError(f"Session response did not include id: {session!r}")
-    return token, agent_id, session_id
+    return ProfileAgentSetup(token, agent_id, session_id)
+
+
+def _create_profile_session(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+) -> str:
+    """Create one independent non-primary Session for a profile test."""
+    response = requests.post(
+        f"{server_url}/chat/v1/agents/{agent_id}/sessions",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={"existing_project_paths": [], "setup_actions": []},
+        timeout=10,
+    )
+    session = _response_object(response)
+    session_id = session.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(f"Session response did not include id: {session!r}")
+    return session_id
 
 
 def _write_profile(
@@ -579,23 +608,46 @@ def _tree_names(tree: dict[str, object]) -> set[str]:
 setup_profile_agent = _setup_profile_agent
 
 
+@pytest.fixture(scope="class")
+def profile_agent_setup(
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    azents_engine_worker_container: object,
+) -> ProfileAgentSetup:
+    """Prepare one immutable Agent/runtime shared by independent test Sessions."""
+    del azents_engine_worker_container
+    public_api_client = azentspublicclient.ApiClient(
+        configuration=azentspublicclient.Configuration(host=azents_public_server_url)
+    )
+    admin_api_client = azentsadminclient.ApiClient(
+        configuration=azentsadminclient.Configuration(
+            host=azents_admin_server_url,
+            access_token=system_bootstrap_evidence.access_token,
+        )
+    )
+    return _setup_profile_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+
+
 class TestPerPromptInferenceProfile:
     """Per-prompt routing and provenance E2E coverage."""
 
     def test_target_effort_resolution_and_safe_failure(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
         mock_openai_url: str,
+        profile_agent_setup: ProfileAgentSetup,
     ) -> None:
         """Resolve distinct targets and expose an unsupported effort safely."""
-        del azents_engine_worker_container
-        token, agent_id, session_id = _setup_profile_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
         )
         requests.delete(
             f"{mock_openai_url}/v1/_requests", timeout=10
@@ -707,17 +759,15 @@ class TestPerPromptInferenceProfile:
 
     def test_subagent_spawn_override_continuation(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        profile_agent_setup: ProfileAgentSetup,
     ) -> None:
         """Persist a spawn override and reuse it for a follow-up run."""
-        del azents_engine_worker_container
-        token, agent_id, root_session_id = _setup_profile_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        token, agent_id, _ = profile_agent_setup
+        root_session_id = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
         )
 
         _write_profile(
@@ -817,10 +867,8 @@ class TestPerPromptInferenceProfile:
     )
     def test_disabled_target_remains_available_through_inheritance(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        profile_agent_setup: ProfileAgentSetup,
         message: str,
         child_name: str,
         task: str,
@@ -828,11 +876,11 @@ class TestPerPromptInferenceProfile:
         expected_effort: str,
     ) -> None:
         """Inherit a disabled parent target with or without an effort override."""
-        del azents_engine_worker_container
-        token, agent_id, root_session_id = _setup_profile_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        token, agent_id, _ = profile_agent_setup
+        root_session_id = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
         )
         _write_profile(
             server_url=azents_public_server_url,
@@ -897,20 +945,18 @@ class TestPerPromptInferenceProfile:
     )
     def test_subagent_spawn_override_rejection_is_atomic(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        profile_agent_setup: ProfileAgentSetup,
         message: str,
         rejected_name: str,
         call_id: str,
     ) -> None:
         """Reject an invalid override without creating a child."""
-        del azents_engine_worker_container
-        token, agent_id, session_id = _setup_profile_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
         )
         _write_profile(
             server_url=azents_public_server_url,
