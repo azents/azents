@@ -3482,6 +3482,8 @@ def test_provider_native_channel_work_progress_journey(
     }
 
     provider_state = _provider_state(slack_provider_fake_url)
+    baseline_counts = _int_dict(provider_state["request_counts"])
+    baseline_delete_count = baseline_counts.get("chat.delete", 0)
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
@@ -3575,7 +3577,7 @@ def test_provider_native_channel_work_progress_journey(
     waiting_state = _provider_state(slack_provider_fake_url)
     waiting_counts = _int_dict(waiting_state["request_counts"])
     assert waiting_counts["chat.update"] == 3
-    assert waiting_counts.get("chat.delete", 0) == 0
+    assert waiting_counts.get("chat.delete", 0) == baseline_delete_count
 
     response_timestamp = f"{int(time.time())}.000400"
     response_text = "<@B-E2E> Use the rollback option."
@@ -3666,7 +3668,7 @@ def test_provider_native_channel_work_progress_journey(
     outcome_state = _provider_state(slack_provider_fake_url)
     outcome_counts = _int_dict(outcome_state["request_counts"])
     assert outcome_counts["chat.update"] == 3
-    assert outcome_counts["chat.delete"] == 1
+    assert outcome_counts["chat.delete"] == baseline_delete_count + 1
     assert (
         _int_dict(_provider_state(slack_provider_fake_url)["request_counts"])
         == outcome_counts
