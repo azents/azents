@@ -68,7 +68,9 @@ export const RunningCommandExpanded = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /^Ran command/ }));
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Running command/ }),
+    );
     await expect(
       canvas.getByText("$ pnpm --filter @azents/web dev"),
     ).toBeVisible();

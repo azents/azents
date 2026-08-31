@@ -34,6 +34,7 @@ import {
 import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
 import { knownToolPresentation } from "../knownToolPresentation";
+import { toolCallActionMessageKey } from "../toolCallActionPresentation";
 import { ActivityRow } from "./ActivityRow";
 import {
   activityDetailScrollAreaProps,
@@ -174,82 +175,10 @@ function genericVisibleAttachments(
 
 function actionLabel(
   action: KnownToolPresentation["action"],
+  status: ActiveToolCall["status"],
   t: ToolCallTranslations,
 ): string {
-  switch (action) {
-    case "read":
-      return t("action.read");
-    case "grep":
-      return t("action.grep");
-    case "glob":
-      return t("action.glob");
-    case "write":
-      return t("action.write");
-    case "edit":
-      return t("action.edit");
-    case "patch":
-      return t("action.patch");
-    case "delete":
-      return t("action.delete");
-    case "command":
-      return t("action.command");
-    case "process":
-      return t("action.process");
-    case "present":
-      return t("action.present");
-    case "readImage":
-      return t("action.readImage");
-    case "importFile":
-      return t("action.importFile");
-    case "saveMemory":
-      return t("action.saveMemory");
-    case "listMemories":
-      return t("action.listMemories");
-    case "getMemory":
-      return t("action.getMemory");
-    case "searchMemories":
-      return t("action.searchMemories");
-    case "deleteMemory":
-      return t("action.deleteMemory");
-    case "getGoal":
-      return t("action.getGoal");
-    case "createGoal":
-      return t("action.createGoal");
-    case "updateGoal":
-      return t("action.updateGoal");
-    case "updateTodo":
-      return t("action.updateTodo");
-    case "loadSkill":
-      return t("action.loadSkill");
-    case "spawnAgent":
-      return t("action.spawnAgent");
-    case "sendMessage":
-      return t("action.sendMessage");
-    case "followupTask":
-      return t("action.followupTask");
-    case "wait":
-      return t("action.wait");
-    case "waitAgent":
-      return t("action.waitAgent");
-    case "interruptAgent":
-      return t("action.interruptAgent");
-    case "listAgents":
-      return t("action.listAgents");
-    case "createGitWorktree":
-      return t("action.createGitWorktree");
-    case "removeGitWorktree":
-      return t("action.removeGitWorktree");
-    case "toolSearch":
-      return t("action.toolSearch");
-    case "addScheduledTask":
-      return t("action.addScheduledTask");
-    case "listScheduledTasks":
-      return t("action.listScheduledTasks");
-    case "deleteScheduledTask":
-      return t("action.deleteScheduledTask");
-    case "submitScheduledTaskResult":
-      return t("action.submitScheduledTaskResult");
-  }
+  return t(toolCallActionMessageKey(action, status));
 }
 
 function presentationQualifier(
@@ -940,7 +869,7 @@ function SpecializedToolCallCard({
     toolCall,
     hiddenAttachmentUris,
   );
-  const action = actionLabel(presentation.action, t);
+  const action = actionLabel(presentation.action, toolCall.status, t);
   const status = t(toolCall.status);
   const ariaLabel = [
     action,
