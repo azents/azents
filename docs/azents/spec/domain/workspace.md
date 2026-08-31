@@ -88,6 +88,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/session-project-defaults
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
+  - /chat/v1/agents/{agent_id}/workspace/repository-type
   - /chat/v1/agents/{agent_id}/git-refs
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
   - /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles
@@ -106,7 +107,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-31
+last_verified_at: 2026-09-01
 spec_version: 76
 ---
 
