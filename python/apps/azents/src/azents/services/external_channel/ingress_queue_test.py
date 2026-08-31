@@ -328,6 +328,9 @@ def _service(
         work.ensure_active_work = AsyncMock(
             return_value=SimpleNamespace(work_cycle_id="work-1")
         )
+        work.resume_from_human_input = AsyncMock(
+            return_value=SimpleNamespace(work_cycle_id="work-1")
+        )
         work.prepare_direct_control = AsyncMock(return_value=None)
         work.prepare_initial_progress = AsyncMock(return_value=None)
     control = provider_control or MagicMock(spec=ExternalChannelProviderControlService)
@@ -395,6 +398,7 @@ def _collaborators(
     *,
     locked_rows: list[SimpleNamespace],
     mailbox_created: bool = True,
+    mailbox_created_by_index: list[bool] | None = None,
 ) -> _Collaborators:
     """Build successful finalization collaborators for one claimed batch."""
     drain = SimpleNamespace(session_id="session-1")
@@ -434,7 +438,11 @@ def _collaborators(
                     id=f"mailbox-{index}",
                     session_id="session-1",
                 ),
-                created=mailbox_created,
+                created=(
+                    mailbox_created
+                    if mailbox_created_by_index is None
+                    else mailbox_created_by_index[index]
+                ),
             )
             for index, _enqueue in enumerate(enqueues)
         ]
@@ -1306,6 +1314,12 @@ async def test_explicit_followup_controls_precede_wake(
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
     assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    work_repository.resume_from_human_input.assert_awaited_once_with(
+        transaction,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+    )
     work_repository.prepare_direct_control.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_awaited_once_with(
         transaction,
@@ -1572,7 +1586,69 @@ async def test_duplicate_explicit_invocation_does_not_project_tracker(
     assert stale is False
     work_repository.prepare_direct_control.assert_not_awaited()
     work_repository.ensure_active_work.assert_not_awaited()
+    work_repository.resume_from_human_input.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_not_awaited()
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_new_context_with_duplicate_trigger_does_not_resume_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only creation of the canonical trigger mailbox item resumes awaiting Work."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000002",
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(
+        locked_rows=[row],
+        mailbox_created_by_index=[True, False],
+    )
+    transaction = _Session()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
+    work_repository.prepare_direct_control = AsyncMock()
+    work_repository.ensure_active_work = AsyncMock()
+    work_repository.resume_from_human_input = AsyncMock()
+    work_repository.prepare_initial_progress = AsyncMock()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                    include_context=True,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    work_repository.ensure_active_work.assert_not_awaited()
+    work_repository.resume_from_human_input.assert_not_awaited()
+    work_repository.prepare_initial_progress.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_not_awaited()
     wake_dispatcher.dispatch.assert_awaited_once()
 
 

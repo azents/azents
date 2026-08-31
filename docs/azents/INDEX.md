@@ -17,14 +17,14 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-27 | 69 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-01 | 156 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-29 | 66 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-31 | 67 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-29 | 100 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-31 | 101 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-01 | 76 |
 
@@ -32,16 +32,16 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 163 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 164 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 36 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 54 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-31 | 55 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
@@ -101,6 +101,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Selective External Channel Response Requirements](requirements/channel-260803-selective-response.md) | channel-260803 | 2026-08-03 | - |
 | [External Channel Silent Work Completion Requirements](requirements/channel-260809-silent-work-completion.md) | channel-260809 | 2026-08-09 | 2026-08-09 |
 | [Batched External Channel Conversation Ingress Requirements](requirements/channel-260810-batched-conversation-ingress.md) | channel-260810 | 2026-08-10 | - |
+| [External Channel Input Request Requirements](requirements/channel-260831-request-input-action.md) | channel-260831 | 2026-08-31 | 2026-08-31 |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
@@ -508,6 +509,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Selective External Channel Response](adr/channel-260803-selective-response.md)
 - [External Channel Silent Work Completion](adr/channel-260809-silent-work-completion.md)
 - [Batched External Channel Conversation Ingress Decisions](adr/channel-260810-batched-conversation-ingress.md)
+- [External Channel Input Request Action](adr/channel-260831-request-input-action.md)
 - [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
 - [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
 - [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)

@@ -43,6 +43,7 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.external_channel.work_data import (
+    AwaitingInputSettlement,
     ChannelActionEffectPlan,
     ChannelActionTransition,
     ChannelWorkSnapshot,
@@ -905,7 +906,7 @@ class ExternalChannelWorkRepository:
 
         def new_state() -> ChannelWorkState:
             return ChannelWorkState(
-                schema_version=3,
+                schema_version=4,
                 binding_id=binding_id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -917,6 +918,7 @@ class ExternalChannelWorkRepository:
                 state_revision=1,
                 desired_progress_revision=1,
                 desired_progress=desired_progress,
+                awaiting_input_run_id=None,
                 finished_at=None,
                 projection_parts=[],
             )
@@ -967,6 +969,39 @@ class ExternalChannelWorkRepository:
             mutator=activate,
         )
         return mutation.result
+
+    async def resume_from_human_input(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+    ) -> ChannelWorkState | None:
+        """Invalidate awaiting settlement after newly created human input."""
+
+        def resume(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[ChannelWorkState]:
+            if current.status is not ExternalChannelWorkStatus.ACTIVE:
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=current,
+                    changed=False,
+                )
+            updated = current.model_copy(deep=True)
+            updated.awaiting_input_run_id = None
+            updated.state_revision += 1
+            return ChannelWorkStateMutation(state=updated, result=updated)
+
+        mutation = await self.work_state_store.update_existing(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            mutator=resume,
+        )
+        return None if mutation is None else mutation.result
 
     async def has_active_binding(
         self,
@@ -1122,6 +1157,7 @@ class ExternalChannelWorkRepository:
                 resource_label=_resource_label(resource.labels, binding.id),
                 title=work.title,
                 tasks=list(work.tasks),
+                awaiting_input=work.awaiting_input_run_id is not None,
             )
             for binding, resource, connection in rows
             if (
@@ -1151,6 +1187,8 @@ class ExternalChannelWorkRepository:
         requested_tasks = list(tasks) if tasks is not None else None
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
+        if mode is ExternalChannelActionMode.REQUEST_INPUT and message is None:
+            raise ValueError("Request input requires an External Channel message.")
         if mode is ExternalChannelActionMode.IGNORE and (
             message is not None
             or title is not None
@@ -1227,7 +1265,7 @@ class ExternalChannelWorkRepository:
             if mode is ExternalChannelActionMode.IGNORE:
                 raise ValueError("Ignore requires active Channel Work.")
             return ChannelWorkState(
-                schema_version=3,
+                schema_version=4,
                 binding_id=binding.id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -1242,6 +1280,7 @@ class ExternalChannelWorkRepository:
                 state_revision=1,
                 desired_progress_revision=0,
                 desired_progress=None,
+                awaiting_input_run_id=None,
                 finished_at=None,
                 projection_parts=[],
             )
@@ -1326,7 +1365,12 @@ class ExternalChannelWorkRepository:
             projection_parts = {
                 part.part_ordinal: part for part in work.projection_parts
             }
-            if mode is ExternalChannelActionMode.CONTINUE:
+            if mode in {
+                ExternalChannelActionMode.CONTINUE,
+                ExternalChannelActionMode.REQUEST_INPUT,
+            }:
+                work.awaiting_input_run_id = None
+                work.state_revision += 1
                 progress_changed = title is not None or requested_tasks is not None
                 if requested_tasks is not None and title is None:
                     raise ValueError(
@@ -1357,8 +1401,8 @@ class ExternalChannelWorkRepository:
                         for task in next_tasks
                     ):
                         raise ValueError(
-                            "Continue must leave at least one unfinished "
-                            "Channel Work task."
+                            "Continue or request input must leave at least one "
+                            "unfinished Channel Work task."
                         )
                     next_title = title if title is not None else work.title
                     if next_title is None:
@@ -1373,7 +1417,6 @@ class ExternalChannelWorkRepository:
                         work.tracker_visibility = "visible"
                     work.title = next_title
                     work.tasks = next_tasks
-                    work.state_revision += 1
                     work.desired_progress_revision += 1
                     work.desired_progress = progress
                     if connection.provider is ExternalChannelProvider.SLACK:
@@ -1452,7 +1495,8 @@ class ExternalChannelWorkRepository:
                         )
                     for part_ordinal, part in sorted(projection_parts.items()):
                         if (
-                            work.tracker_visibility == "visible"
+                            progress_changed
+                            and work.tracker_visibility == "visible"
                             and part.status
                             is ExternalChannelWorkProjectionStatus.PRESENT
                             and part.provider_message_key is not None
@@ -1474,6 +1518,7 @@ class ExternalChannelWorkRepository:
                             )
             else:
                 work.status = ExternalChannelWorkStatus.FINISHED
+                work.awaiting_input_run_id = None
                 work.state_revision += 1
                 work.finished_at = now
                 work.desired_progress_revision += 1
@@ -1515,6 +1560,60 @@ class ExternalChannelWorkRepository:
             default_factory=default_work,
             mutator=transition,
         )
+        return mutation.result
+
+    async def settle_awaiting_input(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+        run_id: str,
+        work_cycle_id: str,
+        expected_state_revision: int,
+    ) -> AwaitingInputSettlement:
+        """Set awaiting state only while the requesting Work revision is current."""
+
+        def settle(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[AwaitingInputSettlement]:
+            if (
+                current.status is not ExternalChannelWorkStatus.ACTIVE
+                or current.work_cycle_id != work_cycle_id
+                or current.state_revision != expected_state_revision
+            ):
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=AwaitingInputSettlement(
+                        established=False,
+                        state_revision=current.state_revision,
+                    ),
+                    changed=False,
+                )
+            updated = current.model_copy(deep=True)
+            updated.awaiting_input_run_id = run_id
+            updated.state_revision += 1
+            return ChannelWorkStateMutation(
+                state=updated,
+                result=AwaitingInputSettlement(
+                    established=True,
+                    state_revision=updated.state_revision,
+                ),
+            )
+
+        mutation = await self.work_state_store.update_existing(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            mutator=settle,
+        )
+        if mutation is None:
+            return AwaitingInputSettlement(
+                established=False,
+                state_revision=expected_state_revision,
+            )
         return mutation.result
 
     async def revalidate_direct_effect(
@@ -2116,6 +2215,7 @@ async def terminate_binding_with_plans(
             )
         work = current.model_copy(deep=True)
         work.status = ExternalChannelWorkStatus.FINISHED
+        work.awaiting_input_run_id = None
         work.finished_at = now
         work.state_revision += 1
         work.desired_progress_revision += 1

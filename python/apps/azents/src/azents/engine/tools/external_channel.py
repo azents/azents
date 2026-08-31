@@ -75,7 +75,8 @@ _COMPACTION_HEADING = "## Channel Work Snapshot"
 _STATIC_PROMPT = textwrap.dedent(
     """\
     Ordinary assistant output is not delivered to the external channel, so use
-    `channel_action` to publish, continue, or silently complete Channel Work.
+    `channel_action` to publish, request participant input, continue, or silently
+    complete Channel Work.
     """
 ).strip()
 _CHANNEL_ACTION_DESCRIPTION = textwrap.dedent(
@@ -85,9 +86,12 @@ _CHANNEL_ACTION_DESCRIPTION = textwrap.dedent(
     external publication. An active binding or prior External Channel history alone
     does not make ordinary input external; otherwise, answer the user normally. Use
     `finish` for the final reply. Use `continue` while work remains; it may send
-    progress and replace the complete ordered Channel Work task list. Use `ignore` to
-    finish active Work silently with no message, title, task update, files, or provider
-    effect. Ignored Work does not schedule another continuation.
+    progress and replace the complete ordered Channel Work task list. Use
+    `request_input` to ask for required participant input and pause that binding's
+    automatic continuation without finishing Work; same-binding participant input or
+    `continue` resumes it. Use `ignore` to finish active Work silently with no message,
+    title, task update, files, or provider effect. Ignored Work does not schedule
+    another continuation.
     """
 ).strip()
 _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
@@ -134,10 +138,11 @@ class ChannelActionInput(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    mode: Literal["finish", "continue", "ignore"] = Field(
+    mode: Literal["finish", "continue", "request_input", "ignore"] = Field(
         description=(
-            "`finish`: final reply. `continue`: work remains. `ignore`: finish "
-            "active Work silently with no other fields."
+            "`finish`: final reply. `continue`: work remains. `request_input`: ask "
+            "for required participant input and wait without finishing Work. "
+            "`ignore`: finish active Work silently with no other fields."
         )
     )
     binding: str = Field(
@@ -149,7 +154,7 @@ class ChannelActionInput(BaseModel):
         default=None,
         min_length=1,
         max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-        description="Required for `finish` and file publication.",
+        description="Required for `finish`, `request_input`, and file publication.",
     )
     title: str | None = Field(
         default=None,
@@ -201,7 +206,9 @@ class ChannelActionInput(BaseModel):
             if self.message is None:
                 raise ValueError("Finish requires a message.")
             return self
-        if (
+        if self.mode == "request_input" and self.message is None:
+            raise ValueError("Request input requires a message.")
+        if self.mode == "continue" and (
             self.message is None
             and self.title is None
             and self.todo_update is None
@@ -224,7 +231,9 @@ class ChannelActionInput(BaseModel):
             }
             for task in self.todo_update
         ):
-            raise ValueError("Continue must leave at least one unfinished task.")
+            raise ValueError(
+                "Continue or request input must leave at least one unfinished task."
+            )
         if self.todo_update is not None:
             task_ids = [task.id for task in self.todo_update]
             if len(task_ids) != len(set(task_ids)):
@@ -348,7 +357,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         )
         if not works:
             return None
-        handles = [work.binding_id for work in works]
+        handles = [work.binding_id for work in works if not work.awaiting_input]
+        if not handles:
+            return None
         return SessionIdleResult(
             continuations=[
                 ExternalChannelSessionContinuationInput(
@@ -662,6 +673,7 @@ def render_channel_work_compaction_snapshot(
                 f"- Provider: {work.provider.value}",
                 f"- Resource: {work.resource_label}",
                 f"- Current work title: {work.title or 'Not declared yet'}",
+                *(["- Awaiting participant input"] if work.awaiting_input else []),
                 "- Tasks:",
             ]
         )
@@ -687,6 +699,7 @@ def _result_payload(result: ChannelActionResult) -> dict[str, object]:
         "binding": result.binding_id,
         "state": result.work_status.value,
         "state_revision": result.state_revision,
+        "awaiting_input": result.awaiting_input,
         "outcomes": [
             {
                 "operation": outcome.operation.value,

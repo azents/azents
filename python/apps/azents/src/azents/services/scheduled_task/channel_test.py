@@ -537,7 +537,16 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_terminal_modes_and_wrong_binding_are_rejected() -> None:
+@pytest.mark.parametrize(
+    "unsupported_mode",
+    [
+        ExternalChannelActionMode.FINISH,
+        ExternalChannelActionMode.REQUEST_INPUT,
+    ],
+)
+async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
+    unsupported_mode: ExternalChannelActionMode,
+) -> None:
     service, run_repository, cycle_repository, provider_repository, _ = _service()
     run_repository.get_by_id.return_value = SimpleNamespace(
         session_id=_SESSION_ID,
@@ -551,8 +560,8 @@ async def test_scheduled_terminal_modes_and_wrong_binding_are_rejected() -> None
             session_id=_SESSION_ID,
             run_id=_RUN_ID,
             binding_id=_BINDING_ID,
-            mode=ExternalChannelActionMode.FINISH,
-            message="Done.",
+            mode=unsupported_mode,
+            message="Question or final reply.",
             title=None,
             tasks=None,
             files=(),

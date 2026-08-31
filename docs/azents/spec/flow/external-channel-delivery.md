@@ -43,8 +43,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-29
-spec_version: 53
+last_verified_at: 2026-08-31
+spec_version: 54
 ---
 
 # External Channel Delivery and Channel Work
@@ -58,20 +58,22 @@ enabled, `channel_action` and `download_external_file` are deferred discovery ta
 when disabled, the complete catalog exposes them directly.
 
 The active Toolkit contributes a minimal static prompt stating that ordinary assistant
-output is not delivered and that external publication, continuation, and silent
-completion use `channel_action`. The Tool Search-enabled variant also instructs the
-model to discover the appropriate Channel tool. Normal turns do not reload canonical
-Channel Work into a dynamic prompt.
+output is not delivered and that external publication, participant-input requests,
+continuation, and silent completion use `channel_action`. Normal turns do not reload
+canonical Channel Work into a dynamic prompt.
 Mode selection, binding-handle, Channel Work, and file-materialization guidance lives
 in tool descriptions and field schemas. Compaction alone preserves unfinished binding,
 provider, resource, title, and ordered task continuity while excluding revisions,
 projection diagnostics, and provider-effect outcomes.
 
 A tool call must identify a binding owned by the current Agent and Session. Every
-model input boundary exposes three atomic modes:
+model input boundary exposes four atomic modes:
 
 - `continue`: optionally send one conversational reply, replace the current
   provider-neutral work title, and replace the ordered Channel Work task list.
+- `request_input`: send one required ordinary question or feedback request while
+  preserving active Work. Confirmed delivery pauses automatic continuation for only
+  that binding until newly created same-binding human input or `continue`.
 - `finish`: send one required final reply and finish Channel Work.
 - `ignore`: finish existing active Work silently, regardless of recorded task status.
   It accepts no message, title, task update, or files. The transition advances the
@@ -85,7 +87,8 @@ model input boundary exposes three atomic modes:
 Publication frequency is determined by the Agent's work and communication needs
 rather than a process-local repetition guard.
 
-Either mode may attach up to 20 file sources to its conversational reply. Each source
+The `continue`, `request_input`, and `finish` modes may attach up to 20 file sources
+to their conversational reply. Each source
 must use one of two formats: an absolute POSIX Runtime file path beginning with `/`, or
 an authority-checked `exchange://{object_key}` file-location URI. Relative paths,
 `artifact://`, `azents://`, and other URI schemes are rejected. The path format selects
@@ -108,10 +111,12 @@ state changes so accepted continuation context is never silently truncated. Each
 binding has independent work state even when several bindings share one AgentSession.
 The canonical value is one Session-bound Toolkit State identity composed from the
 Agent, Session, namespace `external_channel`, and state name
-`channel_work:{binding_id}`. Its schema-version-1 payload stores the stable
+`channel_work:{binding_id}`. Its schema-version-4 payload stores the stable
 `work_cycle_id`, current or latest work lifecycle, desired progress, and ordered
-provider projection parts. Whole-state optimistic-lock retries are isolated per
-binding.
+provider projection parts plus nullable `awaiting_input_run_id`. The awaiting marker
+is valid only for active Work, is not exposed through public management state, and is
+cleared by terminal or replacement transitions. Whole-state optimistic-lock retries
+are isolated per binding.
 The ordinary Session Todo toolkit is not the Channel Work source of truth.
 
 ## Agent Presentation
@@ -159,9 +164,18 @@ The Tool result contains one identifier-free outcome for each ordered effect:
   effect did not complete.
 
 The result includes only the operation, ordered part, status, and sanitized reason or
-detail. Normal Session client-tool call/result events are the only durable
+detail, plus the final Work revision and whether awaiting input was established.
+Normal Session client-tool call/result events are the only durable
 Agent-requested execution history. No Channel Action, delivery attempt, pending
 provider work item, retry, replay, recovery, or compensation record is created.
+
+For `request_input`, the initial canonical transition clears an older awaiting marker,
+advances `state_revision`, and captures the exact Work cycle and revision before
+provider I/O. Awaiting settlement occurs only after every ordinary reply part is
+`delivered`. The settlement uses the existing bounded Toolkit State CAS and succeeds
+only for the captured active cycle and revision; failed, unknown, not-attempted, or
+stale delivery remains ready for normal continuation. Process loss after delivery but
+before settlement therefore fails open rather than silently waiting.
 
 Progress effect results compare-and-set only the current Work-owned projection part
 inside the binding's Toolkit State for the expected work cycle and desired revision.
@@ -417,10 +431,12 @@ rather than `missing`; its canonical desired progress remains readable.
 
 ## Slack Work Presence
 
-Every active Slack conversational Work requests provider-native presence regardless of
-Tracker visibility. A dedicated Gateway manager claims one independent lease per active
-Slack connection, decrypts only that connection's current Bot credential, and fences
-target projection and renewal by the captured configuration generation.
+Every ready active Slack conversational Work requests provider-native presence
+regardless of Tracker visibility. Awaiting Work retains its Tracker and active
+lifecycle but projects idle presence. A dedicated Gateway manager claims one
+independent lease per active Slack connection, decrypts only that connection's current
+Bot credential, and fences target projection and renewal by the captured configuration
+generation.
 
 Parent-channel Work uses public `assistant_threads_setStatus` at the first trigger
 message retained for the cycle, with a bounded checking or work title and periodic
@@ -440,9 +456,10 @@ Tracker state, or reply delivery.
 
 ## Discord Typing Presence
 
-Every active Discord conversational Work requests typing regardless of Tracker
-visibility. The current lease-fenced Discord Gateway owner derives distinct exact
-delivery channels from PostgreSQL Binding, Resource, Session, Agent, route, connection,
+Every ready active Discord conversational Work requests typing regardless of Tracker
+visibility; awaiting Work is excluded until same-binding input or `continue` resumes
+it. The current lease-fenced Discord Gateway owner derives distinct exact delivery
+channels from PostgreSQL Binding, Resource, Session, Agent, route, connection,
 App-claim, lease, and Work authority. It uses the existing long-lived
 `discord.Client`, public `get_partial_messageable()`, and awaitable public `typing()`
 operation to maintain one renewal task per Bot/channel.
@@ -461,13 +478,16 @@ retry, or recovery authority.
 
 ## Continuation
 
-A successfully completed run with unfinished Channel Work remains eligible for idle
-continuation. Continuation is binding-aware and includes the current unfinished work
-snapshot. Sending an intermediate reply does not finish active work. Completing or
-clearing tasks, explicitly finishing with no follow-up work, or `ignore` stops
-continuation for that binding. Recorded pending or in-progress tasks do not override
-the explicit ignore decision. Other connected bindings can still require continuation
-in the same Session.
+A successfully completed run with ready unfinished Channel Work remains eligible for
+idle continuation. Continuation is binding-aware, includes only ready binding handles,
+and keeps awaiting Work in the compaction snapshot with an `Awaiting participant input`
+indicator. A newly created canonical human mailbox item through the same binding clears
+awaiting state and advances `state_revision` before the response Run becomes idle.
+`continue` performs the same invalidation even when it only sends a message. Duplicate,
+failed, provisioning-only, another-binding, Goal, Scheduled Task, and other Run sources
+do not resume awaiting Work. Completing or clearing tasks, explicitly finishing with no
+follow-up work, or `ignore` stops continuation for that binding. Other ready connected
+bindings and independent continuation sources remain eligible.
 
 ## Lifecycle Cleanup Controls
 
@@ -503,6 +523,8 @@ boundary as other External Channel effects but have Scheduled-owned state.
 - Run start may create one Scheduled Activity Tracker.
 - Scheduled-bound `channel_action continue` may publish a reply and replace the
   current progress title and ordered task list for the exact Binding.
+- Scheduled-bound Channel Actions reject `request_input`; Scheduled Task lifecycle
+  remains owned by `continue` and `submit_scheduled_task_result`.
 - `submit_scheduled_task_result` may attach the same validated Runtime or Exchange
   file sources as `channel_action`. The terminal reply and files use the active
   cycle's exact Binding and conversation; the Agent does not choose another
@@ -519,6 +541,10 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-31** (spec_version 54) — Added concise `request_input` guidance,
+  delivery-confirmed binding-scoped awaiting state, same-binding human-input and
+  `continue` resume, ready-only idle continuation, awaiting compaction, Slack idle
+  presence, Discord typing suspension, and the version-4 Channel Work migration.
 - **2026-08-29** (spec_version 53) — Added leased Slack channel/thread Work presence,
   aligned Slack Tracker visibility and promotion with Discord, moved recurring
   conversation settings onto visible Slack Trackers, and removed settings-only

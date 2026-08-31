@@ -28,7 +28,7 @@ from azents.repos.toolkit_state.data import ToolkitStateUpsert
 
 EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE = "external_channel"
 CHANNEL_WORK_STATE_NAME_PREFIX = "channel_work:"
-CHANNEL_WORK_STATE_SCHEMA_VERSION = 3
+CHANNEL_WORK_STATE_SCHEMA_VERSION = 4
 
 
 class ChannelWorkProjectionPartState(BaseModel):
@@ -47,7 +47,7 @@ class ChannelWorkState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     binding_id: str = Field(min_length=1)
     work_cycle_id: str = Field(min_length=1)
     status: ExternalChannelWorkStatus
@@ -59,6 +59,7 @@ class ChannelWorkState(BaseModel):
     state_revision: int = Field(ge=1)
     desired_progress_revision: int = Field(ge=0)
     desired_progress: ExternalChannelDesiredProgress | None
+    awaiting_input_run_id: str | None = Field(min_length=1)
     finished_at: datetime.datetime | None
     projection_parts: list[ChannelWorkProjectionPartState]
 
@@ -80,6 +81,11 @@ class ChannelWorkState(BaseModel):
             and self.finished_at is None
         ):
             raise ValueError("Finished Channel Work requires a finished timestamp.")
+        if (
+            self.status is ExternalChannelWorkStatus.FINISHED
+            and self.awaiting_input_run_id is not None
+        ):
+            raise ValueError("Finished Channel Work cannot await participant input.")
         return self
 
 

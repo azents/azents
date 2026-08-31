@@ -293,9 +293,12 @@ class ExternalChannelActionService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
-        reply_delivered = mode is not ExternalChannelActionMode.FINISH or any(
+        reply_requested = any(
             effect.provider.target.operation is ExternalChannelDeliveryOperation.REPLY
             for effect in transition.effects
+        )
+        reply_delivered = (
+            mode is not ExternalChannelActionMode.FINISH or reply_requested
         )
         outcomes: list[ProviderEffectOutcome] = []
         for effect in transition.effects:
@@ -329,10 +332,31 @@ class ExternalChannelActionService:
             outcomes.append(outcome)
             if operation is ExternalChannelDeliveryOperation.REPLY:
                 reply_delivered = reply_delivered and outcome.status == "delivered"
+        awaiting_input = False
+        state_revision = transition.state_revision
+        if (
+            mode is ExternalChannelActionMode.REQUEST_INPUT
+            and reply_requested
+            and reply_delivered
+        ):
+            async with self.session_manager() as session:
+                settlement = await self.repository.settle_awaiting_input(
+                    session,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    binding_id=binding_id,
+                    run_id=run_id,
+                    work_cycle_id=transition.work_id,
+                    expected_state_revision=transition.state_revision,
+                )
+                await session.commit()
+            awaiting_input = settlement.established
+            state_revision = settlement.state_revision
         return ChannelActionResult(
             binding_id=transition.binding_id,
             work_status=transition.work_status,
-            state_revision=transition.state_revision,
+            state_revision=state_revision,
+            awaiting_input=awaiting_input,
             outcomes=tuple(outcomes),
         )
 

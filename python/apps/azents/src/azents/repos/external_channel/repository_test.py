@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from types import SimpleNamespace
 from typing import Literal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 import sqlalchemy as sa
@@ -14,7 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionProductMode,
+    AgentSessionStatus,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelIngressProfile,
@@ -32,6 +34,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
     RDBExternalChannelAppClaim,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
@@ -49,7 +52,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelConversationPosition,
     ExternalChannelResourceCreate,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.repository import (
+    ExternalChannelRepository,
+    _slack_work_presence_target,
+)
 from azents.repos.external_channel.work_state import (
     CHANNEL_WORK_STATE_SCHEMA_VERSION,
     EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE,
@@ -261,6 +267,7 @@ async def _create_discord_gateway_typing_binding(
     work_cycle_id: str,
     work_status: ExternalChannelWorkStatus = ExternalChannelWorkStatus.ACTIVE,
     tracker_visibility: Literal["hidden", "visible"] = "visible",
+    awaiting_input_run_id: str | None = None,
 ) -> str:
     """Create one binding and its exact current Channel Work Toolkit State."""
     resource = await fixture.repository.create_resource_idempotent(
@@ -307,6 +314,7 @@ async def _create_discord_gateway_typing_binding(
                 state_revision=1,
                 desired_progress_revision=0,
                 desired_progress=None,
+                awaiting_input_run_id=awaiting_input_run_id,
                 finished_at=(
                     None if work_status is ExternalChannelWorkStatus.ACTIVE else _at(2)
                 ),
@@ -470,6 +478,18 @@ async def test_discord_gateway_typing_targets_project_active_current_work(
             "thread_id": "400",
         },
         work_cycle_id="work-thread-fallback",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-awaiting",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "450",
+        },
+        work_cycle_id="work-awaiting",
+        awaiting_input_run_id="run-request",
     )
     await _create_discord_gateway_typing_binding(
         rdb_session,
@@ -1366,6 +1386,60 @@ async def test_slack_presence_lease_is_configuration_fenced(
         lease_owner="presence-manager",
         now=_at(3),
     )
+
+
+def test_slack_presence_projects_awaiting_work_as_idle() -> None:
+    """Awaiting Work keeps its Tracker identity without active processing presence."""
+    connection = create_autospec(RDBExternalChannelConnection, instance=True)
+    connection.capabilities = None
+    binding = create_autospec(RDBExternalChannelBinding, instance=True)
+    binding.id = "binding-1"
+    binding.disconnected_at = None
+    resource = create_autospec(RDBExternalChannelResource, instance=True)
+    resource.labels = {"channel_id": "C1"}
+    resource.status = ExternalChannelResourceStatus.ACTIVE
+    resource.resource_type = ExternalChannelResourceType.PARENT_CHANNEL
+    route = create_autospec(RDBExternalChannelAgentRoute, instance=True)
+    route.agent_id = "agent-1"
+    route.catalog_status = ExternalChannelRouteCatalogStatus.AVAILABLE
+    agent = create_autospec(RDBAgent, instance=True)
+    agent.id = "agent-1"
+    agent.name = "Agent"
+    agent.lifecycle_status = AgentLifecycleStatus.ACTIVE
+    agent_session = create_autospec(RDBAgentSession, instance=True)
+    agent_session.status = AgentSessionStatus.ACTIVE
+    agent_session.stop_requested_at = None
+    work = ChannelWorkState(
+        schema_version=CHANNEL_WORK_STATE_SCHEMA_VERSION,
+        binding_id="binding-1",
+        work_cycle_id="work-1",
+        status=ExternalChannelWorkStatus.ACTIVE,
+        tracker_visibility="visible",
+        slack_presence_thread_ts="123.456",
+        slack_presence_initiator_user_id=None,
+        title="Investigating…",
+        tasks=[],
+        state_revision=3,
+        desired_progress_revision=0,
+        desired_progress=None,
+        awaiting_input_run_id="run-request",
+        finished_at=None,
+        projection_parts=[],
+    )
+
+    target = _slack_work_presence_target(
+        connection=connection,
+        binding=binding,
+        resource=resource,
+        route=route,
+        agent=agent,
+        agent_session=agent_session,
+        work=work,
+    )
+
+    assert target is not None
+    assert target.desired_state == "idle"
+    assert target.status_text is None
 
 
 async def test_create_agent_route_enforces_mode_and_workspace_boundaries(

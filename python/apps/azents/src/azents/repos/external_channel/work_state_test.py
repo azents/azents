@@ -1,5 +1,6 @@
 """Binding ownership and concurrency tests for External Channel Work state."""
 
+import datetime
 from dataclasses import dataclass
 
 import pytest
@@ -33,7 +34,7 @@ class _SeededBinding:
 def _work(binding_id: str, *, title: str | None = None) -> ChannelWorkState:
     """Build one active Work payload."""
     return ChannelWorkState(
-        schema_version=3,
+        schema_version=4,
         binding_id=binding_id,
         work_cycle_id=f"cycle-{binding_id}",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -45,6 +46,7 @@ def _work(binding_id: str, *, title: str | None = None) -> ChannelWorkState:
         state_revision=1,
         desired_progress_revision=0,
         desired_progress=None,
+        awaiting_input_run_id=None,
         finished_at=None,
         projection_parts=[],
     )
@@ -482,7 +484,7 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
         await _cleanup_binding(rdb_engine, seeded)
 
 
-def test_work_state_requires_schema_version_two_and_tracker_visibility() -> None:
+def test_work_state_requires_schema_version_four_and_tracker_visibility() -> None:
     """Payload validation fails closed for unsupported schema versions."""
     with pytest.raises(ValidationError):
         ChannelWorkState.model_validate(
@@ -516,5 +518,30 @@ def test_work_state_requires_schema_version_two_and_tracker_visibility() -> None
                 .model_dump(mode="json")
                 .items()
                 if key != "tracker_visibility"
+            }
+        )
+
+
+def test_finished_work_cannot_await_participant_input() -> None:
+    """Awaiting input remains orthogonal only while Work is active."""
+    work = _work("binding-finished-awaiting").model_copy(deep=True)
+    work.status = ExternalChannelWorkStatus.FINISHED
+    work.finished_at = datetime.datetime(2026, 8, 31, tzinfo=datetime.UTC)
+    work.awaiting_input_run_id = "run-1"
+
+    with pytest.raises(
+        ValidationError,
+        match="Finished Channel Work cannot await participant input",
+    ):
+        ChannelWorkState.model_validate(work.model_dump(mode="json"))
+
+
+def test_awaiting_input_requires_nonempty_run_identity() -> None:
+    """An established awaiting marker always identifies its requesting Run."""
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        ChannelWorkState.model_validate(
+            {
+                **_work("binding-empty-awaiting").model_dump(mode="json"),
+                "awaiting_input_run_id": "",
             }
         )

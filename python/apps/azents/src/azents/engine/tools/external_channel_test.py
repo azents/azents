@@ -60,7 +60,11 @@ from azents.services.scheduled_task.channel import (
 )
 
 
-def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
+def _snapshot(
+    binding_id: str = "binding-1",
+    *,
+    awaiting_input: bool = False,
+) -> ChannelWorkSnapshot:
     return ChannelWorkSnapshot(
         binding_id=binding_id,
         provider=ExternalChannelProvider.SLACK,
@@ -76,6 +80,7 @@ def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
                 sources=[],
             )
         ],
+        awaiting_input=awaiting_input,
     )
 
 
@@ -103,6 +108,7 @@ class _ActionService:
             binding_id=str(kwargs["binding_id"]),
             work_status=ExternalChannelWorkStatus.ACTIVE,
             state_revision=4,
+            awaiting_input=False,
             outcomes=(
                 ProviderEffectOutcome(
                     operation=ExternalChannelDeliveryOperation.REPLY,
@@ -263,6 +269,7 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert isinstance(output, str)
     payload = json.loads(output)
     assert payload["state"] == "active"
+    assert payload["awaiting_input"] is False
     assert payload["outcomes"] == [
         {
             "detail": "Slack cannot post to the linked conversation.",
@@ -287,6 +294,7 @@ async def test_ignore_schema_is_always_exposed() -> None:
     assert _channel_action_mode_enum(schema) == [
         "finish",
         "continue",
+        "request_input",
         "ignore",
     ]
 
@@ -616,6 +624,17 @@ def test_finish_requires_message() -> None:
         )
 
 
+def test_request_input_requires_message() -> None:
+    """Request input always carries the participant-visible question."""
+    with pytest.raises(ValueError, match="Request input requires a message"):
+        ChannelActionInput.model_validate(
+            {
+                "mode": "request_input",
+                "binding": "binding-1",
+            }
+        )
+
+
 def test_continue_limits_todos_to_available_activity_blocks() -> None:
     """One status card leaves 49 Slack message blocks for Todo cards."""
     with pytest.raises(ValueError, match="at most 49"):
@@ -652,7 +671,12 @@ def test_channel_action_rejects_empty_file_lists() -> None:
 @pytest.mark.asyncio
 async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() -> None:
     """Prompt layers retain only discovery and unfinished-work continuity."""
-    service = _ActionService([_snapshot("binding-1"), _snapshot("binding-2")])
+    service = _ActionService(
+        [
+            _snapshot("binding-1", awaiting_input=True),
+            _snapshot("binding-2"),
+        ]
+    )
     toolkit = _toolkit(service)
 
     direct_prompt = await toolkit.get_static_prompt(_turn_context())
@@ -661,6 +685,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     )
     normalized_prompt = " ".join(direct_prompt.split())
     assert "ordinary assistant output is not delivered" in normalized_prompt.lower()
+    assert "request participant input" in normalized_prompt
     assert "silently complete Channel Work" in normalized_prompt
     assert "Tool Search" not in direct_prompt
     assert "Tool Search" not in search_prompt
@@ -683,6 +708,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert compacted is not None
     assert compacted.summary.count("## Channel Work Snapshot") == 1
     assert "binding-2" in compacted.summary
+    assert "Awaiting participant input" in compacted.summary
     assert "State revision" not in compacted.summary
     assert "Progress projection" not in compacted.summary
     assert "Latest action" not in compacted.summary
@@ -699,8 +725,33 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     )
     assert idle is not None
     assert len(idle.continuations) == 1
-    assert idle.continuations[0].metadata["active_bindings"] == ("binding-1,binding-2")
+    assert idle.continuations[0].metadata["active_bindings"] == "binding-2"
     assert set(idle.continuations[0].metadata) == {"source", "active_bindings"}
+
+
+@pytest.mark.asyncio
+async def test_idle_hook_emits_nothing_when_every_binding_awaits_input() -> None:
+    """Awaiting Work remains active without scheduling autonomous continuation."""
+    toolkit = _toolkit(
+        _ActionService(
+            [
+                _snapshot("binding-1", awaiting_input=True),
+                _snapshot("binding-2", awaiting_input=True),
+            ]
+        )
+    )
+
+    idle = await toolkit._on_session_idle(
+        SessionIdleHookContext(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            run_id="run-1",
+            reason="completed",
+        )
+    )
+
+    assert idle is None
 
 
 @pytest.mark.asyncio
@@ -719,6 +770,7 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     assert "answer the user normally" in description
     assert "Use `finish`" in description
     assert "Use `continue`" in description
+    assert "Use `request_input`" in description
     assert "Use `ignore`" in description
     assert "does not schedule another continuation" in description
     assert "opaque locator" in download_external_file.spec.description
@@ -728,4 +780,7 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     assert "oneOf" not in channel_action.spec.input_schema
     assert "anyOf" not in channel_action.spec.input_schema
     assert "Pass it unchanged" in schema_text
+    assert (
+        "Required for `finish`, `request_input`, and file publication." in schema_text
+    )
     assert "independent from the session-scoped update_todo list" in schema_text
