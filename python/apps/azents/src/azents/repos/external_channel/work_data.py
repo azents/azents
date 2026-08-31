@@ -32,6 +32,7 @@ class ChannelWorkSnapshot(_Record):
     resource_label: str
     title: str | None
     tasks: list[ChannelWorkTask]
+    awaiting_input: bool
 
 
 @dataclass(frozen=True)
@@ -56,12 +57,21 @@ class ChannelActionTransition:
 
 
 @dataclass(frozen=True)
+class AwaitingInputSettlement:
+    """Final canonical awaiting settlement for one input request."""
+
+    established: bool
+    state_revision: int
+
+
+@dataclass(frozen=True)
 class ChannelActionResult:
     """Canonical Work result with ordered identifier-free provider outcomes."""
 
     binding_id: str
     work_status: ExternalChannelWorkStatus
     state_revision: int
+    awaiting_input: bool
     outcomes: tuple[ProviderEffectOutcome, ...]
 
 

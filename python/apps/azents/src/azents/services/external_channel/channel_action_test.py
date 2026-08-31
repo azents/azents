@@ -21,6 +21,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileSource,
 )
 from azents.repos.external_channel.work_data import (
+    AwaitingInputSettlement,
     ChannelActionEffectPlan,
     ChannelActionTransition,
 )
@@ -382,6 +383,145 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     assert result.outcomes[1].status == "not_attempted"
     assert result.outcomes[1].reason == "final_reply_not_delivered"
     execute_direct_effect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_request_input_settles_only_after_confirmed_reply_delivery() -> None:
+    """A delivered question establishes awaiting state through a second CAS."""
+    session = SimpleNamespace(commit=AsyncMock())
+    reply = _effect(ExternalChannelDeliveryOperation.REPLY)
+    repository = SimpleNamespace(
+        commit_direct_action=AsyncMock(
+            return_value=ChannelActionTransition(
+                binding_id="binding-1",
+                work_id="work-1",
+                work_status=ExternalChannelWorkStatus.ACTIVE,
+                state_revision=5,
+                effects=(reply,),
+            )
+        ),
+        settle_awaiting_input=AsyncMock(
+            return_value=AwaitingInputSettlement(
+                established=True,
+                state_revision=6,
+            )
+        ),
+    )
+    delivered = ProviderEffectOutcome(
+        operation=ExternalChannelDeliveryOperation.REPLY,
+        part=0,
+        status="delivered",
+        reason=None,
+        detail=None,
+    )
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
+
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            session_manager=session_manager,
+            repository=repository,
+            execute_direct_effect=AsyncMock(return_value=delivered),
+        ),
+        ExternalChannelActionService,
+    )
+
+    result = await ExternalChannelActionService.execute(
+        service,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-request",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.REQUEST_INPUT,
+        message="Which option should I use?",
+        title=None,
+        tasks=None,
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert result.awaiting_input is True
+    assert result.state_revision == 6
+    repository.settle_awaiting_input.assert_awaited_once_with(
+        session,
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+        run_id="run-1",
+        work_cycle_id="work-1",
+        expected_state_revision=5,
+    )
+    assert session.commit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
+    """A failed question reply leaves Work ready for normal continuation."""
+    session = SimpleNamespace(commit=AsyncMock())
+    reply = _effect(ExternalChannelDeliveryOperation.REPLY)
+    repository = SimpleNamespace(
+        commit_direct_action=AsyncMock(
+            return_value=ChannelActionTransition(
+                binding_id="binding-1",
+                work_id="work-1",
+                work_status=ExternalChannelWorkStatus.ACTIVE,
+                state_revision=5,
+                effects=(reply,),
+            )
+        ),
+        settle_awaiting_input=AsyncMock(),
+    )
+    failed = ProviderEffectOutcome(
+        operation=ExternalChannelDeliveryOperation.REPLY,
+        part=0,
+        status="failed",
+        reason="provider_rejected",
+        detail="The provider rejected the request.",
+    )
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
+
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            session_manager=session_manager,
+            repository=repository,
+            execute_direct_effect=AsyncMock(return_value=failed),
+        ),
+        ExternalChannelActionService,
+    )
+
+    result = await ExternalChannelActionService.execute(
+        service,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-request",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.REQUEST_INPUT,
+        message="Which option should I use?",
+        title=None,
+        tasks=None,
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert result.awaiting_input is False
+    assert result.state_revision == 5
+    repository.settle_awaiting_input.assert_not_awaited()
+    session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -690,7 +690,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         agent_session_id="session-1",
     )
     work = ChannelWorkState(
-        schema_version=3,
+        schema_version=4,
         binding_id=binding.id,
         work_cycle_id="work-cycle-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -701,6 +701,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         state_revision=1,
         desired_progress_revision=1,
         desired_progress=None,
+        awaiting_input_run_id=None,
         finished_at=None,
         projection_parts=[],
         tracker_visibility="visible",

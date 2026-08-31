@@ -76,6 +76,7 @@ def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
                 sources=[],
             )
         ],
+        awaiting_input=False,
     )
 
 
@@ -103,6 +104,7 @@ class _ActionService:
             binding_id=str(kwargs["binding_id"]),
             work_status=ExternalChannelWorkStatus.ACTIVE,
             state_revision=4,
+            awaiting_input=False,
             outcomes=(
                 ProviderEffectOutcome(
                     operation=ExternalChannelDeliveryOperation.REPLY,
@@ -263,6 +265,7 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert isinstance(output, str)
     payload = json.loads(output)
     assert payload["state"] == "active"
+    assert payload["awaiting_input"] is False
     assert payload["outcomes"] == [
         {
             "detail": "Slack cannot post to the linked conversation.",
@@ -287,6 +290,7 @@ async def test_ignore_schema_is_always_exposed() -> None:
     assert _channel_action_mode_enum(schema) == [
         "finish",
         "continue",
+        "request_input",
         "ignore",
     ]
 
@@ -616,6 +620,17 @@ def test_finish_requires_message() -> None:
         )
 
 
+def test_request_input_requires_message() -> None:
+    """Request input always carries the participant-visible question."""
+    with pytest.raises(ValueError, match="Request input requires a message"):
+        ChannelActionInput.model_validate(
+            {
+                "mode": "request_input",
+                "binding": "binding-1",
+            }
+        )
+
+
 def test_continue_limits_todos_to_available_activity_blocks() -> None:
     """One status card leaves 49 Slack message blocks for Todo cards."""
     with pytest.raises(ValueError, match="at most 49"):
@@ -661,6 +676,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     )
     normalized_prompt = " ".join(direct_prompt.split())
     assert "ordinary assistant output is not delivered" in normalized_prompt.lower()
+    assert "request participant input" in normalized_prompt
     assert "silently complete Channel Work" in normalized_prompt
     assert "Tool Search" not in direct_prompt
     assert "Tool Search" not in search_prompt
@@ -719,6 +735,7 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     assert "answer the user normally" in description
     assert "Use `finish`" in description
     assert "Use `continue`" in description
+    assert "Use `request_input`" in description
     assert "Use `ignore`" in description
     assert "does not schedule another continuation" in description
     assert "opaque locator" in download_external_file.spec.description
@@ -728,4 +745,7 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     assert "oneOf" not in channel_action.spec.input_schema
     assert "anyOf" not in channel_action.spec.input_schema
     assert "Pass it unchanged" in schema_text
+    assert (
+        "Required for `finish`, `request_input`, and file publication." in schema_text
+    )
     assert "independent from the session-scoped update_todo list" in schema_text
