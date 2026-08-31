@@ -57,8 +57,8 @@ from azents.services.external_channel.slack_events import (
 from azents.testing.external_channel import make_provider_effect_plan
 
 
-class _CommitIgnoreResult(NamedTuple):
-    """Committed ignore transition and state-store observation."""
+class _CommitActionResult(NamedTuple):
+    """Committed direct action transition and state-store observation."""
 
     transition: ChannelActionTransition
     work: ChannelWorkState
@@ -1262,12 +1262,14 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
     assert current.projection_parts == []
 
 
-async def _commit_ignore(
+async def _commit_action(
     work: ChannelWorkState,
     *,
     provider: ExternalChannelProvider,
-) -> _CommitIgnoreResult:
-    """Execute the canonical ignore mutator through repository authority checks."""
+    mode: ExternalChannelActionMode,
+    message: str | None,
+) -> _CommitActionResult:
+    """Execute one canonical direct action through repository authority checks."""
     binding = SimpleNamespace(
         id="binding-1",
         route_id="route-1",
@@ -1362,20 +1364,64 @@ async def _commit_ignore(
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",
-        client_tool_call_id="tool-call-ignore",
+        client_tool_call_id=f"tool-call-{mode.value}",
         binding_id=binding.id,
-        mode=ExternalChannelActionMode.IGNORE,
-        message=None,
+        mode=mode,
+        message=message,
         title=None,
         tasks=None,
         files=(),
         now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
     )
-    return _CommitIgnoreResult(
+    return _CommitActionResult(
         transition=transition,
         work=current,
         update=state_store.update,
     )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        ExternalChannelActionMode.CONTINUE,
+        ExternalChannelActionMode.REQUEST_INPUT,
+    ],
+)
+@pytest.mark.parametrize(
+    "provider",
+    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
+)
+async def test_message_only_nonterminal_action_preserves_present_tracker(
+    mode: ExternalChannelActionMode,
+    provider: ExternalChannelProvider,
+) -> None:
+    """A reply without progress changes must not delete the current Tracker."""
+    provider_message_key = (
+        "slack:C1:123.456"
+        if provider is ExternalChannelProvider.SLACK
+        else "discord:111:555"
+    )
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key=provider_message_key,
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, updated, update = await _commit_action(
+        work,
+        provider=provider,
+        mode=mode,
+        message="Which option should I use?",
+    )
+
+    assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.REPLY
+    ]
+    assert updated.projection_parts == [projection]
+    assert updated.desired_progress == work.desired_progress
+    assert updated.desired_progress_revision == work.desired_progress_revision
+    update.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -1422,7 +1468,12 @@ async def test_ignore_finishes_active_work_and_deletes_present_tracker(
         for index, status in enumerate(statuses)
     ]
 
-    transition, updated, update = await _commit_ignore(work, provider=provider)
+    transition, updated, update = await _commit_action(
+        work,
+        provider=provider,
+        mode=ExternalChannelActionMode.IGNORE,
+        message=None,
+    )
 
     assert transition.work_status is ExternalChannelWorkStatus.FINISHED
     assert len(transition.effects) == 1
@@ -1473,7 +1524,12 @@ async def test_ignore_without_present_tracker_has_no_provider_effect(
         ],
     )
 
-    transition, updated, update = await _commit_ignore(work, provider=provider)
+    transition, updated, update = await _commit_action(
+        work,
+        provider=provider,
+        mode=ExternalChannelActionMode.IGNORE,
+        message=None,
+    )
 
     assert transition.work_status is ExternalChannelWorkStatus.FINISHED
     assert transition.effects == ()

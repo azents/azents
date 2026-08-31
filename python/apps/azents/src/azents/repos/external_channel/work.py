@@ -1495,7 +1495,8 @@ class ExternalChannelWorkRepository:
                         )
                     for part_ordinal, part in sorted(projection_parts.items()):
                         if (
-                            work.tracker_visibility == "visible"
+                            progress_changed
+                            and work.tracker_visibility == "visible"
                             and part.status
                             is ExternalChannelWorkProjectionStatus.PRESENT
                             and part.provider_message_key is not None
