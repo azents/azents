@@ -2,6 +2,7 @@
 title: "External Channel Input Request Action Design"
 created: 2026-08-31
 updated: 2026-08-31
+implemented: 2026-08-31
 tags: [external-channel, agent, continuation, reliability, backend]
 document_role: primary
 document_type: design

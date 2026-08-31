@@ -41,7 +41,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 54 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-31 | 55 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
@@ -101,7 +101,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Selective External Channel Response Requirements](requirements/channel-260803-selective-response.md) | channel-260803 | 2026-08-03 | - |
 | [External Channel Silent Work Completion Requirements](requirements/channel-260809-silent-work-completion.md) | channel-260809 | 2026-08-09 | 2026-08-09 |
 | [Batched External Channel Conversation Ingress Requirements](requirements/channel-260810-batched-conversation-ingress.md) | channel-260810 | 2026-08-10 | - |
-| [External Channel Input Request Requirements](requirements/channel-260831-request-input-action.md) | channel-260831 | 2026-08-31 | - |
+| [External Channel Input Request Requirements](requirements/channel-260831-request-input-action.md) | channel-260831 | 2026-08-31 | 2026-08-31 |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |

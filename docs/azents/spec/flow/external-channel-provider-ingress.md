@@ -67,8 +67,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-29
-spec_version: 54
+last_verified_at: 2026-08-31
+spec_version: 55
 ---
 
 # External Channel Provider Ingress
@@ -377,22 +377,36 @@ durable queue content.
 9. Every canonical provider message is admitted as one independent
    `external_channel_message` mailbox row. Rows from one processing batch share an
    order group with contiguous sequence values following queue order and per-item
-   provider-history order.
+   provider-history order. Only a newly created exact trigger row is authoritative
+   participant input for its Binding; newly created context history is not.
 10. When at least one newly created mailbox row has a provider-native explicit
    invocation flag, the transaction creates or promotes the active Slack or Discord
    Work as Tracker-visible and may claim its latest complete Tracker snapshot. A batch
    containing only newly created ordinary all-messages input creates or retains hidden
    Work. Duplicate mailbox rows and context-only history do not promote visibility.
-11. In the same transaction, successful cursor advances, mailbox rows, retry-tail
+11. A newly created exact trigger row clears that same Binding's awaiting-input marker,
+    if present, while preserving the active Work cycle, title, tasks, and history. The
+    transaction then prepares the current progress projection and admits the Session
+    input wake. Context-only creation, another Binding's input, provisioning or setup
+    activity, failed items, and duplicate trigger rows do not resume or re-project the
+    awaiting Work. A duplicate trigger may reuse its existing mailbox item only for
+    post-commit wake redispatch, allowing recovery from a prior dispatch failure
+    without duplicating canonical input or changing awaiting state.
+12. In the same transaction, successful cursor advances, mailbox rows, retry-tail
    transitions, bounded-failure deletions, queue completion, drain-state update, and
    the existing Session runnable transition commit atomically. Retry retains the same
    ingress identity and original age while assigning a fresh tail key. Successful,
    suppressed, and bounded-failure items are deleted; no completed outcome or
    tombstone row is created.
-12. A non-empty processing batch emits one post-commit routing-only
+13. A non-empty processing batch emits one post-commit routing-only
    `SessionWakeUp(session_id)`. Broker failure does not roll back mailbox input.
    Existing pending-mailbox and stuck-Session recovery consume the committed input
    without provider resend or a durable wake row.
+
+The synchronous configured replay path applies the same created-trigger boundary.
+An already committed trigger is reported as a duplicate with its existing mailbox
+identity available for wake recovery; it does not clear awaiting state or create new
+progress controls.
 
 Provisioning and item history each have at most five provider attempts and at most five
 minutes of original owner/item age. Retryable preparation retains every item unchanged,
