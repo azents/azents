@@ -48,14 +48,23 @@ The existing ownership boundaries remain authoritative:
 - `ExternalChannelActionService` owns commit-before-call orchestration, provider
   delivery outcomes, and post-delivery awaiting settlement.
 - `ExternalChannelWorkStateStore` remains the sole persisted Work state boundary.
-- Existing Slack and Discord ingress services own accepted human-message admission
-  and call `ensure_active_work` only for newly created canonical mailbox input.
+- Existing Slack and Discord ingress services own accepted human-message admission.
+  A dedicated repository mutation resumes awaiting Work only after a canonical
+  mailbox enqueue reports `created`; provisioning and binding-reuse helpers do not
+  invoke that mutation.
 - `ExternalChannelToolkit._on_session_idle` owns External Channel continuation
   selection; the common `IdleContinuationService` remains unchanged and continues to
   merge independent continuation sources.
+- Existing Slack Work presence and Discord Gateway typing projections own participant
+  processing indicators and read the same awaiting state.
 
 No provider adapter, interaction endpoint, webhook callback, or frontend reply UI
 becomes a source of waiting-state authority.
+
+The feature adds no new database, row, table, advisory, Session, Binding, or
+long-lived transaction lock. Existing authorization locks remain unchanged. Every new
+concurrent transition uses `ExternalChannelWorkStateStore` bounded CAS and canonical
+`state_revision`.
 
 ## Tool Interface
 
@@ -93,6 +102,9 @@ provider progress, or public API responses.
 
 The existing `status` remains `active` or `finished`. Awaiting input is orthogonal to
 Work lifecycle, Tracker visibility, progress projection, and task status.
+`awaiting_input_run_id` may be non-null only while status is active. Finish, ignore,
+cycle replacement, binding termination, and Session cleanup clear it; a finished Work
+payload must contain null.
 
 Every authoritative transition that can invalidate an input request advances
 `state_revision`:
@@ -104,7 +116,7 @@ Every authoritative transition that can invalidate an input request advances
 - existing terminal transitions.
 
 This makes `state_revision` the common stale-result fence without adding a second
-request-order authority.
+request-order authority or a new lock.
 
 ## State Transitions
 
@@ -157,9 +169,10 @@ silently wait on an unconfirmed question.
 
 ## Same-Binding Resume and Invalidation
 
-Existing accepted External Channel ingress already calls `ensure_active_work` only
-when canonical mailbox input is newly created. That mutation becomes the participant
-resume boundary:
+The Work repository adds a dedicated admission mutation that is called only after an
+eligible same-binding human mailbox enqueue returns `created`. `ensure_active_work`
+continues to own provisioning, cycle creation, visibility promotion, and presence
+identity fill, but does not clear awaiting state. The admission-only mutation:
 
 - preserve the current active cycle, title, tasks, desired progress, Tracker identity,
   and projection observations;
@@ -171,6 +184,24 @@ resume boundary:
 A same-binding `continue` applies the same invalidation before optional message and
 progress handling. It always advances `state_revision`. Another binding's ingress or
 Channel Action touches only that binding's state and cannot invalidate this marker.
+Provisioning, history collection, duplicate mailbox admission, and failed ingestion do
+not invoke the resume mutation.
+
+## Presence and Typing
+
+Awaiting Work remains active and keeps its existing Activity Tracker and tasks, but it
+does not project active processing presence:
+
+- Slack Work presence readers parse the awaiting field and project the Work's desired
+  state as `idle` rather than `processing`.
+- Discord Gateway typing target readers exclude awaiting Work cycles.
+- Same-binding admitted input or continue clears awaiting state through CAS; the next
+  ordinary presence reconciliation may project Slack processing and Discord typing
+  again.
+
+No provider mutation is performed inside the awaiting-state transaction. Existing
+presence and typing managers observe the committed state through their normal polling
+or renewal cycle. Tracker visibility and provider message identity are unchanged.
 
 ## Idle Continuation
 
@@ -185,11 +216,13 @@ remain unchanged.
 
 ## Compaction and Projection
 
-Compaction continues to include every active Work so the question, title, tasks, and
-remaining execution state survive context compaction. The model-visible Channel Work
-snapshot adds only a provider-neutral `Awaiting participant input` indication; it does
-not expose the requesting Run ID, state revisions, delivery outcomes, or provider
-message identities.
+Compaction continues to include every active Work so its title, tasks, awaiting
+indicator, and remaining execution state survive context compaction. The question
+itself remains ordinary transcript content handled by the general summary and
+continuity policy; the Work snapshot does not create a second deterministic copy. The
+model-visible Channel Work snapshot adds only a provider-neutral
+`Awaiting participant input` indication and does not expose the requesting Run ID,
+state revisions, delivery outcomes, or provider message identities.
 
 Provider Activity Trackers remain present and unchanged while awaiting input. Public
 management Work status remains active. This snapshot does not add provider-specific
@@ -206,11 +239,14 @@ to ready continuation semantics because older code cannot preserve input waiting
 
 The migration follows the existing fail-closed Channel Work JSON migration pattern and
 does not import application models. Shipping uses a coordinated backend restart.
-Every component that can execute Channel Work, admit External Channel input, or
-evaluate External Channel idle continuation is stopped or replaced as one deployment
-boundary. The version-4 migration completes before homogeneous new backends expose
-`request_input`. No mixed-version reader, feature flag, provider interaction
-mechanism, or generalized rollout controller is added.
+Every component that reads or writes Channel Work Toolkit State is stopped or replaced
+as one deployment boundary. This explicitly includes Channel Action and idle workers,
+External Channel ingress, management and API readers, Slack Work presence managers,
+Discord Gateway typing managers, and lifecycle cleanup. The version-4 migration
+completes before homogeneous new backends expose `request_input`. Release verification
+checks the database revision and the deployed version of every reader/writer group. No
+mixed-version reader, feature flag, provider interaction mechanism, or generalized
+rollout controller is added.
 
 ## Failure, Retry, and Recovery
 
@@ -224,6 +260,8 @@ mechanism, or generalized rollout controller is added.
   continuation.
 - Binding termination and Session cleanup delete or terminalize Work through existing
   lifecycle paths; no separate awaiting cleanup worker is required.
+- Every terminal or replacement transition clears `awaiting_input_run_id`; model and
+  migration validation reject finished Work with a non-null value.
 
 ## Security and Privacy
 
@@ -251,6 +289,8 @@ response bodies. Existing provider outcomes remain the delivery evidence.
   components, or interaction callbacks.
 - A same-binding `continue` after awaiting input restores continuation eligibility
   without changing another binding.
+- Slack processing presence becomes idle and Discord typing stops while awaiting, then
+  both resume after same-binding input or continue without deleting the Tracker.
 
 Existing External Channel testenv transport, mailbox admission, and deterministic
 provider fixtures are sufficient. No live provider credentials or new interactive
@@ -264,11 +304,21 @@ identity.
 - Scheduled Task-bound rejection.
 - Repository transitions for request, settlement, continue invalidation, terminal
   actions, and multiple bindings.
+- Admission tests prove that only a newly created canonical same-binding human mailbox
+  item resumes Work; provisioning, history, duplicate, and failed admission do not.
 - Concurrency tests where continue or admitted input wins before delayed delivery
   settlement.
+- Concurrency tests assert that the feature adds no new lock path and completes through
+  existing bounded Toolkit State CAS retries.
 - Failed and unknown delivery remain ready.
 - Idle hook includes only ready binding handles and preserves other hook sources.
+- An intervening Goal, TurnAction, Scheduled Task, or other-source Run neither clears
+  awaiting state nor re-adds the awaiting binding to External Channel continuation.
+- Slack presence and Discord typing target projection stop and resume from awaiting
+  state while Tracker visibility remains unchanged.
 - Compaction renders awaiting state without internal IDs.
+- State validation and terminal-transition tests require null awaiting state for
+  finished or replacement Work.
 - Toolkit State schema version 3-to-4 upgrade and downgrade validation.
 
 All deterministic E2E and migration tests are required CI checks and must fail rather
@@ -281,11 +331,15 @@ The design is feasible with current repository boundaries:
 - Channel Work already has binding-scoped CAS state and `state_revision`.
 - Direct actions already separate canonical commit from provider I/O and return typed
   outcomes.
-- Ingress already owns the exact transaction where newly created same-binding human
-  input reactivates Work.
+- Ingress already exposes authoritative `mailbox_result.created` boundaries where a
+  dedicated same-binding resume mutation can run without changing provisioning.
 - The idle hook already receives binding snapshots and can filter handles without
   changing the common continuation service.
+- Slack presence and Discord typing already validate Channel Work Toolkit State and can
+  filter awaiting Work without a provider-specific state store.
 - Existing migrations demonstrate validated versioned Channel Work JSON upgrades.
+- Existing Toolkit State CAS and `state_revision` provide the required concurrency
+  fence without a new lock.
 
 The coordinated restart approved by `channel-260831/ADR-D4` provides homogeneous
 understanding of the new state before mode exposure. No feasibility blocker remains.
@@ -302,19 +356,21 @@ understanding of the new state before mode exposure. No feasibility blocker rema
 
 ## Design Authority
 
-- Design revision: `2`
+- Design revision: `3`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
 | M1 | Add nonterminal `request_input` while preserving active Work | `channel-260831/REQ-1`, `channel-260831/ADR-D1` | `decided` |
 | M2 | Persist binding-scoped awaiting state orthogonally to Work lifecycle | `channel-260831/REQ-2`, `channel-260831/ADR-D1` | `decided` |
-| M3 | Resume and invalidate only from same-binding admitted human input or continue | `channel-260831/REQ-3`, `channel-260831/ADR-D2` | `decided` |
+| M3 | Resume and invalidate only from newly created same-binding canonical human input or continue | `channel-260831/REQ-3`, `channel-260831/ADR-D2` | `decided` |
 | M4 | Confirm delivery before waiting and fence late settlement by cycle/revision | `channel-260831/REQ-4`, `channel-260831/ADR-D3` | `decided` |
 | M5 | Preserve the common durable idle-continuation pipeline and independent hook sources | Current Agent Execution Loop and External Channel Delivery Specs, `channel-260831/REQ-2` | `existing` |
 | M6 | Use ordinary Slack and Discord messages and ingress without interactive webhook UX | `channel-260831/REQ` fixed constraints and non-goals | `required` |
 | M7 | Reject `request_input` for Scheduled Task-bound Channel Actions | `channel-260831/REQ` non-goals, current External Channel Delivery Spec | `derived` |
 | M8 | Version and migrate Channel Work Toolkit State for durable awaiting state | `channel-260831/REQ-2`, `channel-260831/ADR-D1`, current Channel Work Toolkit State ownership | `derived` |
 | M9 | Deploy the state upgrade and mode through one coordinated backend restart | `channel-260831/ADR-D4` | `decided` |
+| M10 | Use existing Toolkit State CAS and Work revision without adding a lock | `channel-260831/REQ` fixed constraints, `channel-260831/ADR-D5` | `decided` |
+| M11 | Stop Slack processing presence and Discord typing while awaiting, preserving the Tracker | `channel-260831/REQ-2`, `channel-260831/ADR-D6` | `decided` |
 
 ## Removal and Replacement
 
@@ -326,16 +382,19 @@ understanding of the new state before mode exposure. No feasibility blocker rema
 | Provider-specific interactive response proposal | M6 | Ordinary provider message and existing ingress | No new interaction route, callback, component, or webhook state | Repository and route absence search |
 | Channel Work Toolkit State schema version 3 | M8 | Version 4 with nullable awaiting Run identity | Generated validated migration and state model | Migration round-trip tests and schema search |
 | Mixed-version mode exposure during rolling deployment | M9 | Homogeneous backend restart before mode availability | Deployment procedure and release verification | Revision and worker-version evidence before mode use |
+| New lock-based waiting coordination | M10 | Existing bounded Toolkit State CAS and `state_revision` | No new lock path in action, settlement, admission, idle, or presence code | Lock-call absence search and concurrency tests |
+| Active processing presence for awaiting Work | M11 | Slack idle presence and no Discord typing; Tracker retained | Presence and Gateway target projection | Projection tests and provider-neutral E2E evidence |
 
 ## Design Approval
 
 - Mode: `Collaborative`
 - Decision owner: requester
 - Approved on: `2026-08-31`
-- Approved Design revision: `2`
-- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9`
+- Approved Design revision: `3`
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`
 - Approved scope: add a binding-scoped `request_input` action that publishes an
   ordinary question, waits only after confirmed delivery, suppresses External Channel
   continuation until same-binding human input or continue, rejects stale waiting
-  settlement without provider-specific interaction UX, and deploys through a
+  settlement without provider-specific interaction UX or new locks, stops processing
+  presence while awaiting, preserves the Work Tracker, and deploys through a
   coordinated homogeneous backend restart.
