@@ -3589,6 +3589,7 @@ def test_provider_native_channel_work_progress_journey(
                     {
                         "user": "U-EXTERNAL",
                         "ts": response_timestamp,
+                        "thread_ts": root_timestamp,
                         "text": response_text,
                     },
                     {
@@ -3601,6 +3602,11 @@ def test_provider_native_channel_work_progress_journey(
         },
         timeout=5,
     ).raise_for_status()
+    resumed_counts_baseline = _int_dict(
+        _provider_state(slack_provider_fake_url)["request_counts"]
+    )
+    resumed_update_baseline = resumed_counts_baseline.get("chat.update", 0)
+    resumed_delete_baseline = resumed_counts_baseline.get("chat.delete", 0)
     response_body = json.dumps(
         {
             "type": "event_callback",
@@ -3615,6 +3621,7 @@ def test_provider_native_channel_work_progress_journey(
                 "user": "U-EXTERNAL",
                 "text": response_text,
                 "ts": response_timestamp,
+                "thread_ts": root_timestamp,
             },
         },
         separators=(",", ":"),
@@ -3626,6 +3633,37 @@ def test_provider_native_channel_work_progress_journey(
         timeout=5,
     )
     assert response.status_code == 200
+
+    def admitted_resume_input() -> list[dict[str, object]] | None:
+        evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+        )
+        assert any(
+            item.get("body") == response_text
+            and item.get("prompt_role") == "invocation"
+            for item in evidence
+        ), (
+            evidence,
+            _provider_state(slack_provider_fake_url),
+            list_live(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+            ),
+        )
+        return evidence
+
+    resumed_input = _objects(
+        wait_until(
+            admitted_resume_input,
+            timeout=30,
+            interval=0.2,
+            message="Same-binding participant input was not admitted canonically",
+        )
+    )
+    assert any(item.get("body") == response_text for item in resumed_input)
 
     def completed_resume_finish() -> list[dict[str, object]]:
         evidence = _channel_action_tool_evidence(
@@ -3667,8 +3705,8 @@ def test_provider_native_channel_work_progress_journey(
     )
     outcome_state = _provider_state(slack_provider_fake_url)
     outcome_counts = _int_dict(outcome_state["request_counts"])
-    assert outcome_counts["chat.update"] == 3
-    assert outcome_counts["chat.delete"] == baseline_delete_count + 1
+    assert outcome_counts.get("chat.update", 0) == resumed_update_baseline
+    assert outcome_counts.get("chat.delete", 0) == resumed_delete_baseline
     assert (
         _int_dict(_provider_state(slack_provider_fake_url)["request_counts"])
         == outcome_counts
