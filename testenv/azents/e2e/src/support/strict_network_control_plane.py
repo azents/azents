@@ -107,6 +107,7 @@ class StrictNetworkControlPlaneLifecycle:
         self.workspace_root = workspace_root
         self.docker = docker.from_env()
         self.commands: dict[str, RuntimeLifecycleCommand] = {}
+        self.runner_images: dict[str, str] = {}
 
     async def start(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
         """Start a Runner process and acknowledge only control-plane convergence."""
@@ -151,7 +152,11 @@ class StrictNetworkControlPlaneLifecycle:
         """Reset the local test workspace and honor the explicit final state."""
         self._validate_strict_command(command)
         await asyncio.to_thread(self._remove_runner, command.identity.runtime_id)
-        await asyncio.to_thread(self._delete_workspace, command.identity.runtime_id)
+        await asyncio.to_thread(
+            self._delete_runtime_data,
+            command.identity.runtime_id,
+            image=command.runner_image,
+        )
         runner_started = (
             command.reset_final_desired_state is RuntimeDesiredState.RUNNING
         )
@@ -194,8 +199,13 @@ class StrictNetworkControlPlaneLifecycle:
         """Remove all simulator-owned Runner state."""
         self._validate_cleanup_command(command)
         await asyncio.to_thread(self._remove_runner, command.identity.runtime_id)
-        await asyncio.to_thread(self._delete_workspace, command.identity.runtime_id)
+        await asyncio.to_thread(
+            self._delete_runtime_data,
+            command.identity.runtime_id,
+            image=command.runner_image,
+        )
         self.commands.pop(command.identity.runtime_id, None)
+        self.runner_images.pop(command.identity.runtime_id, None)
         self._record_command(command, runner_process_started=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
@@ -241,13 +251,23 @@ class StrictNetworkControlPlaneLifecycle:
         )
         for container in containers:
             container.remove(force=True)
+        for runtime_id, image in tuple(self.runner_images.items()):
+            self._delete_runtime_data(runtime_id, image=image)
+        self.runner_images.clear()
+        if self.workspace_root.exists():
+            self.workspace_root.rmdir()
         self.docker.close()
 
     def _replace_runner(self, command: RuntimeLifecycleCommand) -> None:
-        self._remove_runner(command.identity.runtime_id)
-        workspace = self._workspace_path(command.identity.runtime_id)
+        runtime_id = command.identity.runtime_id
+        self._remove_runner(runtime_id)
+        self.runner_images[runtime_id] = command.runner_image
+        workspace = self._workspace_path(runtime_id)
+        nix_root = self._nix_path(runtime_id)
         workspace.mkdir(parents=True, exist_ok=True)
         workspace.chmod(0o777)
+        nix_root.mkdir(parents=True, exist_ok=True)
+        nix_root.chmod(0o777)
         evidence = command.runtime_configuration.evidence
         environment = {
             "AZ_RUNTIME_CONTROL_ENDPOINT": command.auth.control_endpoint,
@@ -287,7 +307,10 @@ class StrictNetworkControlPlaneLifecycle:
                 _RUNTIME_ID_LABEL: command.identity.runtime_id,
                 _PROVIDER_ID_LABEL: self.provider_id,
             },
-            volumes={str(workspace): {"bind": _WORKSPACE_PATH, "mode": "rw"}},
+            volumes={
+                str(workspace): {"bind": _WORKSPACE_PATH, "mode": "rw"},
+                str(nix_root): {"bind": "/nix", "mode": "rw"},
+            },
             user="1000:1000",
             working_dir=_WORKSPACE_PATH,
         )
@@ -309,18 +332,28 @@ class StrictNetworkControlPlaneLifecycle:
         container.reload()
         return container.status == "running"
 
-    def _delete_workspace(self, runtime_id: str) -> None:
-        workspace = self._workspace_path(runtime_id)
-        if not workspace.exists():
+    def _delete_runtime_data(self, runtime_id: str, *, image: str) -> None:
+        runtime_root = self._runtime_path(runtime_id)
+        if not runtime_root.exists():
             return
-        for path in sorted(workspace.rglob("*"), reverse=True):
-            if path.is_dir():
-                path.rmdir()
-            else:
-                path.unlink()
-        workspace.rmdir()
+        self.docker.containers.run(
+            image,
+            command=["/bin/sh", "-ec", "find /runtime-data -mindepth 1 -delete"],
+            remove=True,
+            user="root",
+            volumes={
+                str(runtime_root): {"bind": "/runtime-data", "mode": "rw"},
+            },
+        )
+        runtime_root.rmdir()
 
     def _workspace_path(self, runtime_id: str) -> Path:
+        return self._runtime_path(runtime_id) / "workspace"
+
+    def _nix_path(self, runtime_id: str) -> Path:
+        return self._runtime_path(runtime_id) / "nix"
+
+    def _runtime_path(self, runtime_id: str) -> Path:
         return self.workspace_root / runtime_id
 
     def _container_name(self, runtime_id: str) -> str:
