@@ -9,6 +9,8 @@ import requests
 
 from support.github_validation_proxy import Handler
 
+_SERVER_POLL_INTERVAL_SECONDS = 0.01
+
 
 @pytest.fixture
 def github_proxy_url() -> Generator[str, None, None]:
@@ -17,7 +19,11 @@ def github_proxy_url() -> Generator[str, None, None]:
     Handler.app_request_count = 0
     Handler.oauth_request_count = 0
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = Thread(target=server.serve_forever, daemon=True)
+    thread = Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     thread.start()
     host = server.server_address[0]
     port = server.server_address[1]

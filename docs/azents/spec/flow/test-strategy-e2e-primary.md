@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-30
-spec_version: 40
+last_verified_at: 2026-08-31
+spec_version: 41
 ---
 
 # E2E Primary Test Strategy
@@ -189,6 +189,18 @@ Always-on required CI does not depend on external credentials.
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
   current-revision check without competing to own an upgrade.
+- E2E image preparation and the independent PostgreSQL, RustFS, Valkey, deterministic
+  model, GitHub validation, and Slack provider prerequisites start concurrently within
+  one session fixture. Real dependencies remain ordered: the OpenAI proxy starts only
+  after the deterministic model service is healthy, database migration still waits for
+  PostgreSQL and storage readiness, and product services still wait for migration.
+  Existing health checks and setup failure propagation remain authoritative. Each lane
+  records prerequisite task duration, wall time, and overlap in
+  `core-prerequisite-timings.json`.
+- Function-scoped local provider and proxy servers use a bounded short
+  `serve_forever` polling interval so `shutdown()` observes termination promptly.
+  Tests still complete both `shutdown()` and thread `join()` before releasing the
+  fixture; elapsed delay is not used as the success condition.
 - Required lanes reuse the preceding immutable snapshot for Server, Runtime Runner,
   and Docker Runtime Provider images whose complete build inputs are unchanged.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and

@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from support import image_generation_openai_proxy as proxy
 
 _JOURNAL_PATH = "/v1/_subscription_usage_requests"
+_SERVER_POLL_INTERVAL_SECONDS = 0.01
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _BOOLEAN_MAP = TypeAdapter(dict[str, bool])
 _CHATGPT_HEADERS = {
@@ -39,7 +40,11 @@ def _running_proxy() -> Generator[str, None, None]:
         proxy._State.oauth_connection_sessions.clear()
         proxy._State.oauth_connection_sequence = 0
     server = proxy.ThreadingHTTPServer(("127.0.0.1", 0), proxy._Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}"

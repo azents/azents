@@ -13,9 +13,10 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,7 +34,8 @@ from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.remote.webdriver import WebDriver
-from testcontainers.core.container import DockerContainer
+from testcontainers.core.config import testcontainers_config
+from testcontainers.core.container import DockerContainer, Reaper
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
@@ -127,6 +129,20 @@ class _CoreServiceContainers:
     public: DockerContainer
     admin: DockerContainer
     engine: DockerContainer
+
+
+@dataclasses.dataclass(frozen=True)
+class _CorePrerequisites:
+    """Hold independently prepared images and infrastructure services."""
+
+    e2e_images: dict[str, str]
+    postgres: PostgresContainer
+    rustfs: DockerContainer
+    valkey: DockerContainer
+    mock_openai: DockerContainer
+    openai_proxy: DockerContainer
+    github_validation_proxy: DockerContainer
+    slack_provider_fake: DockerContainer
 
 
 _SERVER_IMAGE_BUILD = _E2EImageBuild(
@@ -304,21 +320,10 @@ def container_network() -> Generator[Network, None, None]:
 
 @pytest.fixture(scope="session")
 def postgres_container(
-    container_network: Network,
-) -> Generator[PostgresContainer, None, None]:
+    core_prerequisites: _CorePrerequisites,
+) -> PostgresContainer:
     """PostgreSQL container."""
-    postgres_image = "postgres:18"
-    with (
-        PostgresContainer(
-            postgres_image,
-            driver="psycopg",
-            dbname="azents",
-            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
-        )
-        .with_network(container_network)
-        .with_network_aliases("rdb") as postgres
-    ):
-        yield postgres
+    return core_prerequisites.postgres
 
 
 @pytest.fixture(scope="session")
@@ -326,35 +331,116 @@ def s3_credentials() -> tuple[str, str]:
     return random_secret(16), random_secret(32)
 
 
+def _wait_for_fixture_health(
+    container: DockerContainer,
+    *,
+    port: int,
+    name: str,
+) -> None:
+    """Wait for one concurrently started fixture service."""
+    host = container.get_container_host_ip()
+    exposed_port = container.get_exposed_port(port)
+    for _ in range(30):
+        try:
+            response = requests.get(
+                f"http://{host}:{exposed_port}/health",
+                timeout=2,
+            )
+            if response.status_code == 200:
+                return
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(1)
+    pytest.fail(f"{name} did not start in time")
+
+
+def _write_core_prerequisite_observability(
+    *,
+    completed: bool,
+    wall_seconds: float,
+    task_timings: dict[str, dict[str, object]],
+) -> None:
+    """Write safe evidence for concurrent prerequisite preparation."""
+    artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+    if artifact_root is None:
+        return
+    task_seconds = sum(
+        cast(float, timing["duration_seconds"]) for timing in task_timings.values()
+    )
+    try:
+        artifact_path = Path(artifact_root) / "core-prerequisite-timings.json"
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "completed": completed,
+                    "wall_seconds": round(wall_seconds, 3),
+                    "task_seconds": round(task_seconds, 3),
+                    "overlap_seconds": round(max(task_seconds - wall_seconds, 0.0), 3),
+                    "tasks": dict(sorted(task_timings.items())),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError as error:
+        warnings.warn(
+            f"Failed to write core prerequisite observability: {error}",
+            stacklevel=2,
+        )
+
+
+def _initialize_testcontainers_reaper() -> None:
+    """Initialize the shared Reaper only when Testcontainers enables it."""
+    if not testcontainers_config.ryuk_disabled:
+        Reaper.get_instance()
+
+
+def _start_tracked_prerequisite_container(
+    container: DockerContainer,
+    *,
+    started_containers: list[DockerContainer],
+    started_containers_lock: threading.Lock,
+    readiness: Callable[[DockerContainer], None] | None,
+) -> DockerContainer:
+    """Start one container and preserve cleanup across partial failures."""
+    try:
+        container.start()
+    except BaseException:
+        with suppress(Exception):
+            container.stop()
+        raise
+    with started_containers_lock:
+        started_containers.append(container)
+    if readiness is not None:
+        readiness(container)
+    return container
+
+
 @pytest.fixture(scope="session")
-def valkey_container(
+def core_prerequisites(
     container_network: Network,
-) -> Generator[DockerContainer, None, None]:
-    """Start a Valkey container that provides Redis-compatible storage."""
-    valkey_image = "valkey/valkey:9-alpine"
-    with (
-        DockerContainer(
-            valkey_image,
+    s3_credentials: tuple[str, str],
+) -> Generator[_CorePrerequisites, None, None]:
+    """Prepare independent images and infrastructure services concurrently."""
+    _initialize_testcontainers_reaper()
+    access_key, secret_key = s3_credentials
+    python_image = "python:3.14-alpine"
+    postgres = (
+        PostgresContainer(
+            "postgres:18",
+            driver="psycopg",
+            dbname="azents",
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
-        .with_exposed_ports(6379)
         .with_network(container_network)
-        .with_network_aliases("valkey") as container
-    ):
-        yield container
-
-
-@pytest.fixture(scope="session")
-def rustfs_container(
-    s3_credentials: tuple[str, str],
-    container_network: Network,
-) -> Generator[DockerContainer, None, None]:
-    """Start a RustFS container that provides S3-compatible storage."""
-    access_key, secret_key = s3_credentials
-    rustfs_image = "rustfs/rustfs:1.0.0-alpha.90"
-    with (
+        .with_network_aliases("rdb")
+    )
+    rustfs = (
         DockerContainer(
-            rustfs_image,
+            "rustfs/rustfs:1.0.0-alpha.90",
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_env("RUSTFS_ADDRESS", ":9000")
@@ -362,26 +448,23 @@ def rustfs_container(
         .with_env("RUSTFS_SECRET_KEY", secret_key)
         .with_exposed_ports(9000)
         .with_network(container_network)
-        .with_network_aliases("rustfs") as container
-    ):
-        yield container
-
-
-@pytest.fixture(scope="session")
-def mock_openai_container(
-    container_network: Network,
-) -> Generator[DockerContainer, None, None]:
-    """Start the AIMock container for the OpenAI Responses API."""
-    with (
+        .with_network_aliases("rustfs")
+    )
+    valkey = (
+        DockerContainer(
+            "valkey/valkey:9-alpine",
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_exposed_ports(6379)
+        .with_network(container_network)
+        .with_network_aliases("valkey")
+    )
+    mock_openai = (
         DockerContainer(
             "ghcr.io/copilotkit/aimock:1.36.1",
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
-        .with_volume_mapping(
-            str(_AIMOCK_FIXTURE_DIR),
-            "/fixtures",
-            "ro",
-        )
+        .with_volume_mapping(str(_AIMOCK_FIXTURE_DIR), "/fixtures", "ro")
         .with_command(
             [
                 "-p",
@@ -396,32 +479,9 @@ def mock_openai_container(
         )
         .with_exposed_ports(8080)
         .with_network(container_network)
-        .with_network_aliases("mock-openai") as container
-    ):
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(8080)
-        for _ in range(30):
-            try:
-                response = requests.get(f"http://{host}:{port}/health", timeout=2)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                pass
-            time.sleep(1)
-        else:
-            pytest.fail("mock OpenAI server did not start in time")
-        yield container
-
-
-@pytest.fixture(scope="session")
-def openai_proxy_container(
-    container_network: Network,
-    mock_openai_container: DockerContainer,
-) -> Generator[DockerContainer, None, None]:
-    """Proxy AIMock and add deterministic Responses image generation."""
-    del mock_openai_container
-    python_image = "python:3.14-alpine"
-    with (
+        .with_network_aliases("mock-openai")
+    )
+    openai_proxy = (
         DockerContainer(
             python_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
@@ -435,30 +495,9 @@ def openai_proxy_container(
         .with_command(["python", "/app/proxy.py"])
         .with_exposed_ports(8081)
         .with_network(container_network)
-        .with_network_aliases("openai-proxy") as container
-    ):
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(8081)
-        for _ in range(30):
-            try:
-                response = requests.get(f"http://{host}:{port}/health", timeout=2)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                pass
-            time.sleep(1)
-        else:
-            pytest.fail("OpenAI image-generation proxy did not start in time")
-        yield container
-
-
-@pytest.fixture(scope="session")
-def github_validation_proxy_container(
-    container_network: Network,
-) -> Generator[DockerContainer, None, None]:
-    """Run the deterministic GitHub App validation boundary."""
-    python_image = "python:3.14-alpine"
-    with (
+        .with_network_aliases("openai-proxy")
+    )
+    github_validation_proxy = (
         DockerContainer(
             python_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
@@ -467,21 +506,192 @@ def github_validation_proxy_container(
         .with_command(["python", "/app/proxy.py"])
         .with_exposed_ports(8082)
         .with_network(container_network)
-        .with_network_aliases("github-validation-proxy") as container
-    ):
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(8082)
-        for _ in range(30):
-            try:
-                response = requests.get(f"http://{host}:{port}/health", timeout=2)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                pass
-            time.sleep(1)
-        else:
-            pytest.fail("GitHub validation proxy did not start in time")
-        yield container
+        .with_network_aliases("github-validation-proxy")
+    )
+    slack_provider_fake = (
+        DockerContainer(
+            python_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(str(_SLACK_PROVIDER_FAKE), "/app/slack_fake.py", "ro")
+        .with_command(["python", "/app/slack_fake.py"])
+        .with_exposed_ports(8083, 8084)
+        .with_network(container_network)
+        .with_network_aliases("slack-fake")
+    )
+
+    started_containers: list[DockerContainer] = []
+    started_containers_lock = threading.Lock()
+    task_timings: dict[str, dict[str, object]] = {}
+    task_timings_lock = threading.Lock()
+    started_at = time.monotonic()
+    completed = False
+
+    def timed_task(name: str, operation: Callable[[], Any]) -> Any:
+        task_started_at = time.monotonic()
+        outcome = "success"
+        try:
+            return operation()
+        except BaseException:
+            outcome = "failure"
+            raise
+        finally:
+            with task_timings_lock:
+                task_timings[name] = {
+                    "duration_seconds": round(
+                        time.monotonic() - task_started_at,
+                        3,
+                    ),
+                    "outcome": outcome,
+                }
+
+    def start_container(
+        name: str,
+        container: DockerContainer,
+        readiness: Callable[[DockerContainer], None] | None = None,
+    ) -> DockerContainer:
+        def operation() -> DockerContainer:
+            return _start_tracked_prerequisite_container(
+                container,
+                started_containers=started_containers,
+                started_containers_lock=started_containers_lock,
+                readiness=readiness,
+            )
+
+        return cast(DockerContainer, timed_task(name, operation))
+
+    def start_openai_services() -> None:
+        start_container(
+            "mock_openai",
+            mock_openai,
+            lambda container: _wait_for_fixture_health(
+                container,
+                port=8080,
+                name="mock OpenAI server",
+            ),
+        )
+        start_container(
+            "openai_proxy",
+            openai_proxy,
+            lambda container: _wait_for_fixture_health(
+                container,
+                port=8081,
+                name="OpenAI image-generation proxy",
+            ),
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            image_future = executor.submit(
+                timed_task,
+                "e2e_images",
+                lambda: _prepare_e2e_images(
+                    os.environ.get(_E2E_IMAGE_BUILD_PROFILE_ENV)
+                ),
+            )
+            futures = [
+                executor.submit(start_container, "postgres", postgres),
+                executor.submit(start_container, "rustfs", rustfs),
+                executor.submit(start_container, "valkey", valkey),
+                executor.submit(start_openai_services),
+                executor.submit(
+                    start_container,
+                    "github_validation_proxy",
+                    github_validation_proxy,
+                    lambda container: _wait_for_fixture_health(
+                        container,
+                        port=8082,
+                        name="GitHub validation proxy",
+                    ),
+                ),
+                executor.submit(
+                    start_container,
+                    "slack_provider_fake",
+                    slack_provider_fake,
+                    lambda container: _wait_for_fixture_health(
+                        container,
+                        port=8083,
+                        name="Slack provider fake",
+                    ),
+                ),
+            ]
+            for future in futures:
+                future.result()
+            e2e_images = cast(dict[str, str], image_future.result())
+        completed = True
+        _write_core_prerequisite_observability(
+            completed=True,
+            wall_seconds=time.monotonic() - started_at,
+            task_timings=task_timings,
+        )
+        yield _CorePrerequisites(
+            e2e_images=e2e_images,
+            postgres=postgres,
+            rustfs=rustfs,
+            valkey=valkey,
+            mock_openai=mock_openai,
+            openai_proxy=openai_proxy,
+            github_validation_proxy=github_validation_proxy,
+            slack_provider_fake=slack_provider_fake,
+        )
+    finally:
+        try:
+            if not completed:
+                _write_core_prerequisite_observability(
+                    completed=False,
+                    wall_seconds=time.monotonic() - started_at,
+                    task_timings=task_timings,
+                )
+        finally:
+            with ThreadPoolExecutor(
+                max_workers=max(len(started_containers), 1)
+            ) as executor:
+                stop_futures = [
+                    executor.submit(container.stop)
+                    for container in reversed(started_containers)
+                ]
+                for future in stop_futures:
+                    future.result()
+
+
+@pytest.fixture(scope="session")
+def valkey_container(
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
+    """Start a Valkey container that provides Redis-compatible storage."""
+    return core_prerequisites.valkey
+
+
+@pytest.fixture(scope="session")
+def rustfs_container(
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
+    """Start a RustFS container that provides S3-compatible storage."""
+    return core_prerequisites.rustfs
+
+
+@pytest.fixture(scope="session")
+def mock_openai_container(
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
+    """Start the AIMock container for the OpenAI Responses API."""
+    return core_prerequisites.mock_openai
+
+
+@pytest.fixture(scope="session")
+def openai_proxy_container(
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
+    """Proxy AIMock and add deterministic Responses image generation."""
+    return core_prerequisites.openai_proxy
+
+
+@pytest.fixture(scope="session")
+def github_validation_proxy_container(
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
+    """Run the deterministic GitHub App validation boundary."""
+    return core_prerequisites.github_validation_proxy
 
 
 @pytest.fixture(scope="session")
@@ -496,34 +706,10 @@ def github_validation_proxy_url(
 
 @pytest.fixture(scope="session")
 def slack_provider_fake_container(
-    container_network: Network,
-) -> Generator[DockerContainer, None, None]:
+    core_prerequisites: _CorePrerequisites,
+) -> DockerContainer:
     """Run the deterministic Slack HTTP and Socket Mode boundary."""
-    python_image = "python:3.14-alpine"
-    with (
-        DockerContainer(
-            python_image,
-            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
-        )
-        .with_volume_mapping(str(_SLACK_PROVIDER_FAKE), "/app/slack_fake.py", "ro")
-        .with_command(["python", "/app/slack_fake.py"])
-        .with_exposed_ports(8083, 8084)
-        .with_network(container_network)
-        .with_network_aliases("slack-fake") as container
-    ):
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(8083)
-        for _ in range(30):
-            try:
-                response = requests.get(f"http://{host}:{port}/health", timeout=2)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                pass
-            time.sleep(1)
-        else:
-            pytest.fail("Slack provider fake did not start in time")
-        yield container
+    return core_prerequisites.slack_provider_fake
 
 
 @pytest.fixture(scope="session")
@@ -697,9 +883,9 @@ def _prepare_e2e_images(profile: str | None) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def e2e_images() -> dict[str, str]:
+def e2e_images(core_prerequisites: _CorePrerequisites) -> dict[str, str]:
     """Return CI-prepared images, leaving focused local builds lazy by default."""
-    return _prepare_e2e_images(os.environ.get(_E2E_IMAGE_BUILD_PROFILE_ENV))
+    return core_prerequisites.e2e_images
 
 
 def _resolve_e2e_image(

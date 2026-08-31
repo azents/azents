@@ -15,6 +15,7 @@ from support.discord_provider_fake import (
 )
 
 _DISCORD_VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
+_SERVER_POLL_INTERVAL_SECONDS = 0.01
 
 
 class _ImmediateBarrierExpiry:
@@ -139,7 +140,11 @@ def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     """Run one isolated SDK-facing/provider-gap fake with fresh global state."""
     STATE.reset()
     http_server = ThreadingHTTPServer(("127.0.0.1", 0), DiscordHTTPHandler)
-    http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    http_thread = threading.Thread(
+        target=http_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     http_thread.start()
     try:
         http_host = http_server.server_address[0]
@@ -455,7 +460,11 @@ def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
     """Keep selector and settings control IDs in transient handoff state only."""
     discord_fake_url, _ = discord_fake_urls
     callback = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    callback_thread = threading.Thread(target=callback.serve_forever, daemon=True)
+    callback_thread = threading.Thread(
+        target=callback.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
     callback_thread.start()
     try:
         callback_host = callback.server_address[0]
@@ -1530,6 +1539,7 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
     )
     callback_thread = threading.Thread(
         target=callback_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
         daemon=True,
     )
     callback_thread.start()
@@ -1582,6 +1592,7 @@ def test_discord_fake_keeps_selector_ids_transient_and_redacted(
     )
     callback_thread = threading.Thread(
         target=callback_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
         daemon=True,
     )
     callback_thread.start()
@@ -1676,6 +1687,7 @@ def test_discord_fake_records_deferred_interaction_completion_without_token(
     )
     callback_thread = threading.Thread(
         target=callback_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
         daemon=True,
     )
     callback_thread.start()
