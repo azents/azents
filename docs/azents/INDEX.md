@@ -278,6 +278,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | 2026-08-13 |
 | [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
 | [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
+| [User-Managed Runtime Tool Addon Requirements](requirements/nix-260831-user-managed-runtime-tools.md) | nix-260831 | 2026-08-31 | - |
 | [Notion Toolkit Historical Requirements Reconstruction](requirements/notion-260321-notion-toolkit.md) | notion-260321 | 2026-03-21 | 2026-03-21 |
 | [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Requirements Reconstruction](requirements/oauth-260327-discord-oauth-button-url-fix.md) | oauth-260327 | 2026-03-27 | 2026-03-27 |
 | [xAI Grok OAuth Provider Historical Requirements Reconstruction](requirements/oauth-260710-xai-oauth.md) | oauth-260710 | 2026-07-10 | - |
@@ -686,6 +687,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Hierarchical Runtime Network Restriction](adr/network-260812-hierarchical-runtime-network-restriction.md)
 - [New Session Project Selection](adr/new-260629-new-selection.md)
 - [New Session Mixed Workspace Selection](adr/new-260705-new-mixed-selection.md)
+- [User-Managed Runtime Tool Addon](adr/nix-260831-user-managed-runtime-tools.md)
 - [Notion Toolkit Historical Decision Reconstruction](adr/notion-260321-notion-toolkit.md)
 - [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Decision Reconstruction](adr/oauth-260327-discord-oauth-button-url-fix.md)
 - [xAI Grok OAuth Provider Historical Decision Reconstruction](adr/oauth-260710-xai-oauth.md)
