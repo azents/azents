@@ -80,6 +80,7 @@ _DISCORD_PROVIDER_FAKE = (
 )
 _DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
+_RUNTIME_PROVIDER_DATA_CLEANUP_TIMEOUT_SECONDS = 120
 _RUNTIME_PROVIDER_ID = "system-docker"
 _STRICT_NETWORK_PROVIDER_ID = "system-kubernetes-e2e"
 _RUNTIME_WORKSPACE_PATH = "/workspace/agent"
@@ -1657,7 +1658,9 @@ def _remove_runtime_provider_data_root(data_root: str, *, image: str) -> None:
         .with_kwargs(user="root")
     )
     with cleanup:
-        result = cleanup.get_wrapped_container().wait(timeout=30)
+        result = cleanup.get_wrapped_container().wait(
+            timeout=_RUNTIME_PROVIDER_DATA_CLEANUP_TIMEOUT_SECONDS
+        )
         logs = b"\n".join(cleanup.get_logs()).decode(errors="replace")
     if result["StatusCode"] != 0:
         pytest.fail(f"E2E Runtime Provider data cleanup failed: {logs}")
