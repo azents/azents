@@ -108,6 +108,8 @@ ordering.
   order.
 - ModelFile cleanup scans and advances bounded event-ID cursor ranges without
   deleting files still reachable from current model input.
+- ModelFile cleanup candidate selection remains indexed after replacing logical-order
+  cursors with event-ID cursors.
 
 ## Fixed Constraints
 
@@ -116,6 +118,9 @@ ordering.
 - Historical implemented Requirements, ADRs, Designs, and executed migrations remain
   unchanged.
 - No backward-compatibility field or legacy ordering fallback is required.
+- The one-time contract migration may require a maintenance window with old
+  event-writing processes stopped; mixed-version zero-downtime rollout compatibility
+  is not required.
 
 ## Open Assumptions
 
@@ -125,3 +130,6 @@ ordering.
 ## Confirmation
 
 Confirmed by the requester on 2026-08-31 before the ADR and Design were created.
+The requester additionally confirmed on 2026-08-31 that the one-time schema
+contraction uses a maintenance window and is not deployed through the ordinary
+mixed-version rolling path.

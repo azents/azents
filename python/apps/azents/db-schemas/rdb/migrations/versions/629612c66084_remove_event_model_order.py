@@ -17,6 +17,14 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             """
+            LOCK TABLE agent_sessions, events
+            IN SHARE ROW EXCLUSIVE MODE
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
             DO $$
             BEGIN
                 IF EXISTS (
@@ -43,10 +51,24 @@ def upgrade() -> None:
     op.drop_index("ix_agent_sessions_model_file_gc_lag", table_name="agent_sessions")
     op.drop_column("agent_sessions", "model_file_gc_cursor_model_order")
     op.drop_column("agent_sessions", "model_input_head_model_order")
+    op.create_index(
+        "ix_agent_sessions_model_file_gc_cursor",
+        "agent_sessions",
+        [
+            sa.text("model_file_gc_cursor_event_id ASC NULLS FIRST"),
+            "model_input_head_event_id",
+        ],
+        unique=False,
+        postgresql_where=sa.text("model_input_head_event_id IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
     """Reconstruct logical ordering from event IDs."""
+    op.drop_index(
+        "ix_agent_sessions_model_file_gc_cursor",
+        table_name="agent_sessions",
+    )
     op.add_column(
         "events",
         sa.Column("model_order", sa.BigInteger(), nullable=True),

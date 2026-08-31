@@ -84,6 +84,24 @@ Rejected alternatives:
 - A nullable deprecated field would leave generated clients and downstream code
   dependent on state that no longer has meaning.
 
+### `event-260831/ADR-D4` — Treat schema contraction as a maintenance migration
+
+**Affects:** `event-260831/REQ-3`
+
+The deployment applying this one-time contract migration stops old application
+processes that read or write the removed columns before upgrading the schema, then
+starts only the new version. The migration itself blocks concurrent legacy writes
+from compatibility preflight through schema removal. It does not add mixed-version
+compatibility columns or a permanent rollout coordinator.
+
+Rejected alternatives:
+
+- A dual-read or dual-write rollout would preserve the obsolete ordering authority.
+- A new generalized deployment-quiescence controller is broader than this one-time
+  breaking migration.
+- Allowing ordinary rolling startup to apply the contraction would leave old
+  processes running against a schema they cannot use.
+
 ## Consequences
 
 - Ordinary event append no longer takes a Session `FOR UPDATE` lock to allocate
@@ -92,5 +110,7 @@ Rejected alternatives:
   its selected tail.
 - ModelFile GC uses event-ID head and cursor fields already present on AgentSession.
 - The public OpenAPI contract changes and generated clients must be regenerated.
+- Applying the contract migration requires a maintenance window that quiesces old
+  event-writing processes before schema upgrade.
 - The existing UUIDv7 event ID becomes the sole ordering contract; a future
   cluster-global allocator would require a separate product decision.

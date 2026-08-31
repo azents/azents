@@ -179,6 +179,12 @@ class RDBAgentSession(RDBModel):
         "ix_agent_sessions_model_input_head_event_id",
         "model_input_head_event_id",
     )
+    IX_MODEL_FILE_GC_CURSOR = sa.Index(
+        "ix_agent_sessions_model_file_gc_cursor",
+        sa.text("model_file_gc_cursor_event_id ASC NULLS FIRST"),
+        "model_input_head_event_id",
+        postgresql_where=sa.text("model_input_head_event_id IS NOT NULL"),
+    )
     IX_PENDING_COMMAND = sa.Index(
         "ix_agent_sessions_pending_command",
         "pending_command_created_at",
@@ -540,6 +546,7 @@ class RDBAgentSession(RDBModel):
         IX_SESSION_KIND,
         IX_AGENT_ACTIVE_LAST_USER_INPUT,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
+        IX_MODEL_FILE_GC_CURSOR,
         IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,

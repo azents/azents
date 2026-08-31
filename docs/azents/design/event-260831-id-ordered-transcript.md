@@ -113,6 +113,9 @@ The existing `(session_id, id)` event index serves the range. After each bounded
 batch, the cursor advances monotonically to the last processed event ID, or exactly
 to the head when the range is exhausted. Concurrent cleanup attempts use a
 conditional cursor comparison so an older attempt cannot move progress backward.
+Candidate selection uses a partial index ordered by
+`model_file_gc_cursor_event_id ASC NULLS FIRST` with
+`model_input_head_event_id` available for the lag predicate.
 
 ## Persistence Migration
 
@@ -123,12 +126,19 @@ A generated Alembic migration:
 2. drops `ix_events_session_model_order`;
 3. drops `events.model_order`;
 4. drops `ix_agent_sessions_model_file_gc_lag`;
-5. drops `agent_sessions.model_input_head_model_order`; and
-6. drops `agent_sessions.model_file_gc_cursor_model_order`.
+5. drops the AgentSession logical-order columns; and
+6. creates `ix_agent_sessions_model_file_gc_cursor` for ID-based cleanup candidate
+   selection.
 
 Existing event IDs, model-input head IDs, cleanup cursor IDs, and historical rows are
 preserved. Downgrade may reconstruct logical orders from ascending event IDs because
 the removed historical-insertion behavior is not restored.
+
+This is a one-time maintenance migration rather than a mixed-version rolling
+contract. Operators stop old application processes that read or write the removed
+columns before applying the revision, then start only the new version. The migration
+table locks close the transaction-local writer race; no compatibility column or
+general deployment-quiescence controller is added.
 
 ## API and Frontend
 
@@ -145,9 +155,12 @@ Compaction tail changes are ordinary stale-plan failures and write no partial st
 The owning run retry boundary rebuilds input from current durable history. No retry
 path recreates logical insertion.
 
-Migration validation fails closed if an active head cannot be represented by pure ID
-filtering. Runtime does not keep a fallback order column or hidden compatibility
-branch.
+The migration first acquires write-blocking table locks on `agent_sessions` and then
+`events` in the same transaction. It holds them through compatibility validation and
+schema removal so a legacy writer cannot create a new logical/ID-order divergence
+after the preflight snapshot. Validation then fails closed if an active head cannot
+be represented by pure ID filtering. Runtime does not keep a fallback order column
+or hidden compatibility branch.
 
 ## Observability and Operational Risks
 
@@ -169,6 +182,8 @@ The primary verification matrix covers:
 - compaction success with unchanged boundaries;
 - compaction rejection when either head or tail changes;
 - migration upgrade and downgrade schema assertions;
+- migration writer blocking before compatibility preflight;
+- indexed ModelFile GC candidate selection after migration;
 - public OpenAPI and generated-client absence of `model_order`;
 - Web latest-inference selection under ID-ordered events; and
 - existing chat and compaction E2E flows.
@@ -192,7 +207,7 @@ checks are failures rather than accepted evidence.
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `3`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -201,6 +216,9 @@ checks are failures rather than accepted evidence.
 | M3 | Edit, retry, fork, and ModelFile GC use ID boundaries | `event-260831/REQ-4`, `event-260831/ADR-D1` | `decided` |
 | M4 | Logical-order persistence and public contracts are removed without fallback | `event-260831/REQ-3`, `event-260831/ADR-D3` | `decided` |
 | M5 | External model latency remains outside compaction transactions | `event-260831/REQ-2`, current Context Compaction Spec | `existing` |
+| M6 | Migration blocks legacy writers before compatibility preflight and through schema removal | `event-260831/REQ-3`, `event-260831/ADR-D3` | `derived` |
+| M7 | Schema contraction uses a maintenance window with old writers quiesced instead of mixed-version compatibility | `event-260831/REQ-3`, `event-260831/ADR-D4` | `decided` |
+| M8 | ModelFile GC candidate selection retains an ID-cursor index | `event-260831/REQ-4` | `required` |
 
 ## Removal and Replacement
 
@@ -208,7 +226,7 @@ checks are failures rather than accepted evidence.
 | --- | --- | --- | --- | --- |
 | Per-Session model-order allocation and Session lock | M1, M4 | UUIDv7 event ID append order | Event repository and tests | Repository search and lock-concurrency test |
 | Logical compaction insertion before concurrent events | M2, M4 | Head-and-tail stale validation | Compactor and tests | Concurrent-tail stale test and search |
-| Event and AgentSession logical-order columns and indexes | M4 | Existing head/cursor event IDs and `(session_id, id)` index | RDB models and migration | Migration tests and schema inspection |
+| Event and AgentSession logical-order columns and indexes | M4, M6, M8 | Existing head/cursor event IDs, `(session_id, id)` event index, and ID-cursor cleanup index | RDB models and migration | Migration tests, writer-lock test, and schema inspection |
 | Model-order revert, retry, fork, and cleanup ranges | M3 | Event-ID ranges | Repositories, services, engine | Focused behavior tests |
 | Public and generated `model_order` field | M4 | Event ID or existing page order | OpenAPI, generated clients, Web | Generated-code and repository search |
 | Current Living Spec logical-order text | M1, M2, M3, M4 | ID-only current behavior | Conversation, compaction, periodic execution Specs | Spec review and documentation search |
@@ -219,8 +237,10 @@ checks are failures rather than accepted evidence.
 - Mode: `Collaborative`
 - Decision owner: requester
 - Approved on: `2026-08-31`
-- Approved Design revision: `1`
-- Approved authority IDs: `M1, M2, M3, M4, M5`
+- Approved Design revision: `3`
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8`
 - Approved scope: remove `model_order` and every dependent persisted/public contract,
-  make event ID the sole transcript order, and replace compaction logical insertion
-  with head-and-tail stale validation.
+  make event ID the sole transcript order, replace compaction logical insertion with
+  head-and-tail stale validation, and block legacy writers throughout migration
+  compatibility validation and schema removal while preserving indexed cleanup
+  selection under a maintenance-window rollout.

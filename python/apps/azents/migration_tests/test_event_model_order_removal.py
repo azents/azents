@@ -1,15 +1,24 @@
 """Migration tests for event model-order removal."""
 
+from concurrent.futures import Future, ThreadPoolExecutor
+from time import monotonic, sleep
+
 import pytest
 import sqlalchemy as sa
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
+
+from azents.consts import PROJECT_ROOT
 
 _PARENT_REVISION = "10fa347228db"
 _REVISION = "629612c66084"
 _FIRST_EVENT_ID = "00000000000000000000000000000001"
 _SECOND_EVENT_ID = "00000000000000000000000000000002"
+_MIGRATION_APPLICATION_NAME = "event_model_order_removal_test"
+_LOCK_WAIT_TIMEOUT_SECONDS = 10.0
 
 
 def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:
@@ -85,6 +94,65 @@ def _insert_event(
     )
 
 
+def _migration_config(database_url: str) -> AlembicConfig:
+    """Build an Alembic config with an identifiable migration connection."""
+    url = sa.make_url(database_url).update_query_dict(
+        {"application_name": _MIGRATION_APPLICATION_NAME}
+    )
+    config = AlembicConfig(PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini")
+    config.set_main_option(
+        "sqlalchemy.url",
+        url.render_as_string(hide_password=False).replace("%", "%%"),
+    )
+    return config
+
+
+def _wait_until_migration_is_blocked(
+    engine: Engine,
+    migration_future: Future[None],
+) -> None:
+    """Wait until PostgreSQL reports the migration waiting on its table lock."""
+    deadline = monotonic() + _LOCK_WAIT_TIMEOUT_SECONDS
+    while monotonic() < deadline:
+        if migration_future.done():
+            try:
+                migration_future.result()
+            except Exception as error:
+                raise AssertionError(
+                    "Migration completed before waiting on the writer lock."
+                ) from error
+            raise AssertionError(
+                "Migration completed before waiting on the writer lock."
+            )
+
+        with engine.connect() as connection:
+            activity = (
+                connection.execute(
+                    sa.text(
+                        """
+                        SELECT wait_event_type, query
+                        FROM pg_stat_activity
+                        WHERE application_name = :application_name
+                        ORDER BY backend_start DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"application_name": _MIGRATION_APPLICATION_NAME},
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if (
+            activity is not None
+            and activity["wait_event_type"] == "Lock"
+            and "LOCK TABLE agent_sessions, events" in activity["query"]
+        ):
+            return
+        sleep(0.01)
+
+    raise AssertionError("Migration did not wait on the legacy writer lock.")
+
+
 def test_event_model_order_is_removed_and_downgrade_reconstructs_id_order(
     alembic_runner: MigrationContext,
     alembic_engine: Engine,
@@ -120,6 +188,11 @@ def test_event_model_order_is_removed_and_downgrade_reconstructs_id_order(
         session_columns = _column_names(inspector, "agent_sessions")
         assert "model_input_head_model_order" not in session_columns
         assert "model_file_gc_cursor_model_order" not in session_columns
+        session_indexes = {
+            index["name"] for index in inspector.get_indexes("agent_sessions")
+        }
+        assert "ix_agent_sessions_model_file_gc_cursor" in session_indexes
+        assert "ix_agent_sessions_model_file_gc_lag" not in session_indexes
         row = connection.execute(
             sa.text(
                 """
@@ -134,6 +207,12 @@ def test_event_model_order_is_removed_and_downgrade_reconstructs_id_order(
     alembic_runner.migrate_down_to(_PARENT_REVISION)
 
     with alembic_engine.connect() as connection:
+        session_indexes = {
+            index["name"]
+            for index in sa.inspect(connection).get_indexes("agent_sessions")
+        }
+        assert "ix_agent_sessions_model_file_gc_cursor" not in session_indexes
+        assert "ix_agent_sessions_model_file_gc_lag" in session_indexes
         event_orders = connection.execute(
             sa.text("SELECT id, model_order FROM events ORDER BY id")
         ).all()
@@ -178,3 +257,59 @@ def test_event_model_order_removal_rejects_unrepresentable_current_head(
 
     with pytest.raises(DBAPIError, match="cannot be represented by event ID order"):
         alembic_runner.migrate_up_to(_REVISION)
+
+
+def test_event_model_order_removal_blocks_writers_before_preflight(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+    migration_database_url: str,
+) -> None:
+    """Upgrade takes write-blocking locks before validating ID compatibility."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_base_rows(connection)
+        _insert_event(connection, event_id=_FIRST_EVENT_ID, model_order=2000)
+        _insert_event(connection, event_id=_SECOND_EVENT_ID, model_order=1000)
+        connection.execute(
+            sa.text(
+                """
+                UPDATE agent_sessions
+                SET model_input_head_event_id = :head_event_id,
+                    model_input_head_model_order = 1000
+                WHERE id = 'event-order-session'
+                """
+            ),
+            {"head_event_id": _SECOND_EVENT_ID},
+        )
+
+    config = _migration_config(migration_database_url)
+    with alembic_engine.connect() as writer:
+        writer_transaction = writer.begin()
+        writer.execute(
+            sa.text(
+                """
+                UPDATE agent_sessions
+                SET status = status
+                WHERE id = 'event-order-session'
+                """
+            )
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            migration_future = executor.submit(
+                alembic_command.upgrade,
+                config,
+                _REVISION,
+            )
+            try:
+                _wait_until_migration_is_blocked(
+                    alembic_engine,
+                    migration_future,
+                )
+            finally:
+                writer_transaction.rollback()
+
+            with pytest.raises(
+                DBAPIError,
+                match="cannot be represented by event ID order",
+            ):
+                migration_future.result(timeout=_LOCK_WAIT_TIMEOUT_SECONDS)
