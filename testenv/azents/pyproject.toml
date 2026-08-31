@@ -7,7 +7,7 @@ dependencies = [
     "cryptography==50.0.1",
     "filelock==3.32.4",
     "httpx==0.28.1",
-    "mcp==2.0.0",
+    "mcp==2.1.0",
     "azents",
     "azents-admin-client",
     "azents-public-client",
