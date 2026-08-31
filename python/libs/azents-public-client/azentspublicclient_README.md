@@ -139,6 +139,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 *ChatV1Api* | [**chat_v1_get_agent_session_sidebar**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
+*ChatV1Api* | [**chat_v1_get_agent_workspace_repository_type**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace_repository_type) | **GET** /chat/v1/agents/{agent_id}/workspace/repository-type | Get Agent Workspace Repository Type
 *ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_subagent_tree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_subagent_tree) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree | Get Subagent Tree
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
@@ -398,6 +399,7 @@ Class | Method | HTTP request | Description
  - [AgentWorkspaceMutationResponse](azentspublicclient/docs/AgentWorkspaceMutationResponse.md)
  - [AgentWorkspaceReadFailedAccessResponse](azentspublicclient/docs/AgentWorkspaceReadFailedAccessResponse.md)
  - [AgentWorkspaceReadyAccessResponse](azentspublicclient/docs/AgentWorkspaceReadyAccessResponse.md)
+ - [AgentWorkspaceRepositoryTypeResponse](azentspublicclient/docs/AgentWorkspaceRepositoryTypeResponse.md)
  - [AgentWorkspaceResponse](azentspublicclient/docs/AgentWorkspaceResponse.md)
  - [AgentWorkspaceRuntimeResponse](azentspublicclient/docs/AgentWorkspaceRuntimeResponse.md)
  - [AgentWorkspaceStatResponse](azentspublicclient/docs/AgentWorkspaceStatResponse.md)

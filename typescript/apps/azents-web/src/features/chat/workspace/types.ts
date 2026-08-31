@@ -110,6 +110,12 @@ export type WorkspaceFileState =
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; file: WorkspaceFile };
 
+export type WorkspaceDirectoryLoadState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED" };
+
 export type ProjectRegistrationMode = "existing_project" | "git_worktree";
 
 export type ProjectGitRefPreviewState =
@@ -158,6 +164,7 @@ export type WorkspacePanelState =
       browserMode?: WorkspaceBrowserMode;
       directory: { path: string; entries: WorkspaceEntry[] };
       directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
+      directoryLoadStatesByPath: Record<string, WorkspaceDirectoryLoadState>;
       fileState: WorkspaceFileState;
       workspaceView: "browser" | "preview" | "info";
       selectedFilePath: string | null;

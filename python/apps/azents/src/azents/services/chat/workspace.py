@@ -871,6 +871,30 @@ class AgentWorkspaceFileService:
         except AgentWorkspacePathDenied as error:
             return Failure(error)
 
+        list_result = await self._runner_list_files(runtime, path)
+        match list_result:
+            case Success(listed):
+                listed_self = _listed_self_entry(listed.entries, path)
+                if listed_self is not None and listed_self.type == "file":
+                    return await self._read_file(
+                        runtime,
+                        path,
+                        size_bytes=listed_self.size_bytes,
+                        limit=limit,
+                    )
+                if listed.entries and listed_self is None:
+                    return Success(
+                        AgentWorkspaceDirectory(
+                            type="DIRECTORY",
+                            path=path.as_posix(),
+                            entries=_list_entries_from_runner(listed.entries),
+                        )
+                    )
+            case Failure(error):
+                return Failure(error)
+            case _:
+                return assert_never(list_result)
+
         stat_result = await self._stat_path(runtime, path)
         match stat_result:
             case Success(stat):
@@ -879,24 +903,16 @@ class AgentWorkspaceFileService:
                 return Failure(error)
             case _:
                 return assert_never(stat_result)
-
         target_kind = stat.resolved_kind if stat.kind == "symlink" else stat.kind
         match target_kind:
             case "directory":
-                entries_result = await self._list_entries(runtime, path)
-                match entries_result:
-                    case Success(entries):
-                        return Success(
-                            AgentWorkspaceDirectory(
-                                type="DIRECTORY",
-                                path=path.as_posix(),
-                                entries=entries,
-                            )
-                        )
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        return assert_never(entries_result)
+                return Success(
+                    AgentWorkspaceDirectory(
+                        type="DIRECTORY",
+                        path=path.as_posix(),
+                        entries=_list_entries_from_runner(listed.entries),
+                    )
+                )
             case "file":
                 read_result = await self._read_file(
                     runtime,
@@ -924,6 +940,22 @@ class AgentWorkspaceFileService:
                 detail=f"Unsupported Agent Workspace path type: {stat.kind}.",
             )
         )
+
+    async def get_repository_type(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str,
+    ) -> Result[AgentWorkspaceEntryRepositoryType | None, AgentWorkspaceError]:
+        """Return repository metadata for one explicitly selected directory."""
+        prepared = await self._prepare_workspace_path(agent_id, user_id, raw_path)
+        match prepared:
+            case Success((runtime, path, _workspace_root)):
+                return await self._repository_type_for_path(runtime, path)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared)
 
     async def stat_path(
         self,
@@ -1371,45 +1403,30 @@ class AgentWorkspaceFileService:
         """Create Agent Workspace directory entry list."""
         result = await self._runner_list_files(runtime, path)
         match result:
-            case Success(entries):
-                workspace_entries = _list_entries_from_runner(entries)
-                return await self._with_repository_metadata(runtime, workspace_entries)
+            case Success(listed):
+                return Success(_list_entries_from_runner(listed.entries))
             case Failure(error):
                 return Failure(error)
             case _:
                 assert_never(result)
 
-    async def _with_repository_metadata(
+    async def _repository_type_for_path(
         self,
         runtime: RuntimeOperationTarget,
-        entries: list[AgentWorkspaceEntry],
-    ) -> Success[list[AgentWorkspaceEntry]]:
-        """Attach best-effort repository metadata to directory entries."""
-        annotated: list[AgentWorkspaceEntry] = []
-        for entry in entries:
-            repository_type = await self._repository_type_for_entry(runtime, entry)
-            annotated.append(
-                dataclasses.replace(entry, repository_type=repository_type)
-            )
-        return Success(annotated)
-
-    async def _repository_type_for_entry(
-        self,
-        runtime: RuntimeOperationTarget,
-        entry: AgentWorkspaceEntry,
-    ) -> AgentWorkspaceEntryRepositoryType | None:
-        """Return repository type for a directory entry when it is known."""
-        if entry.kind != "directory":
-            return None
-        git_marker_path = PurePosixPath(entry.path) / ".git"
+        path: PurePosixPath,
+    ) -> Result[AgentWorkspaceEntryRepositoryType | None, AgentWorkspaceError]:
+        """Return repository type for one explicitly inspected directory."""
+        git_marker_path = path / ".git"
         result = await self._stat_path(runtime, git_marker_path)
         match result:
             case Success(stat) if stat.kind in {"directory", "file"}:
-                return "git"
+                return Success("git")
             case Success():
-                return None
-            case Failure():
-                return None
+                return Success(None)
+            case Failure(AgentWorkspaceFileNotFound()):
+                return Success(None)
+            case Failure(error):
+                return Failure(error)
             case _:
                 assert_never(result)
 
@@ -1487,17 +1504,18 @@ class AgentWorkspaceFileService:
         self,
         runtime: RuntimeOperationTarget,
         path: PurePosixPath,
-    ) -> Result[tuple[RuntimeFileListEntry, ...], AgentWorkspaceError]:
+    ) -> Result[RuntimeFileListResult, AgentWorkspaceError]:
         """List files through the active Runtime Runner."""
         try:
-            result = await self._runner_operations.list_files(
-                runtime_id=runtime.id,
-                runner_generation=runtime.runner_generation,
-                owner_session_id=None,
-                path=path.as_posix(),
-                deadline_at=_runner_file_operation_deadline(),
+            return Success(
+                await self._runner_operations.list_files(
+                    runtime_id=runtime.id,
+                    runner_generation=runtime.runner_generation,
+                    owner_session_id=None,
+                    path=path.as_posix(),
+                    deadline_at=_runner_file_operation_deadline(),
+                )
             )
-            return Success(result.entries)
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1633,6 +1651,16 @@ def _list_entries_from_runner(
             )
         )
     return sorted(entries, key=lambda entry: (entry.kind != "directory", entry.name))
+
+
+def _listed_self_entry(
+    entries: tuple[RuntimeFileListEntry, ...],
+    path: PurePosixPath,
+) -> RuntimeFileListEntry | None:
+    """Return the file.list entry that represents the requested path itself."""
+    if len(entries) != 1 or entries[0].path != path.as_posix():
+        return None
+    return entries[0]
 
 
 def _path_stat_from_runner(stat: RuntimeFileStatResult) -> AgentWorkspacePathStat:

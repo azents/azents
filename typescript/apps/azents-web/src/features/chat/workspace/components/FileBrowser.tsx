@@ -7,8 +7,8 @@ import {
   Box,
   Button,
   Checkbox,
-  Collapse,
   Group,
+  Loader,
   Menu,
   rem,
   ScrollArea,
@@ -20,6 +20,7 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import {
+  IconAlertCircle,
   IconArrowRight,
   IconBrandGit,
   IconChevronDown,
@@ -43,12 +44,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "../../components/collapsiblePresentation";
+import { chatChevronTransition } from "../../components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
-import type { WorkspaceBrowserMode, WorkspaceEntry } from "../types";
+import type {
+  WorkspaceBrowserMode,
+  WorkspaceDirectoryLoadState,
+  WorkspaceEntry,
+} from "../types";
 
 interface FileBrowserProps {
   root: string;
@@ -59,6 +61,7 @@ interface FileBrowserProps {
   projectEmptyState: { title: string; description: string } | null;
   manifestEntries: WorkspaceEntry[];
   directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
+  directoryLoadStatesByPath: Record<string, WorkspaceDirectoryLoadState>;
   selectedFilePath: string | null;
   selectedPaths: string[];
   isRefreshing: boolean;
@@ -170,11 +173,11 @@ function filterTree(
           ...parents,
           node.nodeId,
         ])
-      : [];
+      : null;
     const matches =
       node.name.toLowerCase().includes(normalizedQuery) ||
       node.path.toLowerCase().includes(normalizedQuery);
-    if (!matches && children.length === 0) {
+    if (!matches && (children?.length ?? 0) === 0) {
       return [];
     }
     for (const parent of parents) {
@@ -246,6 +249,7 @@ interface TreeNodeProps {
   expanded: Set<string>;
   activePath: string | null;
   selectedPaths: Set<string>;
+  directoryLoadStatesByPath: Record<string, WorkspaceDirectoryLoadState>;
   getDownloadHref: (path: string) => string;
   onToggle: (nodeId: string) => void;
   onOpenDirectory: (path: string) => void;
@@ -267,6 +271,7 @@ function TreeNode({
   expanded,
   activePath,
   selectedPaths,
+  directoryLoadStatesByPath,
   getDownloadHref,
   onToggle,
   onOpenDirectory,
@@ -286,6 +291,8 @@ function TreeNode({
   const open = expanded.has(node.nodeId);
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
+  const directoryLoadState =
+    directoryLoadStatesByPath[node.path] ?? ({ type: "IDLE" } as const);
   const displayName = getEntryDisplayName(node, depth);
   const displayPath = getEntryDisplayPath(node, depth);
   const isDirectory = node.kind === "directory";
@@ -313,7 +320,9 @@ function TreeNode({
   const handleOpen = useCallback((): void => {
     if (isDirectory) {
       onToggle(node.nodeId);
-      onOpenDirectory(node.path);
+      if (!open) {
+        onOpenDirectory(node.path);
+      }
       return;
     }
     onOpenFile(node.path);
@@ -321,6 +330,7 @@ function TreeNode({
     isDirectory,
     node.nodeId,
     node.path,
+    open,
     onOpenDirectory,
     onOpenFile,
     onToggle,
@@ -542,13 +552,9 @@ function TreeNode({
           </Menu.Dropdown>
         </Menu>
       </Group>
-      {isDirectory ? (
-        <Collapse
-          expanded={open}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          {node.children?.map((child) => (
+      {isDirectory && open ? (
+        node.children !== null ? (
+          node.children.map((child) => (
             <TreeNode
               key={child.nodeId}
               node={child}
@@ -557,6 +563,7 @@ function TreeNode({
               expanded={expanded}
               activePath={activePath}
               selectedPaths={selectedPaths}
+              directoryLoadStatesByPath={directoryLoadStatesByPath}
               getDownloadHref={getDownloadHref}
               onToggle={onToggle}
               onOpenDirectory={onOpenDirectory}
@@ -570,8 +577,37 @@ function TreeNode({
               onRemoveProject={onRemoveProject}
               onDeleteWorktreeProject={onDeleteWorktreeProject}
             />
-          ))}
-        </Collapse>
+          ))
+        ) : directoryLoadState.type === "LOADING" ? (
+          <Group
+            gap={rem(6)}
+            role="status"
+            wrap="nowrap"
+            py={rem(4)}
+            pl={compact ? rem(70 + depth * 14) : rem(82 + depth * 18)}
+          >
+            <Loader size="xs" />
+            <Text c="dimmed" size="xs">
+              {t("loadingDirectory")}
+            </Text>
+          </Group>
+        ) : directoryLoadState.type === "ERROR" ? (
+          <Group
+            c="red"
+            gap={rem(6)}
+            role="alert"
+            wrap="nowrap"
+            py={rem(4)}
+            pl={compact ? rem(70 + depth * 14) : rem(82 + depth * 18)}
+          >
+            <IconAlertCircle size={rem(14)} />
+            <Text size="xs">
+              {t("directoryLoadFailed", {
+                message: directoryLoadState.message,
+              })}
+            </Text>
+          </Group>
+        ) : null
       ) : null}
     </>
   );
@@ -586,6 +622,7 @@ export function FileBrowser({
   projectEmptyState,
   manifestEntries,
   directoryEntriesByPath,
+  directoryLoadStatesByPath,
   selectedFilePath,
   selectedPaths,
   isRefreshing,
@@ -700,7 +737,7 @@ export function FileBrowser({
         />
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
-            <ActionIcon size="sm" variant="subtle">
+            <ActionIcon aria-label={t("actions")} size="sm" variant="subtle">
               <IconDotsVertical size="0.75rem" />
             </ActionIcon>
           </Menu.Target>
@@ -839,6 +876,7 @@ export function FileBrowser({
                   expanded={effectiveExpanded}
                   activePath={activePath}
                   selectedPaths={selectedPathSet}
+                  directoryLoadStatesByPath={directoryLoadStatesByPath}
                   getDownloadHref={getDownloadHref}
                   onToggle={handleToggle}
                   onOpenDirectory={onOpenDirectory}

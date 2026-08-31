@@ -222,6 +222,7 @@ const readyState: WorkspacePanelState = {
       },
     ],
   },
+  directoryLoadStatesByPath: {},
   fileState: { type: "IDLE" },
   workspaceView: "browser",
   selectedFilePath: null,

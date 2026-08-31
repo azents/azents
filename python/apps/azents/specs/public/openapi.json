@@ -4903,6 +4903,65 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/workspace/repository-type": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Workspace Repository Type",
+        "description": "Inspect repository metadata for one selected Agent Workspace directory.",
+        "operationId": "chat_v1_get_agent_workspace_repository_type",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Agent Workspace directory to inspect",
+              "title": "Path"
+            },
+            "description": "Agent Workspace directory to inspect"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceRepositoryTypeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/workspace/directories": {
       "post": {
         "tags": [
@@ -17089,6 +17148,29 @@
         ],
         "title": "AgentWorkspaceReadyAccessResponse",
         "description": "Agent Workspace ready access response."
+      },
+      "AgentWorkspaceRepositoryTypeResponse": {
+        "properties": {
+          "repository_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "git"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Type",
+            "description": "Detected repository type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository_type"
+        ],
+        "title": "AgentWorkspaceRepositoryTypeResponse",
+        "description": "Repository metadata for one explicitly inspected Workspace directory."
       },
       "AgentWorkspaceResponse": {
         "properties": {

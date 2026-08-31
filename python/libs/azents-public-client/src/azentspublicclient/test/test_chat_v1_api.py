@@ -180,6 +180,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_agent_workspace_repository_type(self) -> None:
+        """Test case for chat_v1_get_agent_workspace_repository_type
+
+        Get Agent Workspace Repository Type
+        """
+        pass
+
     def test_chat_v1_get_session_project_browser_manifest(self) -> None:
         """Test case for chat_v1_get_session_project_browser_manifest
 

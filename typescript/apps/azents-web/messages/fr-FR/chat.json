@@ -184,6 +184,8 @@
     "collapseAll": "Tout réduire",
     "refresh": "Actualiser",
     "parentDirectory": "Dossier parent",
+    "loadingDirectory": "Chargement du dossier…",
+    "directoryLoadFailed": "Impossible de charger le dossier : {message}",
     "emptyDirectory": "Ce dossier est vide.",
     "noSearchResults": "Aucun résultat.",
     "directory": "Dossier",
