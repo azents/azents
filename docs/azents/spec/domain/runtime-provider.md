@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-26
-spec_version: 28
+last_verified_at: 2026-09-01
+spec_version: 29
 ---
 
 # Runtime Provider
@@ -148,6 +148,14 @@ set Runner `HOME` and working directory to the configured mount path, but Provid
 lifecycle reports do not advertise an Agent Workspace path. The Runner's current-generation report
 is the metadata authority for the effective absolute path.
 
+Bundled Providers also own one durable Nix storage root per managed Runtime and mount it read-write
+at `/nix` in the Runner only. This storage is physically distinct from Agent Workspace storage and
+does not appear in Provider capability/Profile selection, lifecycle reports, Workspace APIs, or
+package inventory. Kubernetes uses a second owned PVC whose StorageClass and requested capacity are
+Provider deployment settings; Docker uses a `nix` child under the existing per-Runtime host root.
+Start, stop, restart, recovery, and ordinary recreation preserve both stores. Reset replaces both
+with empty storage before the Runner seeds the release baseline, and terminal delete removes both.
+
 When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
 recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
 terminal delete remain available where required to reduce authority or finalize decommissioning.
@@ -181,6 +189,10 @@ Each Provider owns typed infrastructure Profiles for its native substrate:
   scheduling, Workspace PVC, network authority, and optional DinD modules.
 - Docker Providers own Container Profile schema v1 or v2 containing typed resources and
   Docker-network placement.
+
+The Kubernetes Agent Workspace PVC remains Profile-controlled. The separate Nix PVC StorageClass
+and size are bundled-Provider deployment configuration rather than infrastructure Profile,
+Workspace Profile, Agent, or capability fields.
 
 Kubernetes Profile v1 and v2 both describe direct Runner execution. Kubernetes Profile v3 adds a
 complete `network_access` authority with `direct`, `proxy_required`, or `no_network` mode,
@@ -301,6 +313,12 @@ The Admin Runtime Provider detail UI preserves its existing master-detail and re
 
 The Kubernetes Provider remains disabled by default. When enabled, Helm renders an authoritative typed bootstrap declaration for the opaque `system-kubernetes` Provider and its `kubernetes_service_account` binding. The declaration contains the normalized ServiceAccount subject, namespace, ServiceAccount name, required audience, and bootstrap ownership identity; bootstrap reconciliation creates or reconciles that durable binding without issuing or persisting a Provider credential.
 
+The same deployment renders required Nix-store StorageClass and size environment values for the
+bundled Kubernetes Provider. A larger configured size may expand an existing claim in place when
+the StorageClass supports expansion. A smaller request does not shrink an existing claim, and a
+StorageClass change does not replace one implicitly; both take effect when reset creates the next
+claim. These values do not create customer-selectable Profile fields.
+
 The long-running Provider receives a dedicated read-only projected ServiceAccount token at `AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE`. Its audience is exactly `azents-runtime-control`; the Provider selects `kubernetes_service_account` explicitly, reads the current token immediately before connecting, and reconnects after projected-token rotation without logging token content. The default auto-mounted Kubernetes API token is not the authentication contract.
 
 Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview requests. It accepts workload identity only when TokenReview reports an authenticated result with the exact required audience and `system:serviceaccount:<namespace>:<name>` subject, and that subject resolves to exactly one active bootstrap-owned binding. The Provider ServiceAccount cannot create TokenReviews, SubjectAccessReviews, or impersonation requests. Its workload-namespace Role grants the resource access required for Runtime Pods, PVCs, Services, ConfigMaps, NetworkPolicies, and Provider-owned logical-Runtime CA Secrets, plus leader-Lease access. The Secret verbs are `get`, `create`, `update`, and `delete`; Provider code validates exact ownership metadata before reading, replacing, or deleting the strict-network CA resource. ClusterRole authority is limited to reading the configured workload Namespace and creating SelfSubjectAccessReviews. Separate namespaced Roles grant `get` for each explicitly named mandatory Service.
@@ -316,6 +334,10 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **29 (2026-09-01):** Added Provider-owned persistent Nix storage as a
+  Workspace-separate Kubernetes PVC or Docker runtime-root child, with
+  deployment-owned Kubernetes capacity settings and the existing reset/terminal
+  deletion boundaries.
 - **28 (2026-08-26):** Separated Provider host-management authority from existing
   ready-Runner data-plane operations while retaining Provider connection requirements
   for lifecycle dispatch and compute creation or replacement.

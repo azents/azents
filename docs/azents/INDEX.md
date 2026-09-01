@@ -21,10 +21,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-01 | 29 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-31 | 101 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-01 | 102 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-01 | 76 |
 
@@ -34,7 +34,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 164 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-01 | 31 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 36 |
@@ -49,7 +49,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-31 | 17 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-23 | 31 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-31 | 41 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-01 | 42 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |
 
@@ -279,7 +279,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | 2026-08-13 |
 | [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
 | [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
-| [User-Managed Runtime Tool Addon Requirements](requirements/nix-260831-user-managed-runtime-tools.md) | nix-260831 | 2026-08-31 | - |
+| [User-Managed Runtime Tool Addon Requirements](requirements/nix-260831-user-managed-runtime-tools.md) | nix-260831 | 2026-08-31 | 2026-09-01 |
 | [Notion Toolkit Historical Requirements Reconstruction](requirements/notion-260321-notion-toolkit.md) | notion-260321 | 2026-03-21 | 2026-03-21 |
 | [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Requirements Reconstruction](requirements/oauth-260327-discord-oauth-button-url-fix.md) | oauth-260327 | 2026-03-27 | 2026-03-27 |
 | [xAI Grok OAuth Provider Historical Requirements Reconstruction](requirements/oauth-260710-xai-oauth.md) | oauth-260710 | 2026-07-10 | - |
@@ -348,7 +348,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Untrusted Runtime Boundary Requirements](requirements/runtime-260811-untrusted-runtime-boundary.md) | runtime-260811 | 2026-08-11 | - |
 | [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | 2026-08-24 |
 | [Clear and Reliable Runtime Lifecycle Requirements](requirements/runtime-260825-reliable-lifecycle.md) | runtime-260825 | 2026-08-25 | 2026-08-25 |
-| [Persistent Runtime System Tools Requirements](requirements/runtime-260831-persistent-system-tools.md) | runtime-260831 | 2026-08-31 | - |
+| [Persistent Runtime System Tools Requirements](requirements/runtime-260831-persistent-system-tools.md) | runtime-260831 | 2026-08-31 | 2026-09-01 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |

@@ -1,6 +1,7 @@
 ---
 title: "User-Managed Runtime Tool Addon Design"
 created: 2026-08-31
+implemented: 2026-09-01
 tags: [runtime, package-management, nix, architecture, security]
 document_role: primary
 document_type: design
