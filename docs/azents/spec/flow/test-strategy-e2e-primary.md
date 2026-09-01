@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-01
-spec_version: 42
+last_verified_at: 2026-08-31
+spec_version: 41
 ---
 
 # E2E Primary Test Strategy
@@ -171,14 +171,9 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files within a suite using the latest successful `main` timing
-  baseline, with a deterministic source-based fallback. A suite may explicitly opt
-  one oversized test file into base pytest-node distribution; coverage remains
-  file-owned, every declared test node appears exactly once across the plans, and a
-  base node selector retains all of its parametrizations. Required currently splits
-  the eight Subagent journey nodes while other files remain atomic. Required uses
-  four lanes; Web uses one lane. Lanes are parallel partitions, not additional
-  profiles.
+  It balances files only within a suite using the latest successful `main` timing
+  baseline, with a deterministic source-based fallback. Required uses four lanes;
+  Web uses one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
   one reusable scenario module. When such a split replaces an existing collection
   file, the planner projects that file's historical per-test call timings onto the
@@ -353,10 +348,6 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
-- **2026-09-01** (spec_version 42) — Allowed an explicitly configured oversized
-  required-suite file to distribute stable base pytest nodes across lanes while
-  retaining file ownership and parametrized coverage, and applied it to Subagent
-  journeys.
 - **2026-08-30** (spec_version 40) — Added bounded compatible-ancestor fallback
   for unchanged required E2E images when an exact predecessor snapshot is
   unavailable, while preserving direct successes, immutable Git-tree validation,
