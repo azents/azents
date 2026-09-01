@@ -99,7 +99,6 @@ def _make_agent(
     *,
     runtime_profile_id: str | None = None,
     runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
-    shell_enabled: bool = False,
 ) -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection()
@@ -129,7 +128,6 @@ def _make_agent(
         runtime_profile_selection_version=1,
         runtime_capability=runtime_capability,
         runtime_capability_version=1,
-        shell_enabled=shell_enabled,
         terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,
@@ -335,7 +333,6 @@ class TestAgentServiceModelSelection:
         repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.runtime_profile_id is None
         assert repository_create.runtime_capability is AgentRuntimeCapability.NONE
-        assert repository_create.shell_enabled is False
         assert repository_create.tool_search_enabled is True
         assert result.value.runtime_capability is AgentRuntimeCapability.NONE
         assert result.value.runtime_profile_configuration_status == "not_applicable"
@@ -375,7 +372,6 @@ class TestAgentServiceModelSelection:
         agent_repo.create.return_value = _make_agent(
             runtime_profile_id="profile-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
-            shell_enabled=True,
         )
         admin_repo.create.return_value = AsyncMock()
 
@@ -388,7 +384,6 @@ class TestAgentServiceModelSelection:
                     model_identifier="gpt-4o",
                 ),
                 runtime_profile_id="profile-1",
-                shell_enabled=True,
             ),
             creator_workspace_user_id="wu-1",
         )
@@ -401,7 +396,6 @@ class TestAgentServiceModelSelection:
         assert profile_session is repository_session
         assert repository_create.runtime_profile_id == "profile-1"
         assert repository_create.runtime_capability is AgentRuntimeCapability.MANAGED
-        assert repository_create.shell_enabled is True
         assert result.value.runtime_capability is AgentRuntimeCapability.MANAGED
         assert result.value.runtime_profile_configuration_status == "configured"
         assert result.value.runtime_add_available is False
@@ -513,27 +507,6 @@ class TestAgentServiceModelSelection:
         assert result.error.code == "runtime_action_required"
         repository.replace_runtime_profile_selection.assert_not_awaited()
 
-    async def test_runtime_free_update_rejects_enabling_shell(self) -> None:
-        """Runtime-free shell enablement requires the dedicated add transition."""
-        service = _make_service()
-        repository = cast(Any, service.repository)
-        runtime_free_agent = _make_agent()
-        repository.get_by_id.return_value = runtime_free_agent
-
-        result = await service.update_by_id(
-            "agent-1",
-            {"shell_enabled": True},
-            workspace_id="ws-1",
-            workspace_user_id="wu-1",
-            role=WorkspaceUserRole.OWNER,
-        )
-
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, RuntimeProfileSelectionInvalid)
-        assert result.error.code == "runtime_action_required"
-        repository.lock_by_id.assert_not_awaited()
-        repository.update_by_id.assert_not_awaited()
-
     async def test_runtime_profile_update_rechecks_capability_under_lock(self) -> None:
         """A concurrent removal fence blocks stale Runtime Profile updates."""
         service = _make_service()
@@ -541,7 +514,6 @@ class TestAgentServiceModelSelection:
         repository.get_by_id.return_value = _make_agent(
             runtime_profile_id="profile-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
-            shell_enabled=True,
         )
         repository.lock_by_id.return_value = _make_agent(
             runtime_capability=AgentRuntimeCapability.REMOVING,
@@ -574,7 +546,6 @@ class TestAgentServiceModelSelection:
         selected_agent = _make_agent(
             runtime_profile_id="profile-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
-            shell_enabled=True,
         )
         cleared_agent = selected_agent.model_copy(
             update={

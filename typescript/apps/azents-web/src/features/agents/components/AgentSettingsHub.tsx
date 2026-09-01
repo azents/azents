@@ -181,9 +181,7 @@ export function AgentSettingsHub({
           icon: <IconSettings size={rem(18)} />,
           label: t("capabilities.label"),
           description: t("capabilities.description"),
-          value: agent.shell_enabled
-            ? t("values.shellEnabled")
-            : t("values.shellDisabled"),
+          value: null,
         },
         {
           href: `${basePath}/memory`,

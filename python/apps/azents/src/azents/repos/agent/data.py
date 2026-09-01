@@ -68,7 +68,6 @@ class Agent(BaseModel):
         ge=1,
         description="Optimistic Agent Runtime capability version",
     )
-    shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     terminal_enabled: bool = Field(description="Interactive Terminal enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(description="Tool Search enabled flag")
@@ -128,7 +127,6 @@ class AgentCreate(BaseModel):
     runtime_capability: AgentRuntimeCapability = Field(
         description="Initial managed Runtime capability state"
     )
-    shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     terminal_enabled: bool = Field(
         default=True,
         description="Interactive Terminal enabled flag",
@@ -174,7 +172,6 @@ class AgentUpdate(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled flag")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     terminal_enabled: Annotated[
         bool,
         Field(description="Interactive Terminal enabled flag"),

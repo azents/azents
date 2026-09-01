@@ -169,7 +169,6 @@ def _make_agent(
         runtime_profile_selection_version=1,
         runtime_capability=AgentRuntimeCapability.MANAGED,
         runtime_capability_version=1,
-        shell_enabled=True,
         terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=tool_search_enabled,
@@ -302,9 +301,10 @@ def _runtime_capability_resolver(
 ) -> RuntimeCapabilityResolver:
     """Create an explicit Runtime capability snapshot for Toolkit tests."""
     return RuntimeCapabilityResolver.from_agent(
-        state=AgentRuntimeCapability.MANAGED,
+        state=(
+            AgentRuntimeCapability.MANAGED if enabled else AgentRuntimeCapability.NONE
+        ),
         version=1,
-        shell_enabled=enabled,
     )
 
 

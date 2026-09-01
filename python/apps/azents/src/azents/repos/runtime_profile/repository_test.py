@@ -619,7 +619,6 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
                 lightweight_model_selection=selection,
                 runtime_profile_id=profile.id,
                 runtime_capability=AgentRuntimeCapability.MANAGED,
-                shell_enabled=True,
             )
             session.add(agent)
             await session.flush()
@@ -820,7 +819,6 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             lightweight_model_selection=selection,
             runtime_profile_id=profile.id,
             runtime_capability=AgentRuntimeCapability.MANAGED,
-            shell_enabled=True,
         )
         session.add(agent)
         await session.flush()

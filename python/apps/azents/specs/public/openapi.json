@@ -14371,12 +14371,6 @@
             "title": "Runtime Profile Id",
             "description": "Selected Workspace Runtime Profile ID"
           },
-          "shell_enabled": {
-            "type": "boolean",
-            "title": "Shell Enabled",
-            "description": "Shell enabled state",
-            "default": true
-          },
           "terminal_enabled": {
             "type": "boolean",
             "title": "Terminal Enabled",
@@ -14861,10 +14855,6 @@
             "type": "boolean",
             "title": "Runtime Remove Available"
           },
-          "shell_enabled": {
-            "type": "boolean",
-            "title": "Shell Enabled"
-          },
           "terminal_enabled": {
             "type": "boolean",
             "title": "Terminal Enabled"
@@ -14986,7 +14976,6 @@
           "runtime_profile_configuration_status",
           "runtime_add_available",
           "runtime_remove_available",
-          "shell_enabled",
           "terminal_enabled",
           "infrastructure_terminal_enabled",
           "workspace_terminal_enabled",
@@ -16725,11 +16714,6 @@
             "minimum": 1.0,
             "title": "Expected Runtime Profile Selection Version",
             "description": "Required optimistic version when replacing the selection"
-          },
-          "shell_enabled": {
-            "type": "boolean",
-            "title": "Shell Enabled",
-            "description": "Shell enabled state"
           },
           "terminal_enabled": {
             "type": "boolean",

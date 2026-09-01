@@ -538,7 +538,6 @@
     "roleAgent": "エージェント",
     "roleAgentDescription": "セッションを実行し、ツールアクセスを保持します",
     "useParentToolkitsLabel": "親エージェントのツールキットを使用",
-    "shellEnabledLabel": "シェルを有効化",
     "memoryEnabledLabel": "メモリを有効化",
     "memoryEnabledDescription": "会話間で永続的なメモリの保存と活用を許可する",
     "toolSearchEnabledLabel": "ツール検索を有効化",
@@ -562,7 +561,7 @@
       },
       "capabilities": {
         "label": "ツール",
-        "description": "Shell アクセス、組み込みツール、ツールキット"
+        "description": "インタラクティブ Terminal、組み込みツール、ツールキット"
       },
       "memory": {
         "label": "Memory",
@@ -585,8 +584,6 @@
         "inactive": "Inactive",
         "enabled": "Enabled",
         "disabled": "Disabled",
-        "shellEnabled": "Shell on",
-        "shellDisabled": "Shell off",
         "subagents": "最大 {count} · 深さ {depth}",
         "none": "なし",
         "projects": "{count} 件のプロジェクト"
@@ -831,7 +828,6 @@
       "emptyDescription": "メモリを作成するか、検索条件を調整してください。",
       "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
     },
-    "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する",
     "subagentsSectionLabel": "サブエージェント",
     "subagentMaxSubagentsLabel": "最大サブエージェント数",
     "subagentMaxSubagentsDescription": "1 つの root session 配下で同時に active にできる subagent 数です。root agent は含みません。",
@@ -1303,8 +1299,6 @@
     },
     "runtimeFreeDefaultTitle": "デフォルトはランタイムなしです",
     "runtimeFreeDefaultDescription": "ランタイムがなくても、モデル、メモリ、外部チャネル、リモートツールは利用できます。ローカルシェル、ファイル、ワークスペース、プロジェクト、Git、ビルド、テストが必要な場合のみプロファイルを選択してください。",
-    "shellRuntimeRequiredTitle": "管理対象ランタイムが必要です",
-    "shellRuntimeRequiredDescription": "<runtimeLink>管理対象ランタイムを追加</runtimeLink>すると、シェル設定を変更できます。",
     "scheduledTasks": {
       "title": "スケジュールタスク",
       "description": "このセッションの単発実行と繰り返し実行を管理します。",

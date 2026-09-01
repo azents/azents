@@ -1574,14 +1574,12 @@ def _runtime_agent(
     *,
     state: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
     version: int = 1,
-    shell_enabled: bool = True,
 ) -> SimpleNamespace:
     """Create Runtime capability fields used by Worker resolution tests."""
     return SimpleNamespace(
         memory_enabled=True,
         runtime_capability=state,
         runtime_capability_version=version,
-        shell_enabled=shell_enabled,
     )
 
 
@@ -1594,7 +1592,6 @@ async def test_idle_continuation_projects_runtime_tools_from_capability_snapshot
         agent=_runtime_agent(
             state=AgentRuntimeCapability.MANAGED,
             version=7,
-            shell_enabled=True,
         )
     )
     captured: list[RuntimeCapabilityResolver] = []
@@ -2313,7 +2310,6 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         agent=_runtime_agent(
             state=AgentRuntimeCapability.MANAGED,
             version=11,
-            shell_enabled=True,
         ),
     )
     recovered_snapshots: list[AgentModelSelection] = []

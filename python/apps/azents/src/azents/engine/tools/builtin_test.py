@@ -806,7 +806,6 @@ class _FakeRunnerOperations:
 _MANAGED_RUNTIME_CAPABILITY_RESOLVER = RuntimeCapabilityResolver.from_agent(
     state=AgentRuntimeCapability.MANAGED,
     version=1,
-    shell_enabled=True,
 )
 
 
@@ -1155,20 +1154,19 @@ class TestRuntimeToolkitUpdateContext:
     """RuntimeToolkit.update_context() unit tests."""
 
     @pytest.mark.asyncio
-    async def test_shell_disabled_runtime_toolkit_is_not_projected(self) -> None:
-        """A managed shell-disabled Agent cannot project Runtime tools."""
+    async def test_managed_runtime_toolkit_is_projected(self) -> None:
+        """A managed Agent projects Runtime tools."""
         toolkit = _make_toolkit(
             runtime_capability_resolver=RuntimeCapabilityResolver.from_agent(
                 state=AgentRuntimeCapability.MANAGED,
                 version=1,
-                shell_enabled=False,
             )
         )
 
         state = await toolkit.update_context(_make_context())
 
-        assert state.status.value == "disabled"
-        assert state.tools == []
+        assert state.status.value == "enabled"
+        assert state.tools
 
     @pytest.mark.asyncio
     async def test_missing_capability_context_disables_runtime_toolkit(self) -> None:
@@ -1238,13 +1236,11 @@ class TestRuntimeToolkitUpdateContext:
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
-                shell_enabled=True,
             )
 
         resolver = RuntimeCapabilityResolver.from_agent(
             state=AgentRuntimeCapability.MANAGED,
             version=1,
-            shell_enabled=True,
             current_snapshot_provider=current_snapshot_provider,
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)
@@ -2565,13 +2561,11 @@ class TestProcessToolHandler:
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
-                shell_enabled=True,
             )
 
         resolver = RuntimeCapabilityResolver.from_agent(
             state=AgentRuntimeCapability.MANAGED,
             version=1,
-            shell_enabled=True,
             current_snapshot_provider=current_snapshot_provider,
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)

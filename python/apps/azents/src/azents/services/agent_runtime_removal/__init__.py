@@ -183,7 +183,6 @@ class AgentRuntimeRemovalService:
                     ),
                     capability=AgentRuntimeCapability.REMOVING,
                     runtime_profile_id=None,
-                    shell_enabled=False,
                 )
             )
             if updated_agent is None:
@@ -692,7 +691,6 @@ class AgentRuntimeRemovalService:
             or agent.runtime_profile_selection_version
             != request.expected_runtime_profile_selection_version + 1
             or agent.runtime_profile_id is not None
-            or agent.shell_enabled
         ):
             raise AgentRuntimeRemovalUnavailable(
                 code="runtime_remove_conflict",

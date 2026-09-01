@@ -10,36 +10,41 @@ from azents.core.runtime_capabilities import (
 )
 
 
-def test_managed_shell_disabled_keeps_non_shell_capabilities() -> None:
-    """Managed shell-disabled Agents are not equivalent to Runtime-free Agents."""
+def test_managed_runtime_grants_all_runtime_capabilities() -> None:
+    """Managed Agents receive every server-declared Runtime capability."""
     managed = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.MANAGED,
         version=3,
-        shell_enabled=False,
     )
+
+    assert managed.granted_capabilities() == frozenset(RuntimeCapability)
+
+
+def test_non_managed_runtime_denies_all_runtime_capabilities() -> None:
+    """Runtime-free and removing Agents receive no Runtime capability."""
     runtime_free = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.NONE,
         version=3,
-        shell_enabled=False,
+    )
+    removing = RuntimeCapabilityResolver.from_agent(
+        state=AgentRuntimeCapability.REMOVING,
+        version=4,
     )
 
-    assert managed.allows(RuntimeCapability.RUNTIME_SETTINGS)
-    assert managed.allows(RuntimeCapability.PROJECTS)
-    assert not managed.allows(RuntimeCapability.PROCESS_EXECUTION)
-    assert not managed.allows(RuntimeCapability.RUNTIME_FILESYSTEM)
-    assert not managed.allows(RuntimeCapability.RUNTIME_CREDENTIALS)
-    assert not runtime_free.allows(RuntimeCapability.RUNTIME_SETTINGS)
+    assert runtime_free.granted_capabilities() == frozenset()
+    assert removing.granted_capabilities() == frozenset()
+    assert not runtime_free.project(tuple(RuntimeCapability))
+    assert not removing.allows(RuntimeCapability.PROCESS_EXECUTION)
 
 
-def test_runtime_tool_bundle_requires_shell_gated_capabilities() -> None:
-    """The Runtime Toolkit bundle is omitted when shell execution is disabled."""
+def test_runtime_tool_bundle_projects_from_managed_runtime() -> None:
+    """The Runtime Toolkit bundle follows managed Runtime authority."""
     resolver = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.MANAGED,
         version=1,
-        shell_enabled=False,
     )
 
-    assert not resolver.project(
+    assert resolver.project(
         (
             RuntimeCapability.WORKSPACE,
             RuntimeCapability.RUNTIME_FILESYSTEM,
@@ -54,12 +59,10 @@ async def test_stale_capability_version_is_rejected() -> None:
     current = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.REMOVING,
         version=4,
-        shell_enabled=False,
     )
     resolver = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.MANAGED,
         version=3,
-        shell_enabled=True,
         current_snapshot_provider=lambda: _current_snapshot(current),
     )
 
@@ -75,12 +78,10 @@ async def test_current_snapshot_cannot_expand_captured_authority() -> None:
     current = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.MANAGED,
         version=3,
-        shell_enabled=True,
     )
     resolver = RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.NONE,
         version=3,
-        shell_enabled=False,
         current_snapshot_provider=lambda: _current_snapshot(current),
     )
 

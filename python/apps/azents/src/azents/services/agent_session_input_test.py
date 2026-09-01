@@ -459,7 +459,6 @@ async def _create_agent(
             model_identifier=f"{slug}-id",
         ),
         runtime_capability=runtime_capability,
-        shell_enabled=runtime_capability is AgentRuntimeCapability.MANAGED,
     )
     session.add(agent)
     await session.flush()

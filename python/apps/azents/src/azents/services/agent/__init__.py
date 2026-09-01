@@ -419,7 +419,6 @@ class AgentService:
         async with self.session_manager() as session:
             runtime_profile_id: str | None = None
             runtime_capability = AgentRuntimeCapability.NONE
-            shell_enabled = False
             if create.runtime_profile_id is not None:
                 try:
                     await self.runtime_profile_service.require_available_agent_profile(
@@ -431,7 +430,6 @@ class AgentService:
                     return Failure(RuntimeProfileSelectionInvalid(code=error.code))
                 runtime_profile_id = create.runtime_profile_id
                 runtime_capability = AgentRuntimeCapability.MANAGED
-                shell_enabled = create.shell_enabled
 
             repo_create = AgentCreate(
                 workspace_id=create.workspace_id,
@@ -451,7 +449,6 @@ class AgentService:
                 type=create.type,
                 runtime_profile_id=runtime_profile_id,
                 runtime_capability=runtime_capability,
-                shell_enabled=shell_enabled,
                 terminal_enabled=create.terminal_enabled,
                 memory_enabled=create.memory_enabled,
                 tool_search_enabled=create.tool_search_enabled,
@@ -585,17 +582,6 @@ class AgentService:
             is not None
         ):
             return Failure(RuntimeProfileSelectionInvalid(code=error_code))
-        if (
-            update.get("shell_enabled") is True
-            and (
-                error_code := self._runtime_capability_update_error(
-                    existing.runtime_capability
-                )
-            )
-            is not None
-        ):
-            return Failure(RuntimeProfileSelectionInvalid(code=error_code))
-
         admin_check = await self._check_admin_or_owner(
             agent_id, workspace_user_id, role
         )
@@ -734,7 +720,7 @@ class AgentService:
             repo_update["subagent_settings"] = update["subagent_settings"]
 
         async with self.session_manager() as session:
-            if "runtime_profile_id" in update or "shell_enabled" in update:
+            if "runtime_profile_id" in update:
                 locked = await self.repository.lock_by_id(session, agent_id)
                 if locked is None:
                     return Failure(NotFound(agent_id=agent_id))
@@ -750,18 +736,6 @@ class AgentService:
                     is not None
                 ):
                     return Failure(RuntimeProfileSelectionInvalid(code=error_code))
-                if "shell_enabled" in update:
-                    if (
-                        update["shell_enabled"]
-                        and (
-                            error_code := self._runtime_capability_update_error(
-                                locked.runtime_capability
-                            )
-                        )
-                        is not None
-                    ):
-                        return Failure(RuntimeProfileSelectionInvalid(code=error_code))
-                    repo_update["shell_enabled"] = update["shell_enabled"]
             if "runtime_profile_id" in update:
                 if "expected_runtime_profile_selection_version" not in update:
                     return Failure(RuntimeProfileSelectionVersionRequired())

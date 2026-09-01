@@ -302,7 +302,6 @@ async def _seed_runtime_free_agent(
         model_selection=selection,
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.NONE,
-        shell_enabled=False,
     )
     session.add(agent)
     await session.flush()
@@ -389,7 +388,6 @@ async def test_add_runtime_commits_stopped_revision_and_exact_replay(
     assert added.agent.runtime_capability_version == 2
     assert added.agent.runtime_profile_selection_version == 2
     assert added.agent.runtime_profile_id == fixture.workspace_runtime_profile_id
-    assert added.agent.shell_enabled is False
     assert added.runtime.desired_state is RuntimeDesiredState.STOPPED
     assert added.runtime.desired_generation == 0
     assert added.runtime.last_lifecycle_command is None
@@ -546,7 +544,6 @@ async def _complete_removal(
             runtime_capability_version=3,
             runtime_profile_id=None,
             runtime_profile_selection_version=3,
-            shell_enabled=False,
         )
     )
     return acknowledged
@@ -600,7 +597,6 @@ async def test_add_runtime_rearms_exact_completed_runtime_without_starting(
     assert rearmed.agent.runtime_capability is AgentRuntimeCapability.MANAGED
     assert rearmed.agent.runtime_capability_version == 4
     assert rearmed.agent.runtime_profile_selection_version == 4
-    assert rearmed.agent.shell_enabled is False
 
 
 async def test_add_runtime_rearm_rejects_provider_reassignment(

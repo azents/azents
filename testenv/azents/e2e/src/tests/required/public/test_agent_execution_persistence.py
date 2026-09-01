@@ -419,7 +419,6 @@ def _create_agent(
             lightweight_model_selection=workspace.model_selection,
             type=AgentType.PUBLIC,
             runtime_profile_id=workspace.runtime_profile_id,
-            shell_enabled=True,
             tool_search_enabled=False,
         ),
         _headers=headers,

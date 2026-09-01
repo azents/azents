@@ -241,7 +241,6 @@ async def create_agent(
         enabled=request_body.enabled,
         type=request_body.type,
         runtime_profile_id=request_body.runtime_profile_id,
-        shell_enabled=request_body.shell_enabled,
         terminal_enabled=request_body.terminal_enabled,
         memory_enabled=request_body.memory_enabled,
         tool_search_enabled=request_body.tool_search_enabled,
@@ -391,8 +390,6 @@ def _build_agent_update_input(
         result["expected_runtime_profile_selection_version"] = request_body[
             "expected_runtime_profile_selection_version"
         ]
-    if "shell_enabled" in request_body:
-        result["shell_enabled"] = request_body["shell_enabled"]
     if "terminal_enabled" in request_body:
         result["terminal_enabled"] = request_body["terminal_enabled"]
 
