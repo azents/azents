@@ -151,7 +151,7 @@ RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid 1000 -m -d /home/agent -s /bin/bash agent
 
 ENV HOME=/home/agent
-ENV PATH=/nix/var/state/azents-agent/profiles/profile/bin:/nix/var/nix/profiles/azents-release/bin:/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
+ENV PATH=/nix/var/state/azents-agent/nix/profiles/profile/bin:/nix/var/nix/profiles/azents-release/bin:/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
 WORKDIR /workspace/python/apps/azents-runtime-runner
 
 USER agent

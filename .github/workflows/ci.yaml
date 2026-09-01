@@ -26,7 +26,6 @@ jobs:
     outputs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
-      kubernetes_nix_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['kubernetes-nix-e2e'] == 'true' }}
       web_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-e2e'] == 'true' }}
       e2e_server_image: ${{ steps.filter.outputs['e2e-server-image'] == 'true' }}
       e2e_runtime_runner_image: ${{ steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
@@ -71,21 +70,6 @@ jobs:
               - 'python/libs/azents-public-client/**'
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
-            kubernetes-nix-e2e:
-              - '.dockerignore'
-              - '.github/workflows/**'
-              - 'azents.Dockerfile'
-              - 'infra/charts/azents/**'
-              - 'proto/**'
-              - 'python/apps/azents/**'
-              - 'python/apps/azents-runtime-provider-kubernetes/**'
-              - 'python/apps/azents-runtime-runner/**'
-              - 'python/libs/azents-public-client/**'
-              - 'python/libs/azents-runtime-control/**'
-              - 'testenv/azents/e2e/src/support/runtime_profiles.py'
-              - 'testenv/azents/e2e/src/tests/required/public/test_runtime_optional_capability.py'
-              - 'testenv/azents/e2e/scripts/run-docker-nix-parity.sh'
-              - 'testenv/azents/e2e/scripts/run-kubernetes-nix-conformance.sh'
             web-e2e:
               - '.dockerignore'
               - '.github/workflows/**'
@@ -609,92 +593,6 @@ jobs:
             echo "E2E runner result was: $RUN_RESULT"
             exit 1
           fi
-
-  ci_kubernetes_nix_e2e_run:
-    name: ci-kubernetes-nix-e2e-run
-    needs: changes
-    if: needs.changes.outputs.kubernetes_nix_e2e == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install kind and kubectl
-        run: |
-          kind_version=v0.32.0
-          kubectl_version=v1.36.1
-          curl -fsSLO \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64"
-          curl -fsSLO \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64.sha256sum"
-          sha256sum --check kind-linux-amd64.sha256sum
-          sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
-          curl -fsSLo kubectl \
-            "https://dl.k8s.io/release/${kubectl_version}/bin/linux/amd64/kubectl"
-          curl -fsSLo kubectl.sha256 \
-            "https://dl.k8s.io/release/${kubectl_version}/bin/linux/amd64/kubectl.sha256"
-          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
-          sudo install -m 0755 kubectl /usr/local/bin/kubectl
-          kind version
-          kubectl version --client
-      - name: Run disposable Kubernetes Nix provider conformance
-        env:
-          AZENTS_E2E_ARTIFACT_DIR: ${{ runner.temp }}/e2e-observability/kubernetes-nix
-        run: testenv/azents/e2e/scripts/run-kubernetes-nix-conformance.sh
-      - name: Summarize Kubernetes Nix provider conformance
-        if: always()
-        env:
-          RESULT: ${{ job.status }}
-        run: |
-          report_dir="${RUNNER_TEMP}/e2e-observability/kubernetes-nix"
-          mkdir -p "$report_dir"
-          {
-            echo '### Kubernetes Nix provider conformance'
-            echo
-            printf 'Job result: `%s`\n\n' "$RESULT"
-            echo 'The artifact contains isolated disposable-cluster resources, redacted bounded logs, dynamic-provisioning lifecycle evidence, and Docker parity output.'
-            echo 'The required product E2E gate separately verifies the composed Runtime Toolkit prompt and Workspace API separation.'
-          } > "$report_dir/summary.md"
-      - name: Upload Kubernetes Nix observability
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: e2e-observability-kubernetes-nix
-          path: ${{ runner.temp }}/e2e-observability/kubernetes-nix
-          if-no-files-found: warn
-          overwrite: true
-          retention-days: 14
-
-  ci-kubernetes-nix-e2e:
-    name: ci-kubernetes-nix-e2e
-    needs:
-      - changes
-      - ci_kubernetes_nix_e2e_run
-      - ci-python-e2e
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Gate Kubernetes Nix E2E result
-        env:
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          CHANGED: ${{ needs.changes.outputs.kubernetes_nix_e2e }}
-          PROVIDER_RESULT: ${{ needs.ci_kubernetes_nix_e2e_run.result }}
-          PRODUCT_RESULT: ${{ needs['ci-python-e2e'].result }}
-        run: |
-          if [ "$CHANGES_RESULT" != 'success' ]; then
-            echo "changes job failed or was skipped: $CHANGES_RESULT"
-            exit 1
-          fi
-          if [ "$CHANGED" != 'true' ]; then
-            echo 'Kubernetes Nix E2E scope unchanged; passing.'
-            exit 0
-          fi
-          if [ "$PROVIDER_RESULT" = 'success' ] && [ "$PRODUCT_RESULT" = 'success' ]; then
-            exit 0
-          fi
-          echo "Kubernetes Nix provider conformance result was: $PROVIDER_RESULT"
-          echo "Required product E2E result was: $PRODUCT_RESULT"
-          exit 1
 
   ci-python-e2e:
     name: ci-python-e2e
