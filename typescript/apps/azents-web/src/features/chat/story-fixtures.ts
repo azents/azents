@@ -184,6 +184,19 @@ export const pendingFiles: PendingFile[] = [
   },
 ];
 
+export const longUploadErrorFile: PendingFile = {
+  id: "error-large-video",
+  file: createFile(
+    "IMG_6601-conference-recording-original-version.mov",
+    "video/quicktime",
+    "video-bytes",
+  ),
+  status: "error",
+  errorReason: "fileTooLarge",
+  errorDetail: "File size exceeds the 20 MB limit.",
+  errorRetryable: false,
+};
+
 export const markdownSample = `# Agent result
 
 The run finished with **three** notable outcomes:

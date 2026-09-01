@@ -15,8 +15,8 @@ import {
   Loader,
   Paper,
   rem,
+  Stack,
   Text,
-  Tooltip,
 } from "@mantine/core";
 import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -206,7 +206,7 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
           pf.status === "error"
             ? getErrorReasonLabel(pf.errorReason ?? null, t)
             : null;
-        const errorTooltip = pf.errorDetail
+        const errorMessage = pf.errorDetail
           ? `${errorReason ?? statusLabels[pf.status]}: ${pf.errorDetail}`
           : errorReason;
 
@@ -218,9 +218,10 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
             shadow="xs"
             style={{
               display: "flex",
-              alignItems: "center",
+              alignItems: pf.status === "error" ? "flex-start" : "center",
               gap: "var(--mantine-spacing-xs)",
-              width: rem(200),
+              width:
+                pf.status === "error" ? `min(100%, ${rem(320)})` : rem(200),
               flex: "0 0 auto",
             }}
           >
@@ -233,40 +234,79 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
               </Box>
             )}
 
-            {/* filetext + status */}
+            {/* file name + status */}
             <Box style={{ flex: 1, minWidth: 0 }}>
-              <Text size="xs" truncate>
-                {pf.file.name}
-              </Text>
-              <Group gap={rem(4)} wrap="nowrap">
-                {pf.status === "uploading" && <Loader size={10} />}
-                <Badge
-                  size="xs"
-                  variant="light"
-                  color={getStatusColor(pf.status)}
-                >
-                  {statusLabels[pf.status]}
-                </Badge>
-                {errorReason ? (
-                  <Tooltip label={errorTooltip} withArrow>
-                    <Text size="xs" c="red" truncate maw={rem(110)}>
-                      {errorReason}
+              {pf.status === "error" ? (
+                <Stack gap={rem(4)}>
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <Text
+                      size="xs"
+                      style={{ minWidth: 0, overflowWrap: "anywhere" }}
+                    >
+                      {pf.file.name}
                     </Text>
-                  </Tooltip>
-                ) : null}
-              </Group>
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="sm"
+                      onClick={() => onRemove(pf.id)}
+                      aria-label={t("removeFile")}
+                      style={{ flexShrink: 0 }}
+                    >
+                      <IconX size={14} />
+                    </ActionIcon>
+                  </Group>
+                  <Box
+                    px="xs"
+                    py={rem(6)}
+                    style={{
+                      borderRadius: "var(--mantine-radius-sm)",
+                      background: "var(--mantine-color-red-light)",
+                    }}
+                  >
+                    <Text size="xs" fw={700} c="red">
+                      {statusLabels.error}
+                    </Text>
+                    {errorMessage ? (
+                      <Text
+                        size="xs"
+                        c="red"
+                        style={{ overflowWrap: "anywhere" }}
+                      >
+                        {errorMessage}
+                      </Text>
+                    ) : null}
+                  </Box>
+                </Stack>
+              ) : (
+                <>
+                  <Text size="xs" truncate>
+                    {pf.file.name}
+                  </Text>
+                  <Group gap={rem(4)} wrap="nowrap">
+                    {pf.status === "uploading" && <Loader size={10} />}
+                    <Badge
+                      size="xs"
+                      variant="light"
+                      color={getStatusColor(pf.status)}
+                    >
+                      {statusLabels[pf.status]}
+                    </Badge>
+                  </Group>
+                </>
+              )}
             </Box>
-
-            {/* remove button */}
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              onClick={() => onRemove(pf.id)}
-              aria-label={t("removeFile")}
-            >
-              <IconX size={14} />
-            </ActionIcon>
+            {pf.status !== "error" ? (
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() => onRemove(pf.id)}
+                aria-label={t("removeFile")}
+              >
+                <IconX size={14} />
+              </ActionIcon>
+            ) : null}
           </Paper>
         );
       })}

@@ -1,7 +1,7 @@
 import { rem } from "@mantine/core";
 import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { pendingFiles } from "../story-fixtures";
+import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type { InputActionDefinition, TodoStateSnapshot } from "../types";
@@ -337,6 +337,28 @@ export const WithPendingFiles = {
     ...baseArgs,
     pendingFiles,
   },
+} satisfies Story;
+
+export const WithLongUploadError = {
+  args: {
+    ...baseArgs,
+    pendingFiles: [longUploadErrorFile],
+  },
+} satisfies Story;
+
+export const MobileWithLongUploadError = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    pendingFiles: [longUploadErrorFile],
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
 } satisfies Story;
 
 export const WaitingForResponse = {
