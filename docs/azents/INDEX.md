@@ -421,6 +421,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent-Team Home Historical Requirements Reconstruction](requirements/team-260421-team-home-2026.md) | team-260421 | 2026-04-21 | 2026-04-21 |
 | [Remove Workspace Team Concept Historical Requirements Reconstruction](requirements/team-260622-team-concept.md) | team-260622 | 2026-06-22 | - |
 | [Correlate Terminal Run Events by Run ID Historical Requirements Reconstruction](requirements/terminal-260712-terminal-events.md) | terminal-260712 | 2026-07-12 | - |
+| [Interactive Runtime Terminal Requirements](requirements/terminal-260901-interactive-runtime-terminal.md) | terminal-260901 | 2026-09-01 | - |
 | [Split testenv Setup Scenarios and Inject INDEX — Discussion Record Historical Requirements Reconstruction](requirements/testenv-260411-testenv-setup-scenarios.md) | testenv-260411 | 2026-04-11 | - |
 | [testenv Recipes Structure Historical Requirements Reconstruction](requirements/testenv-260412-testenv-recipes.md) | testenv-260412 | 2026-04-12 | 2026-04-12 |
 | [testenv Framework Redesign — Discussion Record Historical Requirements Reconstruction](requirements/testenv-260414-testenv-runner-redesign.md) | testenv-260414 | 2026-04-14 | 2026-04-14 |
@@ -830,6 +831,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent-Team Home Historical Decision Reconstruction](adr/team-260421-team-home-2026.md)
 - [Remove Workspace Team Concept](adr/team-260622-team-concept.md)
 - [Correlate Terminal Run Events by Run ID](adr/terminal-260712-terminal-events.md)
+- [Interactive Runtime Terminal](adr/terminal-260901-interactive-runtime-terminal.md)
 - [Split testenv Setup Scenarios and Inject INDEX — Discussion Record](adr/testenv-260411-testenv-setup-scenarios.md)
 - [testenv Recipes Structure Historical Decision Reconstruction](adr/testenv-260412-testenv-recipes.md)
 - [testenv Framework Redesign — Discussion Record](adr/testenv-260414-testenv-runner-redesign.md)

@@ -15,6 +15,7 @@ from azents_runtime_control.grpc_runner_client import (
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_runner_control_pb2,
+    runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import RunnerStateReport
@@ -975,6 +976,94 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     assert replies[0].event.event_type is RuntimeReplyEventType.PROCESS_OUTPUT
     assert replies[0].event.payload["process_id"] == "proc_123"
     assert replies[0].event.payload["text"] == "Serving HTTP"
+    await _close_stream(stream)
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_relays_typed_terminal_metadata_intents() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=iter(("open-1", "terminate-1")).__next__,
+    )
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    register = _register_message()
+    register.register.capabilities.append("terminal.v1")
+    await inbound.put(register)
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    runner_generation = accepted.register_accepted.generation
+    idle_deadline = _now() + timedelta(minutes=30)
+    maximum_deadline = _now() + timedelta(hours=8)
+    stream_deadline = _now() + timedelta(minutes=2)
+
+    open_result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner_generation,
+            operation_type="terminal.open.v1",
+            owner_session_id="session-1",
+            payload={
+                "terminal_id": "terminal-1",
+                "working_directory": "/workspace/session",
+                "columns": 120,
+                "rows": 40,
+                "idle_deadline_at": idle_deadline.isoformat(),
+                "maximum_deadline_at": maximum_deadline.isoformat(),
+                "data_stream_grace_deadline_at": stream_deadline.isoformat(),
+                "stream_nonce": "nonce-1",
+                "initial_stream_generation": 1,
+            },
+            deadline_at=stream_deadline,
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(open_result, RuntimeDispatchResult)
+    open_command = await anext(stream)
+
+    assert open_command.WhichOneof("payload") == "terminal_open_intent"
+    assert open_command.terminal_open_intent.identity.terminal_id == "terminal-1"
+    assert open_command.terminal_open_intent.identity.runtime_id == "runtime-1"
+    assert (
+        open_command.terminal_open_intent.identity.runner_generation
+        == runner_generation
+    )
+    assert open_command.terminal_open_intent.owner_session_id == "session-1"
+    assert open_command.terminal_open_intent.working_directory == "/workspace/session"
+    assert open_command.terminal_open_intent.columns == 120
+    assert open_command.terminal_open_intent.rows == 40
+    assert open_command.terminal_open_intent.stream_nonce == "nonce-1"
+    assert open_command.terminal_open_intent.initial_stream_generation == 1
+
+    terminate_result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner_generation,
+            operation_type="terminal.terminate.v1",
+            owner_session_id="session-1",
+            payload={
+                "terminal_id": "terminal-1",
+                "reason": "runtime_invalidated",
+            },
+            deadline_at=_now() + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(terminate_result, RuntimeDispatchResult)
+    terminate_command = await anext(stream)
+
+    assert terminate_command.WhichOneof("payload") == "terminal_terminate_intent"
+    assert (
+        terminate_command.terminal_terminate_intent.identity.terminal_id == "terminal-1"
+    )
+    assert (
+        terminate_command.terminal_terminate_intent.reason
+        == runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_RUNTIME_INVALIDATED
+    )
     await _close_stream(stream)
 
 

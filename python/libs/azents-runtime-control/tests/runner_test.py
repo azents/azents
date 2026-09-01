@@ -24,6 +24,10 @@ from azents_runtime_control.runner import (
     RuntimeRunnerOperations,
     RuntimeRunnerState,
 )
+from azents_runtime_control.runner_terminal import (
+    RunnerTerminalOpenIntent,
+    RunnerTerminalTerminateIntent,
+)
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferIntent,
@@ -61,6 +65,12 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.transfer_cancel_handler: (
             Callable[[RunnerTransferCancel], Awaitable[None]] | None
         ) = None
+        self.terminal_open_intent_handler: (
+            Callable[[RunnerTerminalOpenIntent], Awaitable[None]] | None
+        ) = None
+        self.terminal_terminate_intent_handler: (
+            Callable[[RunnerTerminalTerminateIntent], Awaitable[None]] | None
+        ) = None
         self.heartbeat_runtime_configuration: RuntimeConfigurationEvidence | None = None
         self.transfer_results: list[RunnerTransferResult] = []
         self.system_metrics_reports: list[tuple[RunnerSystemMetricsReport, int]] = []
@@ -92,6 +102,20 @@ class FakeRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Record the direct transfer cancellation handler."""
         self.transfer_cancel_handler = handler
+
+    def set_terminal_open_intent_handler(
+        self,
+        handler: Callable[[RunnerTerminalOpenIntent], Awaitable[None]],
+    ) -> None:
+        """Record the direct Terminal admission handler."""
+        self.terminal_open_intent_handler = handler
+
+    def set_terminal_terminate_intent_handler(
+        self,
+        handler: Callable[[RunnerTerminalTerminateIntent], Awaitable[None]],
+    ) -> None:
+        """Record the direct Terminal termination handler."""
+        self.terminal_terminate_intent_handler = handler
 
     async def register_runner(
         self,

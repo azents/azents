@@ -12,6 +12,7 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 import builtins as _builtins
 from . import runtime_configuration_pb2 as _runtime_configuration_pb2
+from . import runtime_runner_terminal_pb2 as _runtime_runner_terminal_pb2
 from . import runtime_runner_transfer_pb2 as _runtime_runner_transfer_pb2
 import sys
 import typing as _typing
@@ -302,6 +303,8 @@ class RunnerControlMessage(_message.Message):
     OPERATION_CANCEL_FIELD_NUMBER: _builtins.int
     TRANSFER_INTENT_FIELD_NUMBER: _builtins.int
     TRANSFER_CANCEL_FIELD_NUMBER: _builtins.int
+    TERMINAL_OPEN_INTENT_FIELD_NUMBER: _builtins.int
+    TERMINAL_TERMINATE_INTENT_FIELD_NUMBER: _builtins.int
     ERROR_FIELD_NUMBER: _builtins.int
     request_id: _builtins.str
     @_builtins.property
@@ -319,6 +322,10 @@ class RunnerControlMessage(_message.Message):
     @_builtins.property
     def transfer_cancel(self) -> Global___RunnerTransferCancel: ...
     @_builtins.property
+    def terminal_open_intent(self) -> Global___RunnerTerminalOpenIntent: ...
+    @_builtins.property
+    def terminal_terminate_intent(self) -> Global___RunnerTerminalTerminateIntent: ...
+    @_builtins.property
     def error(self) -> Global___RunnerError: ...
     def __init__(
         self,
@@ -331,6 +338,8 @@ class RunnerControlMessage(_message.Message):
         operation_cancel: Global___RunnerOperationCancel | None = ...,
         transfer_intent: Global___RunnerTransferIntent | None = ...,
         transfer_cancel: Global___RunnerTransferCancel | None = ...,
+        terminal_open_intent: Global___RunnerTerminalOpenIntent | None = ...,
+        terminal_terminate_intent: Global___RunnerTerminalTerminateIntent | None = ...,
         error: Global___RunnerError | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -348,6 +357,10 @@ class RunnerControlMessage(_message.Message):
         b"payload",
         "register_accepted",
         b"register_accepted",
+        "terminal_open_intent",
+        b"terminal_open_intent",
+        "terminal_terminate_intent",
+        b"terminal_terminate_intent",
         "transfer_cancel",
         b"transfer_cancel",
         "transfer_intent",
@@ -371,6 +384,10 @@ class RunnerControlMessage(_message.Message):
         b"register_accepted",
         "request_id",
         b"request_id",
+        "terminal_open_intent",
+        b"terminal_open_intent",
+        "terminal_terminate_intent",
+        b"terminal_terminate_intent",
         "transfer_cancel",
         b"transfer_cancel",
         "transfer_intent",
@@ -385,6 +402,8 @@ class RunnerControlMessage(_message.Message):
         "operation_cancel",
         "transfer_intent",
         "transfer_cancel",
+        "terminal_open_intent",
+        "terminal_terminate_intent",
         "error",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
@@ -831,6 +850,111 @@ class RunnerTransferCancel(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RunnerTransferCancel: _TypeAlias = RunnerTransferCancel
+
+@_typing.final
+class RunnerTerminalOpenIntent(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    OWNER_SESSION_ID_FIELD_NUMBER: _builtins.int
+    WORKING_DIRECTORY_FIELD_NUMBER: _builtins.int
+    COLUMNS_FIELD_NUMBER: _builtins.int
+    ROWS_FIELD_NUMBER: _builtins.int
+    IDLE_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    MAXIMUM_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    DATA_STREAM_GRACE_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    STREAM_NONCE_FIELD_NUMBER: _builtins.int
+    INITIAL_STREAM_GENERATION_FIELD_NUMBER: _builtins.int
+    owner_session_id: _builtins.str
+    working_directory: _builtins.str
+    columns: _builtins.int
+    rows: _builtins.int
+    stream_nonce: _builtins.str
+    initial_stream_generation: _builtins.int
+    @_builtins.property
+    def identity(self) -> _runtime_runner_terminal_pb2.TerminalIdentity: ...
+    @_builtins.property
+    def idle_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def maximum_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def data_stream_grace_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        identity: _runtime_runner_terminal_pb2.TerminalIdentity | None = ...,
+        owner_session_id: _builtins.str = ...,
+        working_directory: _builtins.str = ...,
+        columns: _builtins.int = ...,
+        rows: _builtins.int = ...,
+        idle_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        maximum_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        data_stream_grace_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        stream_nonce: _builtins.str = ...,
+        initial_stream_generation: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "data_stream_grace_deadline_at",
+        b"data_stream_grace_deadline_at",
+        "identity",
+        b"identity",
+        "idle_deadline_at",
+        b"idle_deadline_at",
+        "maximum_deadline_at",
+        b"maximum_deadline_at",
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "columns",
+        b"columns",
+        "data_stream_grace_deadline_at",
+        b"data_stream_grace_deadline_at",
+        "identity",
+        b"identity",
+        "idle_deadline_at",
+        b"idle_deadline_at",
+        "initial_stream_generation",
+        b"initial_stream_generation",
+        "maximum_deadline_at",
+        b"maximum_deadline_at",
+        "owner_session_id",
+        b"owner_session_id",
+        "rows",
+        b"rows",
+        "stream_nonce",
+        b"stream_nonce",
+        "working_directory",
+        b"working_directory",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerTerminalOpenIntent: _TypeAlias = RunnerTerminalOpenIntent
+
+@_typing.final
+class RunnerTerminalTerminateIntent(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    REASON_FIELD_NUMBER: _builtins.int
+    reason: _runtime_runner_terminal_pb2.TerminalTerminationReason.ValueType
+    @_builtins.property
+    def identity(self) -> _runtime_runner_terminal_pb2.TerminalIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: _runtime_runner_terminal_pb2.TerminalIdentity | None = ...,
+        reason: _runtime_runner_terminal_pb2.TerminalTerminationReason.ValueType = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "identity", b"identity", "reason", b"reason"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerTerminalTerminateIntent: _TypeAlias = RunnerTerminalTerminateIntent
 
 @_typing.final
 class RunnerTransferResult(_message.Message):

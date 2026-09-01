@@ -17,6 +17,8 @@ from azents_runtime_control.grpc_runner_client import (
     runner_runtime_configuration_evidence_to_message,
     runner_state_report_from_message,
     runner_system_metrics_from_message,
+    runner_terminal_open_intent_to_message,
+    runner_terminal_terminate_intent_to_message,
     runner_transfer_result_from_message,
 )
 from azents_runtime_control.proto import (
@@ -26,6 +28,13 @@ from azents_runtime_control.proto import (
 )
 from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runner_terminal import (
+    RUNNER_TERMINAL_CAPABILITY,
+    RunnerTerminalIdentity,
+    RunnerTerminalOpenIntent,
+    RunnerTerminalTerminateIntent,
+    RunnerTerminalTerminationReason,
+)
 from azents_runtime_control.runner_transfer import RunnerTransferDirection
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
@@ -68,6 +77,8 @@ from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResu
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
+_TERMINAL_OPEN_OPERATION_TYPE = "terminal.open.v1"
+_TERMINAL_TERMINATE_OPERATION_TYPE = "terminal.terminate.v1"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -663,6 +674,57 @@ class RuntimeRunnerControlGrpcServicer(
                     )
                 )
                 continue
+            if envelope.operation_type == _TERMINAL_OPEN_OPERATION_TYPE:
+                if not await self._runner_terminal_capable(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                ):
+                    _LOGGER.warning(
+                        "Runtime Runner Terminal intent rejected",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": envelope.request_id,
+                            "reason": "terminal_capability_missing",
+                        },
+                    )
+                    await self._control_protocol.ack_claimed_request(envelope)
+                    continue
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            terminal_open_intent=(
+                                runner_terminal_open_intent_to_message(
+                                    _runner_terminal_open_intent(envelope)
+                                )
+                            ),
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
+            if envelope.operation_type == _TERMINAL_TERMINATE_OPERATION_TYPE:
+                if not await self._runner_terminal_capable(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                ):
+                    await self._control_protocol.ack_claimed_request(envelope)
+                    continue
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            terminal_terminate_intent=(
+                                runner_terminal_terminate_intent_to_message(
+                                    _runner_terminal_terminate_intent(envelope)
+                                )
+                            ),
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
             if _deadline_expired(envelope, datetime.now(UTC)):
                 await self._expire_runner_operation(
                     envelope,
@@ -688,6 +750,24 @@ class RuntimeRunnerControlGrpcServicer(
                     ack_envelope=envelope,
                 )
             )
+
+    async def _runner_terminal_capable(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+    ) -> bool:
+        connection = await self._coordination_store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=runtime_id,
+        )
+        if connection is None or connection.generation != generation:
+            return False
+        capabilities = connection.metadata.get("capabilities")
+        return (
+            isinstance(capabilities, list)
+            and RUNNER_TERMINAL_CAPABILITY in capabilities
+        )
 
     async def _expire_runner_operation(
         self,
@@ -1321,6 +1401,108 @@ def _str_list_payload(payload: dict[str, JsonValue], key: str) -> list[str]:
 
 def _deadline_expired(envelope: RuntimeRequestEnvelope, now: datetime) -> bool:
     return envelope.deadline_at is not None and envelope.deadline_at <= now
+
+
+def _runner_terminal_open_intent(
+    envelope: RuntimeRequestEnvelope,
+) -> RunnerTerminalOpenIntent:
+    payload = _terminal_payload(
+        envelope,
+        required={
+            "terminal_id",
+            "working_directory",
+            "columns",
+            "rows",
+            "idle_deadline_at",
+            "maximum_deadline_at",
+            "data_stream_grace_deadline_at",
+            "stream_nonce",
+            "initial_stream_generation",
+        },
+    )
+    owner_session_id = envelope.payload.get("owner_session_id")
+    if not isinstance(owner_session_id, str):
+        raise ValueError("Terminal owner_session_id is required")
+    return RunnerTerminalOpenIntent(
+        identity=RunnerTerminalIdentity(
+            terminal_id=_required_str(payload, "terminal_id"),
+            runtime_id=envelope.runtime_id,
+            runner_generation=envelope.generation,
+        ),
+        owner_session_id=owner_session_id,
+        working_directory=_required_str(payload, "working_directory"),
+        columns=_required_int(payload, "columns"),
+        rows=_required_int(payload, "rows"),
+        idle_deadline_at=_required_datetime(payload, "idle_deadline_at"),
+        maximum_deadline_at=_required_datetime(payload, "maximum_deadline_at"),
+        data_stream_grace_deadline_at=_required_datetime(
+            payload,
+            "data_stream_grace_deadline_at",
+        ),
+        stream_nonce=_required_str(payload, "stream_nonce"),
+        initial_stream_generation=_required_int(
+            payload,
+            "initial_stream_generation",
+        ),
+    )
+
+
+def _runner_terminal_terminate_intent(
+    envelope: RuntimeRequestEnvelope,
+) -> RunnerTerminalTerminateIntent:
+    payload = _terminal_payload(
+        envelope,
+        required={"terminal_id", "reason"},
+    )
+    return RunnerTerminalTerminateIntent(
+        identity=RunnerTerminalIdentity(
+            terminal_id=_required_str(payload, "terminal_id"),
+            runtime_id=envelope.runtime_id,
+            runner_generation=envelope.generation,
+        ),
+        reason=RunnerTerminalTerminationReason(_required_str(payload, "reason")),
+    )
+
+
+def _terminal_payload(
+    envelope: RuntimeRequestEnvelope,
+    *,
+    required: set[str],
+) -> dict[str, JsonValue]:
+    payload = envelope.payload.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Terminal intent payload must be an object")
+    if set(payload) != required:
+        raise ValueError("Terminal intent payload fields are invalid")
+    return payload
+
+
+def _required_str(payload: dict[str, JsonValue], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str):
+        raise ValueError(f"Terminal intent {key} must be a string")
+    return value
+
+
+def _required_int(payload: dict[str, JsonValue], key: str) -> int:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Terminal intent {key} must be an integer")
+    return value
+
+
+def _required_datetime(
+    payload: dict[str, JsonValue],
+    key: str,
+) -> datetime:
+    value = _required_str(payload, key)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"Terminal intent {key} must be ISO 8601") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"Terminal intent {key} must be timezone-aware")
+    return parsed
 
 
 def _validate_transfer_result_lookup(
