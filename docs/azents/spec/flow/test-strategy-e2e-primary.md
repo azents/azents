@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-31
-spec_version: 41
+last_verified_at: 2026-09-01
+spec_version: 42
 ---
 
 # E2E Primary Test Strategy
@@ -201,6 +201,13 @@ Always-on required CI does not depend on external credentials.
   `serve_forever` polling interval so `shutdown()` observes termination promptly.
   Tests still complete both `shutdown()` and thread `join()` before releasing the
   fixture; elapsed delay is not used as the success condition.
+- Subagent required journeys reuse one immutable Workspace, model integration, and
+  Runtime Profile. Five non-barrier journeys share one max-two Agent Runtime, while
+  mailbox, timeout, interrupt, and active-overflow journeys share one max-three
+  Runtime-hook Agent. Every journey retains an isolated root Session, and both Agent
+  groups retain one team-primary journey. Barrier state is reset around every
+  barrier-backed journey. The interrupted-child scenario blocks on that observable
+  barrier instead of a wall-clock sleep.
 - Required lanes reuse the preceding immutable snapshot for Server, Runtime Runner,
   and Docker Runtime Provider images whose complete build inputs are unchanged.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and
@@ -348,6 +355,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-01** (spec_version 42) — Reused compatible Subagent E2E Workspace and
+  Agent Runtime setup across isolated journey Sessions, and replaced the interrupted
+  child wall-clock sleep with the existing explicit Runtime-hook barrier.
 - **2026-08-30** (spec_version 40) — Added bounded compatible-ancestor fallback
   for unchanged required E2E images when an exact predecessor snapshot is
   unavailable, while preserving direct successes, immutable Git-tree validation,

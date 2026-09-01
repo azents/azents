@@ -2,7 +2,7 @@
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import azentsadminclient
@@ -42,6 +42,7 @@ from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
+from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
     authenticate_user,
     decode_docker_exec_output,
@@ -127,6 +128,19 @@ class _Workspace:
     handle: str
     model_selection: AgentModelSelectionInput
     runtime_profile_id: str
+
+
+@dataclass(frozen=True)
+class _SharedSubagentSetup:
+    """Immutable setup shared by isolated Subagent journey Sessions."""
+
+    public_api_client: azentspublicclient.ApiClient
+    workspace: _Workspace
+    standard_agent_id: str
+    barrier_agent_id: str
+    barrier_release_file_path: str
+    barrier_log_baseline: int
+    engine_worker_container: DockerContainer
 
 
 @dataclass(frozen=True)
@@ -307,6 +321,27 @@ def _team_primary_session(
     return session_id
 
 
+def _create_root_session(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+) -> str:
+    """Create one isolated root Session for a Subagent journey."""
+    response = requests.post(
+        f"{public_url}/chat/v1/agents/{agent_id}/sessions",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={"existing_project_paths": [], "setup_actions": []},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = _json_object(response)
+    session_id = payload.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(f"Session response did not include id: {payload!r}")
+    return session_id
+
+
 def _run_message(
     *,
     public_url: str,
@@ -482,20 +517,23 @@ def _wait_for_release_barriers(
     container: DockerContainer,
     release_file_path: str,
     *,
+    baseline_count: int,
     expected_count: int,
     timeout: float = 120,
 ) -> None:
     """Wait until the expected child tools are blocked on a release file."""
     deadline = time.monotonic() + timeout
     last_logs = ""
+    target_count = baseline_count + expected_count
     while time.monotonic() < deadline:
         last_logs = _container_logs(container)
-        if last_logs.count(release_file_path) >= expected_count:
+        if last_logs.count(release_file_path) >= target_count:
             return
         time.sleep(0.25)
     raise TimeoutError(
         f"release barriers were not observed: {release_file_path}, "
-        f"expected={expected_count}\n{last_logs[-4000:]}"
+        f"baseline={baseline_count}, expected_new={expected_count}, "
+        f"target={target_count}\n{last_logs[-4000:]}"
     )
 
 
@@ -907,24 +945,112 @@ def _session_ids(
     return ids
 
 
+@pytest.fixture(scope="class")
+def shared_subagent_setup(
+    request: pytest.FixtureRequest,
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    azents_engine_worker_container: DockerContainer,
+) -> _SharedSubagentSetup:
+    """Prepare one Workspace and two compatible Agent Runtimes."""
+    public_api_client = azentspublicclient.ApiClient(
+        configuration=azentspublicclient.Configuration(host=azents_public_server_url)
+    )
+    admin_api_client = azentsadminclient.ApiClient(
+        configuration=azentsadminclient.Configuration(
+            host=azents_admin_server_url,
+            access_token=system_bootstrap_evidence.access_token,
+        )
+    )
+    workspace = _setup_workspace(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    barrier_release_file_path = f"/tmp/azents-subagent-shared-{unique()}"
+    _set_release_file(
+        azents_engine_worker_container,
+        barrier_release_file_path,
+        present=True,
+    )
+    request.addfinalizer(
+        lambda: _set_release_file(
+            azents_engine_worker_container,
+            barrier_release_file_path,
+            present=True,
+        )
+    )
+    return _SharedSubagentSetup(
+        public_api_client=public_api_client,
+        workspace=workspace,
+        standard_agent_id=_create_agent(
+            public_api_client,
+            workspace,
+            max_subagents=2,
+        ),
+        barrier_agent_id=_create_agent(
+            public_api_client,
+            workspace,
+            release_file_path=barrier_release_file_path,
+            max_subagents=3,
+        ),
+        barrier_release_file_path=barrier_release_file_path,
+        barrier_log_baseline=0,
+        engine_worker_container=azents_engine_worker_container,
+    )
+
+
+@pytest.fixture
+def barrier_subagent_setup(
+    request: pytest.FixtureRequest,
+    shared_subagent_setup: _SharedSubagentSetup,
+) -> _SharedSubagentSetup:
+    """Reset the shared barrier Agent before one isolated journey."""
+    setup = shared_subagent_setup
+    AgentV1Api(setup.public_api_client).agent_v1_update_agent(
+        handle=setup.workspace.handle,
+        agent_id=setup.barrier_agent_id,
+        agent_update_request=AgentUpdateRequest(
+            subagent_settings=SubagentSettings(
+                max_subagents=3,
+                max_depth=1,
+            )
+        ),
+        _headers=_headers(setup.workspace.token),
+    )
+    _set_release_file(
+        setup.engine_worker_container,
+        setup.barrier_release_file_path,
+        present=False,
+    )
+    setup = replace(
+        setup,
+        barrier_log_baseline=_container_logs(setup.engine_worker_container).count(
+            setup.barrier_release_file_path
+        ),
+    )
+    request.addfinalizer(
+        lambda: _set_release_file(
+            setup.engine_worker_container,
+            setup.barrier_release_file_path,
+            present=True,
+        )
+    )
+    return setup
+
+
 class TestSubagents:
     """Subagent user-facing behavior E2E coverage."""
 
     def test_spawn_wait_tree_projection_and_child_detail_history(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        shared_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Spawn a child, open child detail history, and observe it via wait."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
+        workspace = shared_subagent_setup.workspace
+        agent_id = shared_subagent_setup.standard_agent_id
         root_session_id = _team_primary_session(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1086,38 +1212,16 @@ class TestSubagents:
 
     def test_targetless_wait_observes_any_child_mailbox_message(
         self,
-        request: pytest.FixtureRequest,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: DockerContainer,
+        barrier_subagent_setup: _SharedSubagentSetup,
         mock_openai_url: str,
     ) -> None:
         """Observe one child message while every descendant remains active."""
         _reset_mock_openai(mock_openai_url)
-        release_file_path = f"/tmp/azents-subagent-mailbox-{unique()}"
-        _set_release_file(
-            azents_engine_worker_container,
-            release_file_path,
-            present=False,
-        )
-        request.addfinalizer(
-            lambda: _set_release_file(
-                azents_engine_worker_container,
-                release_file_path,
-                present=True,
-            )
-        )
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(
-            public_api_client,
-            workspace,
-            release_file_path=release_file_path,
-        )
+        workspace = barrier_subagent_setup.workspace
+        agent_id = barrier_subagent_setup.barrier_agent_id
+        release_file_path = barrier_subagent_setup.barrier_release_file_path
+        azents_engine_worker_container = barrier_subagent_setup.engine_worker_container
         root_session_id = _team_primary_session(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1180,6 +1284,7 @@ class TestSubagents:
         _wait_for_release_barriers(
             azents_engine_worker_container,
             release_file_path,
+            baseline_count=barrier_subagent_setup.barrier_log_baseline,
             expected_count=2,
         )
         wait_event = _wait_for_tool_result_outcome(
@@ -1299,20 +1404,13 @@ class TestSubagents:
 
     def test_targetless_wait_without_descendants_returns_immediately(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        shared_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Return a no-descendants result without creating a child."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
-        root_session_id = _team_primary_session(
+        workspace = shared_subagent_setup.workspace
+        agent_id = shared_subagent_setup.standard_agent_id
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1360,37 +1458,15 @@ class TestSubagents:
 
     def test_targetless_wait_timeout_reports_active_descendant(
         self,
-        request: pytest.FixtureRequest,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: DockerContainer,
+        barrier_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Report a timeout when a zero-duration wait expires."""
-        release_file_path = f"/tmp/azents-subagent-timeout-{unique()}"
-        _set_release_file(
-            azents_engine_worker_container,
-            release_file_path,
-            present=False,
-        )
-        request.addfinalizer(
-            lambda: _set_release_file(
-                azents_engine_worker_container,
-                release_file_path,
-                present=True,
-            )
-        )
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(
-            public_api_client,
-            workspace,
-            release_file_path=release_file_path,
-        )
-        root_session_id = _team_primary_session(
+        workspace = barrier_subagent_setup.workspace
+        agent_id = barrier_subagent_setup.barrier_agent_id
+        release_file_path = barrier_subagent_setup.barrier_release_file_path
+        azents_engine_worker_container = barrier_subagent_setup.engine_worker_container
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1421,6 +1497,7 @@ class TestSubagents:
         _wait_for_release_barriers(
             azents_engine_worker_container,
             release_file_path,
+            baseline_count=barrier_subagent_setup.barrier_log_baseline,
             expected_count=1,
         )
 
@@ -1474,20 +1551,13 @@ class TestSubagents:
 
     def test_interrupt_agent_delivers_stopped_child_result_safely(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        barrier_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Stop an interrupted child and promote its safe terminal result."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
-        root_session_id = _team_primary_session(
+        workspace = barrier_subagent_setup.workspace
+        agent_id = barrier_subagent_setup.barrier_agent_id
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1514,6 +1584,12 @@ class TestSubagents:
             name="interrupt_child",
             expected_status="running",
             expected_unread=False,
+        )
+        _wait_for_release_barriers(
+            barrier_subagent_setup.engine_worker_container,
+            barrier_subagent_setup.barrier_release_file_path,
+            baseline_count=barrier_subagent_setup.barrier_log_baseline,
+            expected_count=1,
         )
 
         _run_message(
@@ -1583,20 +1659,13 @@ class TestSubagents:
 
     def test_failed_child_result_excludes_internal_provider_failure(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        shared_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Promote a failed child result without internal provider text."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
-        root_session_id = _team_primary_session(
+        workspace = shared_subagent_setup.workspace
+        agent_id = shared_subagent_setup.standard_agent_id
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1668,24 +1737,13 @@ class TestSubagents:
 
     def test_bounded_list_contract_and_historical_reuse(
         self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        shared_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Bound inactive history while preserving canonical child reuse."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(
-            public_api_client,
-            workspace,
-            max_subagents=2,
-        )
-        root_session_id = _team_primary_session(
+        workspace = shared_subagent_setup.workspace
+        agent_id = shared_subagent_setup.standard_agent_id
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1868,38 +1926,16 @@ class TestSubagents:
 
     def test_active_overflow_remains_visible_and_blocks_new_activation(
         self,
-        request: pytest.FixtureRequest,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: DockerContainer,
+        barrier_subagent_setup: _SharedSubagentSetup,
     ) -> None:
         """Keep active children visible after a capacity reduction."""
-        release_file_path = f"/tmp/azents-subagent-overflow-{unique()}"
-        _set_release_file(
-            azents_engine_worker_container,
-            release_file_path,
-            present=False,
-        )
-        request.addfinalizer(
-            lambda: _set_release_file(
-                azents_engine_worker_container,
-                release_file_path,
-                present=True,
-            )
-        )
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(
-            public_api_client,
-            workspace,
-            release_file_path=release_file_path,
-            max_subagents=3,
-        )
-        root_session_id = _team_primary_session(
+        public_api_client = barrier_subagent_setup.public_api_client
+        workspace = barrier_subagent_setup.workspace
+        agent_id = barrier_subagent_setup.barrier_agent_id
+        release_file_path = barrier_subagent_setup.barrier_release_file_path
+        azents_engine_worker_container = barrier_subagent_setup.engine_worker_container
+        root_session_id = _create_root_session(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1932,6 +1968,7 @@ class TestSubagents:
         _wait_for_release_barriers(
             azents_engine_worker_container,
             release_file_path,
+            baseline_count=barrier_subagent_setup.barrier_log_baseline,
             expected_count=3,
         )
         _wait_for_session_run_state(
