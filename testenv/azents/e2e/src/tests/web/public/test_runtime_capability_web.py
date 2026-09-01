@@ -570,12 +570,7 @@ def test_runtime_free_add_and_remove_progress(
         handle=workspace.handle,
         agent_id=agent.id,
     )
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
-        )
-    ).click()
-    _click_button(browser_driver, "Start runtime")
+    _click_button(browser_driver, "Start Runtime")
     _wait_for_runtime_ready(
         browser_driver,
         runtime_api=runtime_api,
