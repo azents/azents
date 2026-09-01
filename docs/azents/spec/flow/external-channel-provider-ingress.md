@@ -67,8 +67,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-31
-spec_version: 55
+last_verified_at: 2026-09-01
+spec_version: 56
 ---
 
 # External Channel Provider Ingress
@@ -272,6 +272,15 @@ the high-level client and fenced lease manager.
 Typed `on_disconnect` records a fenced degraded gap. Typed `on_ready` and `on_resumed`
 mark the same current lease active and clear its gap. A stale callback fails the client
 and cannot mutate a newer lease.
+
+Each newly created SDK client has a one-minute continuous readiness deadline that
+starts at initial connection and restarts after a transition from ready to
+disconnected. A ready or resumed lifecycle clears the deadline, so brief transport
+gaps retain the SDK-owned Resume path. If the deadline expires while the SDK task is
+still alive, the manager cancels and discards that client, records a fenced degraded
+gap, releases its lease, and reclaims the still-eligible connection with a fresh
+client. The fresh client does not inherit the prior process-local Resume endpoint or
+session state.
 
 The same current Gateway owner runs one ephemeral typing registry on its existing
 `discord.Client`. A complete lease/App-claim/configuration fence projects exact
@@ -559,6 +568,9 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 56) — Bounded each Discord SDK client's continuous
+  unready interval to one minute, preserving brief Resume recovery while replacing a
+  client that remains pinned to an unavailable Gateway endpoint.
 - **2026-08-29** (spec_version 54) — Made Slack Tracker admission follow the same
   explicit-invocation visibility rule as Discord, removed Slack settings-only
   follow-up controls, and added the independently leased Slack Work presence manager

@@ -62,11 +62,16 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
 _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
+_READINESS_TIMEOUT = datetime.timedelta(seconds=60)
 _EVENT_RETRY_DELAY_SECONDS = 1.0
 
 
 class DiscordGatewayLeaseLost(DiscordGatewayError):
     """The current process no longer owns the authoritative Gateway lease."""
+
+
+class DiscordGatewayReadinessTimeout(DiscordGatewayError):
+    """The current SDK client did not recover readiness within the bounded window."""
 
 
 def get_discord_gateway_client() -> DiscordGatewayRunner:
@@ -235,6 +240,21 @@ class DiscordGatewayManagerService:
                 reason=error.reason,
             )
             lease_released = True
+        except DiscordGatewayReadinessTimeout:
+            logger.warning(
+                "Discord Gateway readiness deadline expired; replacing client",
+                extra={
+                    "external_channel_connection_id": connection_id,
+                    "discord_gateway_readiness_timeout_seconds": (
+                        _READINESS_TIMEOUT.total_seconds()
+                    ),
+                },
+            )
+            await self._record_gap(
+                connection_id=connection_id,
+                lease=lease,
+                reason="gateway_readiness_timeout",
+            )
         except DiscordGatewayError:
             await self._record_gap(
                 connection_id=connection_id,
@@ -259,6 +279,16 @@ class DiscordGatewayManagerService:
         configuration_generation: int,
         shutdown_event: asyncio.Event,
     ) -> None:
+        lifecycle_states: asyncio.Queue[DiscordGatewayLifecycleState] = asyncio.Queue()
+
+        async def handle_lifecycle(state: DiscordGatewayLifecycleState) -> None:
+            await self._handle_gateway_lifecycle(
+                connection_id=connection_id,
+                lease=lease,
+                state=state,
+            )
+            lifecycle_states.put_nowait(state)
+
         connection_task = asyncio.create_task(
             self.gateway_client.run_connection(
                 bot_token=bot_token,
@@ -277,31 +307,39 @@ class DiscordGatewayManagerService:
                     configuration_generation=configuration_generation,
                     event=event,
                 ),
-                handle_lifecycle=lambda state: self._handle_gateway_lifecycle(
-                    connection_id=connection_id,
-                    lease=lease,
-                    state=state,
-                ),
+                handle_lifecycle=handle_lifecycle,
                 load_typing_targets=lambda: self._load_typing_targets(
                     connection_id=connection_id,
                     lease=lease,
                 ),
             )
         )
+        readiness_task = asyncio.create_task(_watch_gateway_readiness(lifecycle_states))
         shutdown_task = asyncio.create_task(shutdown_event.wait())
         try:
             while True:
                 done, _ = await asyncio.wait(
-                    (connection_task, shutdown_task),
+                    (connection_task, readiness_task, shutdown_task),
                     timeout=self._renew_interval().total_seconds(),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if shutdown_task in done:
+                    connection_task.cancel()
+                    await asyncio.gather(connection_task, return_exceptions=True)
+                    return
                 if connection_task in done:
                     connection_task.result()
                     raise DiscordGatewayError(
                         "Discord Gateway client stopped unexpectedly."
                     )
-                if shutdown_task in done or not await self._renew(
+                if readiness_task in done:
+                    connection_task.cancel()
+                    await asyncio.gather(connection_task, return_exceptions=True)
+                    readiness_task.result()
+                    raise AssertionError(
+                        "Discord Gateway readiness task completed without failure."
+                    )
+                if not await self._renew(
                     connection_id=connection_id,
                     lease=lease,
                 ):
@@ -309,8 +347,13 @@ class DiscordGatewayManagerService:
                     await asyncio.gather(connection_task, return_exceptions=True)
                     return
         finally:
+            readiness_task.cancel()
             shutdown_task.cancel()
-            await asyncio.gather(shutdown_task, return_exceptions=True)
+            await asyncio.gather(
+                readiness_task,
+                shutdown_task,
+                return_exceptions=True,
+            )
 
     async def _claim(
         self,
@@ -590,6 +633,33 @@ class DiscordGatewayManagerService:
 
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
+
+
+async def _watch_gateway_readiness(
+    lifecycle_states: asyncio.Queue[DiscordGatewayLifecycleState],
+) -> None:
+    """Expire one SDK client after a bounded continuous unready interval."""
+    loop = asyncio.get_running_loop()
+    timeout_seconds = _READINESS_TIMEOUT.total_seconds()
+    deadline: float | None = loop.time() + timeout_seconds
+    while True:
+        remaining_seconds = (
+            None if deadline is None else max(0.0, deadline - loop.time())
+        )
+        try:
+            state = await asyncio.wait_for(
+                lifecycle_states.get(),
+                timeout=remaining_seconds,
+            )
+        except TimeoutError as error:
+            raise DiscordGatewayReadinessTimeout(
+                "Discord Gateway readiness deadline expired."
+            ) from error
+        if state == "disconnected":
+            if deadline is None:
+                deadline = loop.time() + timeout_seconds
+        else:
+            deadline = None
 
 
 def _log_provider_control_task_failure(
