@@ -463,6 +463,33 @@ run_provider() {
     tee "${TMP_DIR}/evidence/${job_name}.json"
 }
 
+run_terminal_delete_until_acknowledged() {
+  local attempt
+  local job_name
+  local result
+  for attempt in $(seq 1 60); do
+    job_name="phase3-delete-${attempt}"
+    run_provider "${job_name}" delete
+    result="$(tail -n 1 "${TMP_DIR}/evidence/${job_name}.json")"
+    if jq -e '
+      .action == "delete"
+      and .observed_state == "stopped"
+      and .reason == "terminal_resources_absent"
+      and .terminal_delete_acknowledged == true
+    ' <<<"${result}" >/dev/null; then
+      return
+    fi
+    jq -e '
+      .action == "delete"
+      and .observed_state == "stopping"
+      and .reason == "terminal_deletion_in_progress"
+      and .terminal_delete_acknowledged == false
+    ' <<<"${result}" >/dev/null
+  done
+  echo 'Kubernetes Provider did not acknowledge terminal delete' >&2
+  return 1
+}
+
 wait_for_runner() {
   kubectl wait -n "${NAMESPACE}" --for=condition=Ready \
     "pod/${RUNTIME_POD}" --timeout=300s
@@ -660,16 +687,12 @@ fi
 nix_exec \
   nix search --offline nixpkgs#hello '^hello$' >/dev/null 2>&1
 
-run_provider phase3-delete delete
-if kubectl get pod -n "${NAMESPACE}" "${RUNTIME_POD}" >/dev/null 2>&1; then
-  echo 'Runtime Pod remained after terminal delete' >&2
-  exit 1
-fi
-if kubectl get pvc -n "${NAMESPACE}" "${WORKSPACE_PVC}" >/dev/null 2>&1 \
-  || kubectl get pvc -n "${NAMESPACE}" "${NIX_PVC}" >/dev/null 2>&1; then
-  echo 'Runtime PVC remained after terminal delete' >&2
-  exit 1
-fi
+run_terminal_delete_until_acknowledged
+kubectl get pod,pvc,service,secret,configmap,networkpolicy \
+  -n "${NAMESPACE}" \
+  -l "azents/managed-by=azents-runtime-provider-kubernetes,azents/runtime-provider-id=nix-phase3-kubernetes,azents/runtime-id=${RUNTIME_ID}" \
+  -o json |
+  jq -e '.items | length == 0' >/dev/null
 wait_for_pv_deletion "${RESET_WORKSPACE_PV}"
 wait_for_pv_deletion "${RESET_NIX_PV}"
 
