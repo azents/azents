@@ -107,7 +107,7 @@ api_routes:
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
 last_verified_at: 2026-09-01
-spec_version: 156
+spec_version: 157
 ---
 
 # Conversation & Events
@@ -1119,13 +1119,16 @@ compacted head. Failed, cancelled, stopped, and stale-plan attempts append neith
 move the head.
 
 Future model input is selected from `model_input_head_event_id` and sorted by event ID. Auto and manual compaction both
-summarize the full selected model-input transcript into one `compaction_summary` event. While the
+summarize the full supported summary projection of the selected transcript into one
+`compaction_summary` event; External Channel projection includes only invocation-role messages. While the
 provider operation is active, the Run exposes one stable `preparing_context` live operation; retries
 and backoff update the same identity and every terminal boundary removes it. Runtime compaction
 summary hooks may enrich the generated summary before continuity is appended. The summary
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
-user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
-no user messages in the recent turn window. The transcript section uses readable model-visible
+user-message section keeps the last five ordinary user messages or External Channel
+invocations visible even when a long tool-heavy run leaves no user messages in the
+recent turn window. External Channel context messages remain excluded from that
+section. The transcript section uses readable model-visible
 excerpts from the last five completed model turns. Provider-tool call excerpts use the same
 deterministic semantic renderer as cross-native lowering, so input, output, typed references, and
 bounded file/attachment/reference metadata survive compaction without exposing opaque artifacts. Each excerpt is
@@ -1226,6 +1229,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-01** — v157. Included External Channel invocation-role messages in
+  compaction summary input and the mixed-source last-five Recent User Messages
+  section while excluding context-role messages from both.
 - **2026-08-31** — v156. Removed the redundant event model order and made event IDs the single
   transcript order for model input, ranges, forks, cleanup cursors, and public event projections.
 - **2026-08-23** — v155. Centralized the closed TurnAction policy, public

@@ -85,8 +85,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-08-31
-spec_version: 164
+last_verified_at: 2026-09-01
+spec_version: 165
 ---
 
 # Agent Execution Loop
@@ -978,12 +978,15 @@ Compaction is append-only:
 - sequential appends leave gaps in model order so later model-visible system events can be inserted
   without renumbering the whole transcript.
 
-Automatic compaction summarizes the full selected model-input transcript, then runs the
-`on_compaction_summary` hook pipeline against the generated summary before appending continuity. The
+Automatic compaction summarizes the full supported summary projection of the
+selected transcript, with External Channel projection limited to invocation-role
+messages, then runs the `on_compaction_summary` hook pipeline against the generated summary before appending continuity. The
 compaction summary payload then embeds bounded `Recent User Messages` and `Recent Transcript`
-sections. The user-message section contains the last five user messages independent of turn
-boundaries; the transcript section contains readable model-visible excerpts from the last five
-completed model turns of the same compacted transcript. The next model step therefore sees a single
+sections. The user-message section contains the last five ordinary user messages
+or External Channel invocation-role messages independent of turn boundaries;
+External Channel context-role messages are excluded. The transcript section
+contains readable model-visible excerpts from the last five completed model turns
+of the same compacted transcript. The next model step therefore sees a single
 `compaction_summary` head event that contains the durable checkpoint, any hook enrichment, and recent
 continuity context.
 
@@ -1341,6 +1344,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 165) — Included External Channel invocation-role
+  messages in compaction summary input and the mixed-source last-five Recent User
+  Messages section while excluding context-role messages from both.
 - **2026-08-31** (spec_version 164) — Added `request_input`, delivery-confirmed
   awaiting state, same-binding resume fencing, and ready-only External Channel idle
   continuation while retaining awaiting Work in compaction.

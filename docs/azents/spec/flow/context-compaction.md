@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-09-01
-spec_version: 36
+spec_version: 37
 ---
 
 # Context Compaction
@@ -118,11 +118,15 @@ evidence. Complex or multi-stage work preserves the details needed to continue d
 checkpoint, including evidence of completed work and conclusions from resolved questions. Simple
 work remains brief, and task complexity determines checkpoint length.
 
-Auto and manual compaction include the full selected transcript in the summary request. The summary
-prompt asks for durable state from the whole compacted transcript and warns that no raw event should
-be assumed to remain available outside the checkpoint. After the model returns the checkpoint, the
-runtime renders bounded continuity history separately, dispatches compaction summary enrichment hooks,
-and then appends the continuity history to the stored summary content.
+Auto and manual compaction include the full supported summary projection of the
+selected transcript in the summary request. External Channel projection includes
+only invocation-role messages; context-role messages remain available only through
+bounded Recent Transcript continuity. The summary prompt asks for durable state from
+the projected compacted transcript and warns that no raw event should be assumed to
+remain available outside the checkpoint. After the model returns the checkpoint,
+the runtime renders bounded continuity history separately, dispatches compaction
+summary enrichment hooks, and then appends the continuity history to the stored
+summary content.
 
 Previous compaction summaries are rendered as existing checkpoints and treated as the previous state
 to update. Later user direction updates the active objective, completed actions update the execution
@@ -187,10 +191,13 @@ summary payload content. This is not a separate raw tail in the event transcript
 starts at the summary event, and the continuity excerpts are part of that summary event's
 model-visible text.
 
-The `Recent User Messages` section contains the last five real `user_message` events
-from the selected transcript. It is selected independently from recent model-turn boundaries so a long
-tool-heavy request can still surface the user's latest requests even when the recent transcript window
-contains no user messages. Items are numbered without repeating a per-item user-message label.
+The `Recent User Messages` section contains the last five direct user-input events
+from the selected transcript: ordinary `user_message` events and External Channel
+messages whose `prompt_role` is `invocation`. External Channel context messages do
+not enter this section. Selection is independent from recent model-turn boundaries
+so a long tool-heavy request can still surface the user's latest requests even when
+the recent transcript window contains no user messages. Items are numbered without
+repeating a per-item user-message label.
 
 The `Recent Transcript` section uses `turn_marker` events as completed model-turn
 boundaries. It includes events after the marker preceding the last five completed turns. If five or
@@ -227,8 +234,9 @@ the immediate shape of the recent interaction.
 - `model_input_head_event_id` points at the summary event after successful compaction.
 - Future model input is selected and sorted by event ID.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
-- The summary model receives the full selected model-input transcript, not a transcript with a
-  protected tail removed.
+- The summary model receives the full supported summary projection of the selected
+  transcript, without a protected tail; External Channel projection includes only
+  invocation-role messages.
 - Compaction summary hooks may replace only the summary portion; continuity history is appended after
   hook dispatch completes.
 - Todo summary enrichment appends a `Todo Snapshot` section only when Todo state is non-empty.
@@ -237,8 +245,9 @@ the immediate shape of the recent interaction.
   sanitized current started-cycle snapshots in deterministic order. It omits
   admitted and terminalized cycles and does not mutate Toolkit State.
 - The stored summary content includes a bounded `Recent User Messages` section from
-  the last five user messages and a bounded `Recent Transcript` section from the last
-  five completed model turns, using `turn_marker` boundaries.
+  the last five ordinary user messages or External Channel invocations and a bounded
+  `Recent Transcript` section from the last five completed model turns, using
+  `turn_marker` boundaries.
 - Continuity sections are always the last sections in the stored compaction summary content.
 - Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
 - Provider-tool call continuity and token estimates use the same canonical semantic renderer and never parse native artifacts.
@@ -256,12 +265,13 @@ the immediate shape of the recent interaction.
 
 ## External Channel Continuity
 
-External Channel messages participate in model-visible token estimation,
-summary input, and bounded Recent Transcript continuity through their explicit
-source rendering. Continuity retains provider, resource, sender, message kind,
-authorization state, and safe body instead of converting the item to a direct
-Web-user message. Provider credentials, raw envelopes, and arbitrary permalink
-Markdown are never included.
+All External Channel messages participate in model-visible token estimation and
+bounded Recent Transcript continuity through their explicit source rendering.
+Only messages whose `prompt_role` is `invocation` participate in summary-model
+input and the bounded Recent User Messages section. Source rendering retains
+provider, resource, sender, prompt role, and safe body instead of converting the
+item to a direct Web-user message. Provider credentials, raw envelopes, and
+arbitrary permalink Markdown are never included.
 
 The immutable revision projected into a run remains the compaction input even
 when provider-current state later changes. Corrections appear only when a later
@@ -283,6 +293,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 37) — Included External Channel invocation-role
+  messages in compaction summary input and the mixed-source last-five Recent User
+  Messages continuity selection while keeping context-role messages out of both.
 - **2026-08-31** (spec_version 36) — Made event ID the only compaction order and
   replaced logical summary insertion with head-and-tail stale-plan validation.
 - **2026-08-27** (spec_version 35) — Added distinct model default and maximum input

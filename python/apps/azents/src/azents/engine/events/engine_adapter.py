@@ -49,6 +49,9 @@ from azents.engine.events.execution import (
     InputPollResult,
     PreparedModelCall,
 )
+from azents.engine.events.external_channel_rendering import (
+    render_external_channel_message,
+)
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
 from azents.engine.events.filters import (
     EventAttachmentAvailabilityFilter,
@@ -109,6 +112,7 @@ from azents.engine.events.types import (
     CompactionMarkerPayload,
     CompactionSummaryPayload,
     Event,
+    ExternalChannelMessagePayload,
     InputTextPart,
     OutputTextPart,
     ProviderToolCallPayload,
@@ -1471,6 +1475,8 @@ def _render_event_for_summary(event: Event) -> str:
             )
         case ProviderToolCallPayload() as payload:
             return render_provider_tool_semantic(payload)
+        case ExternalChannelMessagePayload(prompt_role="invocation") as payload:
+            return render_external_channel_message(payload)
         case CompactionSummaryPayload(content=content):
             return f"[Existing Checkpoint]: {content}"
         case CompactionMarkerPayload():
