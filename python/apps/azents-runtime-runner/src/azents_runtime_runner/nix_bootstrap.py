@@ -505,7 +505,7 @@ def nix_agent_environment(nix_root: Path) -> Mapping[str, str]:
     profile_root = nix_root / "var" / "nix" / "profiles"
     agent_config = nix_root / "var" / "config" / "azents-agent"
     agent_state = nix_root / "var" / "state" / "azents-agent"
-    agent_profile = agent_state / "nix" / "profiles" / "profile"
+    agent_profile = agent_state / "profiles" / "profile"
     release_profile = profile_root / _PROFILE_NAME
     path = os.environ.get("PATH", "")
     path_parts = (
