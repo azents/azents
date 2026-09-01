@@ -11,9 +11,6 @@ tags: [runtime, package-management, nix, kubernetes, docker, implementation]
 - Requirements: [runtime-260831/REQ](../requirements/runtime-260831-persistent-system-tools.md)
 - Decisions: [runtime-260831/ADR](../adr/runtime-260831-persistent-system-tools.md)
 - Approved Design: [runtime-260831/DESIGN](../design/runtime-260831-persistent-system-tools.md), revision `1`, authority `M1`–`M10`
-- Superseding addon policy Requirements: [nix-260831/REQ](../requirements/nix-260831-user-managed-runtime-tools.md)
-- Superseding addon policy Decisions: [nix-260831/ADR](../adr/nix-260831-user-managed-runtime-tools.md)
-- Approved addon policy Design: [nix-260831/DESIGN](../design/nix-260831-user-managed-runtime-tools.md), revision `1`, authority `M1`–`M5`
 - Current Specs:
   - [Agent Runtime Persistence](../spec/flow/agent-runtime-persistence.md)
   - [Agent Runtime Control](../spec/flow/agent-runtime-control.md)
@@ -24,16 +21,16 @@ tags: [runtime, package-management, nix, kubernetes, docker, implementation]
 
 ## Objective
 
-Ship the approved Nix-based persistent system-tool addon for bundled Kubernetes and
-Docker Runtimes without adding Runtime capability, Profile, database, API, Admin,
-or package-policy management authority.
+Ship the approved Nix-based persistent system-tool contract for bundled Kubernetes
+and Docker Runtimes without adding Runtime capability, Profile, database, API, or
+Admin configuration authority.
 
 ## Delivery Stack
 
 | Phase | Branch | Base | Deliverable | Approved mechanisms |
 | --- | --- | --- | --- | --- |
 | 1 | `feature/nix-runtime-tools-1-providers` | `main` | Approved snapshot docs, Kubernetes Nix PVC lifecycle, Helm deployment settings, Docker durable bind parity, Provider tests | `M4`, `M5`, `M6` |
-| 2 | `feature/nix-runtime-tools-2-runner` | Phase 1 | Release-owned Nix seed/bootstrap, user-managed addon environment, native prompt, focused Runner/Server tests | `runtime-260831/M1`, `M7`, `M8`, `M9`; `nix-260831/M1`–`M5` |
+| 2 | `feature/nix-runtime-tools-2-runner` | Phase 1 | Release-owned Nix seed/bootstrap, Runner environment, native prompt, focused Runner/Server tests | `M1`, `M2`, `M3`, `M7`, `M8`, `M9` |
 | 3 | `feature/nix-runtime-tools-3-validation` | Phase 2 | Kubernetes-focused integration/E2E substrate, Docker parity integration, validation evidence and fixes | `M10` plus validation of `M1`–`M9` |
 | 4 | `feature/nix-runtime-tools-4-specs` | Phase 3 | Living Spec promotion, implemented snapshot dates, plan cleanup | Verified `M1`–`M10` |
 
@@ -62,7 +59,7 @@ All planned PRs use the title prefix `runtime tools [n/4]:`.
 | Area | Required evidence |
 | --- | --- |
 | Runner bootstrap | Empty seed, existing-store reconcile, digest failure, interrupted retry, offline catalog, corrupt-store failure |
-| Nix behavior | Native search/profile-add, conservative release defaults, Agent-overridable native configuration, persistent config/state/profile paths, GC root preservation |
+| Nix behavior | Native search/profile-add, signed substitution, no local builds, persistent state/profile path, GC root preservation |
 | Runtime prompt | Exact 30-word guidance, Runtime-free/shell-disabled absence |
 | Kubernetes Provider | Nix PVC ownership, create/observe/preserve/expand/reset/delete, Pod mount, partial retry, foreign-resource rejection |
 | Docker Provider | Nix host directory ownership, bind, replacement persistence, reset/terminal deletion |
@@ -88,8 +85,7 @@ All planned PRs use the title prefix `runtime tools [n/4]:`.
 - Extend Kubernetes and Docker Runtime resource sets with Nix storage without
   changing Profile or capability authority.
 - Verify no Nix enablement field, capability, database state, API, generated client,
-  package inventory UI, wrapper, daemon, or package-policy control plane is
-  introduced.
+  package inventory UI, or source-build fallback is introduced.
 
 ## Rollout
 
@@ -106,9 +102,7 @@ creation.
 
 ## Blockers
 
-- No product or Design blocker. `nix-260831/ADR-D1` resolves the Phase 2 feasibility
-  finding by defining release settings as Agent-overridable defaults rather than an
-  Azents-enforced package policy.
+- No product or Design blocker.
 - Phase 3 must establish the currently missing Kubernetes Runtime E2E substrate.
 
 ## Plan Cleanup

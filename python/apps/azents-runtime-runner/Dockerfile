@@ -1,19 +1,5 @@
 FROM docker:29.7.2-cli@sha256:000bb62ff495f986c9f5578eb67cc2cb98b91138eda81d7762d5371eb8a497fe AS docker-cli
 
-FROM nixos/nix:2.35.2@sha256:7a007c766426c1877758ddc5cb87a965ac131fc78c582ce0083d922d51ae945c AS nix-seed
-
-ARG NIX_VERSION=2.35.2
-ARG NIXPKGS_REVISION=c5c4a43b0e8056328ec4529f735cabdb8f1942bb
-ARG NIX_SEED_GENERATION=nix-2.35.2-nixpkgs-c5c4a43b0e8056328ec4529f735cabdb8f1942bb
-
-ENV NIX_VERSION=${NIX_VERSION}
-ENV NIXPKGS_REVISION=${NIXPKGS_REVISION}
-ENV SEED_GENERATION=${NIX_SEED_GENERATION}
-
-COPY python/apps/azents-runtime-runner/docker/build-nix-seed.sh /usr/local/bin/build-nix-seed
-RUN chmod +x /usr/local/bin/build-nix-seed \
-    && /usr/local/bin/build-nix-seed
-
 FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.6@sha256:88bc6eb1ccd4b82efd0e1b530caffabddf50dc2bf612e66c14ea25b8ee8a4d3d /uv /uvx /bin/
@@ -140,10 +126,7 @@ COPY python/apps/azents-runtime-runner/src ./src
 RUN uv sync --frozen --no-dev
 
 COPY python/apps/azents-runtime-runner/docker/azents-git-credential.sh /usr/local/bin/azents-git-credential
-COPY python/apps/azents-runtime-runner/docker/azents-nix-profile.sh /etc/profile.d/azents-nix.sh
-COPY --from=nix-seed --chown=1000:1000 /opt/azents/nix-seed /opt/azents/nix-seed
 RUN chmod +x /usr/local/bin/azents-git-credential \
-    && chmod 644 /etc/profile.d/azents-nix.sh \
     && git config --system credential.helper '!/usr/local/bin/azents-git-credential' \
     && git config --system credential.useHttpPath true
 
@@ -151,7 +134,7 @@ RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid 1000 -m -d /home/agent -s /bin/bash agent
 
 ENV HOME=/home/agent
-ENV PATH=/nix/var/state/azents-agent/nix/profiles/profile/bin:/nix/var/nix/profiles/azents-release/bin:/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
+ENV PATH=/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
 WORKDIR /workspace/python/apps/azents-runtime-runner
 
 USER agent
