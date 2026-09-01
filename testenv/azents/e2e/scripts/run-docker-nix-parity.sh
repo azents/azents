@@ -110,7 +110,7 @@ remove_runner
 start_runner replacement none
 nix_exec /bin/sh -ec 'hello'
 nix_exec \
-  nix search --offline nixpkgs '^hello$' >/dev/null 2>&1
+  nix search --offline nixpkgs#hello '^hello$' >/dev/null 2>&1
 remove_runner
 
 docker run --rm --user root \
@@ -124,7 +124,7 @@ if nix_exec /bin/sh -ec 'command -v hello'; then
   exit 1
 fi
 nix_exec \
-  nix search --offline nixpkgs '^hello$' >/dev/null 2>&1
+  nix search --offline nixpkgs#hello '^hello$' >/dev/null 2>&1
 remove_runner
 
 printf '%s\n' '{"docker_parity":"passed","package":"hello"}'

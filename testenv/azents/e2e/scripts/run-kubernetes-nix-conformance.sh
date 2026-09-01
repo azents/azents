@@ -658,7 +658,7 @@ if kubectl exec -n "${NAMESPACE}" "${RUNTIME_POD}" -c runner -- \
   exit 1
 fi
 nix_exec \
-  nix search --offline nixpkgs '^hello$' >/dev/null 2>&1
+  nix search --offline nixpkgs#hello '^hello$' >/dev/null 2>&1
 
 run_provider phase3-delete delete
 if kubectl get pod -n "${NAMESPACE}" "${RUNTIME_POD}" >/dev/null 2>&1; then
