@@ -7,3 +7,4 @@ cache_write_repositories = [
   "azents-runtime-runner",
   "azents-runtime-provider-docker",
 ]
+split_test_files = ["public/test_subagents.py"]

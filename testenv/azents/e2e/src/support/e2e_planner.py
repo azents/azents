@@ -58,6 +58,7 @@ class Suite:
     lanes: int
     timeout_minutes: int
     cache_write_repositories: tuple[str, ...]
+    split_test_files: tuple[str, ...]
 
 
 def load_suites(tests_root: Path) -> tuple[Suite, ...]:
@@ -79,6 +80,24 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
             raise ValueError(
                 f"{config_path}: cache_write_repositories must be a string list"
             )
+        split_test_files = config.get("split_test_files", [])
+        if not isinstance(split_test_files, list) or not all(
+            isinstance(value, str) and value for value in split_test_files
+        ):
+            raise ValueError(f"{config_path}: split_test_files must be a string list")
+        for relative_path in split_test_files:
+            path = root / relative_path
+            relative = Path(relative_path)
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or not path.is_file()
+                or not path.name.startswith("test_")
+                or path.suffix != ".py"
+            ):
+                raise ValueError(
+                    f"{config_path}: invalid split test file {relative_path!r}"
+                )
         suites.append(
             Suite(
                 name=name,
@@ -86,6 +105,7 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
                 lanes=_required_positive_int(config, "lanes"),
                 timeout_minutes=_required_positive_int(config, "timeout_minutes"),
                 cache_write_repositories=tuple(repositories),
+                split_test_files=tuple(split_test_files),
             )
         )
 
@@ -103,6 +123,15 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
 
 def load_file_timings(path: Path | None) -> dict[str, float]:
     """Aggregate prior successful call timings by test file."""
+    totals: dict[str, float] = {}
+    for node_id, duration in load_node_timings(path).items():
+        file_path = node_id.split("::", 1)[0]
+        totals[file_path] = totals.get(file_path, 0.0) + duration
+    return totals
+
+
+def load_node_timings(path: Path | None) -> dict[str, float]:
+    """Aggregate prior successful call timings by pytest node."""
     if path is None or not path.is_file():
         return {}
     totals: dict[str, float] = {}
@@ -116,8 +145,8 @@ def load_file_timings(path: Path | None) -> dict[str, float]:
         duration = payload.get("duration_seconds")
         if not isinstance(node_id, str) or not isinstance(duration, int | float):
             raise ValueError("invalid test timing record")
-        file_path = _current_timing_path(node_id)
-        totals[file_path] = totals.get(file_path, 0.0) + float(duration)
+        current_node_id = _current_timing_node(node_id)
+        totals[current_node_id] = totals.get(current_node_id, 0.0) + float(duration)
     return totals
 
 
@@ -128,12 +157,13 @@ def plan_suites(
     timings_path: Path | None,
     output_dir: Path,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Create deterministic file-level lane plans for enabled suites."""
+    """Create deterministic timing-balanced lane plans for enabled suites."""
     suites = load_suites(tests_root)
     unknown = enabled_suites - {suite.name for suite in suites}
     if unknown:
         raise ValueError(f"unknown enabled suites: {', '.join(sorted(unknown))}")
 
+    node_timings = load_node_timings(timings_path)
     timings = load_file_timings(timings_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     matrix: list[dict[str, Any]] = []
@@ -145,19 +175,24 @@ def plan_suites(
         files = sorted(suite.root.rglob("test_*.py"))
         if not files:
             raise ValueError(f"suite {suite.name!r} contains no tests")
-        lane_count = min(suite.lanes, len(files))
-        lanes: list[list[Path]] = [[] for _ in range(lane_count)]
-        lane_weights = [0.0] * lane_count
-        weighted_files = sorted(
-            ((_file_weight(path, timings), path) for path in files),
-            key=lambda item: (-item[0], item[1].as_posix()),
+        weighted_items = sorted(
+            _weighted_suite_items(
+                suite=suite,
+                files=files,
+                file_timings=timings,
+                node_timings=node_timings,
+            ),
+            key=lambda item: (-item[0], item[1]),
         )
-        for weight, path in weighted_files:
+        lane_count = min(suite.lanes, len(weighted_items))
+        lanes: list[list[str]] = [[] for _ in range(lane_count)]
+        lane_weights = [0.0] * lane_count
+        for weight, selector in weighted_items:
             lane_index = min(
                 range(lane_count),
                 key=lambda index: (lane_weights[index], index),
             )
-            lanes[lane_index].append(path)
+            lanes[lane_index].append(selector)
             lane_weights[lane_index] += weight
 
         coverage[suite.name] = [path.as_posix() for path in files]
@@ -165,7 +200,7 @@ def plan_suites(
             lane_name = f"{suite.name}-{index}"
             plan_path = output_dir / f"{lane_name}.txt"
             plan_path.write_text(
-                "".join(f"{path.as_posix()}\n" for path in sorted(lane_files)),
+                "".join(f"{selector}\n" for selector in sorted(lane_files)),
                 encoding="utf-8",
             )
             matrix.append(
@@ -185,6 +220,71 @@ def plan_suites(
         encoding="utf-8",
     )
     return {"include": matrix}
+
+
+def _weighted_suite_items(
+    *,
+    suite: Suite,
+    files: list[Path],
+    file_timings: dict[str, float],
+    node_timings: dict[str, float],
+) -> list[tuple[float, str]]:
+    """Return file or test-node selectors with representative weights."""
+    split_paths = {suite.root / relative for relative in suite.split_test_files}
+    items: list[tuple[float, str]] = []
+    for path in files:
+        if path not in split_paths:
+            items.append((_file_weight(path, file_timings), path.as_posix()))
+            continue
+        selectors = _test_selectors(path)
+        if not selectors:
+            raise ValueError(f"split test file has no tests: {path}")
+        fallback_weight = _file_weight(path, file_timings) / len(selectors)
+        items.extend(
+            (
+                _node_weight(selector, node_timings, fallback_weight),
+                selector,
+            )
+            for selector in selectors
+        )
+    return items
+
+
+def _test_selectors(path: Path) -> tuple[str, ...]:
+    """Return stable base pytest node IDs declared directly in one file."""
+    module = ast.parse(path.read_text(encoding="utf-8"))
+    selectors: list[str] = []
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                selectors.append(f"{path.as_posix()}::{node.name}")
+            continue
+        if not isinstance(node, ast.ClassDef) or not node.name.startswith("Test"):
+            continue
+        selectors.extend(
+            f"{path.as_posix()}::{node.name}::{method.name}"
+            for method in node.body
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and method.name.startswith("test_")
+        )
+    return tuple(selectors)
+
+
+def _node_weight(
+    selector: str,
+    timings: dict[str, float],
+    fallback: float,
+) -> float:
+    """Return prior duration for one base node including parametrizations."""
+    exact = timings.get(selector)
+    parametrized = sum(
+        duration
+        for node_id, duration in timings.items()
+        if node_id.startswith(f"{selector}[")
+    )
+    if exact is not None or parametrized:
+        return max((exact or 0.0) + parametrized, 0.001)
+    return max(fallback, 0.001)
 
 
 def _file_weight(path: Path, timings: dict[str, float]) -> float:
@@ -231,6 +331,12 @@ def _current_timing_path(node_id: str) -> str:
     if current_name is None:
         return path
     return path.rsplit("/", 1)[0] + f"/{current_name}"
+
+
+def _current_timing_node(node_id: str) -> str:
+    """Map one historical pytest node onto its current collection path."""
+    parts = node_id.split("::")
+    return "::".join((_current_timing_path(node_id), *parts[1:]))
 
 
 def _required_string(config: dict[str, Any], key: str) -> str:

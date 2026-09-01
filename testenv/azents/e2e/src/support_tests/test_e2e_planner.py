@@ -5,12 +5,24 @@ from pathlib import Path
 
 import pytest
 
-from support.e2e_planner import load_file_timings, load_suites, plan_suites
+from support.e2e_planner import (
+    load_file_timings,
+    load_node_timings,
+    load_suites,
+    plan_suites,
+)
 
 
-def _write_suite(root: Path, name: str, *, lanes: int = 2) -> Path:
+def _write_suite(
+    root: Path,
+    name: str,
+    *,
+    lanes: int = 2,
+    split_test_files: tuple[str, ...] = (),
+) -> Path:
     suite_root = root / name
     suite_root.mkdir(parents=True)
+    split_config = ", ".join(json.dumps(value) for value in split_test_files)
     (suite_root / "suite.toml").write_text(
         (
             "[suite]\n"
@@ -18,6 +30,7 @@ def _write_suite(root: Path, name: str, *, lanes: int = 2) -> Path:
             f"lanes = {lanes}\n"
             "timeout_minutes = 30\n"
             'cache_write_repositories = ["image-a"]\n'
+            f"split_test_files = [{split_config}]\n"
         ),
         encoding="utf-8",
     )
@@ -71,6 +84,75 @@ def test_plan_suites_balances_files_and_assigns_cache_writer(tmp_path: Path) -> 
     assert "test_c.py" in lane_files[1]
 
 
+def test_plan_suites_splits_configured_file_by_test_node(tmp_path: Path) -> None:
+    tests_root = tmp_path / "tests"
+    suite_root = _write_suite(
+        tests_root,
+        "required",
+        split_test_files=("test_large.py",),
+    )
+    split_path = suite_root / "test_large.py"
+    split_path.write_text(
+        (
+            "def test_top_level():\n"
+            "    pass\n\n"
+            "class TestGroup:\n"
+            "    def test_first(self):\n"
+            "        pass\n\n"
+            "    def test_second(self):\n"
+            "        pass\n"
+        ),
+        encoding="utf-8",
+    )
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": node_id,
+                    "duration_seconds": duration,
+                }
+            )
+            for node_id, duration in (
+                (f"{split_path}::test_top_level", 8.0),
+                (f"{split_path}::TestGroup::test_first[param-a]", 6.0),
+                (f"{split_path}::TestGroup::test_first[param-b]", 4.0),
+                (f"{split_path}::TestGroup::test_second", 2.0),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    matrix = plan_suites(
+        tests_root=tests_root,
+        enabled_suites={"required"},
+        timings_path=timings_path,
+        output_dir=tmp_path / "plan",
+    )
+
+    selectors = [
+        selector
+        for lane in matrix["include"]
+        for selector in (tmp_path / "plan" / lane["plan_file"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert selectors.count(f"{split_path}::test_top_level") == 1
+    assert selectors.count(f"{split_path}::TestGroup::test_first") == 1
+    assert selectors.count(f"{split_path}::TestGroup::test_second") == 1
+    assert len(matrix["include"]) == 2
+    coverage = json.loads(
+        (tmp_path / "plan" / "coverage.json").read_text(encoding="utf-8")
+    )
+    assert coverage["required"] == [split_path.as_posix()]
+    assert (
+        load_node_timings(timings_path)[f"{split_path}::TestGroup::test_first[param-a]"]
+        == 6.0
+    )
+
+
 def test_load_suites_rejects_test_outside_suite_folder(tmp_path: Path) -> None:
     tests_root = tmp_path / "tests"
     _write_suite(tests_root, "required")
@@ -81,6 +163,26 @@ def test_load_suites_rejects_test_outside_suite_folder(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="must belong to a configured suite"):
+        load_suites(tests_root)
+
+
+def test_load_suites_rejects_invalid_split_test_file(tmp_path: Path) -> None:
+    tests_root = tmp_path / "tests"
+    suite_root = tests_root / "required"
+    suite_root.mkdir(parents=True)
+    (suite_root / "suite.toml").write_text(
+        (
+            "[suite]\n"
+            'name = "required"\n'
+            "lanes = 2\n"
+            "timeout_minutes = 30\n"
+            "cache_write_repositories = []\n"
+            'split_test_files = ["../test_outside.py"]\n'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid split test file"):
         load_suites(tests_root)
 
 
