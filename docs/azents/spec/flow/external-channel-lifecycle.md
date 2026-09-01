@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-29
-spec_version: 40
+last_verified_at: 2026-09-01
+spec_version: 41
 ---
 
 # External Channel Lifecycle
@@ -201,10 +201,14 @@ hash matches the active connection. An absent or mismatched endpoint records
 `interaction_endpoint_drift` through the same terminal lease fence without retaining
 the raw selector. During SDK-owned recovery, `disconnect` records a fenced degraded
 gap and `ready` or `resumed` marks the same lease active and clears the gap. Azents
-not run a second Gateway reconnect or Resume loop. The current Gateway owner also
-reconciles process-local typing tasks from active Work under the same lease and
-generation fences. A restart or Resume restores still-active targets; Work finished
-during the gap is absent. Typing provider failure does not change connection health.
+does not run a second Gateway reconnect or Resume loop. A one-minute continuous
+unready deadline preserves brief SDK-owned Resume but cancels and discards a client
+that remains unavailable, records a fenced degraded gap, releases its lease, and lets
+the connection be reclaimed with a fresh client. The current Gateway owner also
+reconciles process-local typing tasks from ready active Work under the same lease and
+generation fences. Awaiting Work is excluded. A restart or Resume restores still-ready
+targets; Work finished or awaiting during the gap is absent. Typing provider failure
+does not change connection health.
 
 Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
 replacement records a degraded gap, successful establishment marks active, and
@@ -310,6 +314,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 41) — Preserved brief SDK-owned Discord Resume while
+  replacing a continuously unready client after one minute, and excluded awaiting
+  Work from lifecycle-restored typing targets.
 - **2026-08-29** (spec_version 40) — Added Slack Work presence lease reset to
   configuration replacement and terminal connection cleanup, and excluded finished
   Work from both Slack presence and Discord typing renewal.

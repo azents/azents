@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-09-01
-spec_version: 37
+spec_version: 38
 ---
 
 # Context Compaction
@@ -210,8 +210,8 @@ shared deterministic renderer; output parts contribute bounded file/attachment/a
 through that rendering. The projection family matches token
 estimation: user/assistant text, client tool call name/arguments, client tool result text,
 provider-tool semantic transcripts, compaction summary reminders, system reminders, and bounded
-file/attachment/artifact metadata. Event IDs, timestamps, native artifacts, event kind, model order,
-and storage-only metadata are not included.
+file/attachment/artifact metadata. Event IDs, timestamps, native artifacts, event kind, and
+storage-only metadata are not included.
 
 For plaintext-custom client calls, the continuity call-argument slot is the same fixed omission marker
 used by token estimation. The corresponding result remains ordinary bounded model-visible result text.
@@ -293,6 +293,8 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 38) — Removed the deleted event model-order field
+  from the continuity projection metadata exclusions.
 - **2026-09-01** (spec_version 37) — Included External Channel invocation-role
   messages in compaction summary input and the mixed-source last-five Recent User
   Messages continuity selection while keeping context-role messages out of both.

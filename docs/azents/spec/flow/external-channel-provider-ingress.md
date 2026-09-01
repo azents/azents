@@ -68,7 +68,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-09-01
-spec_version: 56
+spec_version: 57
 ---
 
 # External Channel Provider Ingress
@@ -284,10 +284,10 @@ session state.
 
 The same current Gateway owner runs one ephemeral typing registry on its existing
 `discord.Client`. A complete lease/App-claim/configuration fence projects exact
-delivery channels for connected active conversational Work. Ready and Resume rebuild
-the registry from PostgreSQL; disconnect, lease loss, Client close, and shutdown cancel
-its tasks. Public SDK typing failures are isolated from event admission and durable
-connection health.
+delivery channels for connected ready active conversational Work; awaiting Work is
+excluded. Ready and Resume rebuild the registry from PostgreSQL; disconnect, lease
+loss, Client close, and shutdown cancel its tasks. Public SDK typing failures are
+isolated from event admission and durable connection health.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
 fenced lease in one transaction: they record the reason, release that lease, and move
@@ -568,9 +568,14 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 57) — Excluded awaiting Work from the Discord
+  Gateway typing registry while retaining ready hidden and visible Work.
 - **2026-09-01** (spec_version 56) — Bounded each Discord SDK client's continuous
   unready interval to one minute, preserving brief Resume recovery while replacing a
   client that remains pinned to an unavailable Gateway endpoint.
+- **2026-08-31** (spec_version 55) — Made only a newly created exact human trigger
+  clear same-binding awaiting state and prepare progress/wake authority; duplicate
+  triggers remain wake-recovery evidence without mutating Work.
 - **2026-08-29** (spec_version 54) — Made Slack Tracker admission follow the same
   explicit-invocation visibility rule as Discord, removed Slack settings-only
   follow-up controls, and added the independently leased Slack Work presence manager

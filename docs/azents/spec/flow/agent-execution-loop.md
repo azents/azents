@@ -86,7 +86,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-01
-spec_version: 165
+spec_version: 166
 ---
 
 # Agent Execution Loop
@@ -973,10 +973,10 @@ Compaction is append-only:
 - old events are not deleted;
 - `compaction_marker` and `compaction_summary` are appended with the same `compaction_id` and trigger reason;
 - `agent_sessions.model_input_head_event_id` moves to the compaction summary event id;
-- model input reads events by model order, so physical append order is not the model-visible
-  ordering contract;
-- sequential appends leave gaps in model order so later model-visible system events can be inserted
-  without renumbering the whole transcript.
+- model input selects the ID-ordered event range beginning at that head, and Event IDs
+  remain the only durable transcript order; and
+- append-only compaction presents future model input from the single summary head
+  without inserting or renumbering older events.
 
 Automatic compaction summarizes the full supported summary projection of the
 selected transcript, with External Channel projection limited to invocation-role
@@ -1344,6 +1344,8 @@ icon.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 166) — Removed the obsolete separate model-order
+  compaction contract and aligned the flow with Event ID-only transcript ordering.
 - **2026-09-01** (spec_version 165) — Included External Channel invocation-role
   messages in compaction summary input and the mixed-source last-five Recent User
   Messages section while excluding context-role messages from both.
