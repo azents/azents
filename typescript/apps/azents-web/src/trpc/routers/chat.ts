@@ -538,6 +538,7 @@ export const chatRouter = router({
         return data;
       } catch (e) {
         throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",

@@ -13,10 +13,9 @@ import requests
 from azentspublicclient.api.user_v1_api import UserV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.remote.command import Command
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
@@ -317,20 +316,13 @@ def _wait_for_promoted_image_without_activity(driver: WebDriver) -> None:
             promoted_attachments,
             nested_attachments,
         ) = _image_projection_counts(driver)
-        try:
-            browser_logs = _JSON_OBJECT_LIST.validate_python(
-                driver.execute(Command.GET_LOG, {"type": "browser"}).get("value", [])
-            )[-20:]
-        except WebDriverException as log_error:
-            browser_logs = [{"log_capture_error": repr(log_error)}]
         raise AssertionError(
             "expected one promoted Exchange image outside Activity without a nested "
             "duplicate; "
             f"observed activities={activities}, cards={cards}, "
             f"completed_cards={completed_cards}, "
             f"promoted_images={promoted_attachments}, "
-            f"nested_images={nested_attachments}, "
-            f"browser_logs={browser_logs!r}"
+            f"nested_images={nested_attachments}"
         ) from exc
 
 
