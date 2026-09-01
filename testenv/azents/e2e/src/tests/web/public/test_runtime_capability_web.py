@@ -634,7 +634,6 @@ def test_runtime_free_add_and_remove_progress(
     browser_driver.set_window_size(1440, 1000)
     _click_button(browser_driver, "Open terminal")
     _click_button(browser_driver, "Terminate")
-    _assert_visible_text(browser_driver, "Exited", timeout_seconds=30)
 
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"

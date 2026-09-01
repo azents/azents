@@ -16,6 +16,7 @@ from azents.services.runtime_terminal.data import (
     RuntimeTerminalProjectionState,
     RuntimeTerminalReasonCode,
     RuntimeTerminalResource,
+    RuntimeTerminalRevoked,
     RuntimeTerminalTicketStatus,
 )
 from azents.services.runtime_terminal.service import (
@@ -360,6 +361,52 @@ async def test_revalidation_revokes_runtime_and_policy_authority_changes() -> No
         await service.revalidate(admission)
         is RuntimeTerminalReasonCode.TERMINAL_DISABLED
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("termination_reason", "reason_code"),
+    [
+        (
+            RunnerTerminalTerminationReason.ACCESS_REVOKED,
+            RuntimeTerminalReasonCode.ACCESS_DENIED,
+        ),
+        (
+            RunnerTerminalTerminationReason.POLICY_REVOKED,
+            RuntimeTerminalReasonCode.TERMINAL_DISABLED,
+        ),
+    ],
+)
+async def test_attachment_projects_coordinated_revocation_before_exit(
+    termination_reason: RunnerTerminalTerminationReason,
+    reason_code: RuntimeTerminalReasonCode,
+) -> None:
+    service, coordination, _dispatcher, _resolver = _service(_authority())
+    ticket = await service.issue_ticket(
+        user_id="user-1",
+        authentication_session_id="auth-session-1",
+        resource=_RESOURCE,
+    )
+    assert ticket.ticket is not None
+    admission = await service.consume_ticket(ticket=ticket.ticket, resource=_RESOURCE)
+    attachment = await service.attach(
+        admission,
+        RuntimeTerminalAttachRequest(
+            columns=80,
+            rows=24,
+            last_output_sequence=None,
+        ),
+    )
+    await coordination.request_termination(
+        "terminal-1",
+        reason=termination_reason,
+        requested_at=_NOW,
+    )
+
+    event = await anext(attachment.events())
+
+    assert event == RuntimeTerminalRevoked(reason_code=reason_code)
+    await attachment.close()
 
 
 def _service(

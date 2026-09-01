@@ -150,6 +150,7 @@ class GrpcRunnerTerminalClient:
             raise RuntimeRunnerTerminalStreamClosed("Terminal stream is closed")
         self._finished = True
         await self._outbound.put(runner_terminal_event_to_message(frame))
+        await self._outbound.join()
         await self._outbound.put(None)
         await self._receiver_task
 
@@ -176,8 +177,12 @@ class GrpcRunnerTerminalClient:
         while True:
             message = await self._outbound.get()
             if message is None:
+                self._outbound.task_done()
                 return
-            yield message
+            try:
+                yield message
+            finally:
+                self._outbound.task_done()
 
     async def _receive(
         self,

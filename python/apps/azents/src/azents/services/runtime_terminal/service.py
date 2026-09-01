@@ -37,6 +37,7 @@ from azents.services.runtime_terminal.data import (
     RuntimeTerminalProjectionState,
     RuntimeTerminalReasonCode,
     RuntimeTerminalResource,
+    RuntimeTerminalRevoked,
     RuntimeTerminalServerEvent,
     RuntimeTerminalSocketAdmission,
     RuntimeTerminalStatusChanged,
@@ -583,6 +584,10 @@ class CoordinatedRuntimeTerminalAttachment:
                     for item in batch.outputs:
                         self.output_sequence = item.sequence
                         yield _output(item)
+            revocation_reason = _revocation_reason_code(record.termination_reason)
+            if revocation_reason is not None:
+                yield RuntimeTerminalRevoked(reason_code=revocation_reason)
+                return
             if record.lifecycle is CoordinationLifecycle.EXITED:
                 yield RuntimeTerminalExited(
                     reason=(
@@ -803,6 +808,16 @@ def _revocation_termination_reason(
     }:
         return RunnerTerminalTerminationReason.POLICY_REVOKED
     return RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
+
+
+def _revocation_reason_code(
+    reason: RunnerTerminalTerminationReason | None,
+) -> RuntimeTerminalReasonCode | None:
+    if reason is RunnerTerminalTerminationReason.ACCESS_REVOKED:
+        return RuntimeTerminalReasonCode.ACCESS_DENIED
+    if reason is RunnerTerminalTerminationReason.POLICY_REVOKED:
+        return RuntimeTerminalReasonCode.TERMINAL_DISABLED
+    return None
 
 
 def _require_applied(status: RuntimeTerminalMutationStatus) -> None:
