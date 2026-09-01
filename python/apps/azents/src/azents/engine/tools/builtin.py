@@ -144,8 +144,9 @@ from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
 _SYSTEM_TOOL_GUIDANCE = (
-    "For missing system tools, use `nix search nixpkgs <name>` and "
-    "`nix profile install nixpkgs#<package>`. Do not use sudo or OS package managers."
+    "For missing user-space tools, use "
+    '`pixi search <name> --platform "$PIXI_PLATFORM"` and '
+    "`pixi global install <package>`. Do not use sudo or OS package managers."
 )
 
 

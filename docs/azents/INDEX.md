@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-01 | 102 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-01 | 103 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-01 | 76 |
 
@@ -34,7 +34,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 164 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-01 | 31 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-01 | 32 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 36 |
@@ -294,6 +294,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Cut Over OpenAI-Compatible HTTP Paths Atomically Historical Requirements Reconstruction](requirements/over-260716-over-openai-http-paths-atomically.md) | over-260716 | 2026-07-16 | - |
 | [Subagent Model Override Policy Historical Requirements Reconstruction](requirements/override-260717-subagent-override-policy.md) | override-260717 | 2026-07-17 | 2026-07-17 |
 | [Remove AgentSession Runtime Ownership Historical Requirements Reconstruction](requirements/ownership-260625-ownership-removal.md) | ownership-260625 | 2026-06-25 | - |
+| [User-Managed Runtime Tools Requirements](requirements/packages-260901-user-managed-runtime-tools.md) | packages-260901 | 2026-09-01 | 2026-09-01 |
 | [GitHub Per-User PAT Authentication Historical Requirements Reconstruction](requirements/pat-260321-pat.md) | pat-260321 | 2026-03-21 | 2026-03-21 |
 | [Select Provider-Specific Tool Dialects for Apply-Patch Historical Requirements Reconstruction](requirements/patch-260721-patch-dialects.md) | patch-260721 | 2026-07-21 | - |
 | [Keep Pending Buffer Deletion State-Neutral Historical Requirements Reconstruction](requirements/pending-260712-pending-buffer-deletion-neutral.md) | pending-260712 | 2026-07-12 | - |
@@ -702,6 +703,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/over-260716-over-openai-http-paths-atomically.md)
 - [Subagent Model Override Policy Historical Decision Reconstruction](adr/override-260717-subagent-override-policy.md)
 - [Remove AgentSession Runtime Ownership](adr/ownership-260625-ownership-removal.md)
+- [User-Managed Runtime Tools](adr/packages-260901-user-managed-runtime-tools.md)
 - [GitHub Per-User PAT Authentication Historical Decision Reconstruction](adr/pat-260321-pat.md)
 - [Select Provider-Specific Tool Dialects for Apply-Patch](adr/patch-260721-patch-dialects.md)
 - [Keep Pending Buffer Deletion State-Neutral](adr/pending-260712-pending-buffer-deletion-neutral.md)
