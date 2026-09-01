@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-01
-spec_version: 42
+last_verified_at: 2026-08-31
+spec_version: 41
 ---
 
 # E2E Primary Test Strategy
@@ -274,20 +274,6 @@ Always-on required CI does not depend on external credentials.
 - Deterministic Optional Managed Runtime E2E creates a Runtime-free Agent through public APIs,
   executes and persists a model-only turn, verifies no logical or physical Runtime appears, and
   confirms Runtime-backed Workspace projection remains unavailable.
-- Persistent Nix system-tool verification combines two required boundaries. The ordinary required
-  product suite creates Runtime-free and managed Agents through Public/Admin APIs, inspects the
-  real composed Runtime Toolkit prompt for exact managed guidance and Runtime-free absence, and
-  proves Workspace file/download APIs deny `/nix`. A separate required disposable Kind job uses a
-  run-unique cluster, dedicated kubeconfig, pinned Kind node and checksum-pinned CNI manifest,
-  loopback-only local registry, the built-in dynamic `standard` StorageClass, production
-  Kubernetes Provider lifecycle code, immutable worktree-built Runner/Provider images, and
-  targeted Docker parity. It verifies Nix install/execution, ordinary Pod recreation persistence,
-  no-network cached execution and uncached failure, reset replacement, terminal reclamation, and
-  distinct Workspace/Nix mounts. The stable `ci-kubernetes-nix-e2e` gate requires both Provider
-  conformance and `ci-python-e2e` for matching prompt, Workspace, Runner, Provider, Helm, or test
-  paths. Cluster
-  artifacts are copied only after fail-closed credential redaction; sanitization failure publishes
-  only a fixed safe marker and fails the job.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - Optional Managed Runtime Web Surface E2E creates all product state through public/admin APIs,
@@ -362,9 +348,6 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
-- **2026-09-01** (spec_version 42) — Added the combined required product E2E and
-  disposable Kubernetes Provider conformance gate for persistent Nix lifecycle,
-  dynamic PVC replacement, Workspace separation, and fail-closed artifacts.
 - **2026-08-30** (spec_version 40) — Added bounded compatible-ancestor fallback
   for unchanged required E2E images when an exact predecessor snapshot is
   unavailable, while preserving direct successes, immutable Git-tree validation,

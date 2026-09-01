@@ -2,7 +2,6 @@
 title: "User-Managed Runtime Tool Addon Requirements"
 created: 2026-08-31
 updated: 2026-08-31
-implemented: 2026-09-01
 tags: [runtime, package-management, nix, product]
 document_role: primary
 document_type: requirements

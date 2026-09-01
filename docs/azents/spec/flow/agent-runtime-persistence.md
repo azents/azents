@@ -38,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-01
-spec_version: 31
+last_verified_at: 2026-08-28
+spec_version: 30
 ---
 
 # Agent Runtime Persistence
@@ -51,8 +51,6 @@ server process and not by S3 checkpoint/restore as an event path. An Agent may b
 have no logical Runtime row or Workspace. When managed compute exists, the current-generation
 Runner reports the effective Agent Workspace absolute path as Runtime metadata. Server file APIs,
 Projects, worktrees, and prompts consume that reported path without a fixed server-side fallback.
-Bundled managed Runtimes also have Provider-owned durable Nix storage mounted at `/nix`; it remains
-physically and authoritatively separate from the Agent Workspace.
 
 ## Runtime Profile binding and current configuration state
 
@@ -144,27 +142,6 @@ S3/RustFS checkpoint objects are not the event persistence contract for Agent Ru
 Legacy checkpoint rows may remain for older data/model compatibility, but new Runtime lifecycle
 correctness must not depend on checkpoint commit/restore.
 
-## Persistent Nix storage
-
-The common Runner image carries an integrity-checked Nix release seed outside `/nix`. Before Runner
-registration, bootstrap initializes an empty mounted store or reconciles a retained store to the
-current release generation, validates the release CLI and catalog roots, and then exposes native
-single-user Nix environment paths. The Agent package profile is
-`/nix/var/state/azents-agent/profiles/profile`; its `bin` directory and the release Nix profile are
-on the Runner-managed shell `PATH`. Release defaults remain Agent-overridable native Nix
-configuration, not an Azents package-policy enforcement boundary.
-
-Kubernetes creates separate owned Workspace and Nix PVCs. The Nix claim has the
-`nix-store-pvc` resource role, uses deployment-configured StorageClass and requested capacity, and
-is mounted at `/nix` only in the Runner container. Docker creates `workspace`, `tmp-agent`, and
-`nix` children under the per-Runtime host root and bind-mounts the `nix` child at `/nix`.
-
-The Nix store, database, configuration, cache, logs, release roots, and Agent profile remain
-outside Agent Workspace authorization. Workspace list, preview, stat, mutation, publication, and
-download paths normalize against the current Runner-reported Workspace root and deny `/nix`.
-PostgreSQL, Redis, Runtime configuration, Toolkit State, and Provider reports store no installed
-package inventory.
-
 ## Runtime System Metrics
 
 The Runner optionally advertises `runtime.system-metrics.v1` and reports normalized CPU, memory,
@@ -223,15 +200,14 @@ path until its Runner reports current evidence.
 
 ## Destructive Operation Boundary
 
-Only explicit `reset` and terminal delete may delete Agent Workspace or Nix storage data.
+Only explicit `reset` and terminal delete may delete Agent Workspace data.
 
-- `start` may create compute and attach durable storage; it must not wipe existing
-  Workspace or Nix bytes.
-- `stop` may stop compute; it must preserve both durable stores.
-- `restart` may recreate compute; it must preserve both durable stores.
+- `start` may create compute and attach durable storage; it must not wipe existing workspace bytes.
+- `stop` may stop compute; it must preserve durable storage.
+- `restart` may recreate compute; it must preserve durable storage.
 - `recover` and reconciliation may repair stale backend/control state; they must preserve durable
   storage.
-- ordinary Runtime Profile recreation may replace compute; it must preserve both durable stores.
+- ordinary Runtime Profile recreation may replace compute; it must preserve durable storage.
 - `observe` is read-only.
 
 For desired-running Runtimes, periodic reconciliation uses idempotent `start` to compare the
@@ -286,14 +262,13 @@ The active Provider keeps the Kubernetes Pod watch as a long-lived request witho
 socket-read deadline. Normal server-side watch completion is reopened independently and does not
 rotate the authoritative Runtime Control connection.
 
-For each Runtime, the provider creates or reuses an Agent Workspace PVC and a separate Nix PVC. It
-mounts the Workspace at the configured Runner home path and the Nix claim at `/nix` in the Runner
-only. Both identities are tied to Runtime ownership labels and fenced by Control generation. Stale
-observations cannot overwrite newer desired generations.
+For each Runtime, the provider creates or reuses an EBS-backed PVC and mounts it at its configured
+Runner home path in the Pod. PVC identity is tied to Runtime identity/generation labels
+and fenced by Control generation. Stale observations cannot overwrite newer desired generations.
 
-Reset is the only non-terminal command that may delete and recreate both PVCs. Terminal delete
-removes both claims without recreating them. Stop/restart/recover and ordinary recreation must not
-delete either claim.
+Reset is the only non-terminal command that may delete and recreate the PVC contents. Terminal
+delete removes the PVC without recreating it. Stop/restart/recover and ordinary recreation must not
+delete the PVC.
 
 The Runtime Profile topology is typed Provider infrastructure, not arbitrary Pod input. A Profile
 without DinD contains only the unprivileged Runner. A DinD-enabled Profile adds one
@@ -339,21 +314,19 @@ aggregate can. Pending lifecycle dispatch and terminal deletion prevent repair. 
 cannot dispatch; a reconnect, stream/control restart, lost completion, or dispatch failure is
 discarded and can retry only after a later periodic `OBSERVE`.
 
-The logical Runtime CA, Agent Workspace PVC, and Nix PVC survive stop, restart, recovery, and
-ordinary recreation. Proxy policy/artifact replacement retains the stable Service and CA identity.
-Reset and terminal delete remain the only PVC-destructive boundaries; terminal delete also removes
-every Provider-owned strict-network resource. A terminal-delete acknowledgement is emitted only
-after the Provider observes the Runtime Pod, Workspace PVC, Nix PVC, logical CA, and all owned
-strict-network and proxy resources absent. While Kubernetes deletion is still in progress, the
-Provider reports a non-acknowledged stopping observation and Control retries the same terminal
-delete.
+The logical Runtime CA and Agent Workspace PVC survive stop, restart, recovery, and ordinary
+recreation. Proxy policy/artifact replacement retains the stable Service and CA identity. Reset and
+terminal delete remain the only PVC-destructive boundaries; terminal delete also removes every
+Provider-owned strict-network resource. A terminal-delete acknowledgement is emitted only after
+the Provider observes the Runtime Pod, Workspace PVC, logical CA, and all owned strict-network and
+proxy resources absent. While Kubernetes deletion is still in progress, the Provider reports a
+non-acknowledged stopping observation and Control retries the same terminal delete.
 
 ## Docker Provider v1
 
 Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a host directory and
 bind-mounts it into the Runner container at its configured Runner home path. The host directory is
-the event persistence source. The same per-Runtime root contains a separate writable `nix` child
-that is bind-mounted at `/nix`.
+the event persistence source.
 
 The Provider protocol remains Docker Provider v1 while the selected infrastructure Profile may be
 schema v1 or v2. Both versions use direct Runner execution. The durable host Workspace directory
@@ -361,9 +334,8 @@ remains mounted at the same Agent path, and the Provider-owned temporary directo
 Runtime incarnation.
 
 Stop/restart/recover and ordinary recreation may remove/recreate containers, but must keep the host
-root and therefore preserve both Workspace and Nix children. Reset deletes and recreates the whole
-Runtime root according to the reset command. Terminal delete removes the container, Workspace,
-Nix, and Provider-owned ephemeral directories.
+directory. Reset may delete or replace the host directory according to the reset command. Terminal
+delete removes the container, Workspace directory, and Provider-owned ephemeral directories.
 
 ## Agent Workspace Projects
 
@@ -395,10 +367,6 @@ Required checks:
   identity, historical null-field normalization, and active containment rejection.
 - Docker and Kubernetes Provider tests prove Workspace persistence and ephemeral-state clearing on
   recreation.
-- Runner, Docker parity, Kubernetes Provider, and required product E2E prove Nix bootstrap,
-  native install/execution, compute-recreation persistence, reset deletion, no-network behavior,
-  dynamically provisioned PVC replacement/reclamation, exact prompt guidance, and Workspace
-  separation.
 - Kubernetes Provider unit, manifest, protocol, and lifecycle tests prove exact strict-mode
   resource ownership, comparison, replacement, cleanup, logical-CA retention, and PVC preservation
   without creating live Kubernetes resources.
@@ -413,10 +381,6 @@ Required checks:
 
 ## Changelog
 
-- **2026-09-01 (spec_version=31)** — Added the Provider-owned persistent Nix
-  store, Runner release bootstrap and Agent profile path, separate Kubernetes PVC
-  and Docker host child, Workspace API exclusion, and shared reset/terminal-delete
-  lifecycle.
 - **2026-08-26 (spec_version=30)** — Separated Provider-authorized host lifecycle from
   ready-Runner data-plane usability and allowed a retained applied configuration to keep
   serving operations while a future desired selection is unavailable or pending recreation.
