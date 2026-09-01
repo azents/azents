@@ -697,7 +697,7 @@ def _render_continuity_history(events: Sequence[Event]) -> str:
     """Render bounded recent event excerpts for compaction continuity."""
     rendered_user_messages = [
         rendered
-        for event in _select_recent_user_message_events(
+        for event in _select_recent_user_input_events(
             events,
             _CONTINUITY_RECENT_USER_MESSAGES,
         )
@@ -778,17 +778,24 @@ def _append_continuity_history(summary: str, continuity_history: str) -> str:
     return f"{summary}\n\n{continuity_history}"
 
 
-def _select_recent_user_message_events(
+def _select_recent_user_input_events(
     events: Sequence[Event], max_messages: int
 ) -> list[Event]:
-    """Return the last user-message events from the selected transcript."""
+    """Return the last direct user-input events from the selected transcript."""
     if max_messages <= 0:
         return []
     selected = [
         event
         for event in events
-        if event.kind == EventKind.USER_MESSAGE
-        and isinstance(event.payload, UserMessagePayload)
+        if (
+            event.kind == EventKind.USER_MESSAGE
+            and isinstance(event.payload, UserMessagePayload)
+        )
+        or (
+            event.kind == EventKind.EXTERNAL_CHANNEL_MESSAGE
+            and isinstance(event.payload, ExternalChannelMessagePayload)
+            and event.payload.prompt_role == "invocation"
+        )
     ]
     return selected[-max_messages:]
 

@@ -4,6 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1196,6 +1197,141 @@ async def test_compactor_continuity_user_message_section_uses_last_five_users() 
         assert f"user request {turn}" in user_message_section
 
 
+async def test_compactor_recent_user_messages_include_channel_invocations() -> None:
+    """Mix direct and Channel invocation inputs in one last-five selection."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old direct request"),
+        ),
+        _event(
+            "2",
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                prompt_role="context",
+                body="retained channel context",
+                message_id="context-message",
+            ),
+        ),
+        _event(
+            "3",
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                prompt_role="invocation",
+                body="first channel invocation",
+                message_id="invocation-1",
+            ),
+        ),
+        _event(
+            "4",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="second direct request"),
+        ),
+        _event(
+            "5",
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                prompt_role="invocation",
+                body="second channel invocation",
+                message_id="invocation-2",
+            ),
+        ),
+        _event(
+            "6",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="third direct request"),
+        ),
+        _event(
+            "7",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="fourth direct request"),
+        ),
+    ]
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a summary that does not itself contain event text."""
+        del old_events, summary_budget
+        return "summary"
+
+    summary = await _compactor(
+        transcript_repo=_TranscriptRepo(events),
+        session_repo=_SessionRepo(),
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    user_message_section = payload.content.split(
+        "## Recent Transcript",
+        maxsplit=1,
+    )[0]
+    assert "old direct request" not in user_message_section
+    assert "retained channel context" not in user_message_section
+    expected = [
+        "first channel invocation",
+        "second direct request",
+        "second channel invocation",
+        "third direct request",
+        "fourth direct request",
+    ]
+    positions = [user_message_section.index(value) for value in expected]
+    assert positions == sorted(positions)
+    assert "Prompt role: invocation" in user_message_section
+
+
+async def test_compactor_truncates_channel_invocation_in_recent_user_messages() -> None:
+    """Bound an oversized Channel invocation in recent user continuity."""
+    oversized_body = "external request " * 1_000
+    events = [
+        _event(
+            "1",
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                prompt_role="invocation",
+                body=oversized_body,
+                message_id="large-invocation",
+            ),
+        )
+    ]
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a summary that does not itself contain event text."""
+        del old_events, summary_budget
+        return "summary"
+
+    summary = await _compactor(
+        transcript_repo=_TranscriptRepo(events),
+        session_repo=_SessionRepo(),
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    user_message_section = payload.content.split(
+        "## Recent Transcript",
+        maxsplit=1,
+    )[0]
+    assert "[Event truncated by Azents continuity guard.]" in user_message_section
+    assert oversized_body not in user_message_section
+
+
 async def test_compactor_truncates_large_continuity_events() -> None:
     """Oversized continuity excerpts are independently truncated."""
     events = [
@@ -1812,7 +1948,12 @@ def _event(
     )
 
 
-def _external_payload() -> ExternalChannelMessagePayload:
+def _external_payload(
+    *,
+    prompt_role: Literal["context", "invocation"],
+    body: str,
+    message_id: str,
+) -> ExternalChannelMessagePayload:
     """Create one external message fixture."""
     return ExternalChannelMessagePayload(
         provider=ExternalChannelProvider.SLACK,
@@ -1822,16 +1963,16 @@ def _external_payload() -> ExternalChannelMessagePayload:
         resource_type=ExternalChannelResourceType.THREAD,
         binding_id="binding-1",
         invocation_batch_id="batch-1",
-        external_message_id="message-1",
-        projection_root_id="external-channel:binding-1:message-1",
-        provider_message_key="slack:tenant-1:C1:1.000001",
-        provider_position="00000000000000000001.000001",
+        external_message_id=message_id,
+        projection_root_id=f"external-channel:binding-1:{message_id}",
+        provider_message_key=f"slack:tenant-1:C1:{message_id}",
+        provider_position=message_id,
         principal_id="principal-1",
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        prompt_role="context",
-        body="context body",
+        prompt_role=prompt_role,
+        body=body,
         attachment_metadata={
             "files": [
                 {
@@ -1878,7 +2019,11 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     event = _event(
         "1",
         EventKind.EXTERNAL_CHANNEL_MESSAGE,
-        _external_payload(),
+        _external_payload(
+            prompt_role="context",
+            body="context body",
+            message_id="message-1",
+        ),
     )
 
     value = filters._model_visible_event_value(event)

@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -30,6 +30,9 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     LLMModelDeveloper,
     LLMProvider,
     SessionAgentKind,
@@ -82,6 +85,7 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     CompactionSummaryPayload,
     Event,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     OutputTextPart,
     SystemErrorPayload,
@@ -863,6 +867,41 @@ def test_summary_renderer_omits_plaintext_custom_tool_input() -> None:
     assert rendered == (
         "[Client tool call: apply_patch (plaintext custom input omitted)]"
     )
+
+
+def test_summary_renderer_includes_only_external_channel_invocations() -> None:
+    """Send invocation-role Channel messages to the compaction summary model."""
+    context_event = Event(
+        id="1" * 32,
+        session_id="session-1",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=_external_channel_payload(
+            prompt_role="context",
+            body="history context",
+            message_id="context-message",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    invocation_event = Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=_external_channel_payload(
+            prompt_role="invocation",
+            body="perform the requested deployment",
+            message_id="invocation-message",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    rendered = engine_adapter_module._render_events_for_summary(
+        [context_event, invocation_event]
+    )
+
+    assert "history context" not in rendered
+    assert "External Channel Message:" in rendered
+    assert "Prompt role: invocation" in rendered
+    assert "perform the requested deployment" in rendered
 
 
 def test_hooked_tool_executor_forwards_request_cancel() -> None:
@@ -2527,6 +2566,47 @@ def _artifact(item: dict[str, object]) -> NativeArtifact:
         model="gpt-5.1",
         schema_version="1",
         item=item,
+    )
+
+
+def _external_channel_payload(
+    *,
+    prompt_role: Literal["context", "invocation"],
+    body: str,
+    message_id: str,
+) -> ExternalChannelMessagePayload:
+    """Create one External Channel event payload."""
+    return ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.DISCORD,
+        provider_tenant_id="guild-1",
+        resource_id="channel-1",
+        resource_label="#operations",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id="batch-1",
+        external_message_id=message_id,
+        projection_root_id=f"external-channel:binding-1:{message_id}",
+        provider_message_key=f"discord:guild-1:channel-1:{message_id}",
+        provider_position=message_id,
+        principal_id="principal-1",
+        provider_user_id="user-1",
+        sender_display_name="Requester",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        prompt_role=prompt_role,
+        body=body,
+        attachment_metadata={},
+        provider_created_at=datetime.datetime(
+            2026,
+            9,
+            1,
+            10,
+            0,
+            tzinfo=datetime.UTC,
+        ),
+        provider_updated_at=None,
+        original_url=None,
+        truncated_context_message_count=0,
+        truncated_context_size=0,
     )
 
 
