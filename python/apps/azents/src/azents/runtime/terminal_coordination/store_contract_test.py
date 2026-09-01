@@ -38,7 +38,7 @@ from azents.runtime.terminal_coordination.store import (
     RuntimeTerminalCoordinationStore,
 )
 
-_NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+_NOW = datetime.now(UTC)
 
 
 @pytest_asyncio.fixture(params=["memory", "redis"])

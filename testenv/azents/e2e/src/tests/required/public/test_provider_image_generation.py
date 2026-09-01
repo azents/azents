@@ -10,15 +10,7 @@ from typing import cast
 import azentsadminclient
 import azentspublicclient
 import requests
-from azentspublicclient.api.user_v1_api import UserV1Api
-from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import WebDriverWait
 
 from support.consts import REPOSITORY_ROOT
 from support.utils import unique
@@ -226,95 +218,6 @@ def _count_typed_items(value: object, item_type: str) -> int:
     return current + sum(
         _count_typed_items(item, item_type) for item in mapping.values()
     )
-
-
-def _open_authenticated_session(
-    driver: WebDriver,
-    *,
-    public_api_client: azentspublicclient.ApiClient,
-    token: str,
-    main_web_url: str,
-    agent_id: str,
-    session_id: str,
-) -> None:
-    """Log in and open the real Main Web chat session."""
-    headers = auth_headers(token)
-    me = UserV1Api(public_api_client).user_v1_me(_headers=headers)
-    workspaces = WorkspaceV1Api(public_api_client).workspace_v1_list_workspaces(
-        _headers=headers
-    )
-    assert len(workspaces.items) == 1
-    workspace_handle = workspaces.items[0].handle
-
-    driver.delete_all_cookies()
-    driver.get(f"{main_web_url}/login")
-    wait = WebDriverWait(driver, 30)
-    email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(me.email, Keys.ENTER)
-    wait.until(ec.url_contains("/login/password"))
-    password_input = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
-    password_input.send_keys("TestPass123!", Keys.ENTER)
-    wait.until(ec.url_contains("/workspaces"))
-    driver.get(
-        f"{main_web_url}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
-    )
-    wait.until(ec.url_contains(session_id))
-
-
-def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int, int, int]:
-    """Return bounded grouped-card and promoted-image counts for diagnostics."""
-    activity_selector = "[data-tool-activity-id]"
-    card_selector = f'{activity_selector} [data-provider-tool-name="image_generation"]'
-    completed_selector = f'{card_selector}[data-provider-tool-status="completed"]'
-    promoted_attachment_selector = 'img[src*="/api/chat/exchange-files/"]'
-    nested_attachment_selector = (
-        f'{card_selector} img[src*="/api/chat/exchange-files/"]'
-    )
-    activities = driver.find_elements(By.CSS_SELECTOR, activity_selector)
-    cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
-    completed_cards = driver.find_elements(By.CSS_SELECTOR, completed_selector)
-    promoted_attachments = driver.find_elements(
-        By.CSS_SELECTOR,
-        promoted_attachment_selector,
-    )
-    nested_attachments = driver.find_elements(
-        By.CSS_SELECTOR,
-        nested_attachment_selector,
-    )
-    return (
-        len(activities),
-        len(cards),
-        len(completed_cards),
-        len(promoted_attachments),
-        len(nested_attachments),
-    )
-
-
-def _has_promoted_image_without_activity(driver: WebDriver) -> bool:
-    """Return whether an attachment result stays outside the final Activity."""
-    return _image_projection_counts(driver) == (0, 0, 0, 1, 0)
-
-
-def _wait_for_promoted_image_without_activity(driver: WebDriver) -> None:
-    """Wait for a standalone image without a completed Activity duplicate."""
-    try:
-        WebDriverWait(driver, 30).until(_has_promoted_image_without_activity)
-    except TimeoutException as exc:
-        (
-            activities,
-            cards,
-            completed_cards,
-            promoted_attachments,
-            nested_attachments,
-        ) = _image_projection_counts(driver)
-        raise AssertionError(
-            "expected one promoted Exchange image outside Activity without a nested "
-            "duplicate; "
-            f"observed activities={activities}, cards={cards}, "
-            f"completed_cards={completed_cards}, "
-            f"promoted_images={promoted_attachments}, "
-            f"nested_images={nested_attachments}"
-        ) from exc
 
 
 class TestProviderImageGeneration:
@@ -535,48 +438,3 @@ class TestProviderImageGeneration:
             )
             == 1
         )
-
-    def run_renders_promoted_attachment_without_activity_across_refresh(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-        azents_engine_worker_container: object,
-        openai_proxy_url: str,
-        browser_driver: WebDriver,
-        azents_main_web_url: str,
-    ) -> None:
-        """Reload renders one standalone promoted image."""
-        del azents_engine_worker_container
-        requests.delete(
-            f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
-            timeout=10,
-        ).raise_for_status()
-        token, agent_id, session_id = setup_profile_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        _open_authenticated_session(
-            browser_driver,
-            public_api_client=public_api_client,
-            token=token,
-            main_web_url=azents_main_web_url,
-            agent_id=agent_id,
-            session_id=session_id,
-        )
-
-        browser_wait = WebDriverWait(browser_driver, 30)
-        composer = browser_wait.until(
-            ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea:not([disabled])"))
-        )
-        composer.send_keys(_PROMPT, Keys.ENTER)
-        _wait_for_idle(
-            server_url=azents_public_server_url,
-            token=token,
-            agent_id=agent_id,
-            session_id=session_id,
-        )
-
-        browser_driver.refresh()
-        _wait_for_promoted_image_without_activity(browser_driver)
