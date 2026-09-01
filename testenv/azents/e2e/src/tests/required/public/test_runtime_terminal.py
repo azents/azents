@@ -146,6 +146,28 @@ def _prepare_session_folder(
     response.raise_for_status()
 
 
+def _prepare_terminal_session(
+    *,
+    public_api_client: azentspublicclient.ApiClient,
+    workspace: _TerminalWorkspace,
+    server_url: str,
+) -> None:
+    """Prepare and observe authoritative Session working-folder readiness."""
+    _prepare_session_folder(
+        server_url=server_url,
+        token=workspace.token,
+        agent_id=workspace.agent_id,
+        session_id=workspace.session_id,
+    )
+    _wait_terminal_projection(
+        public_api_client=public_api_client,
+        workspace=workspace,
+        predicate=lambda projection: projection.state in {"ready", "active"},
+        message="Terminal did not become ready after Session folder preparation",
+        timeout=120,
+    )
+
+
 def _create_workspace(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -284,26 +306,12 @@ def _start_runtime(
         ),
         message="Runtime Runner did not become ready",
     )
-    _prepare_session_folder(
+    _prepare_terminal_session(
+        public_api_client=public_api_client,
+        workspace=workspace,
         server_url=server_url,
-        token=workspace.token,
-        agent_id=workspace.agent_id,
-        session_id=workspace.session_id,
     )
-    terminal_api = TerminalV1Api(public_api_client)
-    deadline = time.monotonic() + 120
-    last_projection: object | None = None
-    while time.monotonic() < deadline:
-        last_projection = terminal_api.terminal_v1_get_terminal_projection(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            _headers=_headers(workspace.token),
-        )
-        if last_projection.state in {"ready", "active"}:
-            return runtime_api
-        time.sleep(1)
-    raise AssertionError(f"Terminal did not become ready: {last_projection!r}")
+    return runtime_api
 
 
 def _wait_terminal_projection(
@@ -765,9 +773,20 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
     )
     assert _marked_value(reattached_pid, "PID") == shell_pid
 
-    exit_control = reattached.terminate()
-    assert exit_control.get("reason") == "caller"
     terminal_api = TerminalV1Api(public_api_client)
+    try:
+        exit_control = reattached.terminate()
+    except TimeoutError as exc:
+        timed_out_projection = terminal_api.terminal_v1_get_terminal_projection(
+            handle=workspace.handle,
+            agent_id=workspace.agent_id,
+            session_id=workspace.session_id,
+            _headers=_headers(workspace.token),
+        )
+        raise AssertionError(
+            f"Terminal exit control timed out; projection={timed_out_projection!r}"
+        ) from exc
+    assert exit_control.get("reason") == "caller"
     projection = terminal_api.terminal_v1_get_terminal_projection(
         handle=workspace.handle,
         agent_id=workspace.agent_id,
@@ -996,11 +1015,10 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
         message="Explicit Runtime Start did not restore Terminal authority",
     )
     assert restarted.lifecycle is not None
-    _prepare_session_folder(
+    _prepare_terminal_session(
+        public_api_client=public_api_client,
+        workspace=workspace,
         server_url=azents_public_server_url,
-        token=workspace.token,
-        agent_id=workspace.agent_id,
-        session_id=workspace.session_id,
     )
     resumed = _TerminalSocket.connect(
         public_api_client=public_api_client,
@@ -1039,6 +1057,13 @@ def test_runtime_terminal_member_access_revocation_closes_attachment(
         session_id=team.session_id,
         runtime_profile_id=None,
         infrastructure_profile_id=None,
+    )
+    _wait_terminal_projection(
+        public_api_client=public_api_client,
+        workspace=member_workspace,
+        predicate=lambda projection: projection.state in {"ready", "active"},
+        message="Member Terminal did not become ready after Session folder preparation",
+        timeout=120,
     )
     terminal = _TerminalSocket.connect(
         public_api_client=public_api_client,

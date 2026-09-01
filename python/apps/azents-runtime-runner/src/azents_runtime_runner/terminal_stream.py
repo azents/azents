@@ -128,6 +128,7 @@ class RunnerTerminalStreamManager:
         self._client_factory = client_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._clients: dict[str, RunnerTerminalClient] = {}
+        self._terminations: dict[str, asyncio.Future[_TerminalFinal]] = {}
         self._lock = asyncio.Lock()
 
     @classmethod
@@ -180,8 +181,10 @@ class RunnerTerminalStreamManager:
             existing = self._tasks.get(intent.identity.terminal_id)
             if existing is not None and not existing.done():
                 return
+            termination = asyncio.get_running_loop().create_future()
+            self._terminations[intent.identity.terminal_id] = termination
             self._tasks[intent.identity.terminal_id] = asyncio.create_task(
-                self._open_and_run(intent),
+                self._open_and_run(intent, termination),
                 name=f"runner-terminal:{intent.identity.terminal_id}",
             )
 
@@ -192,23 +195,32 @@ class RunnerTerminalStreamManager:
         """Terminate one exact current-generation Terminal intent."""
         if not self._identity_current(intent.identity):
             return
+        async with self._lock:
+            termination = self._terminations.get(intent.identity.terminal_id)
+        if termination is not None:
+            _set_future_result(
+                termination,
+                _TerminalFinal(reason=intent.reason, exit_code=None),
+            )
+            return
         cleanup = await self._registry.invalidate(
             terminal_id=intent.identity.terminal_id
         )
-        async with self._lock:
-            task = self._tasks.pop(intent.identity.terminal_id, None)
-            client = self._clients.pop(intent.identity.terminal_id, None)
         asyncio.create_task(
             self._finish_detached(
                 terminal_id=intent.identity.terminal_id,
-                task=task,
-                client=client,
+                task=None,
+                client=None,
                 cleanup=cleanup,
             ),
             name=f"runner-terminal-explicit-cleanup:{intent.identity.terminal_id}",
         )
 
-    async def _open_and_run(self, intent: RunnerTerminalOpenIntent) -> None:
+    async def _open_and_run(
+        self,
+        intent: RunnerTerminalOpenIntent,
+        termination: asyncio.Future[_TerminalFinal],
+    ) -> None:
         terminal_id = intent.identity.terminal_id
         try:
             terminal = await self._registry.open(
@@ -228,7 +240,7 @@ class RunnerTerminalStreamManager:
                     ),
                 )
             )
-            await self._run_terminal(terminal, intent)
+            await self._run_terminal(terminal, intent, termination)
         except asyncio.CancelledError:
             raise
         except TerminalAdmissionError, OSError:
@@ -258,6 +270,8 @@ class RunnerTerminalStreamManager:
             async with self._lock:
                 if self._tasks.get(terminal_id) is current:
                     self._tasks.pop(terminal_id, None)
+                if self._terminations.get(terminal_id) is termination:
+                    self._terminations.pop(terminal_id, None)
 
     async def invalidate_runtime(self) -> tuple[asyncio.Task[PtyTerminalExit], ...]:
         """Fence PTYs, then close all data streams before returning authority."""
@@ -267,8 +281,13 @@ class RunnerTerminalStreamManager:
         async with self._lock:
             tasks = tuple(self._tasks.values())
             clients = tuple(self._clients.values())
+            terminations = tuple(self._terminations.values())
             self._tasks.clear()
             self._clients.clear()
+            self._terminations.clear()
+        for termination in terminations:
+            if not termination.done():
+                termination.cancel()
         for task in tasks:
             task.cancel()
         if tasks:
@@ -318,6 +337,7 @@ class RunnerTerminalStreamManager:
         self,
         terminal: RunnerTerminal,
         intent: RunnerTerminalOpenIntent,
+        termination: asyncio.Future[_TerminalFinal],
     ) -> None:
         stream_generation = intent.initial_stream_generation
         final: _TerminalFinal | None = None
@@ -346,6 +366,7 @@ class RunnerTerminalStreamManager:
                         terminal,
                         intent,
                         client,
+                        termination,
                         stream_generation=stream_generation,
                     )
                 except asyncio.CancelledError:
@@ -395,6 +416,7 @@ class RunnerTerminalStreamManager:
         terminal: RunnerTerminal,
         intent: RunnerTerminalOpenIntent,
         client: RunnerTerminalClient,
+        termination: asyncio.Future[_TerminalFinal],
         *,
         stream_generation: int,
     ) -> _TerminalFinal:
@@ -403,6 +425,7 @@ class RunnerTerminalStreamManager:
                 terminal,
                 intent,
                 client,
+                termination,
                 stream_generation=stream_generation,
             )
         )
@@ -431,12 +454,10 @@ class RunnerTerminalStreamManager:
         terminal: RunnerTerminal,
         intent: RunnerTerminalOpenIntent,
         client: RunnerTerminalClient,
+        termination: asyncio.Future[_TerminalFinal],
         *,
         stream_generation: int,
     ) -> _TerminalFinal:
-        stop: asyncio.Future[_TerminalFinal] = (
-            asyncio.get_running_loop().create_future()
-        )
         output_acknowledged = asyncio.Event()
         last_resize_sequence = 0
         heartbeat = _HeartbeatState()
@@ -464,7 +485,7 @@ class RunnerTerminalStreamManager:
                         output_acknowledged.set()
                     case RunnerTerminalTerminate(reason=reason):
                         _set_future_result(
-                            stop,
+                            termination,
                             _TerminalFinal(reason=reason, exit_code=None),
                         )
                     case RunnerTerminalHeartbeatAcknowledgement(
@@ -481,7 +502,7 @@ class RunnerTerminalStreamManager:
                     case RunnerTerminalStreamError(code=code):
                         if code is RunnerTerminalStreamErrorCode.STALE_AUTHORITY:
                             _set_future_result(
-                                stop,
+                                termination,
                                 _TerminalFinal(
                                     reason=(
                                         RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
@@ -491,7 +512,7 @@ class RunnerTerminalStreamManager:
                             )
                         elif code is RunnerTerminalStreamErrorCode.PROTOCOL_VIOLATION:
                             _set_future_result(
-                                stop,
+                                termination,
                                 _TerminalFinal(
                                     reason=(
                                         RunnerTerminalTerminationReason.PROTOCOL_VIOLATION
@@ -501,7 +522,7 @@ class RunnerTerminalStreamManager:
                             )
                         elif code is RunnerTerminalStreamErrorCode.TERMINATED:
                             _set_future_result(
-                                stop,
+                                termination,
                                 _TerminalFinal(
                                     reason=RunnerTerminalTerminationReason.CALLER,
                                     exit_code=None,
@@ -509,11 +530,11 @@ class RunnerTerminalStreamManager:
                             )
                         else:
                             _set_future_exception(
-                                stop,
+                                termination,
                                 RuntimeRunnerTerminalStreamClosed(code.value),
                             )
             except (TerminalError, ValueError) as error:
-                _set_future_exception(stop, error)
+                _set_future_exception(termination, error)
 
         client.set_control_handler(handle_control)
         resume = terminal.resume_state()
@@ -582,8 +603,7 @@ class RunnerTerminalStreamManager:
             terminal.process.wait(),
             name=f"runner-terminal-process:{terminal.terminal_id}",
         )
-        tasks = (
-            stop,
+        connection_tasks = (
             output_task,
             heartbeat_task,
             heartbeat_health_task,
@@ -593,11 +613,11 @@ class RunnerTerminalStreamManager:
         done = set()
         try:
             done, _pending = await asyncio.wait(
-                tasks,
+                (termination, *connection_tasks),
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if stop in done:
-                final = stop.result()
+            if termination in done:
+                final = termination.result()
             elif process_task in done:
                 final = _TerminalFinal(
                     reason=RunnerTerminalTerminationReason.PROCESS_EXIT,
@@ -630,15 +650,11 @@ class RunnerTerminalStreamManager:
                 )
             return final
         finally:
-            for task in tasks:
+            for task in connection_tasks:
                 if task not in done:
                     task.cancel()
             await asyncio.gather(
-                output_task,
-                heartbeat_task,
-                heartbeat_health_task,
-                deadline_task,
-                process_task,
+                *connection_tasks,
                 return_exceptions=True,
             )
 

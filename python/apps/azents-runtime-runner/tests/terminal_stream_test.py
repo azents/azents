@@ -230,8 +230,13 @@ async def test_open_intent_allocates_pty_and_bridges_input_ack() -> None:
         )
     )
     await asyncio.wait_for(client.closed.wait(), timeout=1)
+    await asyncio.wait_for(process.closed_event.wait(), timeout=1)
     assert await registry.get(terminal_id="terminal-1") is None
     assert process.closed is True
+    assert client.sent[-1] == RunnerTerminalExit(
+        reason=RunnerTerminalTerminationReason.CALLER,
+        exit_code=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -346,6 +351,12 @@ async def test_terminate_intent_returns_before_pty_cleanup_finishes() -> None:
     terminate_gate.set()
     await asyncio.wait_for(clients[0].closed.wait(), timeout=1)
     await asyncio.wait_for(process.closed_event.wait(), timeout=1)
+    assert clients[0].sent == [
+        RunnerTerminalExit(
+            reason=RunnerTerminalTerminationReason.CALLER,
+            exit_code=None,
+        )
+    ]
 
 
 @pytest.mark.asyncio
