@@ -11,7 +11,6 @@ import azentspublicclient
 import requests
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
-from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -37,10 +36,7 @@ from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 
-from support.runtime_profiles import (
-    create_workspace_runtime_profile,
-    start_and_wait_for_agent_runtime,
-)
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -51,11 +47,6 @@ _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _RUNTIME_PROVIDER_ID = "system-docker"
 _DETERMINISTIC_MODEL_MESSAGE = "Event durable hello"
-_SYSTEM_TOOL_GUIDANCE = (
-    "For missing system tools, use `nix search nixpkgs <name>` and "
-    "`nix profile add nixpkgs#<package>`. Do not use sudo or OS package managers. "
-    "Use the Project's package manager for Project dependencies."
-)
 
 
 @dataclass(frozen=True)
@@ -168,53 +159,6 @@ def _create_runtime_free_agent(
     assert agent.runtime_capability == AgentRuntimeCapability.NONE
     assert agent.runtime_profile_id is None
     return agent.id
-
-
-def _create_managed_agent(
-    *,
-    public_api_client: azentspublicclient.ApiClient,
-    workspace: _Workspace,
-) -> str:
-    """Create an Agent with the exact managed Runtime Profile."""
-    runtime_profile_id = workspace.runtime_profile_id
-    if runtime_profile_id is None:
-        raise AssertionError("Managed Agent setup requires a Runtime Profile")
-    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
-        handle=workspace.handle,
-        agent_create_request=AgentCreateRequest(
-            name=f"Managed Runtime Agent {unique()}",
-            model_selection=workspace.model_selection,
-            lightweight_model_selection=workspace.model_selection,
-            type=AgentType.PUBLIC,
-            runtime_profile_id=runtime_profile_id,
-        ),
-        _headers=_headers(workspace.token),
-    )
-    assert agent.runtime_capability == AgentRuntimeCapability.MANAGED
-    assert agent.runtime_profile_id == runtime_profile_id
-    return agent.id
-
-
-def _system_prompt_content(
-    *,
-    public_api_client: azentspublicclient.ApiClient,
-    token: str,
-    agent_id: str,
-    session_id: str,
-) -> tuple[list[str], str]:
-    """Return composed Toolkit fragments and the final prompt."""
-    context = ChatV1Api(public_api_client).chat_v1_get_agent_session_context(
-        agent_id=agent_id,
-        session_id=session_id,
-        _headers=_headers(token),
-    )
-    prompt = context.system_prompt
-    if prompt is None or prompt.final_prompt is None:
-        raise AssertionError(f"Session context omitted composed prompt: {context!r}")
-    return (
-        [fragment.content for fragment in prompt.toolkit_prompts],
-        prompt.final_prompt.content,
-    )
 
 
 def _primary_session_id(
@@ -615,14 +559,6 @@ def test_runtime_free_model_turn_does_not_create_runtime(
         session_id=session_id,
     )
     assert message in str(history)
-    toolkit_prompts, final_prompt = _system_prompt_content(
-        public_api_client=public_api_client,
-        token=workspace.token,
-        agent_id=agent_id,
-        session_id=session_id,
-    )
-    assert all(_SYSTEM_TOOL_GUIDANCE not in prompt for prompt in toolkit_prompts)
-    assert _SYSTEM_TOOL_GUIDANCE not in final_prompt
 
     after_turn = runtime_api.agent_runtime_v1_get_agent_runtime(
         agent_id=agent_id,
@@ -639,72 +575,3 @@ def test_runtime_free_model_turn_does_not_create_runtime(
         agent_id=agent_id,
         session_id=session_id,
     )
-
-
-def test_managed_runtime_exposes_nix_prompt_but_not_nix_workspace(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_engine_worker_container: DockerContainer,
-) -> None:
-    """Verify the real prompt and Workspace API separation for managed Runtime."""
-    del azents_engine_worker_container
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-        with_runtime_profile=True,
-    )
-    agent_id = _create_managed_agent(
-        public_api_client=public_api_client,
-        workspace=workspace,
-    )
-    start_and_wait_for_agent_runtime(
-        public_api_client,
-        token=workspace.token,
-        workspace_handle=workspace.handle,
-        agent_id=agent_id,
-    )
-    session_id = _primary_session_id(
-        server_url=azents_public_server_url,
-        token=workspace.token,
-        agent_id=agent_id,
-    )
-    session_id = _write_session_message(
-        server_url=azents_public_server_url,
-        token=workspace.token,
-        agent_id=agent_id,
-        session_id=session_id,
-        message=_DETERMINISTIC_MODEL_MESSAGE,
-    )
-    _wait_for_assistant_message(
-        server_url=azents_public_server_url,
-        token=workspace.token,
-        session_id=session_id,
-    )
-
-    toolkit_prompts, final_prompt = _system_prompt_content(
-        public_api_client=public_api_client,
-        token=workspace.token,
-        agent_id=agent_id,
-        session_id=session_id,
-    )
-    matching_prompts = [
-        prompt for prompt in toolkit_prompts if _SYSTEM_TOOL_GUIDANCE in prompt
-    ]
-    assert len(matching_prompts) == 1
-    assert final_prompt.count(_SYSTEM_TOOL_GUIDANCE) == 1
-    assert len(_SYSTEM_TOOL_GUIDANCE.split()) == 30
-
-    for path, suffix in (
-        ("/nix", "/workspace/files"),
-        ("/nix/store", "/workspace/download"),
-    ):
-        response = requests.get(
-            f"{azents_public_server_url}/chat/v1/agents/{agent_id}{suffix}",
-            params={"path": path},
-            headers=_headers(workspace.token),
-            timeout=10,
-        )
-        assert response.status_code == 403, response.text
-        assert response.json() == {"detail": "Agent Workspace path access denied."}

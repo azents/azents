@@ -155,10 +155,10 @@ def test_empty_store_initialization_is_complete_before_environment_exposure(
         )
     ]
     assert environment["NIX_PROFILE"] == (
-        f"{nix_root}/var/state/azents-agent/profiles/profile"
+        f"{nix_root}/var/state/azents-agent/nix/profiles/profile"
     )
     assert environment["PATH"].split(os.pathsep)[:2] == [
-        f"{nix_root}/var/state/azents-agent/profiles/profile/bin",
+        f"{nix_root}/var/state/azents-agent/nix/profiles/profile/bin",
         f"{nix_root}/var/nix/profiles/azents-release/bin",
     ]
     assert not (nix_root / ".azents-bootstrap").exists()
@@ -210,7 +210,9 @@ def test_existing_store_reconciliation_preserves_agent_installed_roots(
         nix_root / "store" / "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-agent-installed-tool"
     )
     installed.mkdir()
-    agent_profile = nix_root / "var" / "state" / "azents-agent" / "profiles" / "profile"
+    agent_profile = (
+        nix_root / "var" / "state" / "azents-agent" / "nix" / "profiles" / "profile"
+    )
     agent_profile.parent.mkdir(parents=True)
     agent_profile.symlink_to(
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-agent-installed-tool"
