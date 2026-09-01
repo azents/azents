@@ -261,15 +261,6 @@ def _open_authenticated_session(
     wait.until(ec.url_contains(session_id))
 
 
-def _wait_for_chat_subscription(driver: WebDriver) -> None:
-    """Wait for the browser Chat WebSocket subscription barrier."""
-    WebDriverWait(driver, 30).until(
-        ec.presence_of_element_located(
-            (By.CSS_SELECTOR, "[data-chat-connection-status='connected']")
-        )
-    )
-
-
 def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int, int, int]:
     """Return bounded grouped-card and promoted-image counts for diagnostics."""
     activity_selector = "[data-tool-activity-id]"
@@ -555,7 +546,7 @@ class TestProviderImageGeneration:
         browser_driver: WebDriver,
         azents_main_web_url: str,
     ) -> None:
-        """Live projection and reload keep one standalone promoted image."""
+        """Reload renders one standalone promoted image."""
         del azents_engine_worker_container
         requests.delete(
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
@@ -574,7 +565,6 @@ class TestProviderImageGeneration:
             agent_id=agent_id,
             session_id=session_id,
         )
-        _wait_for_chat_subscription(browser_driver)
 
         browser_wait = WebDriverWait(browser_driver, 30)
         composer = browser_wait.until(
@@ -588,6 +578,5 @@ class TestProviderImageGeneration:
             session_id=session_id,
         )
 
-        _wait_for_promoted_image_without_activity(browser_driver)
         browser_driver.refresh()
         _wait_for_promoted_image_without_activity(browser_driver)

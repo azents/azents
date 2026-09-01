@@ -61,12 +61,7 @@ export function ChatSessionView({
   const tAgentDetail = useTranslations("workspace.agents.detail");
 
   return (
-    <Box
-      h="100%"
-      mih={0}
-      data-chat-connection-status={chatSession.connectionStatus}
-      style={{ display: "flex", flexDirection: "column" }}
-    >
+    <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
       <AgentSessionHeader
         handle={handle}
         agent={agent}
