@@ -38,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-28
-spec_version: 30
+last_verified_at: 2026-09-01
+spec_version: 31
 ---
 
 # Agent Runtime Persistence
@@ -51,6 +51,8 @@ server process and not by S3 checkpoint/restore as an event path. An Agent may b
 have no logical Runtime row or Workspace. When managed compute exists, the current-generation
 Runner reports the effective Agent Workspace absolute path as Runtime metadata. Server file APIs,
 Projects, worktrees, and prompts consume that reported path without a fixed server-side fallback.
+The Runner image includes Nix and points its store, state, log, configuration, and user profile
+paths under the existing persistent Runner `HOME`.
 
 ## Runtime Profile binding and current configuration state
 
@@ -210,6 +212,10 @@ Only explicit `reset` and terminal delete may delete Agent Workspace data.
 - ordinary Runtime Profile recreation may replace compute; it must preserve durable storage.
 - `observe` is read-only.
 
+Nix store and profile state follow the same boundary because they live inside the existing
+Workspace storage. Ordinary recreation preserves installed tools; reset and terminal deletion
+remove them together with the Workspace.
+
 For desired-running Runtimes, periodic reconciliation uses idempotent `start` to compare the
 Provider-managed workload against the current Runner image and configuration. Equivalent workloads
 are reused. Drifted Docker containers or Kubernetes Pods are replaced while the host workspace
@@ -367,6 +373,8 @@ Required checks:
   identity, historical null-field normalization, and active containment rejection.
 - Docker and Kubernetes Provider tests prove Workspace persistence and ephemeral-state clearing on
   recreation.
+- Runner tests prove HOME-based Nix state survives ordinary recreation and is removed by the
+  existing Workspace reset boundary.
 - Kubernetes Provider unit, manifest, protocol, and lifecycle tests prove exact strict-mode
   resource ownership, comparison, replacement, cleanup, logical-CA retention, and PVC preservation
   without creating live Kubernetes resources.
@@ -381,6 +389,8 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-01 (spec_version=31)** — Added image-installed Nix whose writable
+  store and state use the existing persistent Runner HOME.
 - **2026-08-26 (spec_version=30)** — Separated Provider-authorized host lifecycle from
   ready-Runner data-plane usability and allowed a retained applied configuration to keep
   serving operations while a future desired selection is unavailable or pending recreation.

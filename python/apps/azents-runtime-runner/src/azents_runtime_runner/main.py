@@ -36,6 +36,7 @@ from azents_runtime_control.transfer import (
 
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
+from azents_runtime_runner.nix import prepare_nix_environment
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.system_metrics import create_system_metrics_collector
 from azents_runtime_runner.transfer import RunnerTransferManager
@@ -150,6 +151,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
     inherited_environment = {
         **prepare_runner_network_environment(),
         **prepare_runner_trust_environment(),
+        **prepare_nix_environment(workspace_path=workspace_path),
     }
     execution_backend = DirectExecutionBackend(
         inherited_environment=inherited_environment
