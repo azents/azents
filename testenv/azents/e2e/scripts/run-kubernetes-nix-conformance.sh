@@ -529,6 +529,25 @@ wait_for_pv_deletion() {
   fi
 }
 
+wait_for_replacement_pvc_uid() {
+  local pvc="$1"
+  local old_uid="$2"
+  local current_uid
+  for _ in $(seq 1 180); do
+    current_uid="$(
+      kubectl get pvc -n "${NAMESPACE}" "${pvc}" \
+        -o jsonpath='{.metadata.uid}' 2>/dev/null || true
+    )"
+    if [[ -n "${current_uid}" && "${current_uid}" != "${old_uid}" ]]; then
+      printf '%s\n' "${current_uid}"
+      return
+    fi
+    sleep 1
+  done
+  kubectl get pvc -n "${NAMESPACE}" "${pvc}" -o yaml >&2
+  return 1
+}
+
 run_provider phase3-start start
 wait_for_runner
 
@@ -591,10 +610,8 @@ kubectl get networkpolicy -n "${NAMESPACE}" "${RUNTIME_POD}-execution" >/dev/nul
 OLD_WORKSPACE_UID="$(kubectl get pvc -n "${NAMESPACE}" "${WORKSPACE_PVC}" -o jsonpath='{.metadata.uid}')"
 OLD_NIX_UID="$(kubectl get pvc -n "${NAMESPACE}" "${NIX_PVC}" -o jsonpath='{.metadata.uid}')"
 run_provider phase3-reset reset
-workspace_uid="$(kubectl get pvc -n "${NAMESPACE}" "${WORKSPACE_PVC}" -o jsonpath='{.metadata.uid}')"
-nix_uid="$(kubectl get pvc -n "${NAMESPACE}" "${NIX_PVC}" -o jsonpath='{.metadata.uid}')"
-test "${workspace_uid}" != "${OLD_WORKSPACE_UID}"
-test "${nix_uid}" != "${OLD_NIX_UID}"
+workspace_uid="$(wait_for_replacement_pvc_uid "${WORKSPACE_PVC}" "${OLD_WORKSPACE_UID}")"
+nix_uid="$(wait_for_replacement_pvc_uid "${NIX_PVC}" "${OLD_NIX_UID}")"
 wait_for_runner
 RESET_WORKSPACE_PV="$(dynamic_pv_name "${WORKSPACE_PVC}")"
 RESET_NIX_PV="$(dynamic_pv_name "${NIX_PVC}")"
