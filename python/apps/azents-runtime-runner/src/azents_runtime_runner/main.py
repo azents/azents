@@ -36,7 +36,6 @@ from azents_runtime_control.transfer import (
 
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
-from azents_runtime_runner.nix_bootstrap import prepare_nix_runtime
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.system_metrics import create_system_metrics_collector
 from azents_runtime_runner.transfer import RunnerTransferManager
@@ -148,15 +147,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
-    nix_environment = await asyncio.to_thread(prepare_nix_runtime)
-    trust_environment = prepare_runner_trust_environment()
     inherited_environment = {
-        **nix_environment,
         **prepare_runner_network_environment(),
-        **trust_environment,
+        **prepare_runner_trust_environment(),
     }
-    if ssl_cert_file := trust_environment.get("SSL_CERT_FILE"):
-        inherited_environment["NIX_SSL_CERT_FILE"] = ssl_cert_file
     execution_backend = DirectExecutionBackend(
         inherited_environment=inherited_environment
     )

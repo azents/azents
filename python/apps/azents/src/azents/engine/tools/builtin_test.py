@@ -1560,24 +1560,6 @@ class TestRuntimeToolkitUpdateContext:
         assert "Runtime Workspace" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_exact_native_nix_guidance(self) -> None:
-        """Managed shell prompt exposes the approved native Nix interface."""
-        toolkit = _make_toolkit()
-        context = _make_context()
-        await toolkit.update_context(context)
-
-        prompt = await toolkit.get_static_prompt(context)
-        guidance = (
-            "For missing system tools, use `nix search nixpkgs <name>` and "
-            "`nix profile add nixpkgs#<package>`. Do not use sudo or OS package "
-            "managers. Use the Project's package manager for Project dependencies."
-        )
-
-        assert guidance in prompt
-        assert len(guidance.split()) == 30
-        assert "You can execute commands, install packages, and run code." not in prompt
-
-    @pytest.mark.asyncio
     async def test_prompt_rejects_removed_containment_profile_without_downgrade(
         self,
     ) -> None:

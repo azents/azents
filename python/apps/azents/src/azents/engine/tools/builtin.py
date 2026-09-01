@@ -143,7 +143,6 @@ from azents.services.session_working_folder_binding import (
 from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
-_SYSTEM_TOOL_GUIDANCE = """For missing system tools, use `nix search nixpkgs <name>` and `nix profile add nixpkgs#<package>`. Do not use sudo or OS package managers. Use the Project's package manager for Project dependencies."""  # noqa: E501
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1336,8 +1335,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return domain allow/block settings and accessible scope prompt."""
         parts: list[str] = []
         scope_lines = [
-            _SYSTEM_TOOL_GUIDANCE,
-            "",
             "## Runtime Workspace",
             "",
             "Use absolute filesystem paths inside the runtime workspace.",
@@ -1409,7 +1406,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
     description = "Execute code in the agent runtime"
     system_prompt = dedent("""\
         You have access to an agent runtime shell environment.
-        You can execute commands and run code.
+        You can execute commands, install packages, and run code.
         The runtime workspace persists across calls for this agent.
 
         ### Runtime Workspace
