@@ -1170,7 +1170,7 @@ def test_runtime_terminal_runner_capability_mismatch_fails_closed(
                 f"AZ_RUNTIME_RUNNER_ID={shlex.quote(f'legacy-{legacy_suffix}')} "
                 "AZ_RUNTIME_RUNNER_CONNECTION_ID="
                 f"{shlex.quote(f'legacy-{legacy_suffix}')} "
-                f"python -c {shlex.quote(legacy_script)} "
+                f".venv/bin/python -c {shlex.quote(legacy_script)} "
                 f"> {shlex.quote(legacy_log_path)} 2>&1 & "
                 f"echo $! > {shlex.quote(legacy_pid_path)}"
             ),

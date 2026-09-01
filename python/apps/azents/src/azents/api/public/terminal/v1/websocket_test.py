@@ -15,6 +15,7 @@ from azents.api.public.terminal.v1 import (
     _CLOSE_REVOKED,
     _receive_attach,
     _receive_loop,
+    _revalidate_loop,
     _run_terminal_socket,
     _send_initial_state,
     _SocketProgress,
@@ -235,6 +236,46 @@ async def test_terminate_keeps_send_loop_alive_until_exit_is_delivered() -> None
     assert {"type": "exit", "reason": "caller", "exit_code": None} in [
         json.loads(item) for item in websocket.texts
     ]
+
+
+@pytest.mark.asyncio
+async def test_revalidation_sends_revoked_before_terminating_pty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    class _OrderedWebSocket(_WebSocket):
+        async def send_text(self, data: str) -> None:
+            order.append("revoked")
+            await super().send_text(data)
+
+    class _OrderedAttachment(_Attachment):
+        async def revoke(self, reason_code: RuntimeTerminalReasonCode) -> None:
+            order.append("terminate")
+            await super().revoke(reason_code)
+
+    monkeypatch.setattr(
+        "azents.api.public.terminal.v1._REVALIDATION_SECONDS",
+        0,
+    )
+    websocket = _OrderedWebSocket()
+    attachment = _OrderedAttachment()
+    service = AsyncMock()
+    service.revalidate.return_value = RuntimeTerminalReasonCode.ACCESS_DENIED
+
+    with pytest.raises(_TerminalSocketProtocolError):
+        await _revalidate_loop(
+            websocket,
+            service,
+            AsyncMock(),
+            attachment,
+        )
+
+    assert order == ["revoked", "terminate"]
+    assert json.loads(websocket.texts[0]) == {
+        "type": "revoked",
+        "reason_code": "access_denied",
+    }
 
 
 @pytest.mark.asyncio

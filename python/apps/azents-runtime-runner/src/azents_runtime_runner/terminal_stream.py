@@ -1,7 +1,6 @@
 """Runner integration for Terminal Control intents and dedicated data streams."""
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -634,20 +633,15 @@ class RunnerTerminalStreamManager:
                     if task in done:
                         task.result()
                 raise RuntimeRunnerTerminalStreamClosed("Terminal data stream stopped")
-            with contextlib.suppress(
-                RuntimeRunnerTerminalStreamClosed,
-                grpc.aio.AioRpcError,
-                TimeoutError,
-            ):
-                await asyncio.wait_for(
-                    client.finish(
-                        RunnerTerminalExit(
-                            reason=final.reason,
-                            exit_code=final.exit_code,
-                        )
-                    ),
-                    timeout=_FINAL_EVENT_FLUSH_TIMEOUT_SECONDS,
-                )
+            await asyncio.wait_for(
+                client.finish(
+                    RunnerTerminalExit(
+                        reason=final.reason,
+                        exit_code=final.exit_code,
+                    )
+                ),
+                timeout=_FINAL_EVENT_FLUSH_TIMEOUT_SECONDS,
+            )
             return final
         finally:
             for task in connection_tasks:

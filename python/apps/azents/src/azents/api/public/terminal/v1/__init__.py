@@ -523,11 +523,13 @@ async def _revalidate_loop(
         await asyncio.sleep(_REVALIDATION_SECONDS)
         reason = await service.revalidate(admission)
         if reason is not None:
-            await attachment.revoke(reason)
-            await _send_control(
-                websocket,
-                TerminalRevokedControl(reason_code=reason),
-            )
+            try:
+                await _send_control(
+                    websocket,
+                    TerminalRevokedControl(reason_code=reason),
+                )
+            finally:
+                await attachment.revoke(reason)
             raise _TerminalSocketProtocolError(
                 code=_CLOSE_REVOKED,
                 reason="Terminal authority is revoked",
