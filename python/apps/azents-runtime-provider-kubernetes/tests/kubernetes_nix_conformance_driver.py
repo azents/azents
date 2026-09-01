@@ -34,6 +34,7 @@ _ACTIONS = {
     "no_network_delete": (RuntimeLifecycleCommandType.RESTART, 2, "no_network"),
     "no_network_start": (RuntimeLifecycleCommandType.START, 2, "no_network"),
     "reset": (RuntimeLifecycleCommandType.RESET, 3, "direct"),
+    "reset_start": (RuntimeLifecycleCommandType.START, 3, "direct"),
     "delete": (RuntimeLifecycleCommandType.TERMINAL_DELETE, 4, "direct"),
 }
 
@@ -180,7 +181,7 @@ async def _run() -> None:
         provider = prepared.lifecycle
         command = _command(action=action, runner_image=runner_image)
         match action:
-            case "start" | "recreate" | "no_network_start":
+            case "start" | "recreate" | "no_network_start" | "reset_start":
                 result = await provider.start(command)
             case "no_network_delete":
                 result = await provider.restart(command)

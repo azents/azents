@@ -534,12 +534,38 @@ wait_for_replacement_pvc_uid() {
   local old_uid="$2"
   local current_uid
   for _ in $(seq 1 180); do
-    current_uid="$(
+    if ! current_uid="$(
       kubectl get pvc -n "${NAMESPACE}" "${pvc}" \
-        -o jsonpath='{.metadata.uid}' 2>/dev/null || true
-    )"
+        --ignore-not-found \
+        -o jsonpath='{.metadata.uid}' 2>/dev/null
+    )"; then
+      sleep 1
+      continue
+    fi
     if [[ -n "${current_uid}" && "${current_uid}" != "${old_uid}" ]]; then
       printf '%s\n' "${current_uid}"
+      return
+    fi
+    sleep 1
+  done
+  kubectl get pvc -n "${NAMESPACE}" "${pvc}" -o yaml >&2
+  return 1
+}
+
+wait_for_old_pvc_uid_gone() {
+  local pvc="$1"
+  local old_uid="$2"
+  local current_uid
+  for _ in $(seq 1 180); do
+    if ! current_uid="$(
+      kubectl get pvc -n "${NAMESPACE}" "${pvc}" \
+        --ignore-not-found \
+        -o jsonpath='{.metadata.uid}' 2>/dev/null
+    )"; then
+      sleep 1
+      continue
+    fi
+    if [[ "${current_uid}" != "${old_uid}" ]]; then
       return
     fi
     sleep 1
@@ -610,6 +636,9 @@ kubectl get networkpolicy -n "${NAMESPACE}" "${RUNTIME_POD}-execution" >/dev/nul
 OLD_WORKSPACE_UID="$(kubectl get pvc -n "${NAMESPACE}" "${WORKSPACE_PVC}" -o jsonpath='{.metadata.uid}')"
 OLD_NIX_UID="$(kubectl get pvc -n "${NAMESPACE}" "${NIX_PVC}" -o jsonpath='{.metadata.uid}')"
 run_provider phase3-reset reset
+wait_for_old_pvc_uid_gone "${WORKSPACE_PVC}" "${OLD_WORKSPACE_UID}"
+wait_for_old_pvc_uid_gone "${NIX_PVC}" "${OLD_NIX_UID}"
+run_provider phase3-reset-start reset_start
 workspace_uid="$(wait_for_replacement_pvc_uid "${WORKSPACE_PVC}" "${OLD_WORKSPACE_UID}")"
 nix_uid="$(wait_for_replacement_pvc_uid "${NIX_PVC}" "${OLD_NIX_UID}")"
 wait_for_runner
