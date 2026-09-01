@@ -584,8 +584,9 @@ if NIX_EXEC_TIMEOUT_SECONDS=90 nix_exec \
   exit 1
 fi
 nix_exec /bin/sh -ec 'hello'
-kubectl get networkpolicy -n "${NAMESPACE}" "${RUNTIME_POD}-execution" -o json |
+kubectl get pod -n "${NAMESPACE}" "${RUNTIME_POD}" -o json |
   jq -e '.metadata.annotations["azents/runtime-network-mode"] == "no_network"' >/dev/null
+kubectl get networkpolicy -n "${NAMESPACE}" "${RUNTIME_POD}-execution" >/dev/null
 
 OLD_WORKSPACE_UID="$(kubectl get pvc -n "${NAMESPACE}" "${WORKSPACE_PVC}" -o jsonpath='{.metadata.uid}')"
 OLD_NIX_UID="$(kubectl get pvc -n "${NAMESPACE}" "${NIX_PVC}" -o jsonpath='{.metadata.uid}')"
