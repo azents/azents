@@ -59,8 +59,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-01
-spec_version: 102
+last_verified_at: 2026-08-31
+spec_version: 101
 ---
 
 # Toolkit
@@ -398,7 +398,6 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
 - `glob` file tool accepts absolute path patterns and implements a shell-style pathname matching subset: `*`, `?`, character classes (`[...]`), recursive `**` matching zero or more path segments, and comma-separated brace alternatives such as `*.{jpg,png}`, including nested alternatives. Recursive patterns search below the non-glob prefix and may return matching directories as well as files, so `<agent-workspace>/.claude/skills/*` exposes directory entries and `/foo/bar/**/baz.{jpg,png}` matches both `/foo/bar/baz.jpg` and nested equivalents. Brace expansion is evaluated once per tool call and is limited to 256 alternatives. Brace sequences such as `{1..10}`, extglob, variable expansion, command substitution, shell quoting, backslash escaping, and tilde expansion are not supported. Patterns beginning with `~` fail explicitly instead of depending on the Runtime process home directory. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
 - Runtime tool prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process. Runtime config prompts sort registered projects and domain lists deterministically and describe the preserved Agent Workspace, temporary work, and outbound connectivity without claiming Azents-owned infrastructure isolation or exposing sensitive path inventories.
-- Every bundled managed shell Runtime includes a native, user-managed Nix addon. When the complete Runtime Toolkit is projected, its composed static prompt includes exactly the following 30-word guidance: “For missing system tools, use `nix search nixpkgs <name>` and `nix profile add nixpkgs#<package>`. Do not use sudo or OS package managers. Use the Project's package manager for Project dependencies.” Runtime-free or otherwise shell-disabled Agents omit the complete Runtime Toolkit and this guidance. Nix is not a persisted ToolkitConfig, Runtime capability, Profile option, wrapper command, package inventory, or Platform package-policy surface.
 - `exec_command(command, workdir?, yield_time_ms?, max_output_bytes?)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `process_id` for later interaction. `yield_time_ms` defaults to 10000 ms and accepts the 250-30000 ms range.
 - `write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)` writes to an existing process. Empty `chars` is the poll primitive and only drains unread output. `yield_time_ms=0` returns the currently buffered output immediately. Non-empty writes default to 250 ms and allow 0-30000 ms; empty polls default to 5000 ms and allow 0-300000 ms. Missing/expired/terminated process ids are returned as normal tool observations with structured metadata rather than assistant/system failures. Per [exec-260628/ADR](../../adr/exec-260628-exec-stop-termination.md), user stop requests TERM for all live exec processes owned by the stopped `AgentSession`; worker graceful shutdown/handover does not TERM runner-owned exec processes by itself.
 - Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
@@ -880,9 +879,6 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
-- **2026-09-01** (spec_version 102) — Added the exact 30-word native Nix
-  system-tool guidance for managed Runtime prompts, Runtime-free absence, and the
-  user-managed addon boundary without new Toolkit/Profile/package-policy state.
 - **2026-08-31** (spec_version 101) — Added `request_input` through the existing
   static prompt, Tool description, field schema, and validator structure; exposed
   delivery-confirmed awaiting state in Tool results and compaction without a dynamic
