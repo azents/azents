@@ -51,6 +51,11 @@ from azents.repos.workspace.data import (
     Workspace,
     WorkspaceRuntimeProfileDefaultReplace,
 )
+from azents.services.terminal_policy.invalidation import (
+    TerminalPolicyInvalidationPublisherDependency,
+    TerminalPolicySourceInvalidation,
+    TerminalPolicySourceScope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,9 @@ class RuntimeProfileWorkspaceService:
         RuntimeProviderControlRepository, Depends(RuntimeProviderControlRepository)
     ]
     workspace_repository: Annotated[WorkspaceRepository, Depends(WorkspaceRepository)]
+    terminal_policy_invalidation_publisher: (
+        TerminalPolicyInvalidationPublisherDependency
+    )
 
     async def get_default(
         self,
@@ -300,6 +308,7 @@ class RuntimeProfileWorkspaceService:
         description: str,
         lifecycle: RuntimeProfileLifecycle,
         policy: WorkspaceRuntimeProfilePolicy,
+        terminal_enabled: bool,
         actor_workspace_user_id: str,
     ) -> WorkspaceRuntimeProfileProjection:
         """Create one complete Workspace Runtime choice."""
@@ -330,6 +339,7 @@ class RuntimeProfileWorkspaceService:
                             description=description,
                             lifecycle=lifecycle,
                             policy=policy.model_dump(mode="json"),
+                            terminal_enabled=terminal_enabled,
                             digest=_workspace_profile_digest(
                                 infrastructure=infrastructure,
                                 policy=policy,
@@ -363,6 +373,7 @@ class RuntimeProfileWorkspaceService:
         description: str,
         lifecycle: RuntimeProfileLifecycle,
         policy: WorkspaceRuntimeProfilePolicy,
+        terminal_enabled: bool,
         actor_workspace_user_id: str,
     ) -> WorkspaceRuntimeProfileProjection:
         """Replace one Workspace Profile with optimistic version fencing."""
@@ -393,6 +404,25 @@ class RuntimeProfileWorkspaceService:
                     infrastructure=infrastructure,
                     policy=policy,
                 )
+            replacement = WorkspaceRuntimeProfileReplace(
+                provider_id=infrastructure.provider_id,
+                infrastructure_profile_id=infrastructure.id,
+                display_name=display_name,
+                description=description,
+                lifecycle=lifecycle,
+                policy=policy.model_dump(mode="json"),
+                terminal_enabled=terminal_enabled,
+                digest=_workspace_profile_digest(
+                    infrastructure=infrastructure,
+                    policy=policy,
+                ),
+                actor_workspace_user_id=actor_workspace_user_id,
+            )
+            terminal_only_change = _workspace_terminal_only_change(
+                current,
+                replacement,
+            )
+            terminal_changed = current.terminal_enabled != terminal_enabled
             try:
                 profile = (
                     await self.profile_repository.replace_workspace_runtime_profile(
@@ -400,19 +430,7 @@ class RuntimeProfileWorkspaceService:
                         workspace_id=workspace_id,
                         profile_id=profile_id,
                         expected_version=expected_version,
-                        replacement=WorkspaceRuntimeProfileReplace(
-                            provider_id=infrastructure.provider_id,
-                            infrastructure_profile_id=infrastructure.id,
-                            display_name=display_name,
-                            description=description,
-                            lifecycle=lifecycle,
-                            policy=policy.model_dump(mode="json"),
-                            digest=_workspace_profile_digest(
-                                infrastructure=infrastructure,
-                                policy=policy,
-                            ),
-                            actor_workspace_user_id=actor_workspace_user_id,
-                        ),
+                        replacement=replacement,
                     )
                 )
             except IntegrityError as error:
@@ -432,14 +450,25 @@ class RuntimeProfileWorkspaceService:
                     message="Workspace Runtime Profile version is stale.",
                     current_profile=latest,
                 )
-            await self.profile_repository.enqueue_reconcile_task(
-                session,
-                source_type=RuntimeReconcileSourceKind.WORKSPACE_RUNTIME_PROFILE,
-                source_id=profile.id,
-                source_version=str(profile.version),
-                available_at=tznow(),
+            if not terminal_only_change:
+                await self.profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.WORKSPACE_RUNTIME_PROFILE,
+                    source_id=profile.id,
+                    source_version=str(profile.version),
+                    available_at=tznow(),
+                )
+            projection = await self._project(session, workspace_id, profile)
+        if terminal_changed:
+            publisher = self.terminal_policy_invalidation_publisher
+            await publisher.publish_terminal_policy_invalidation(
+                TerminalPolicySourceInvalidation(
+                    scope=TerminalPolicySourceScope.WORKSPACE_PROFILE,
+                    source_id=profile.id,
+                    source_version=str(profile.version),
+                )
             )
-            return await self._project(session, workspace_id, profile)
+        return projection
 
     async def delete_profile(
         self,
@@ -882,6 +911,23 @@ class RuntimeProfileWorkspaceService:
             contract.profile_contracts,
             provider_protocol_version=contract.protocol_version,
         )
+
+
+def _workspace_terminal_only_change(
+    current: WorkspaceRuntimeProfile,
+    replacement: WorkspaceRuntimeProfileReplace,
+) -> bool:
+    """Return whether only the non-physical Terminal policy flag changed."""
+    return (
+        current.terminal_enabled != replacement.terminal_enabled
+        and current.provider_id == replacement.provider_id
+        and current.infrastructure_profile_id == replacement.infrastructure_profile_id
+        and current.display_name == replacement.display_name
+        and current.description == replacement.description
+        and current.lifecycle is replacement.lifecycle
+        and current.policy == replacement.policy
+        and current.digest == replacement.digest
+    )
 
 
 def _unavailable_compatibility(reason_code: str) -> RuntimeProfileCompatibility:

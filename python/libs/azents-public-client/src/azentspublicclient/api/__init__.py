@@ -17,6 +17,7 @@ from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimePro
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
 from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api
+from azentspublicclient.api.terminal_v1_api import TerminalV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.api.user_v1_api import UserV1Api

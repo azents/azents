@@ -39,7 +39,8 @@ class TestRuntimeInfrastructureProfileReplaceRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                spec = None
+                spec = None,
+                terminal_enabled = True
             )
         else:
             return RuntimeInfrastructureProfileReplaceRequest(
@@ -48,6 +49,7 @@ class TestRuntimeInfrastructureProfileReplaceRequest(unittest.TestCase):
                 description = '',
                 lifecycle = 'active',
                 spec = None,
+                terminal_enabled = True,
         )
         """
 

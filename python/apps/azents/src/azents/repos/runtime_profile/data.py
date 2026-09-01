@@ -31,6 +31,7 @@ class RuntimeInfrastructureProfile:
     schema_version: int
     spec: dict[str, Any]
     required_capabilities: tuple[str, ...]
+    terminal_enabled: bool
     version: int
     digest: str
     created_by_user_id: str | None
@@ -52,6 +53,7 @@ class RuntimeInfrastructureProfileCreate:
     schema_version: int
     spec: dict[str, Any]
     required_capabilities: tuple[str, ...]
+    terminal_enabled: bool
     digest: str
     actor_user_id: str | None
 
@@ -67,6 +69,7 @@ class RuntimeInfrastructureProfileReplace:
     schema_version: int
     spec: dict[str, Any]
     required_capabilities: tuple[str, ...]
+    terminal_enabled: bool
     digest: str
     actor_user_id: str | None
 
@@ -135,6 +138,7 @@ class WorkspaceRuntimeProfile:
     description: str
     lifecycle: RuntimeProfileLifecycle
     policy: dict[str, Any]
+    terminal_enabled: bool
     version: int
     digest: str
     created_by_workspace_user_id: str | None
@@ -154,6 +158,7 @@ class WorkspaceRuntimeProfileCreate:
     description: str
     lifecycle: RuntimeProfileLifecycle
     policy: dict[str, Any]
+    terminal_enabled: bool
     digest: str
     actor_workspace_user_id: str | None
 
@@ -168,6 +173,7 @@ class WorkspaceRuntimeProfileReplace:
     description: str
     lifecycle: RuntimeProfileLifecycle
     policy: dict[str, Any]
+    terminal_enabled: bool
     digest: str
     actor_workspace_user_id: str | None
 

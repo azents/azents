@@ -252,6 +252,7 @@ def test_delete_profile_maps_not_found_and_version_conflict() -> None:
             lifecycle=RuntimeProfileLifecycle.ACTIVE,
             policy={"schema_version": 1},
             version=8,
+            terminal_enabled=True,
             digest="a" * 64,
             created_by_workspace_user_id=None,
             updated_by_workspace_user_id=None,

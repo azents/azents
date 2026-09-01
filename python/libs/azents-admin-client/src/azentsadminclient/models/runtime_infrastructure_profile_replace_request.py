@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
@@ -34,8 +34,9 @@ class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
     description: Annotated[str, Field(strict=True, max_length=4000)]
     lifecycle: RuntimeProfileLifecycle
     spec: RuntimeInfrastructureProfileSpec
+    terminal_enabled: StrictBool
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["expected_version", "display_name", "description", "lifecycle", "spec"]
+    __properties: ClassVar[List[str]] = ["expected_version", "display_name", "description", "lifecycle", "spec", "terminal_enabled"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,7 +103,8 @@ class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "lifecycle": obj.get("lifecycle"),
-            "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None
+            "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
+            "terminal_enabled": obj.get("terminal_enabled")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

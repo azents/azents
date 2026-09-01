@@ -34,6 +34,7 @@ __all__ = [
     "RuntimeProviderV1Api",
     "ScheduledTaskV1Api",
     "SecurityV1Api",
+    "TerminalV1Api",
     "ToolkitOAuthV1Api",
     "ToolkitV1Api",
     "UserV1Api",
@@ -418,6 +419,13 @@ __all__ = [
     "RuntimeSystemMetricState",
     "RuntimeSystemMetricsSummary",
     "RuntimeTerminalDeleteAcknowledgementKind",
+    "RuntimeTerminalDeniedScope",
+    "RuntimeTerminalLifecycle",
+    "RuntimeTerminalProjectionResponse",
+    "RuntimeTerminalReasonCode",
+    "RuntimeTerminalSummaryResponse",
+    "RuntimeTerminalTicketResponse",
+    "RuntimeTerminalTicketStatus",
     "ScheduledTaskCreateRequest",
     "ScheduledTaskCurrentCycleEnvelope",
     "ScheduledTaskCurrentCycleResponse",
@@ -536,6 +544,7 @@ from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimePro
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api as ScheduledTaskV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
+from azentspublicclient.api.terminal_v1_api import TerminalV1Api as TerminalV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api as ToolkitOAuthV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api as ToolkitV1Api
 from azentspublicclient.api.user_v1_api import UserV1Api as UserV1Api
@@ -924,6 +933,13 @@ from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as
 from azentspublicclient.models.runtime_system_metric_state import RuntimeSystemMetricState as RuntimeSystemMetricState
 from azentspublicclient.models.runtime_system_metrics_summary import RuntimeSystemMetricsSummary as RuntimeSystemMetricsSummary
 from azentspublicclient.models.runtime_terminal_delete_acknowledgement_kind import RuntimeTerminalDeleteAcknowledgementKind as RuntimeTerminalDeleteAcknowledgementKind
+from azentspublicclient.models.runtime_terminal_denied_scope import RuntimeTerminalDeniedScope as RuntimeTerminalDeniedScope
+from azentspublicclient.models.runtime_terminal_lifecycle import RuntimeTerminalLifecycle as RuntimeTerminalLifecycle
+from azentspublicclient.models.runtime_terminal_projection_response import RuntimeTerminalProjectionResponse as RuntimeTerminalProjectionResponse
+from azentspublicclient.models.runtime_terminal_reason_code import RuntimeTerminalReasonCode as RuntimeTerminalReasonCode
+from azentspublicclient.models.runtime_terminal_summary_response import RuntimeTerminalSummaryResponse as RuntimeTerminalSummaryResponse
+from azentspublicclient.models.runtime_terminal_ticket_response import RuntimeTerminalTicketResponse as RuntimeTerminalTicketResponse
+from azentspublicclient.models.runtime_terminal_ticket_status import RuntimeTerminalTicketStatus as RuntimeTerminalTicketStatus
 from azentspublicclient.models.scheduled_task_create_request import ScheduledTaskCreateRequest as ScheduledTaskCreateRequest
 from azentspublicclient.models.scheduled_task_current_cycle_envelope import ScheduledTaskCurrentCycleEnvelope as ScheduledTaskCurrentCycleEnvelope
 from azentspublicclient.models.scheduled_task_current_cycle_response import ScheduledTaskCurrentCycleResponse as ScheduledTaskCurrentCycleResponse

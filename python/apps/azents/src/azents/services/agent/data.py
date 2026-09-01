@@ -54,6 +54,7 @@ class AgentOutput(BaseModel):
     runtime_add_available: bool
     runtime_remove_available: bool
     shell_enabled: bool
+    terminal_enabled: bool
     memory_enabled: bool
     tool_search_enabled: bool
     max_turns: int | None
@@ -116,6 +117,7 @@ class AgentOutput(BaseModel):
                 can_manage and data.runtime_capability is AgentRuntimeCapability.MANAGED
             ),
             shell_enabled=data.shell_enabled,
+            terminal_enabled=data.terminal_enabled,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
@@ -196,6 +198,10 @@ class AgentCreateInput(BaseModel):
         default=None, description="Selected Workspace Runtime Profile ID"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
+    terminal_enabled: bool = Field(
+        default=True,
+        description="Interactive Terminal enabled flag",
+    )
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(
         default=True, description="Tool Search enabled flag"
@@ -257,6 +263,10 @@ class AgentUpdateInput(TypedDict, total=False):
         ),
     ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
+    terminal_enabled: Annotated[
+        bool,
+        Field(description="Interactive Terminal enabled flag"),
+    ]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]

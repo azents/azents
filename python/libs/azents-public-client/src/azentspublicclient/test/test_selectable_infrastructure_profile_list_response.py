@@ -49,6 +49,7 @@ class TestSelectableInfrastructureProfileListResponse(unittest.TestCase):
                         required_capabilities = [
                             ''
                             ], 
+                        terminal_enabled = True, 
                         version = 56, 
                         digest = '', 
                         capability_revision_id = '', )
@@ -70,6 +71,7 @@ class TestSelectableInfrastructureProfileListResponse(unittest.TestCase):
                         required_capabilities = [
                             ''
                             ], 
+                        terminal_enabled = True, 
                         version = 56, 
                         digest = '', 
                         capability_revision_id = '', )

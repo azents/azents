@@ -76,6 +76,7 @@ def _agent(
         runtime_capability=capability,
         runtime_capability_version=5,
         shell_enabled=False,
+        terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=True,
         max_turns=None,

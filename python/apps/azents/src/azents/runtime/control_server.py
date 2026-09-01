@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import logging
 import signal
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -53,8 +54,10 @@ from azents.runtime.control_protocol.grpc.provider_server import (
 from azents.runtime.control_protocol.grpc.runner_server import (
     add_runtime_runner_control_servicer,
 )
+from azents.runtime.control_protocol.grpc.runner_terminal_broker import (
+    CoordinatedRuntimeRunnerTerminalBroker,
+)
 from azents.runtime.control_protocol.grpc.runner_terminal_server import (
-    RejectingRuntimeRunnerTerminalBroker,
     add_runtime_runner_terminal_servicer,
 )
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
@@ -76,6 +79,20 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
+)
+from azents.runtime.terminal_coordination.redis import (
+    RedisRuntimeTerminalCoordinationStore,
+)
+from azents.runtime.terminal_coordination.store import (
+    RuntimeTerminalCoordinationStore,
+)
+from azents.runtime.terminal_dispatcher import (
+    RuntimeTerminalControlDispatcherAdapter,
+)
+from azents.runtime.terminal_integration import (
+    CompositeRuntimeRunnerGenerationObserver,
+    CoordinatedRuntimeTerminalInvalidationPublisher,
+    RuntimeTerminalRunnerGenerationObserver,
 )
 from azents.runtime.transfer.control import (
     create_runtime_control_transfer_state_store,
@@ -120,6 +137,8 @@ _DEFAULT_RECONCILE_INTERVAL_SECONDS = 15.0
 _DEFAULT_START_TIMEOUT_SECONDS = 300.0
 _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS = 15.0
 _DEFAULT_TRANSFER_REPAIR_INTERVAL_SECONDS = 5.0
+_DEFAULT_TERMINAL_REPAIR_INTERVAL_SECONDS = 1.0
+_TERMINAL_REPAIR_LIMIT = 100
 _DEFAULT_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
 _MAX_TRANSFER_TTL_SECONDS = 3_600
 _MAX_TRANSFER_PROCESS_BUFFER_BYTES = 64 * 1024 * 1024
@@ -271,9 +290,21 @@ async def runtime_control_server_lifespan(
         cleanup=transfer_cleanup,
         clock=clock,
     )
+    terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     control_protocol = RuntimeControlProtocolService(
         coordination_store,
-        runner_generation_observer=transfer_coordinator,
+        runner_generation_observer=CompositeRuntimeRunnerGenerationObserver(
+            transfer_coordinator,
+            RuntimeTerminalRunnerGenerationObserver(
+                store=terminal_coordination,
+                clock=clock,
+            ),
+        ),
+    )
+    terminal_dispatcher = RuntimeTerminalControlDispatcherAdapter(
+        control_protocol=control_protocol,
+        terminal_coordination=terminal_coordination,
+        runtime_coordination=coordination_store,
     )
     transfer_result_coordinator = RuntimeRunnerTransferResultCoordinator(
         state_store=transfer_state,
@@ -380,6 +411,13 @@ async def runtime_control_server_lifespan(
         profile_repository=profile_repository,
         runtime_repository=runtime_repository,
         agent_repository=agent_repository,
+        terminal_invalidation_publisher=(
+            CoordinatedRuntimeTerminalInvalidationPublisher(
+                store=terminal_coordination,
+                dispatcher=terminal_dispatcher,
+                clock=clock,
+            )
+        ),
     )
     stop_reconciler = asyncio.Event()
     reconciler_task = asyncio.create_task(
@@ -403,6 +441,18 @@ async def runtime_control_server_lifespan(
             page_size=settings.runtime_control_transfer_list_page_size,
         ),
         name="runtime-transfer-repair",
+    )
+    stop_terminal_repair = asyncio.Event()
+    terminal_repair_task = asyncio.create_task(
+        _run_terminal_repair(
+            terminal_coordination,
+            dispatcher=terminal_dispatcher,
+            clock=clock,
+            stop=stop_terminal_repair,
+            interval_seconds=_DEFAULT_TERMINAL_REPAIR_INTERVAL_SECONDS,
+            limit=_TERMINAL_REPAIR_LIMIT,
+        ),
+        name="runtime-terminal-repair",
     )
     server = grpc.aio.server()
     add_runtime_provider_control_servicer(
@@ -429,7 +479,11 @@ async def runtime_control_server_lifespan(
     )
     add_runtime_runner_terminal_servicer(
         server,
-        broker=RejectingRuntimeRunnerTerminalBroker(),
+        broker=CoordinatedRuntimeRunnerTerminalBroker(
+            store=terminal_coordination,
+            clock=clock,
+            monotonic_clock=time.monotonic,
+        ),
         runner_authenticator=runner_authenticator,
     )
     add_runtime_runner_transfer_servicer(
@@ -484,14 +538,20 @@ async def runtime_control_server_lifespan(
     finally:
         stop_reconciler.set()
         stop_transfer_repair.set()
+        stop_terminal_repair.set()
         reconciler_task.cancel()
         transfer_repair_task.cancel()
+        terminal_repair_task.cancel()
         try:
             await reconciler_task
         except asyncio.CancelledError:
             pass
         try:
             await transfer_repair_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await terminal_repair_task
         except asyncio.CancelledError:
             pass
         await server.stop(grace=5)
@@ -582,6 +642,52 @@ async def _run_transfer_repair(
                 )
         except Exception:
             _LOGGER.exception("Runtime transfer repair iteration failed")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
+async def _run_terminal_repair(
+    coordination: RuntimeTerminalCoordinationStore,
+    *,
+    dispatcher: RuntimeTerminalControlDispatcherAdapter,
+    clock: Callable[[], datetime],
+    stop: asyncio.Event,
+    interval_seconds: float,
+    limit: int,
+) -> None:
+    """Run bounded volatile Terminal lifecycle deadline repair."""
+    if interval_seconds <= 0:
+        raise ValueError("Runtime Terminal repair interval must be positive")
+    if limit <= 0:
+        raise ValueError("Runtime Terminal repair limit must be positive")
+    while not stop.is_set():
+        try:
+            now = clock()
+            repaired = await coordination.repair_expired(
+                current_time=now,
+                limit=limit,
+            )
+            for terminal_id in repaired.terminal_ids:
+                record = await coordination.get_terminal(
+                    terminal_id,
+                    current_time=now,
+                )
+                if record is None or record.termination_reason is None:
+                    continue
+                await dispatcher.terminate_terminal(
+                    record,
+                    reason=record.termination_reason,
+                    requested_at=now,
+                )
+            if repaired.terminal_ids:
+                _LOGGER.info(
+                    "Runtime Terminal repair requested termination",
+                    extra={"terminal_count": len(repaired.terminal_ids)},
+                )
+        except Exception:
+            _LOGGER.exception("Runtime Terminal repair iteration failed")
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:

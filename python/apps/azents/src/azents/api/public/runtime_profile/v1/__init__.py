@@ -126,6 +126,7 @@ async def create_workspace_runtime_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             policy=request_body.policy,
+            terminal_enabled=request_body.terminal_enabled,
             actor_workspace_user_id=member.workspace_user_id,
         )
     except RuntimeProfileWorkspaceUnavailable as error:
@@ -169,6 +170,7 @@ async def replace_workspace_runtime_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             policy=request_body.policy,
+            terminal_enabled=request_body.terminal_enabled,
             actor_workspace_user_id=member.workspace_user_id,
         )
     except RuntimeProfileWorkspaceUnavailable as error:

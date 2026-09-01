@@ -18,6 +18,9 @@ from azents.repos.workspace_user.data import (
     WorkspaceNotFound,
     WorkspaceUserCreate,
 )
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 from .data import (
     CannotModifyOwner,
@@ -41,6 +44,7 @@ class WorkspaceUserService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
 
     async def create(
         self, create: WorkspaceUserCreateInput
@@ -198,6 +202,9 @@ class WorkspaceUserService:
                 workspace_id=target.workspace_id,
                 user_id=target.user_id,
             )
+        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
+            target.user_id
+        )
         return Success(None)
 
     async def delete_force(
@@ -223,6 +230,9 @@ class WorkspaceUserService:
                 workspace_id=target.workspace_id,
                 user_id=target.user_id,
             )
+        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
+            target.user_id
+        )
         return Success(None)
 
     async def transfer_ownership(
@@ -268,6 +278,11 @@ class WorkspaceUserService:
 
         match result:
             case Success(value):
+                if current_owner is not None:
+                    publisher = self.terminal_invalidation_publisher
+                    await publisher.publish_user_terminal_invalidation(
+                        current_owner.user_id,
+                    )
                 return Success(WorkspaceUserOutput.convert_from(value))
             case Failure(error):
                 return Failure(error)

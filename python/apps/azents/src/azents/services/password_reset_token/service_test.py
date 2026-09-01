@@ -1,6 +1,7 @@
 """PasswordResetTokenService tests."""
 
 import datetime
+from unittest.mock import AsyncMock
 
 from azcommon.logging import RuntimeEnvironment
 from azcommon.result import Failure, Success
@@ -27,6 +28,9 @@ from azents.services.password_reset_token.data import (
     RedeemPasswordResetTokenInput,
     WeakResetPassword,
 )
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+)
 
 
 def _make_service(
@@ -40,6 +44,7 @@ def _make_service(
         password_login_repo=PasswordLoginRepository(),
         session_repo=SessionRepository(),
         session_manager=rdb_session_manager,
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         config=Config.model_construct(
             runtime_env=RuntimeEnvironment.LOCAL,
             web_url="https://azents.example.com",
@@ -115,6 +120,7 @@ class TestPasswordResetTokenService:
     ) -> None:
         """On redeem success, set password and revoke existing sessions."""
         service = _make_service(rdb_session_manager)
+        service.terminal_invalidation_publisher = AsyncMock()
         refresh_token = generate_refresh_token()
         async with rdb_session_manager() as session:
             user = await UserRepository().create_with_verified_primary_email(
@@ -154,6 +160,9 @@ class TestPasswordResetTokenService:
         )
 
         assert isinstance(result, Success)
+        publisher = service.terminal_invalidation_publisher
+        publish = publisher.publish_user_terminal_invalidation
+        publish.assert_awaited_once_with(user.id)
         async with rdb_session_manager() as session:
             password_login = await PasswordLoginRepository().get_by_user_id(
                 session,

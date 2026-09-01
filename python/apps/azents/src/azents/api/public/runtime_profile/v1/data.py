@@ -36,6 +36,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
     spec: RuntimeInfrastructureProfileSpec
     infrastructure_network: RuntimeNetworkProjection
     required_capabilities: list[str]
+    terminal_enabled: bool
     version: int
     digest: str
     capability_revision_id: str
@@ -60,6 +61,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             spec=spec,
             infrastructure_network=project_runtime_network(spec),
             required_capabilities=list(profile.required_capabilities),
+            terminal_enabled=profile.terminal_enabled,
             version=profile.version,
             digest=profile.digest,
             capability_revision_id=projection.capability_revision_id,
@@ -84,6 +86,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     policy: WorkspaceRuntimeProfilePolicy
     infrastructure_network: RuntimeNetworkProjection | None
     effective_network: RuntimeNetworkProjection | None
+    terminal_enabled: bool
+    infrastructure_terminal_enabled: bool
+    effective_terminal_enabled: bool
     version: int
     digest: str
     available: bool
@@ -128,6 +133,14 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
             policy=policy,
             infrastructure_network=infrastructure_network,
             effective_network=effective_network,
+            terminal_enabled=profile.terminal_enabled,
+            infrastructure_terminal_enabled=(
+                projection.infrastructure_profile.terminal_enabled
+            ),
+            effective_terminal_enabled=(
+                profile.terminal_enabled
+                and projection.infrastructure_profile.terminal_enabled
+            ),
             version=profile.version,
             digest=profile.digest,
             available=projection.available,
@@ -156,6 +169,7 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle = RuntimeProfileLifecycle.ACTIVE
     policy: WorkspaceRuntimeProfilePolicy
+    terminal_enabled: bool = True
 
 
 class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
@@ -167,6 +181,7 @@ class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle
     policy: WorkspaceRuntimeProfilePolicy
+    terminal_enabled: bool
 
 
 class WorkspaceRuntimeProfileDeleteRequest(BaseModel):

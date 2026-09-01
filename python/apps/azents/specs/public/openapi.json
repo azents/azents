@@ -11680,6 +11680,138 @@
         ]
       }
     },
+    "/terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Terminal v1"
+        ],
+        "summary": "Get Terminal Projection",
+        "description": "Return current Terminal availability without starting the Runtime.",
+        "operationId": "terminal_v1_get_terminal_projection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeTerminalProjectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket": {
+      "post": {
+        "tags": [
+          "Terminal v1"
+        ],
+        "summary": "Issue Terminal Ticket",
+        "description": "Issue a one-time resource-bound ticket without Runtime auto-start.",
+        "operationId": "terminal_v1_issue_terminal_ticket",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeTerminalTicketResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspace-model-settings/v1/workspaces/{handle}": {
       "get": {
         "tags": [
@@ -14245,6 +14377,12 @@
             "description": "Shell enabled state",
             "default": true
           },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled",
+            "description": "Interactive Terminal enabled state",
+            "default": true
+          },
           "memory_enabled": {
             "type": "boolean",
             "title": "Memory Enabled",
@@ -14727,6 +14865,10 @@
             "type": "boolean",
             "title": "Shell Enabled"
           },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
+          },
           "memory_enabled": {
             "type": "boolean",
             "title": "Memory Enabled"
@@ -14802,6 +14944,7 @@
           "runtime_add_available",
           "runtime_remove_available",
           "shell_enabled",
+          "terminal_enabled",
           "memory_enabled",
           "tool_search_enabled",
           "max_turns",
@@ -16540,6 +16683,11 @@
             "type": "boolean",
             "title": "Shell Enabled",
             "description": "Shell enabled state"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled",
+            "description": "Interactive Terminal enabled state"
           },
           "memory_enabled": {
             "type": "boolean",
@@ -27302,6 +27450,261 @@
         "title": "RuntimeTerminalDeleteAcknowledgementKind",
         "description": "Authority that proved one terminal Runtime deletion."
       },
+      "RuntimeTerminalDeniedScope": {
+        "type": "string",
+        "enum": [
+          "provider_profile",
+          "workspace_profile",
+          "agent",
+          "runtime",
+          "runner",
+          "session",
+          "access"
+        ],
+        "title": "RuntimeTerminalDeniedScope",
+        "description": "Policy or authority scope that denied Terminal use."
+      },
+      "RuntimeTerminalLifecycle": {
+        "type": "string",
+        "enum": [
+          "opening",
+          "attached",
+          "detached",
+          "terminating",
+          "exited"
+        ],
+        "title": "RuntimeTerminalLifecycle",
+        "description": "Volatile Terminal lifecycle exposed to the browser."
+      },
+      "RuntimeTerminalProjectionResponse": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalReasonCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "denied_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalDeniedScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_start_runtime": {
+            "type": "boolean",
+            "title": "Can Start Runtime"
+          },
+          "can_open_or_attach": {
+            "type": "boolean",
+            "title": "Can Open Or Attach"
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "reason_code",
+          "denied_scope",
+          "can_start_runtime",
+          "can_open_or_attach",
+          "terminal"
+        ],
+        "title": "RuntimeTerminalProjectionResponse",
+        "description": "Session Terminal availability and action projection."
+      },
+      "RuntimeTerminalReasonCode": {
+        "type": "string",
+        "enum": [
+          "access_denied",
+          "agent_not_found",
+          "session_not_found",
+          "session_agent_mismatch",
+          "runtime_free_agent",
+          "runtime_stopped",
+          "runtime_starting",
+          "runtime_unavailable",
+          "profile_unavailable",
+          "provider_unavailable",
+          "terminal_disabled",
+          "runner_unavailable",
+          "runner_terminal_unsupported",
+          "working_folder_unavailable",
+          "session_limit",
+          "user_limit",
+          "runtime_limit",
+          "terminal_ended",
+          "terminal_revoked",
+          "coordination_unavailable"
+        ],
+        "title": "RuntimeTerminalReasonCode",
+        "description": "Bounded public reason codes without secret or content data."
+      },
+      "RuntimeTerminalSummaryResponse": {
+        "properties": {
+          "terminal_id": {
+            "type": "string",
+            "title": "Terminal Id"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeTerminalLifecycle"
+          },
+          "attached": {
+            "type": "boolean",
+            "title": "Attached"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "final_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Reason"
+          },
+          "input_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Input Bytes"
+          },
+          "output_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Output Bytes"
+          },
+          "replay_truncated": {
+            "type": "boolean",
+            "title": "Replay Truncated"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "terminal_id",
+          "lifecycle",
+          "attached",
+          "started_at",
+          "ended_at",
+          "final_reason",
+          "input_bytes",
+          "output_bytes",
+          "replay_truncated"
+        ],
+        "title": "RuntimeTerminalSummaryResponse",
+        "description": "Content-free visible Terminal summary."
+      },
+      "RuntimeTerminalTicketResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RuntimeTerminalTicketStatus"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalReasonCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "denied_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalDeniedScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "reason_code",
+          "denied_scope",
+          "ticket",
+          "expires_at"
+        ],
+        "title": "RuntimeTerminalTicketResponse",
+        "description": "Typed open-or-attach ticket issuance response."
+      },
+      "RuntimeTerminalTicketStatus": {
+        "type": "string",
+        "enum": [
+          "issued",
+          "runtime_stopped",
+          "unavailable",
+          "denied"
+        ],
+        "title": "RuntimeTerminalTicketStatus",
+        "description": "Ticket issuance result without Runtime side effects."
+      },
       "ScheduledTaskCreateRequest": {
         "properties": {
           "session_id": {
@@ -27791,6 +28194,10 @@
             "type": "array",
             "title": "Required Capabilities"
           },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
+          },
           "version": {
             "type": "integer",
             "title": "Version"
@@ -27816,6 +28223,7 @@
           "spec",
           "infrastructure_network",
           "required_capabilities",
+          "terminal_enabled",
           "version",
           "digest",
           "capability_revision_id"
@@ -30361,6 +30769,11 @@
           },
           "policy": {
             "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicy"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled",
+            "default": true
           }
         },
         "type": "object",
@@ -30598,6 +31011,10 @@
           },
           "policy": {
             "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicy"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
           }
         },
         "type": "object",
@@ -30607,7 +31024,8 @@
           "display_name",
           "description",
           "lifecycle",
-          "policy"
+          "policy",
+          "terminal_enabled"
         ],
         "title": "WorkspaceRuntimeProfileReplaceRequest",
         "description": "Complete optimistic replacement of one Workspace Runtime Profile."
@@ -30659,6 +31077,18 @@
                 "type": "null"
               }
             ]
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
+          },
+          "infrastructure_terminal_enabled": {
+            "type": "boolean",
+            "title": "Infrastructure Terminal Enabled"
+          },
+          "effective_terminal_enabled": {
+            "type": "boolean",
+            "title": "Effective Terminal Enabled"
           },
           "version": {
             "type": "integer",
@@ -30738,6 +31168,9 @@
           "policy",
           "infrastructure_network",
           "effective_network",
+          "terminal_enabled",
+          "infrastructure_terminal_enabled",
+          "effective_terminal_enabled",
           "version",
           "digest",
           "available",
@@ -31219,6 +31652,10 @@
     {
       "name": "Security v1",
       "description": "\nSecurity API (Public)\n\nSecurity settings and step-up authentication endpoints.\n"
+    },
+    {
+      "name": "Terminal v1",
+      "description": "\nRuntime Terminal API (Public)\n\nSession-owned interactive Terminal projection, ticket, and dedicated\nWebSocket transport for managed Agent Runtimes.\n"
     },
     {
       "name": "Workspace Model Settings v1",

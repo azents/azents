@@ -131,6 +131,11 @@ class RDBRuntimeInfrastructureProfile(RDBModel):
     schema_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     spec: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     required_capabilities: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    terminal_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.true(),
+    )
     version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     digest: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(
@@ -209,6 +214,11 @@ class RDBWorkspaceRuntimeProfile(RDBModel):
         nullable=False,
     )
     policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    terminal_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.true(),
+    )
     version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     digest: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     created_by_workspace_user_id: Mapped[str | None] = mapped_column(

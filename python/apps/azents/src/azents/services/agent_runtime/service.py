@@ -67,6 +67,9 @@ from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 from .lifecycle_data import (
     AgentAccessDenied,
@@ -186,6 +189,7 @@ class AgentRuntimeService:
         AgentRuntimeRemovalService,
         Depends(AgentRuntimeRemovalService),
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
 
     async def get(
         self,
@@ -341,6 +345,10 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
+        runtime_id = removed.operation.agent_runtime_id
+        if runtime_id is not None:
+            publisher = self.terminal_invalidation_publisher
+            await publisher.publish_runtime_terminal_invalidation(runtime_id)
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None:
@@ -502,6 +510,8 @@ class AgentRuntimeService:
                         ),
                     )
                 )
+            publisher = self.terminal_invalidation_publisher
+            await publisher.publish_runtime_terminal_invalidation(command.runtime.id)
             resolution = await self._ensure_runtime_for_agent(agent_id)
         except RuntimeProfileResolutionUnavailable as error:
             return Failure(
@@ -935,6 +945,9 @@ class AgentRuntimeService:
                     ),
                 )
             )
+        if command_type is not RuntimeLifecycleCommandType.START:
+            publisher = self.terminal_invalidation_publisher
+            await publisher.publish_runtime_terminal_invalidation(command.runtime.id)
         try:
             resolution = await self._ensure_runtime_for_agent(agent_id)
         except RuntimeProfileResolutionUnavailable as error:

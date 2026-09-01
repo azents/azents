@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **description** | **str** |  | 
 **lifecycle** | [**RuntimeProfileLifecycle**](RuntimeProfileLifecycle.md) |  | [optional] 
 **policy** | [**WorkspaceRuntimeProfilePolicy**](WorkspaceRuntimeProfilePolicy.md) |  | 
+**terminal_enabled** | **bool** |  | [optional] [default to True]
 
 ## Example
 

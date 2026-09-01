@@ -48,6 +48,7 @@ class TestRuntimeInfrastructureProfileListResponse(unittest.TestCase):
                         required_capabilities = [
                             ''
                             ], 
+                        terminal_enabled = True, 
                         version = 56, 
                         digest = '', 
                         compatible = True, 
@@ -78,6 +79,7 @@ class TestRuntimeInfrastructureProfileListResponse(unittest.TestCase):
                         required_capabilities = [
                             ''
                             ], 
+                        terminal_enabled = True, 
                         version = 56, 
                         digest = '', 
                         compatible = True, 

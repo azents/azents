@@ -6345,6 +6345,11 @@
           },
           "spec": {
             "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled",
+            "default": true
           }
         },
         "type": "object",
@@ -6555,6 +6560,10 @@
           },
           "spec": {
             "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
           }
         },
         "type": "object",
@@ -6563,7 +6572,8 @@
           "display_name",
           "description",
           "lifecycle",
-          "spec"
+          "spec",
+          "terminal_enabled"
         ],
         "title": "RuntimeInfrastructureProfileReplaceRequest",
         "description": "Complete optimistic replacement of one infrastructure Profile."
@@ -6613,6 +6623,10 @@
             },
             "type": "array",
             "title": "Required Capabilities"
+          },
+          "terminal_enabled": {
+            "type": "boolean",
+            "title": "Terminal Enabled"
           },
           "version": {
             "type": "integer",
@@ -6684,6 +6698,7 @@
           "schema_version",
           "spec",
           "required_capabilities",
+          "terminal_enabled",
           "version",
           "digest",
           "compatible",

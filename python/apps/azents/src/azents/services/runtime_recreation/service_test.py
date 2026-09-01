@@ -36,6 +36,9 @@ from azents.repos.runtime_profile.data import (
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+)
 
 from .service import (
     RuntimeRecreationReconciler,
@@ -245,6 +248,7 @@ def _reconciler() -> tuple[
         profile_repository=profile_repository,
         runtime_repository=runtime_repository,
         agent_repository=agent_repository,
+        terminal_invalidation_publisher=(NoopRuntimeTerminalInvalidationPublisher()),
         operation_limit=1,
         item_limit=1,
         maximum_attempts=3,

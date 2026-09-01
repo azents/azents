@@ -79,6 +79,7 @@ class AgentRepository:
             runtime_profile_id=create.runtime_profile_id,
             runtime_capability=create.runtime_capability,
             shell_enabled=create.shell_enabled,
+            terminal_enabled=create.terminal_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
@@ -263,6 +264,8 @@ class AgentRepository:
             db_values["type"] = update["type"]
         if "shell_enabled" in update:
             db_values["shell_enabled"] = update["shell_enabled"]
+        if "terminal_enabled" in update:
+            db_values["terminal_enabled"] = update["terminal_enabled"]
         if "memory_enabled" in update:
             db_values["memory_enabled"] = update["memory_enabled"]
         if "tool_search_enabled" in update:
@@ -394,6 +397,7 @@ class AgentRepository:
             runtime_capability=rdb.runtime_capability,
             runtime_capability_version=rdb.runtime_capability_version,
             shell_enabled=rdb.shell_enabled,
+            terminal_enabled=rdb.terminal_enabled,
             memory_enabled=rdb.memory_enabled,
             tool_search_enabled=rdb.tool_search_enabled,
             max_turns=rdb.max_turns,

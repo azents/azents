@@ -589,6 +589,7 @@ def _default_agent() -> Agent:
         runtime_profile_selection_version=1,
         runtime_capability=AgentRuntimeCapability.NONE,
         runtime_capability_version=1,
+        terminal_enabled=True,
         tool_search_enabled=True,
         auto_archive_ttl_days=30,
         created_at=now,

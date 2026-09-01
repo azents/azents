@@ -33,6 +33,9 @@ from azents.repos.runtime_profile.data import (
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 _DEFAULT_OPERATION_LIMIT = 20
 _DEFAULT_ITEM_LIMIT = 100
@@ -377,6 +380,7 @@ class RuntimeRecreationReconciler:
     profile_repository: RuntimeProfileRepository
     runtime_repository: AgentRuntimeRepository
     agent_repository: AgentRepository
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     operation_limit: int = _DEFAULT_OPERATION_LIMIT
     item_limit: int = _DEFAULT_ITEM_LIMIT
     maximum_attempts: int = _DEFAULT_MAXIMUM_ATTEMPTS
@@ -715,10 +719,14 @@ class RuntimeRecreationReconciler:
                 desired_generation=next_state.desired.target_generation,
                 dispatched_generation=command.desired_generation,
             )
-            return RuntimeRecreationItemProcessResult(
+            result = RuntimeRecreationItemProcessResult(
                 dispatched=updated,
                 completed=False,
             )
+        if updated:
+            publisher = self.terminal_invalidation_publisher
+            await publisher.publish_runtime_terminal_invalidation(runtime.id)
+        return result
 
 
 def _runtime_matches_target(

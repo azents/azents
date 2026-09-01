@@ -170,6 +170,7 @@ def _make_agent(
         runtime_capability=AgentRuntimeCapability.MANAGED,
         runtime_capability_version=1,
         shell_enabled=True,
+        terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=tool_search_enabled,
         max_turns=None,

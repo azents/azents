@@ -18,6 +18,9 @@ from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import NotFound, UserCreate, UserUpdate
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 from .data import UserListOutput, UserOutput
 
@@ -35,6 +38,7 @@ class UserService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
 
     async def create(self, create: UserCreate) -> UserOutput:
         """Create User.
@@ -143,6 +147,9 @@ class UserService:
                 session,
                 user_id=user_id,
             )
+        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
+            user_id
+        )
         logger.info(
             "User account deletion accepted; purge lifecycle enqueued",
             extra={"target_user_id": user_id},

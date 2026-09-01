@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
 **infrastructure_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
 **required_capabilities** | **List[str]** |  | 
+**terminal_enabled** | **bool** |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 
 **capability_revision_id** | **str** |  | 

@@ -15,6 +15,7 @@ Name | Type | Description | Notes
 **schema_version** | **int** |  | 
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
 **required_capabilities** | **List[str]** |  | 
+**terminal_enabled** | **bool** |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 
 **compatible** | **bool** |  | 

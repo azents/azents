@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **description** | **str** |  | 
 **lifecycle** | [**RuntimeProfileLifecycle**](RuntimeProfileLifecycle.md) |  | [optional] 
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
+**terminal_enabled** | **bool** |  | [optional] [default to True]
 
 ## Example
 
