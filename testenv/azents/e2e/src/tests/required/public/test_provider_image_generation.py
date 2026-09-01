@@ -261,6 +261,15 @@ def _open_authenticated_session(
     wait.until(ec.url_contains(session_id))
 
 
+def _wait_for_chat_subscription(driver: WebDriver) -> None:
+    """Wait for the browser Chat WebSocket subscription barrier."""
+    WebDriverWait(driver, 30).until(
+        ec.presence_of_element_located(
+            (By.CSS_SELECTOR, "[data-chat-connection-status='connected']")
+        )
+    )
+
+
 def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int, int, int]:
     """Return bounded grouped-card and promoted-image counts for diagnostics."""
     activity_selector = "[data-tool-activity-id]"
@@ -565,6 +574,7 @@ class TestProviderImageGeneration:
             agent_id=agent_id,
             session_id=session_id,
         )
+        _wait_for_chat_subscription(browser_driver)
 
         browser_wait = WebDriverWait(browser_driver, 30)
         composer = browser_wait.until(
