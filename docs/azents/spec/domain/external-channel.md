@@ -65,8 +65,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-31
-spec_version: 67
+last_verified_at: 2026-09-01
+spec_version: 68
 ---
 
 # External Channel
@@ -160,7 +160,7 @@ contain multiple independent bindings.
 | Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. Slack `location=channel` may fan source threads into one parent owner. Discord parent-channel messages use the parent owner, while every existing Discord Thread keeps an exact independent owner and participation state. Parent participation can select the routed Agent and the response mode copied after an explicit Thread invocation, but it never makes an unbound Thread participate. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, nullable Slack presence anchor and initiator, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Slack and Discord cycles begin visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` transition with unfinished tasks promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
+| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, nullable Slack presence anchor and initiator, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, nullable awaiting-input Run identity, finish timestamp, and ordered current provider projection parts. Slack and Discord cycles begin visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` or `request_input` progress update with unfinished tasks promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -275,17 +275,21 @@ contain multiple independent bindings.
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
 - The same fenced Discord Gateway connection owner reconciles ephemeral typing targets
-  from connected active Bindings and schema-valid active Channel Work. Hidden and
-  visible conversational Work both request typing on the Resource's exact parent or
-  delivery-thread channel. One public-SDK task per Bot/channel renews typing while any
-  contributing Work remains active. `finish`, `ignore`, binding termination, lease
-  loss, disconnect, Client shutdown, and process shutdown remove or cancel targets.
+  from connected active Bindings and schema-valid ready active Channel Work. Hidden
+  and visible ready Work both request typing on the Resource's exact parent or
+  delivery-thread channel; awaiting Work does not. One public-SDK task per Bot/channel
+  renews typing while any contributing Work remains ready. `finish`, `ignore`, binding
+  termination, lease loss, disconnect, Client shutdown, and process shutdown remove
+  or cancel targets.
   Gateway ready/resume and worker restart rebuild targets from PostgreSQL. Typing
   failures and Discord's provider-defined indicator expiry never mutate Work,
   connection health, mailbox input, replies, or Tracker projection state.
 - Discord `ready`, `resumed`, and `disconnect` callbacks update active or degraded
-  health only through the current lease fence. Slack Socket establishment and endpoint
-  replacement callbacks use the equivalent fenced active/gap transitions. One
+  health only through the current lease fence. One minute of continuous unready state
+  cancels and discards the current SDK client, records a fenced degraded gap, releases
+  its lease, and permits the still-eligible connection to be reclaimed with a fresh
+  client that has no prior process-local Resume state. Slack Socket establishment and
+  endpoint replacement callbacks use the equivalent fenced active/gap transitions. One
   provider-neutral gateway process supervises both required manager loops and exits if
   either loop stops unexpectedly. One customer configuration requiring reconnection
   remains connection-local health. General Agent Workers own neither provider socket.
@@ -526,6 +530,10 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-09-01** (spec_version 68) — Added the schema-v4 awaiting Run identity to
+  the domain model, aligned hidden-Work promotion with both progress-update modes,
+  excluded awaiting Work from Discord typing, and recorded bounded fresh-client
+  recovery after a continuous unready interval.
 - **2026-08-31** (spec_version 67) — Added version-4 binding-scoped awaiting input,
   delivery-confirmed `request_input`, same-binding resume authority, ready-only
   continuation, and idle Slack/Discord processing presence while retaining Trackers.
