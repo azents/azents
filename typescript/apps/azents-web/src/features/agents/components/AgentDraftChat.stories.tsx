@@ -68,6 +68,7 @@ const agent: AgentResponse = {
   runtime_profile_configuration_status: "not_applicable",
   runtime_add_available: false,
   runtime_remove_available: false,
+  terminal_enabled: true,
   shell_enabled: true,
   memory_enabled: true,
   tool_search_enabled: false,
@@ -193,6 +194,7 @@ export const ManagedProjectSetup = {
       runtime_profile_configuration_status: "configured",
       runtime_add_available: false,
       runtime_remove_available: true,
+      terminal_enabled: true,
     },
     workspaceItems: [
       {

@@ -2,6 +2,7 @@ import {
   runtimeProfileV1CreateProfileRecreation,
   runtimeProfileV1CreateWorkspaceRuntimeProfile,
   runtimeProfileV1DeleteWorkspaceRuntimeProfile,
+  runtimeProfileV1GetWorkspaceRuntimeProfile,
   runtimeProfileV1GetWorkspaceRuntimeProfileDefault,
   runtimeProfileV1GetWorkspaceRuntimeProfileRecreation,
   runtimeProfileV1ListSelectableInfrastructureProfiles,
@@ -263,6 +264,15 @@ export const runtimeProfileRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
+        const { data: current } =
+          await runtimeProfileV1GetWorkspaceRuntimeProfile({
+            client: ctx.apiClient,
+            path: {
+              handle: input.handle,
+              profile_id: input.profileId,
+            },
+            throwOnError: true,
+          });
         const { data } = await runtimeProfileV1ReplaceWorkspaceRuntimeProfile({
           client: ctx.apiClient,
           path: {
@@ -275,6 +285,7 @@ export const runtimeProfileRouter = router({
             display_name: input.displayName,
             description: input.description,
             lifecycle: input.lifecycle,
+            terminal_enabled: current.terminal_enabled,
             policy: workspacePolicyBody(input.policy),
           },
           throwOnError: true,

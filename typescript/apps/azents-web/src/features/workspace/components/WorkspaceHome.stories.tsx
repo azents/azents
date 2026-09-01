@@ -81,6 +81,7 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     runtime_profile_configuration_status: "not_applicable",
     runtime_add_available: false,
     runtime_remove_available: false,
+    terminal_enabled: true,
     shell_enabled: true,
     memory_enabled: true,
     tool_search_enabled: false,

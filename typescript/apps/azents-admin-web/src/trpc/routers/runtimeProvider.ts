@@ -7,8 +7,10 @@ import {
   runtimeProviderV1CreateProviderRecreation,
   runtimeProviderV1DeleteContainerProfile,
   runtimeProviderV1DeletePodProfile,
+  runtimeProviderV1GetContainerProfile,
   runtimeProviderV1GetContainerProfileDeletionImpact,
   runtimeProviderV1GetPlatformRecreation,
+  runtimeProviderV1GetPodProfile,
   runtimeProviderV1GetPodProfileDeletionImpact,
   runtimeProviderV1GetProviderDiagnostics,
   runtimeProviderV1GetRuntimeProvider,
@@ -225,6 +227,18 @@ export const runtimeProviderRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
+        const getRequest = {
+          client: ctx.adminApiClient,
+          path: {
+            provider_id: input.providerId,
+            profile_id: input.profileId,
+          },
+          throwOnError: true,
+        } as const;
+        const { data: current } =
+          input.spec.profile_kind === "kubernetes_pod"
+            ? await runtimeProviderV1GetPodProfile(getRequest)
+            : await runtimeProviderV1GetContainerProfile(getRequest);
         const request = {
           client: ctx.adminApiClient,
           path: {
@@ -236,6 +250,7 @@ export const runtimeProviderRouter = router({
             display_name: input.displayName,
             description: input.description,
             lifecycle: input.lifecycle,
+            terminal_enabled: current.terminal_enabled,
             spec: input.spec,
           },
           throwOnError: true,
