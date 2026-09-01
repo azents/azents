@@ -239,6 +239,16 @@ class _OwnedRepository(_Repository):
         )
 
 
+class _RestartingOwnedRepository(_OwnedRepository):
+    """Keep one recoverable Discord connection eligible for repeated claims."""
+
+    async def list_discord_gateway_connection_ids(
+        self,
+        _session: object,
+    ) -> list[str]:
+        return ["connection-1"]
+
+
 class _IntentsFailureRunner:
     """Surface one public SDK privileged-intent rejection."""
 
@@ -357,6 +367,81 @@ class _BlockingRunner:
             load_typing_targets,
         )
         self.started.set()
+        await asyncio.Event().wait()
+
+
+class _FreshClientRecoveryRunner:
+    """Block the first client and mark the replacement client ready."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.first_cancelled = asyncio.Event()
+        self.replacement_ready = asyncio.Event()
+
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        del (
+            bot_token,
+            target_guild_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+            connected_bot_user_id,
+            handle_event,
+            load_typing_targets,
+        )
+        self.calls += 1
+        if self.calls == 1:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.first_cancelled.set()
+                raise
+        await handle_lifecycle("ready")
+        self.replacement_ready.set()
+        await asyncio.Event().wait()
+
+
+class _ResumeThenBlockRunner:
+    """Exercise one brief SDK disconnect and successful in-process Resume."""
+
+    def __init__(self) -> None:
+        self.resumed = asyncio.Event()
+
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        del (
+            bot_token,
+            target_guild_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+            connected_bot_user_id,
+            handle_event,
+            load_typing_targets,
+        )
+        await handle_lifecycle("ready")
+        await handle_lifecycle("disconnected")
+        await handle_lifecycle("resumed")
+        self.resumed.set()
         await asyncio.Event().wait()
 
 
@@ -919,3 +1004,81 @@ async def test_active_sdk_lifecycle_renews_gateway_lease() -> None:
     await task
 
     assert repository.renew_calls
+
+
+@pytest.mark.asyncio
+async def test_brief_sdk_disconnect_preserves_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resumed SDK client remains owned instead of being replaced."""
+    monkeypatch.setattr(
+        "azents.services.external_channel.discord_gateway_manager._READINESS_TIMEOUT",
+        datetime.timedelta(milliseconds=20),
+    )
+    repository = _Repository(admission=object())
+    runner = _ResumeThenBlockRunner()
+    service = _service(
+        repository=repository,
+        sessions=_SessionManager(),
+        gateway_client=runner,
+    )
+    service.renew_interval = datetime.timedelta(milliseconds=1)
+    shutdown = asyncio.Event()
+    task = asyncio.create_task(
+        service._run_connection_with_lease(
+            connection_id="connection-1",
+            lease=_lease(),
+            bot_token="test-token",
+            provider_app_id="app-1",
+            target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
+            connected_bot_user_id="900",
+            configuration_generation=2,
+            shutdown_event=shutdown,
+        )
+    )
+
+    await runner.resumed.wait()
+    await asyncio.wait_for(repository.renewed.wait(), timeout=1)
+    shutdown.set()
+    await task
+
+    assert len(repository.gap_calls) == 1
+    assert len(repository.active_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_unready_sdk_client_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A continuously unready SDK client is discarded and started fresh."""
+    monkeypatch.setattr(
+        "azents.services.external_channel.discord_gateway_manager._READINESS_TIMEOUT",
+        datetime.timedelta(milliseconds=10),
+    )
+    repository = _RestartingOwnedRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt.return_value = DiscordConnectionCredentials(
+        bot_token="test-token"
+    )
+    runner = _FreshClientRecoveryRunner()
+    service = _service(
+        repository=repository,
+        sessions=_SessionManager(),
+        credentials_codec=credentials_codec,
+        gateway_client=runner,
+    )
+    service.poll_interval = datetime.timedelta(milliseconds=1)
+    shutdown = asyncio.Event()
+    task = asyncio.create_task(service.run(shutdown))
+
+    await asyncio.wait_for(runner.replacement_ready.wait(), timeout=1)
+    shutdown.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    assert runner.calls == 2
+    assert runner.first_cancelled.is_set()
+    assert repository.gap_calls[0]["reason"] == "gateway_readiness_timeout"
+    assert repository.release_calls
+    assert repository.active_calls
