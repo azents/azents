@@ -1,15 +1,19 @@
 """Coordination-backed Runtime Runner Terminal broker tests."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from azents_runtime_control.runner_terminal import (
+    RunnerTerminalExit,
     RunnerTerminalIdentity,
     RunnerTerminalInputAcknowledgement,
     RunnerTerminalInputFrame,
     RunnerTerminalOutputAcknowledgement,
     RunnerTerminalOutputFrame,
     RunnerTerminalStreamRegistration,
+    RunnerTerminalTerminate,
+    RunnerTerminalTerminationReason,
 )
 
 from azents.runtime.control_protocol.grpc.runner_terminal_broker import (
@@ -23,14 +27,58 @@ from azents.runtime.control_protocol.grpc.runner_terminal_server import (
 )
 from azents.runtime.terminal_coordination.data import (
     RuntimeTerminalAdmission,
+    RuntimeTerminalInputBatch,
     RuntimeTerminalLifecycle,
+    RuntimeTerminalMutationResult,
     RuntimeTerminalMutationStatus,
+    RuntimeTerminalRecord,
 )
 from azents.runtime.terminal_coordination.memory import (
     InMemoryRuntimeTerminalCoordinationStore,
 )
 
 _NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+
+
+class _TerminatingReadGuardStore(InMemoryRuntimeTerminalCoordinationStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.terminating = False
+        self.waiting_after_termination = asyncio.Event()
+
+    async def read_inputs(
+        self,
+        terminal_id: str,
+        *,
+        runner_stream_generation: int,
+        after_sequence: int,
+        maximum_bytes: int,
+        current_time: datetime,
+    ) -> RuntimeTerminalMutationResult[RuntimeTerminalInputBatch]:
+        if self.terminating:
+            raise AssertionError("terminating stream must not read more input")
+        return await super().read_inputs(
+            terminal_id,
+            runner_stream_generation=runner_stream_generation,
+            after_sequence=after_sequence,
+            maximum_bytes=maximum_bytes,
+            current_time=current_time,
+        )
+
+    async def wait_for_change(
+        self,
+        terminal_id: str,
+        *,
+        after_revision: int,
+        timeout_seconds: float,
+    ) -> RuntimeTerminalRecord | None:
+        if self.terminating:
+            self.waiting_after_termination.set()
+        return await super().wait_for_change(
+            terminal_id,
+            after_revision=after_revision,
+            timeout_seconds=timeout_seconds,
+        )
 
 
 @pytest.mark.asyncio
@@ -83,6 +131,49 @@ async def test_broker_bridges_coordinated_input_output_and_detach() -> None:
     assert detached is not None
     assert detached.runner_stream is None
     assert detached.runner_stream_grace_expires_at == _NOW + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_terminating_stream_waits_for_runner_exit_without_reading_input() -> None:
+    store = _TerminatingReadGuardStore()
+    await store.admit_or_get(_admission(), admitted_at=_NOW)
+    broker = CoordinatedRuntimeRunnerTerminalBroker(
+        store=store,
+        clock=lambda: _NOW,
+        monotonic_clock=lambda: 0.0,
+    )
+    stream = await broker.connect(
+        _registration(),
+        authority=_authority(),
+        connected_at=_NOW,
+    )
+    controls = stream.control_frames()
+    terminated = await store.request_termination(
+        "terminal-1",
+        reason=RunnerTerminalTerminationReason.CALLER,
+        requested_at=_NOW,
+    )
+    assert terminated.status is RuntimeTerminalMutationStatus.APPLIED
+    store.terminating = True
+
+    control = await anext(controls)
+    assert control == RunnerTerminalTerminate(
+        reason=RunnerTerminalTerminationReason.CALLER
+    )
+    waiting = asyncio.ensure_future(anext(controls))
+    await asyncio.wait_for(store.waiting_after_termination.wait(), timeout=1)
+
+    await stream.receive(
+        RunnerTerminalExit(
+            reason=RunnerTerminalTerminationReason.CALLER,
+            exit_code=None,
+        )
+    )
+    with pytest.raises(StopAsyncIteration):
+        await waiting
+    final = await store.get_terminal("terminal-1", current_time=_NOW)
+    assert final is not None
+    assert final.lifecycle is RuntimeTerminalLifecycle.EXITED
 
 
 @pytest.mark.asyncio

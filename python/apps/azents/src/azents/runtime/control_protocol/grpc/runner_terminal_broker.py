@@ -347,6 +347,11 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                     )
                 )
                 continue
+            if record.lifecycle is RuntimeTerminalLifecycle.TERMINATING:
+                outbound = await self._wait_for_outbound_or_change()
+                if outbound is not None:
+                    yield outbound
+                continue
             inputs = await self._store.read_inputs(
                 self.terminal_id,
                 runner_stream_generation=self.stream_generation,
@@ -378,37 +383,44 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                     columns=resize.value.columns,
                     rows=resize.value.rows,
                 )
-            outbound_task = asyncio.create_task(self._outbound.get())
-            change_task = asyncio.create_task(
-                self._store.wait_for_change(
-                    self.terminal_id,
-                    after_revision=self._record_revision,
-                    timeout_seconds=_CHANGE_WAIT_SECONDS,
-                )
-            )
-            done = set()
-            try:
-                done, _pending = await asyncio.wait(
-                    (outbound_task, change_task),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if outbound_task in done:
-                    yield outbound_task.result()
-                else:
-                    changed = change_task.result()
-                    if changed is not None:
-                        self._record_revision = changed.revision
-            finally:
-                for task in (outbound_task, change_task):
-                    if task not in done:
-                        task.cancel()
-                await asyncio.gather(
-                    outbound_task,
-                    change_task,
-                    return_exceptions=True,
-                )
+            outbound = await self._wait_for_outbound_or_change()
+            if outbound is not None:
+                yield outbound
             if self._closed and self._outbound.empty():
                 return
+
+    async def _wait_for_outbound_or_change(
+        self,
+    ) -> RunnerTerminalControlFrame | None:
+        outbound_task = asyncio.create_task(self._outbound.get())
+        change_task = asyncio.create_task(
+            self._store.wait_for_change(
+                self.terminal_id,
+                after_revision=self._record_revision,
+                timeout_seconds=_CHANGE_WAIT_SECONDS,
+            )
+        )
+        done = set()
+        try:
+            done, _pending = await asyncio.wait(
+                (outbound_task, change_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if outbound_task in done:
+                return outbound_task.result()
+            changed = change_task.result()
+            if changed is not None:
+                self._record_revision = changed.revision
+            return None
+        finally:
+            for task in (outbound_task, change_task):
+                if task not in done:
+                    task.cancel()
+            await asyncio.gather(
+                outbound_task,
+                change_task,
+                return_exceptions=True,
+            )
 
     async def _accept_or_reject[ValueT](
         self,

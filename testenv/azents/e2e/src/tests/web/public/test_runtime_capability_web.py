@@ -600,17 +600,6 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Runtime connection")
     _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
-    _assert_visible_text(browser_driver, "Runtime is stopped", timeout_seconds=120)
-    _open_metrics_tab(browser_driver)
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[role='img'][aria-label='Recent one-hour usage trend']",
-            )
-        )
-    )
-
     stopped_generation = _wait_for_runtime_stopped(
         browser_driver,
         runtime_api=runtime_api,

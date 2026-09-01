@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import struct
 import time
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from urllib.parse import quote
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
 from azentsadminclient.models.runtime_infrastructure_profile_replace_request import (
@@ -26,6 +28,7 @@ from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.terminal_v1_api import TerminalV1Api
 from azentspublicclient.api.workspace_user_v1_api import WorkspaceUserV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.exceptions import ForbiddenException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
@@ -429,14 +432,39 @@ def _runtime_container(
     return containers[0]
 
 
-def _runtime_exec(container: Container, command: str) -> None:
-    """Run one bounded Runtime-container command."""
+def _runtime_exec(container: Container, command: str) -> str:
+    """Run one bounded Runtime-container command and return its output."""
     result = container.exec_run(["sh", "-lc", command])
     output = decode_docker_exec_output(result.output)
     if result.exit_code != 0:
         raise AssertionError(
             f"Runtime command failed with exit {result.exit_code}: {command}\n{output}"
         )
+    return output
+
+
+def _wait_runtime_log(
+    container: Container,
+    *,
+    path: str,
+    marker: str,
+    timeout: float = 60,
+) -> None:
+    """Wait for one explicit Runner log marker inside the Runtime container."""
+    deadline = time.monotonic() + timeout
+    latest = ""
+    quoted_path = shlex.quote(path)
+    while time.monotonic() < deadline:
+        latest = _runtime_exec(
+            container,
+            f"if [ -f {quoted_path} ]; then cat {quoted_path}; fi",
+        )
+        if marker in latest:
+            return
+        time.sleep(0.5)
+    raise AssertionError(
+        f"Runtime log marker {marker!r} was not observed: {latest[-4096:]!r}"
+    )
 
 
 def _websocket_url(
@@ -1050,6 +1078,14 @@ def test_runtime_terminal_member_access_revocation_closes_attachment(
         agent_id=team.agent_id,
         session_id=team.session_id,
     )
+    owner_workspace = _TerminalWorkspace(
+        token=team.owner_access_token,
+        handle=team.workspace_handle,
+        agent_id=team.agent_id,
+        session_id=team.session_id,
+        runtime_profile_id=None,
+        infrastructure_profile_id=None,
+    )
     member_workspace = _TerminalWorkspace(
         token=team.member_access_token,
         handle=team.workspace_handle,
@@ -1060,7 +1096,7 @@ def test_runtime_terminal_member_access_revocation_closes_attachment(
     )
     _wait_terminal_projection(
         public_api_client=public_api_client,
-        workspace=member_workspace,
+        workspace=owner_workspace,
         predicate=lambda projection: projection.state in {"ready", "active"},
         message="Member Terminal did not become ready after Session folder preparation",
         timeout=120,
@@ -1080,15 +1116,13 @@ def test_runtime_terminal_member_access_revocation_closes_attachment(
     )
     revoked = terminal.wait_for_control("revoked", timeout=15)
     assert revoked.get("reason_code") == "access_denied"
-    denied = TerminalV1Api(public_api_client).terminal_v1_issue_terminal_ticket(
-        handle=team.workspace_handle,
-        agent_id=team.agent_id,
-        session_id=team.session_id,
-        _headers=_headers(team.member_access_token),
-    )
-    assert denied.status is RuntimeTerminalTicketStatus.DENIED
-    assert denied.reason_code is RuntimeTerminalReasonCode.ACCESS_DENIED
-    assert denied.denied_scope is RuntimeTerminalDeniedScope.ACCESS
+    with pytest.raises(ForbiddenException):
+        TerminalV1Api(public_api_client).terminal_v1_issue_terminal_ticket(
+            handle=team.workspace_handle,
+            agent_id=team.agent_id,
+            session_id=team.session_id,
+            _headers=_headers(team.member_access_token),
+        )
 
 
 def test_runtime_terminal_runner_capability_mismatch_fails_closed(
@@ -1114,12 +1148,11 @@ def test_runtime_terminal_runner_capability_mismatch_fails_closed(
         azents_runtime_provider_docker_container,
         agent_id=workspace.agent_id,
     )
-    legacy_pid_path = f"/tmp/terminal-e2e-legacy-runner-{unique()}.pid"
+    legacy_suffix = unique()
+    legacy_pid_path = f"/tmp/terminal-e2e-legacy-runner-{legacy_suffix}.pid"
+    legacy_log_path = f"/tmp/terminal-e2e-legacy-runner-{legacy_suffix}.log"
     legacy_script = (
-        "import os\n"
-        "from pathlib import Path\n"
         "import azents_runtime_runner.main as runner\n"
-        f"Path({legacy_pid_path!r}).write_text(str(os.getpid()))\n"
         "runner._CAPABILITIES = tuple(\n"
         "    capability for capability in runner._CAPABILITIES\n"
         "    if capability != 'terminal.v1'\n"
@@ -1130,9 +1163,22 @@ def test_runtime_terminal_runner_capability_mismatch_fails_closed(
     try:
         _runtime_exec(runtime_container, "kill -STOP 1")
         original_suspended = True
-        runtime_container.exec_run(
-            ["python", "-c", legacy_script],
-            detach=True,
+        _runtime_exec(
+            runtime_container,
+            (
+                "PYTHONUNBUFFERED=1 "
+                f"AZ_RUNTIME_RUNNER_ID={shlex.quote(f'legacy-{legacy_suffix}')} "
+                "AZ_RUNTIME_RUNNER_CONNECTION_ID="
+                f"{shlex.quote(f'legacy-{legacy_suffix}')} "
+                f"python -c {shlex.quote(legacy_script)} "
+                f"> {shlex.quote(legacy_log_path)} 2>&1 & "
+                f"echo $! > {shlex.quote(legacy_pid_path)}"
+            ),
+        )
+        _wait_runtime_log(
+            runtime_container,
+            path=legacy_log_path,
+            marker="Runtime Runner registered",
         )
         unsupported = _wait_terminal_projection(
             public_api_client=public_api_client,
@@ -1166,6 +1212,7 @@ def test_runtime_terminal_runner_capability_mismatch_fails_closed(
                     f"if [ -f {legacy_pid_path} ]; then "
                     f'kill "$(cat {legacy_pid_path})" 2>/dev/null || true; '
                     f"rm -f {legacy_pid_path}; fi; "
+                    f"rm -f {legacy_log_path}; "
                     "kill -CONT 1"
                 ),
             )
