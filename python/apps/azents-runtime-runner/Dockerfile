@@ -41,6 +41,7 @@ RUN apt-get update \
         gnupg \
         vim-tiny \
         nano \
+        nix-bin \
         libnspr4 \
         libnss3 \
         libatk1.0-0 \
@@ -132,6 +133,9 @@ RUN chmod +x /usr/local/bin/azents-git-credential \
 
 RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid 1000 -m -d /home/agent -s /bin/bash agent
+
+COPY python/apps/azents-runtime-runner/docker/azents-nix-profile.sh /etc/profile.d/azents-nix.sh
+RUN chmod 644 /etc/profile.d/azents-nix.sh
 
 ENV HOME=/home/agent
 ENV PATH=/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}

@@ -1560,6 +1560,21 @@ class TestRuntimeToolkitUpdateContext:
         assert "Runtime Workspace" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
+    async def test_prompt_includes_native_nix_guidance(self) -> None:
+        toolkit = _make_toolkit()
+        context = _make_context()
+        await toolkit.update_context(context)
+
+        prompt = await toolkit.get_static_prompt(context)
+
+        assert (
+            "For missing system tools, use `nix search nixpkgs <name>` and "
+            "`nix profile install nixpkgs#<package>`. Do not use sudo or OS package "
+            "managers."
+        ) in prompt
+        assert "You can execute commands, install packages, and run code." not in prompt
+
+    @pytest.mark.asyncio
     async def test_prompt_rejects_removed_containment_profile_without_downgrade(
         self,
     ) -> None:
