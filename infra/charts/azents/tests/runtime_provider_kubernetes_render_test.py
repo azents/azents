@@ -116,13 +116,6 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS" in rendered
     assert '\\"app.kubernetes.io/managed-by\\":\\"Helm\\"' in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered
-    assert (
-        "- name: AZ_RUNTIME_PROVIDER_NIX_STORE_STORAGE_CLASS\n"
-        '              value: "gp3"'
-    ) in rendered
-    assert (
-        '- name: AZ_RUNTIME_PROVIDER_NIX_STORE_SIZE\n              value: "10Gi"'
-    ) in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH" in rendered
     assert "AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR" in rendered
     assert "AZ_RUNTIME_PROVIDER_POD_TOLERATIONS" in rendered

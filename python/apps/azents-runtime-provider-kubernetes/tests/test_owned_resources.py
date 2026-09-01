@@ -38,7 +38,6 @@ def test_resource_names_are_deterministic_for_every_owned_role() -> None:
     assert {role: resource_name("runtime-1", role) for role in ResourceRole} == {
         ResourceRole.RUNTIME_POD: "azents-runtime-runtime-1",
         ResourceRole.WORKSPACE_PVC: "azents-runtime-runtime-1-workspace",
-        ResourceRole.NIX_STORE_PVC: "azents-runtime-runtime-1-nix",
         ResourceRole.RUNTIME_NETWORK_POLICY: "azents-runtime-runtime-1-execution",
         ResourceRole.RUNTIME_CA: "azents-runtime-runtime-1-ca",
         ResourceRole.PROXY_POLICY: "azents-runtime-runtime-1-proxy-policy",

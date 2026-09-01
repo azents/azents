@@ -208,11 +208,6 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert workspace_path.exists()
     workspace_stat = workspace_path.stat()
     assert workspace_stat.st_mode & 0o777 in {0o755, 0o777}
-    nix_store_path = tmp_path / "agent-runtimes" / "runtime-1" / "nix"
-    assert nix_store_path.exists()
-    nix_store_stat = nix_store_path.stat()
-    assert nix_store_stat.st_mode & 0o777 in {0o755, 0o777}
-    assert any(bind.container_path == "/nix" for bind in container.spec.binds)
 
 
 @pytest.mark.asyncio
@@ -231,7 +226,6 @@ async def test_start_accepts_direct_v2_without_containment(tmp_path: Path) -> No
     assert {bind.container_path for bind in spec.binds} == {
         "/runtime/home",
         "/tmp/agent",
-        "/nix",
     }
     assert spec.cap_drop == ("ALL",)
     assert spec.cap_add == ()
@@ -537,36 +531,6 @@ async def test_restart_rejects_container_owned_by_another_runtime(
 
     assert docker.removed == []
     assert "azents-runtime-runtime-1" in docker.containers
-
-
-@pytest.mark.asyncio
-async def test_nix_store_follows_runtime_storage_lifecycle(tmp_path: Path) -> None:
-    docker = FakeDockerApi()
-    provider = _provider(tmp_path, docker)
-    await provider.start(_command(RuntimeLifecycleCommandType.START))
-    nix_store = tmp_path / "agent-runtimes" / "runtime-1" / "nix"
-    marker = nix_store / "keep.txt"
-    marker.write_text("preserved")
-
-    await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
-
-    assert marker.read_text() == "preserved"
-
-    await provider.reset(
-        _command(
-            RuntimeLifecycleCommandType.RESET,
-            final_desired_state=RuntimeDesiredState.STOPPED,
-        )
-    )
-
-    assert not marker.exists()
-    assert nix_store.exists()
-
-    await provider.terminal_delete(
-        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
-    )
-
-    assert not nix_store.exists()
 
 
 @pytest.mark.asyncio

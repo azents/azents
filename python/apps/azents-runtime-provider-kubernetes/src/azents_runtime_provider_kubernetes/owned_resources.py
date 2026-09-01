@@ -48,7 +48,6 @@ class ResourceRole(enum.StrEnum):
 
     RUNTIME_POD = "runtime-pod"
     WORKSPACE_PVC = "workspace-pvc"
-    NIX_STORE_PVC = "nix-store-pvc"
     RUNTIME_NETWORK_POLICY = "runtime-network-policy"
     RUNTIME_CA = "runtime-ca"
     PROXY_POLICY = "proxy-policy"
@@ -105,7 +104,6 @@ def resource_name(runtime_id: str, role: ResourceRole) -> str:
     suffix = {
         ResourceRole.RUNTIME_POD: "",
         ResourceRole.WORKSPACE_PVC: "-workspace",
-        ResourceRole.NIX_STORE_PVC: "-nix",
         ResourceRole.RUNTIME_NETWORK_POLICY: "-execution",
         ResourceRole.RUNTIME_CA: "-ca",
         ResourceRole.PROXY_POLICY: "-proxy-policy",

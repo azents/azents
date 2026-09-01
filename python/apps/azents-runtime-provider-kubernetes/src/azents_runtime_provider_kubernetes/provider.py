@@ -144,7 +144,6 @@ _IMAGE_GENERATION = "agent-runtime-kubernetes-v1"
 _RUNNER_CONTAINER_NAME = "runner"
 _ENGINE_CONTAINER_NAME = "container-engine"
 _WORKSPACE_VOLUME_NAME = "agent-workspace"
-_NIX_STORE_VOLUME_NAME = "nix-store"
 _ENGINE_SOCKET_VOLUME_NAME = "container-engine-socket"
 _ENGINE_STORAGE_VOLUME_NAME = "container-engine-storage"
 _SHARED_TMP_VOLUME_NAME = "runtime-shared-tmp"
@@ -152,7 +151,6 @@ _ENGINE_SOCKET_DIR = "/var/run/azents-engine"
 _ENGINE_STORAGE_PATH = "/var/lib/azents-engine"
 _ENGINE_SOCKET_PATH = f"{_ENGINE_SOCKET_DIR}/docker.sock"
 _SHARED_TMP_PATH = "/tmp"
-_NIX_STORE_MOUNT_PATH = "/nix"
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
@@ -259,8 +257,6 @@ class KubernetesRuntimeProviderConfig:
     proxy_port: int
     proxy_readiness_port: int
     workspace_mount_path: str
-    nix_store_storage_class_name: str
-    nix_store_storage_request: str
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
@@ -309,10 +305,6 @@ class KubernetesRuntimeProvider:
         self._config = config
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
-        if not config.nix_store_storage_class_name:
-            raise ValueError("Nix store StorageClass name is required.")
-        if _quantity_value(config.nix_store_storage_request) is None:
-            raise ValueError("Nix store storage request is invalid.")
 
     async def start(
         self,
@@ -330,9 +322,7 @@ class KubernetesRuntimeProvider:
                 command_type=RuntimeLifecycleCommandType.START,
                 report=await self.observe(command),
             )
-        await self._validate_existing_nix_store_ownership(command)
         await self._ensure_pvc(command, policy, ca_fingerprint=None)
-        await self._ensure_nix_store_pvc(command)
         if await self._delete_strict_runtime_before_direct(command):
             return RuntimeLifecycleResult(
                 command_type=RuntimeLifecycleCommandType.START,
@@ -417,13 +407,11 @@ class KubernetesRuntimeProvider:
         await self._delete_runtime_pod(command)
         await self._delete_execution_resources(command, delete_ca=False)
         await self._delete_workspace_pvc(command)
-        await self._delete_nix_store_pvc(command)
         await self._ensure_pvc(
             command,
             policy,
             ca_fingerprint=retained_ca_fingerprint,
         )
-        await self._ensure_nix_store_pvc(command)
         if command.reset_final_desired_state is RuntimeDesiredState.RUNNING:
             if isinstance(policy, KubernetesPodProfileV3):
                 await self._start_v3(command, policy, replace_runtime=False)
@@ -460,17 +448,11 @@ class KubernetesRuntimeProvider:
             _pvc_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        nix_store_pvc = await self._api.get_pvc(
-            _nix_store_pvc_name(command.identity.runtime_id),
-            self._config.namespace,
-        )
         if (
             pod is None
             or pvc is None
-            or nix_store_pvc is None
             or not self._pod_in_place_compatible(pod, command, policy)
             or not self._pvc_in_place_compatible(pvc, command, policy)
-            or not self._nix_store_pvc_in_place_compatible(nix_store_pvc, command)
         ):
             raise UnsupportedRuntimeConfiguration(
                 "Runtime configuration requires Kubernetes resource recreation."
@@ -499,7 +481,6 @@ class KubernetesRuntimeProvider:
         await self._delete_runtime_pod(command)
         await self._delete_execution_resources(command, delete_ca=True)
         await self._delete_workspace_pvc(command)
-        await self._delete_nix_store_pvc(command)
         if not await self._terminal_resources_absent(command):
             return RuntimeLifecycleResult(
                 command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
@@ -538,10 +519,12 @@ class KubernetesRuntimeProvider:
             self._config.namespace,
         )
         if pod is None:
+            pvc = await self._api.get_pvc(
+                _pvc_name(command.identity.runtime_id),
+                self._config.namespace,
+            )
             reason = (
-                "pvc_present_without_pod"
-                if await self._runtime_storage_present(command)
-                else "resources_absent"
+                "pvc_present_without_pod" if pvc is not None else "resources_absent"
             )
             return self._report(
                 command,
@@ -607,38 +590,18 @@ class KubernetesRuntimeProvider:
                 continue
             seen_runtime_ids.add(runtime_id)
             reports.append(report)
-        pvcs = await self._api.list_pvcs(labels, self._config.namespace)
-        for pvc in sorted(
-            pvcs,
-            key=lambda item: (
-                item.metadata.labels.get(LABEL_RESOURCE_ROLE)
-                == ResourceRole.NIX_STORE_PVC.value
-            ),
-        ):
+        for pvc in await self._api.list_pvcs(labels, self._config.namespace):
             runtime_id = pvc.metadata.labels.get(_LABEL_RUNTIME_ID)
             if runtime_id is None or runtime_id in seen_runtime_ids:
                 continue
-            role = pvc.metadata.labels.get(LABEL_RESOURCE_ROLE)
-            if role not in {
-                None,
-                ResourceRole.WORKSPACE_PVC.value,
-                ResourceRole.NIX_STORE_PVC.value,
-            }:
-                continue
-            expected_role = (
-                ResourceRole.NIX_STORE_PVC
-                if role == ResourceRole.NIX_STORE_PVC.value
-                else ResourceRole.WORKSPACE_PVC
-            )
             try:
                 _validate_recovered_runtime_resource(
                     pvc.metadata,
                     self._config,
-                    expected_role,
-                    allow_missing_role=expected_role is ResourceRole.WORKSPACE_PVC,
+                    ResourceRole.WORKSPACE_PVC,
+                    allow_missing_role=True,
                 )
                 reports.append(self._report_from_pvc(pvc))
-                seen_runtime_ids.add(runtime_id)
             except ValueError:
                 _LOGGER.warning(
                     "Kubernetes Runtime PVC observation skipped without valid "
@@ -701,7 +664,6 @@ class KubernetesRuntimeProvider:
             policy,
             ca_fingerprint=None if bundle.ca is None else bundle.ca.fingerprint,
         )
-        await self._ensure_nix_store_pvc(command)
         current = await self._api.get_pod(
             bundle.runtime_pod.metadata.name,
             self._config.namespace,
@@ -782,21 +744,15 @@ class KubernetesRuntimeProvider:
             _pvc_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        nix_store_pvc = await self._api.get_pvc(
-            _nix_store_pvc_name(command.identity.runtime_id),
-            self._config.namespace,
-        )
         bundle = await self._v3_bundle(command, policy, prepare_proxy=True)
         if bundle is None:
             raise ProxyNotReady("proxy_not_ready")
         if (
             pod is None
             or pvc is None
-            or nix_store_pvc is None
             or _pod_network_mode(pod) is not policy.network_access.mode
             or not _v3_pod_in_place_compatible(pod, bundle.runtime_pod)
             or not self._pvc_in_place_compatible(pvc, command, policy)
-            or not self._nix_store_pvc_in_place_compatible(nix_store_pvc, command)
         ):
             raise NetworkRecreationRequired("network_recreation_required")
         await self._apply_owned_network_policy(
@@ -833,15 +789,11 @@ class KubernetesRuntimeProvider:
         try:
             bundle = await self._v3_bundle(command, policy, prepare_proxy=False)
         except (InvalidMandatoryService, InvalidRuntimeCa) as error:
-            if pod is None:
-                observed_state = RuntimeProviderObservedState.STOPPED
-                reason = (
-                    "pvc_present_without_pod"
-                    if await self._runtime_storage_present(command)
-                    else "resources_absent"
-                )
-            else:
-                observed_state, reason = _observed_state(pod)
+            observed_state, reason = (
+                (RuntimeProviderObservedState.STOPPED, "resources_absent")
+                if pod is None
+                else _observed_state(pod)
+            )
             return self._report(
                 command,
                 observed_state=observed_state,
@@ -874,13 +826,7 @@ class KubernetesRuntimeProvider:
                     else RuntimeProviderObservedState.STOPPED
                 ),
                 reason=(
-                    "proxy_preparing"
-                    if proxy_pod is not None
-                    else (
-                        "pvc_present_without_pod"
-                        if await self._runtime_storage_present(command)
-                        else "resources_absent"
-                    )
+                    "proxy_preparing" if proxy_pod is not None else "resources_absent"
                 ),
                 provider_runtime_id=None,
                 reconciliation=reconciliation,
@@ -1638,51 +1584,6 @@ class KubernetesRuntimeProvider:
         )
         await self._api.delete_pvc(name, self._config.namespace)
 
-    async def _delete_nix_store_pvc(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> None:
-        name = _nix_store_pvc_name(command.identity.runtime_id)
-        pvc = await self._api.get_pvc(name, self._config.namespace)
-        if pvc is None:
-            return
-        _validate_owned_role(
-            pvc.metadata,
-            _owned_identity(command, self._config),
-            ResourceRole.NIX_STORE_PVC,
-        )
-        await self._api.delete_pvc(name, self._config.namespace)
-
-    async def _validate_existing_nix_store_ownership(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> None:
-        pvc = await self._api.get_pvc(
-            _nix_store_pvc_name(command.identity.runtime_id),
-            self._config.namespace,
-        )
-        if pvc is None:
-            return
-        _validate_owned_role(
-            pvc.metadata,
-            _owned_identity(command, self._config),
-            ResourceRole.NIX_STORE_PVC,
-        )
-
-    async def _runtime_storage_present(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> bool:
-        workspace = await self._api.get_pvc(
-            _pvc_name(command.identity.runtime_id),
-            self._config.namespace,
-        )
-        nix_store = await self._api.get_pvc(
-            _nix_store_pvc_name(command.identity.runtime_id),
-            self._config.namespace,
-        )
-        return workspace is not None or nix_store is not None
-
     async def _retained_ca_fingerprint(
         self,
         command: RuntimeLifecycleCommand,
@@ -1734,17 +1635,6 @@ class KubernetesRuntimeProvider:
                 ),
                 ResourceRole.WORKSPACE_PVC,
                 True,
-            ),
-            (
-                await self._api.get_pvc(
-                    resource_name(
-                        command.identity.runtime_id,
-                        ResourceRole.NIX_STORE_PVC,
-                    ),
-                    self._config.namespace,
-                ),
-                ResourceRole.NIX_STORE_PVC,
-                False,
             ),
             (
                 await self._api.get_network_policy(
@@ -1850,10 +1740,6 @@ class KubernetesRuntimeProvider:
             ),
             await self._api.get_pvc(
                 resource_name(runtime_id, ResourceRole.WORKSPACE_PVC),
-                namespace,
-            ),
-            await self._api.get_pvc(
-                resource_name(runtime_id, ResourceRole.NIX_STORE_PVC),
                 namespace,
             ),
             await self._api.get_network_policy(
@@ -2024,49 +1910,6 @@ class KubernetesRuntimeProvider:
             ResourceRole.RUNTIME_NETWORK_POLICY,
             allow_missing_role=True,
         )
-
-    async def _ensure_nix_store_pvc(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> None:
-        desired = self._nix_store_pvc(command)
-        existing = await self._api.get_pvc(
-            desired.metadata.name,
-            desired.metadata.namespace,
-        )
-        if existing is not None:
-            _validate_owned_role(
-                existing.metadata,
-                _owned_identity(command, self._config),
-                ResourceRole.NIX_STORE_PVC,
-            )
-            if existing.spec.storage_class_name != desired.spec.storage_class_name:
-                raise UnsupportedRuntimeConfiguration(
-                    "Nix store StorageClass change requires Runtime reset."
-                )
-            existing_size = _quantity_value(existing.spec.storage_request)
-            desired_size = _quantity_value(desired.spec.storage_request)
-            if (
-                existing_size is not None
-                and desired_size is not None
-                and existing_size > desired_size
-            ):
-                desired = dataclasses.replace(
-                    desired,
-                    spec=dataclasses.replace(
-                        desired.spec,
-                        storage_request=existing.spec.storage_request,
-                    ),
-                )
-        _LOGGER.info(
-            "Kubernetes Runtime ensuring Nix store PVC",
-            extra={
-                **_log_context(command, self._config),
-                "pvc_name": desired.metadata.name,
-                "storage_request": desired.spec.storage_request,
-            },
-        )
-        await self._api.apply_pvc(desired)
 
     async def _ensure_pod(
         self,
@@ -2244,18 +2087,6 @@ class KubernetesRuntimeProvider:
             == _quantity_value(expected.spec.storage_request)
         )
 
-    def _nix_store_pvc_in_place_compatible(
-        self,
-        pvc: PersistentVolumeClaimResource,
-        command: RuntimeLifecycleCommand,
-    ) -> bool:
-        expected = self._nix_store_pvc(command)
-        return (
-            pvc.spec.storage_class_name == expected.spec.storage_class_name
-            and _quantity_value(pvc.spec.storage_request)
-            == _quantity_value(expected.spec.storage_request)
-        )
-
     def _pvc(
         self,
         command: RuntimeLifecycleCommand,
@@ -2288,27 +2119,6 @@ class KubernetesRuntimeProvider:
                 storage_class_name=volume.storage_class_name,
                 access_modes=("ReadWriteOnce",),
                 storage_request=str(volume.storage_request_bytes),
-            ),
-        )
-
-    def _nix_store_pvc(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> PersistentVolumeClaimResource:
-        return PersistentVolumeClaimResource(
-            metadata=ObjectMeta(
-                name=_nix_store_pvc_name(command.identity.runtime_id),
-                namespace=self._config.namespace,
-                labels={
-                    **self._labels(command),
-                    LABEL_RESOURCE_ROLE: ResourceRole.NIX_STORE_PVC.value,
-                },
-                annotations=self._configuration_annotations(command),
-            ),
-            spec=PersistentVolumeClaimSpec(
-                storage_class_name=self._config.nix_store_storage_class_name,
-                access_modes=("ReadWriteOnce",),
-                storage_request=self._config.nix_store_storage_request,
             ),
         )
 
@@ -2350,10 +2160,6 @@ class KubernetesRuntimeProvider:
                         name=_WORKSPACE_VOLUME_NAME,
                         claim_name=_pvc_name(command.identity.runtime_id),
                     ),
-                    PersistentVolumeClaimVolume(
-                        name=_NIX_STORE_VOLUME_NAME,
-                        claim_name=_nix_store_pvc_name(command.identity.runtime_id),
-                    ),
                     *(
                         (
                             EmptyDirVolume(
@@ -2389,12 +2195,7 @@ class KubernetesRuntimeProvider:
                 name=_WORKSPACE_VOLUME_NAME,
                 mount_path=self._workspace_mount_path,
                 read_only=False,
-            ),
-            VolumeMount(
-                name=_NIX_STORE_VOLUME_NAME,
-                mount_path=_NIX_STORE_MOUNT_PATH,
-                read_only=False,
-            ),
+            )
         ]
         dind = policy.dind
         runner_env = self._env(command)
@@ -3600,10 +3401,6 @@ def _pod_name(runtime_id: str) -> str:
 
 def _pvc_name(runtime_id: str) -> str:
     return resource_name(runtime_id, ResourceRole.WORKSPACE_PVC)
-
-
-def _nix_store_pvc_name(runtime_id: str) -> str:
-    return resource_name(runtime_id, ResourceRole.NIX_STORE_PVC)
 
 
 def _network_policy_name(runtime_id: str) -> str:
