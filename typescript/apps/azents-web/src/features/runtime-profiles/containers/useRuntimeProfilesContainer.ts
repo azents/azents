@@ -254,6 +254,7 @@ export function useRuntimeProfilesContainer(
           displayName: values.displayName,
           description: values.description,
           lifecycle: values.lifecycle,
+          terminalEnabled: values.terminalEnabled,
           policy,
         });
         return;
@@ -265,6 +266,7 @@ export function useRuntimeProfilesContainer(
           displayName: values.displayName,
           description: values.description,
           lifecycle: values.lifecycle,
+          terminalEnabled: values.terminalEnabled,
           policy,
         });
       }

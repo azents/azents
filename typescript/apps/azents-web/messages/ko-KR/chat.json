@@ -811,5 +811,40 @@
   "runtimeFreeProjectTitle": "로컬 Project 없이 시작",
   "runtimeFreeProjectDescription": "로컬 Project 없이도 대화를 시작할 수 있습니다. Workspace 폴더를 선택하거나 Git worktree를 만들려면 <runtimeLink>관리형 Runtime을 추가</runtimeLink>하세요.",
   "runtimeRemovingProjectTitle": "Runtime 제거 진행 중",
-  "runtimeRemovingProjectDescription": "Runtime 제거가 완료되는 동안 로컬 Project 없이 대화를 시작할 수 있습니다."
+  "runtimeRemovingProjectDescription": "Runtime 제거가 완료되는 동안 로컬 Project 없이 대화를 시작할 수 있습니다.",
+  "terminal": {
+    "open": "터미널 열기",
+    "focus": "터미널에 집중",
+    "returnToDock": "도킹 화면으로 돌아가기",
+    "terminate": "종료",
+    "collapse": "접기",
+    "backToChat": "채팅으로 돌아가기",
+    "newOutput": "새 출력",
+    "retry": "다시 연결",
+    "focusKeyboard": "소프트웨어 키보드 포커스",
+    "stoppedTitle": "런타임이 중지됨",
+    "stoppedDescription": "터미널을 여는 것만으로 런타임이 자동 시작되지는 않습니다. 계속하려면 런타임을 직접 시작하세요.",
+    "startRuntime": "런타임 시작",
+    "startingTitle": "런타임 시작 중",
+    "startingDescription": "런타임과 Runner가 준비되면 터미널을 사용할 수 있습니다.",
+    "unavailableTitle": "터미널을 사용할 수 없음",
+    "unavailableDescription": "현재 런타임 권한으로는 터미널을 사용할 수 없습니다.",
+    "replayTruncated": "이전 출력 일부를 더 이상 불러올 수 없습니다. 현재 터미널 연결은 유지됩니다.",
+    "connection": {
+      "idle": "터미널",
+      "connecting": "연결 중…",
+      "connected": "연결됨",
+      "reconnecting": "다시 연결 중…",
+      "terminating": "종료 중…",
+      "exited": "종료됨",
+      "revoked": "접근 권한 철회됨",
+      "error": "연결 오류"
+    },
+    "stateMessage": {
+      "exited": "터미널이 종료되었습니다. 새 터미널을 열려면 다시 시도하세요.",
+      "revoked": "터미널 접근 권한이 철회되었습니다. 권한이 복구된 후 다시 시도하세요.",
+      "error": "터미널 연결에 실패했습니다. 다시 연결해 보세요."
+    },
+    "resizeDock": "터미널 도크 크기 조절"
+  }
 }

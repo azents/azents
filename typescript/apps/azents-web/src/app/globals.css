@@ -1,3 +1,5 @@
+@import "@xterm/xterm/css/xterm.css";
+
 /* Prevent iOS Safari auto-zoom on input focus (happens when font-size < 16px) */
 @media screen and (max-width: $mantine-breakpoint-sm) {
   input[type="text"],

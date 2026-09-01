@@ -811,5 +811,40 @@
   "runtimeFreeProjectTitle": "Démarrer sans projets locaux",
   "runtimeFreeProjectDescription": "Cet agent peut démarrer une conversation sans projets locaux. <runtimeLink>Ajoutez un environnement géré</runtimeLink> pour sélectionner des dossiers ou créer des worktrees Git.",
   "runtimeRemovingProjectTitle": "Suppression de l’environnement en cours",
-  "runtimeRemovingProjectDescription": "Démarrez la conversation sans projets locaux pendant la suppression de l’environnement."
+  "runtimeRemovingProjectDescription": "Démarrez la conversation sans projets locaux pendant la suppression de l’environnement.",
+  "terminal": {
+    "open": "Ouvrir le terminal",
+    "focus": "Agrandir le terminal",
+    "returnToDock": "Revenir au panneau",
+    "terminate": "Terminer",
+    "collapse": "Réduire",
+    "backToChat": "Revenir au chat",
+    "newOutput": "Nouvelle sortie",
+    "retry": "Réessayer",
+    "focusKeyboard": "Activer le clavier logiciel",
+    "stoppedTitle": "Le runtime est arrêté",
+    "stoppedDescription": "L’ouverture du terminal ne démarre jamais automatiquement le runtime. Démarrez-le explicitement pour continuer.",
+    "startRuntime": "Démarrer le runtime",
+    "startingTitle": "Démarrage du runtime",
+    "startingDescription": "Le terminal sera disponible lorsque le runtime et le Runner seront prêts.",
+    "unavailableTitle": "Terminal indisponible",
+    "unavailableDescription": "Le terminal n’est pas disponible avec l’autorité actuelle du runtime.",
+    "replayTruncated": "Une partie de la sortie précédente n’est plus disponible. Le terminal reste connecté.",
+    "connection": {
+      "idle": "Terminal",
+      "connecting": "Connexion…",
+      "connected": "Connecté",
+      "reconnecting": "Reconnexion…",
+      "terminating": "Arrêt…",
+      "exited": "Terminé",
+      "revoked": "Accès révoqué",
+      "error": "Erreur de connexion"
+    },
+    "stateMessage": {
+      "exited": "Le terminal est terminé. Réessayez pour ouvrir un nouveau terminal.",
+      "revoked": "L’accès au terminal a été révoqué. Réessayez une fois l’accès rétabli.",
+      "error": "La connexion au terminal a échoué. Réessayez pour vous reconnecter."
+    },
+    "resizeDock": "Redimensionner le panneau du terminal"
+  }
 }

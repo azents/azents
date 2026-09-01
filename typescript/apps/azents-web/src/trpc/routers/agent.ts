@@ -149,6 +149,7 @@ export const agentRouter = router({
         type: agentTypeEnum.optional(),
         runtime_profile_id: z.string().min(1).nullable().optional(),
         shell_enabled: z.boolean().optional(),
+        terminal_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
@@ -176,6 +177,7 @@ export const agentRouter = router({
             type: input.type ?? "public",
             runtime_profile_id: input.runtime_profile_id ?? null,
             shell_enabled: input.shell_enabled,
+            terminal_enabled: input.terminal_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
             max_turns: input.max_turns,
@@ -221,6 +223,7 @@ export const agentRouter = router({
           .positive()
           .optional(),
         shell_enabled: z.boolean().optional(),
+        terminal_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
@@ -266,6 +269,7 @@ export const agentRouter = router({
                 }
               : {}),
             shell_enabled: input.shell_enabled,
+            terminal_enabled: input.terminal_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
             max_turns: input.max_turns,

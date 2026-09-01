@@ -12,6 +12,7 @@ const baseValues: RuntimeProfileFormValues = {
   description: "",
   infrastructureProfileId: "profile",
   lifecycle: "active",
+  terminalEnabled: true,
   policySchemaVersion: 2,
   networkMode: "inherit",
   allowedCidrs: "",

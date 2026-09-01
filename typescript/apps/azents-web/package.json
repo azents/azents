@@ -31,6 +31,8 @@
     "@trpc/client": "^11.18.0",
     "@trpc/react-query": "^11.18.0",
     "@trpc/server": "^11.18.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "geist": "^1.7.2",
     "lang-map": "^0.4.0",
     "mermaid": "^11.16.1",

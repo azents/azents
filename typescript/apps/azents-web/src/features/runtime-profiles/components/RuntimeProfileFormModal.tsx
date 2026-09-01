@@ -7,6 +7,7 @@ import {
   Modal,
   Select,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -117,6 +118,7 @@ export function RuntimeProfileFormModal({
       description: "",
       infrastructureProfileId: "",
       lifecycle: "active",
+      terminalEnabled: true,
       policySchemaVersion: 2,
       networkMode: "inherit",
       allowedCidrs: "",
@@ -154,6 +156,7 @@ export function RuntimeProfileFormModal({
         description: editorState.profile.description,
         infrastructureProfileId: editorState.profile.infrastructure_profile_id,
         lifecycle: editorState.profile.lifecycle,
+        terminalEnabled: editorState.profile.terminal_enabled,
         policySchemaVersion: editorState.profile.policy.schema_version,
         networkMode: networkModeForProfile(editorState),
         ...networkFields,
@@ -172,6 +175,7 @@ export function RuntimeProfileFormModal({
         description: "",
         infrastructureProfileId: initialInfrastructure?.id ?? "",
         lifecycle: "active",
+        terminalEnabled: true,
         policySchemaVersion: initialInfrastructure
           ? policySchemaVersionForInfrastructure(initialInfrastructure)
           : 2,
@@ -309,6 +313,14 @@ export function RuntimeProfileFormModal({
             allowDeselect={false}
             key={form.key("lifecycle")}
             {...form.getInputProps("lifecycle")}
+          />
+          <Switch
+            label={t("terminalEnabledLabel")}
+            description={t("terminalEnabledDescription")}
+            checked={form.values.terminalEnabled}
+            onChange={(event) =>
+              form.setFieldValue("terminalEnabled", event.currentTarget.checked)
+            }
           />
           <Select
             label={t("networkModeLabel")}

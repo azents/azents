@@ -50,6 +50,7 @@ interface InfrastructureProfileFormValues {
   displayName: string;
   description: string;
   lifecycle: "active" | "disabled";
+  terminalEnabled: boolean;
   schemaVersion: 1 | 2 | 3;
   runnerCpuRequest: number | null;
   runnerCpuLimit: number | null;
@@ -140,6 +141,7 @@ function blankValues(
     displayName: "",
     description: "",
     lifecycle: "active",
+    terminalEnabled: true,
     schemaVersion: kind === "kubernetes_pod" ? 3 : 1,
     runnerCpuRequest: null,
     runnerCpuLimit: null,
@@ -300,6 +302,7 @@ function valuesFromProfile(
       displayName: profile.display_name,
       description: profile.description,
       lifecycle: profile.lifecycle,
+      terminalEnabled: profile.terminal_enabled,
       schemaVersion: spec.schema_version,
       runnerCpuRequest: spec.runner_resources.cpu_request_millicores,
       runnerCpuLimit: spec.runner_resources.cpu_limit_millicores,
@@ -350,6 +353,7 @@ function valuesFromProfile(
     displayName: profile.display_name,
     description: profile.description,
     lifecycle: profile.lifecycle,
+    terminalEnabled: profile.terminal_enabled,
     schemaVersion: spec.schema_version,
     dockerCpuReservation: spec.runner_resources.cpu_reservation_millicores,
     dockerCpuLimit: spec.runner_resources.cpu_limit_millicores,
@@ -756,6 +760,7 @@ function InfrastructureProfileEditor({
             displayName: values.displayName.trim(),
             description: values.description.trim(),
             lifecycle: values.lifecycle,
+            terminalEnabled: values.terminalEnabled,
             spec: buildSpec(kind, values),
           }),
         )}
@@ -781,6 +786,14 @@ function InfrastructureProfileEditor({
             allowDeselect={false}
             key={form.key("lifecycle")}
             {...form.getInputProps("lifecycle")}
+          />
+          <Switch
+            label="Enable interactive Terminal"
+            description="Allow Session users to open Terminals through this infrastructure Profile."
+            checked={form.values.terminalEnabled}
+            onChange={(event) =>
+              form.setFieldValue("terminalEnabled", event.currentTarget.checked)
+            }
           />
 
           {kind === "kubernetes_pod" ? (
@@ -1419,6 +1432,14 @@ export function InfrastructureProfilesSection({
                         Disabled
                       </Badge>
                     )}
+                    <Badge
+                      color={profile.terminal_enabled ? "green" : "yellow"}
+                      variant="outline"
+                    >
+                      {profile.terminal_enabled
+                        ? "Terminal enabled"
+                        : "Terminal disabled"}
+                    </Badge>
                     {profile.schema_version !== 1 && (
                       <Badge color="blue" variant="outline">
                         Schema v{profile.schema_version}

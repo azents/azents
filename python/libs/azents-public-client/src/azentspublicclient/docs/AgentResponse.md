@@ -31,6 +31,10 @@ Name | Type | Description | Notes
 **runtime_remove_available** | **bool** |  | 
 **shell_enabled** | **bool** |  | 
 **terminal_enabled** | **bool** |  | 
+**infrastructure_terminal_enabled** | **bool** |  | 
+**workspace_terminal_enabled** | **bool** |  | 
+**effective_terminal_enabled** | **bool** |  | 
+**terminal_denied_scope** | **str** |  | 
 **memory_enabled** | **bool** |  | 
 **tool_search_enabled** | **bool** |  | 
 **max_turns** | **int** |  | 

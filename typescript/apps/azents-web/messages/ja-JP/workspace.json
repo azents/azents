@@ -444,7 +444,13 @@
       "succeeded": "成功",
       "skipped": "スキップ",
       "failed": "失敗"
-    }
+    },
+    "terminalEnabledLabel": "対話型ターミナルを有効化",
+    "terminalEnabledDescription": "このワークスペースランタイムプロファイルを使う Agent のセッションでターミナルを開けるようにします。",
+    "terminalEffectiveEnabled": "ターミナル利用可",
+    "terminalEffectiveDisabled": "ターミナル利用不可",
+    "terminalInfrastructureDisabled": "インフラ側ターミナル無効",
+    "terminalWorkspaceDisabled": "ワークスペースプロファイル側ターミナル無効"
   },
   "agents": {
     "headline": "エージェント",
@@ -1385,6 +1391,17 @@
         "cronRequired": "Cron式を入力してください。",
         "timezoneRequired": "IANAタイムゾーンを入力してください。"
       }
+    },
+    "terminalEnabledLabel": "対話型ターミナルを有効化",
+    "terminalEnabledDescription": "現在のセッションにアクセスできるユーザーが管理対象ランタイムのターミナルを開けるようにします。",
+    "terminalCurrentEffectiveEnabled": "現在の有効なターミナル: 利用可能",
+    "terminalCurrentEffectiveDisabled": "現在の有効なターミナル: 利用不可",
+    "terminalDeniedScopeLabel": "{scope} で拒否",
+    "terminalDeniedScope": {
+      "runtime": "管理対象ランタイム",
+      "provider_profile": "インフラプロファイル",
+      "workspace_profile": "ワークスペースランタイムプロファイル",
+      "agent": "Agent"
     }
   },
   "toolkits": {

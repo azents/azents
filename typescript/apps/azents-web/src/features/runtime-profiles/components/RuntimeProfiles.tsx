@@ -299,6 +299,29 @@ export function RuntimeProfiles(
                               {t("disabled")}
                             </Badge>
                           )}
+                          <Badge
+                            color={
+                              profile.effective_terminal_enabled
+                                ? "green"
+                                : "yellow"
+                            }
+                            variant="outline"
+                          >
+                            {profile.effective_terminal_enabled
+                              ? t("terminalEffectiveEnabled")
+                              : t("terminalEffectiveDisabled")}
+                          </Badge>
+                          {!profile.infrastructure_terminal_enabled ? (
+                            <Badge color="red" variant="outline">
+                              {t("terminalInfrastructureDisabled")}
+                            </Badge>
+                          ) : null}
+                          {profile.infrastructure_terminal_enabled &&
+                          !profile.terminal_enabled ? (
+                            <Badge color="red" variant="outline">
+                              {t("terminalWorkspaceDisabled")}
+                            </Badge>
+                          ) : null}
                         </Group>
                         {!profile.available && (
                           <Stack gap={2} mt="xs">

@@ -40,10 +40,58 @@ from azents.testing.model_selection import (
 )
 
 from ..runtime_profile_workspace.service import RuntimeProfileWorkspaceUnavailable
-from . import AgentService
+from . import AgentService, _terminal_denied_scope
 from .data import AgentCreateInput, ModelRequired, RuntimeProfileSelectionInvalid
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+def test_terminal_denied_scope_reports_each_policy_owner() -> None:
+    """Effective Terminal denial names the first authoritative scope."""
+    assert (
+        _terminal_denied_scope(
+            capability=AgentRuntimeCapability.NONE,
+            runtime_profile_available=False,
+            runtime_profile_reason="runtime_profile_unconfigured",
+            infrastructure_terminal_enabled=None,
+            workspace_terminal_enabled=None,
+            agent_terminal_enabled=True,
+        )
+        == "runtime"
+    )
+    assert (
+        _terminal_denied_scope(
+            capability=AgentRuntimeCapability.MANAGED,
+            runtime_profile_available=True,
+            runtime_profile_reason=None,
+            infrastructure_terminal_enabled=False,
+            workspace_terminal_enabled=True,
+            agent_terminal_enabled=True,
+        )
+        == "provider_profile"
+    )
+    assert (
+        _terminal_denied_scope(
+            capability=AgentRuntimeCapability.MANAGED,
+            runtime_profile_available=True,
+            runtime_profile_reason=None,
+            infrastructure_terminal_enabled=True,
+            workspace_terminal_enabled=False,
+            agent_terminal_enabled=True,
+        )
+        == "workspace_profile"
+    )
+    assert (
+        _terminal_denied_scope(
+            capability=AgentRuntimeCapability.MANAGED,
+            runtime_profile_available=True,
+            runtime_profile_reason=None,
+            infrastructure_terminal_enabled=True,
+            workspace_terminal_enabled=True,
+            agent_terminal_enabled=False,
+        )
+        == "agent"
+    )
 
 
 def _make_agent(
@@ -321,6 +369,8 @@ class TestAgentServiceModelSelection:
         runtime_profile_service.get_profile.return_value = SimpleNamespace(
             available=True,
             reason_code=None,
+            infrastructure_profile=SimpleNamespace(terminal_enabled=True),
+            profile=SimpleNamespace(terminal_enabled=True),
         )
         agent_repo.create.return_value = _make_agent(
             runtime_profile_id="profile-1",
@@ -356,6 +406,8 @@ class TestAgentServiceModelSelection:
         assert result.value.runtime_profile_configuration_status == "configured"
         assert result.value.runtime_add_available is False
         assert result.value.runtime_remove_available is True
+        assert result.value.effective_terminal_enabled is True
+        assert result.value.terminal_denied_scope is None
         runtime_profile_repository.enqueue_reconcile_task.assert_awaited_once()
 
     async def test_create_rejects_unavailable_explicit_runtime_profile(self) -> None:

@@ -444,7 +444,13 @@
       "succeeded": "Succeeded",
       "skipped": "Skipped",
       "failed": "Failed"
-    }
+    },
+    "terminalEnabledLabel": "Enable interactive Terminal",
+    "terminalEnabledDescription": "Allow Session users to open a Terminal for Agents using this Workspace Runtime Profile.",
+    "terminalEffectiveEnabled": "Terminal available",
+    "terminalEffectiveDisabled": "Terminal unavailable",
+    "terminalInfrastructureDisabled": "Infrastructure Terminal off",
+    "terminalWorkspaceDisabled": "Workspace Profile Terminal off"
   },
   "agents": {
     "headline": "Agents",
@@ -1385,6 +1391,17 @@
         "cronRequired": "Enter a cron expression.",
         "timezoneRequired": "Enter an IANA timezone."
       }
+    },
+    "terminalEnabledLabel": "Enable interactive Terminal",
+    "terminalEnabledDescription": "Allow people with current Session access to open the managed Runtime Terminal.",
+    "terminalCurrentEffectiveEnabled": "Current effective Terminal: available",
+    "terminalCurrentEffectiveDisabled": "Current effective Terminal: unavailable",
+    "terminalDeniedScopeLabel": "Denied by {scope}",
+    "terminalDeniedScope": {
+      "runtime": "managed Runtime",
+      "provider_profile": "infrastructure Profile",
+      "workspace_profile": "Workspace Runtime Profile",
+      "agent": "Agent"
     }
   },
   "toolkits": {

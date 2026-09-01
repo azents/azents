@@ -10,6 +10,7 @@
 import {
   Alert,
   Anchor,
+  Badge,
   Button,
   Container,
   Divider,
@@ -125,6 +126,7 @@ export function AgentForm({
       enabled: true,
       reasoning_effort: null,
       shell_enabled: true,
+      terminal_enabled: true,
       memory_enabled: true,
       tool_search_enabled: true,
       max_turns: null,
@@ -180,6 +182,7 @@ export function AgentForm({
         enabled: agent.enabled,
         reasoning_effort: defaultReasoningEffort,
         shell_enabled: agent.shell_enabled,
+        terminal_enabled: agent.terminal_enabled,
         memory_enabled: agent.memory_enabled,
         tool_search_enabled: agent.tool_search_enabled,
         max_turns: agent.max_turns ?? null,
@@ -578,6 +581,45 @@ export function AgentForm({
               }
             />
           )}
+
+          {showCapabilities && (
+            <Switch
+              label={t("terminalEnabledLabel")}
+              description={t("terminalEnabledDescription")}
+              disabled={
+                formState.type === "EDIT" &&
+                formState.agent.runtime_capability !== "managed"
+              }
+              checked={form.values.terminal_enabled ?? true}
+              onChange={(e) =>
+                form.setFieldValue("terminal_enabled", e.currentTarget.checked)
+              }
+            />
+          )}
+
+          {showCapabilities && formState.type === "EDIT" ? (
+            <Group gap="xs">
+              <Badge
+                color={
+                  formState.agent.effective_terminal_enabled ? "green" : "red"
+                }
+                variant="outline"
+              >
+                {formState.agent.effective_terminal_enabled
+                  ? t("terminalCurrentEffectiveEnabled")
+                  : t("terminalCurrentEffectiveDisabled")}
+              </Badge>
+              {formState.agent.terminal_denied_scope !== null ? (
+                <Badge color="red" variant="light">
+                  {t("terminalDeniedScopeLabel", {
+                    scope: t(
+                      `terminalDeniedScope.${formState.agent.terminal_denied_scope}`,
+                    ),
+                  })}
+                </Badge>
+              ) : null}
+            </Group>
+          ) : null}
 
           {showCapabilities && (
             <Switch

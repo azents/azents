@@ -811,5 +811,40 @@
   "runtimeFreeProjectTitle": "Start without local Projects",
   "runtimeFreeProjectDescription": "This agent can start a conversation without local Projects. <runtimeLink>Add a managed Runtime</runtimeLink> to select Workspace folders or create Git worktrees.",
   "runtimeRemovingProjectTitle": "Runtime removal in progress",
-  "runtimeRemovingProjectDescription": "Start the conversation without local Projects while Runtime removal completes."
+  "runtimeRemovingProjectDescription": "Start the conversation without local Projects while Runtime removal completes.",
+  "terminal": {
+    "open": "Open terminal",
+    "focus": "Focus terminal",
+    "returnToDock": "Return to dock",
+    "terminate": "Terminate",
+    "collapse": "Collapse",
+    "backToChat": "Back to chat",
+    "newOutput": "New output",
+    "retry": "Retry",
+    "focusKeyboard": "Focus software keyboard",
+    "stoppedTitle": "Runtime is stopped",
+    "stoppedDescription": "Starting a Terminal never starts the Runtime automatically. Start it explicitly to continue.",
+    "startRuntime": "Start Runtime",
+    "startingTitle": "Runtime is starting",
+    "startingDescription": "Terminal will become available after the Runtime and Runner are ready.",
+    "unavailableTitle": "Terminal unavailable",
+    "unavailableDescription": "Terminal is not available for the current Runtime authority.",
+    "replayTruncated": "Earlier output is no longer available. The live Terminal is still connected.",
+    "connection": {
+      "idle": "Terminal",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting…",
+      "terminating": "Terminating…",
+      "exited": "Exited",
+      "revoked": "Access revoked",
+      "error": "Connection error"
+    },
+    "stateMessage": {
+      "exited": "The Terminal has exited. Retry to open a new Terminal.",
+      "revoked": "Terminal access was revoked. Retry after access is restored.",
+      "error": "The Terminal connection failed. Retry to reconnect."
+    },
+    "resizeDock": "Resize Terminal dock"
+  }
 }

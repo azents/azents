@@ -12,6 +12,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
 import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
+import { useRuntimeTerminalContainer } from "@/features/runtime-terminal/containers/useRuntimeTerminalContainer";
 import { trpc } from "@/trpc/client";
 import { ChatSessionView } from "../components/ChatSessionView";
 import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
@@ -25,6 +26,7 @@ import type { ComposerSubscriptionUsagePresentationProps } from "../components/C
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { ConnectionStatus } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
+import type { RuntimeTerminalContainerOutput } from "@/features/runtime-terminal/containers/useRuntimeTerminalContainer";
 import type {
   AgentResponse,
   AgentSessionResponse,
@@ -52,6 +54,8 @@ export interface ChatSessionViewContainerOutput {
   subscriptionUsage: ComposerSubscriptionUsagePresentationProps | null;
   workspacePanel: WorkspacePanelContainerOutput;
   subagentNavigation: SubagentNavigationLinks | null;
+  terminal: RuntimeTerminalContainerOutput;
+  terminalMobile: boolean;
   runtimeDrawerOpened: boolean;
   onSessionTitleChange: (session: AgentSessionResponse) => void;
   onOpenRuntime: () => void;
@@ -122,6 +126,12 @@ export function useChatSessionViewContainer(
     sessionId,
     autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
   });
+  const terminal = useRuntimeTerminalContainer({
+    handle,
+    agentId: agent.id,
+    sessionId,
+    mobile: !isWorkspacePanelDocked,
+  });
   const subagentTreePanel = useSubagentTreePanelContainer({
     agentId: agent.id,
     sessionId,
@@ -157,6 +167,8 @@ export function useChatSessionViewContainer(
     subscriptionUsage,
     workspacePanel,
     subagentNavigation,
+    terminal,
+    terminalMobile: !isWorkspacePanelDocked,
     runtimeDrawerOpened,
     onSessionTitleChange,
     onOpenRuntime,

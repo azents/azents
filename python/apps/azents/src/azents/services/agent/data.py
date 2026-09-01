@@ -55,6 +55,18 @@ class AgentOutput(BaseModel):
     runtime_remove_available: bool
     shell_enabled: bool
     terminal_enabled: bool
+    infrastructure_terminal_enabled: bool | None
+    workspace_terminal_enabled: bool | None
+    effective_terminal_enabled: bool
+    terminal_denied_scope: (
+        Literal[
+            "runtime",
+            "provider_profile",
+            "workspace_profile",
+            "agent",
+        ]
+        | None
+    )
     memory_enabled: bool
     tool_search_enabled: bool
     max_turns: int | None
@@ -74,6 +86,16 @@ class AgentOutput(BaseModel):
         effective_auto_compaction_threshold_tokens: int | None,
         runtime_profile_available: bool,
         runtime_profile_availability_reason_code: str | None,
+        infrastructure_terminal_enabled: bool | None,
+        workspace_terminal_enabled: bool | None,
+        effective_terminal_enabled: bool,
+        terminal_denied_scope: Literal[
+            "runtime",
+            "provider_profile",
+            "workspace_profile",
+            "agent",
+        ]
+        | None,
         can_manage: bool,
     ) -> Self:
         """Create output by combining domain `Agent` and resolved `avatar`."""
@@ -118,6 +140,10 @@ class AgentOutput(BaseModel):
             ),
             shell_enabled=data.shell_enabled,
             terminal_enabled=data.terminal_enabled,
+            infrastructure_terminal_enabled=infrastructure_terminal_enabled,
+            workspace_terminal_enabled=workspace_terminal_enabled,
+            effective_terminal_enabled=effective_terminal_enabled,
+            terminal_denied_scope=terminal_denied_scope,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
