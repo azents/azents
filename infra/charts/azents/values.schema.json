@@ -873,6 +873,24 @@
         "storage": {
           "type": "object"
         },
+        "nixStore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "className",
+            "size"
+          ],
+          "properties": {
+            "className": {
+              "type": "string",
+              "minLength": 1
+            },
+            "size": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
         "networkPolicy": {
           "type": "object",
           "properties": {

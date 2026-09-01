@@ -262,6 +262,9 @@ runtimeProviderKubernetes:
   storage:
     className: gp3
     size: 20Gi
+  nixStore:
+    className: gp3
+    size: 10Gi
   networkPolicy:
     enabled: true
     allowedCidrs: []
