@@ -2671,6 +2671,7 @@ def browser_driver(
     options.accept_insecure_certs = True
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1440,1000")
+    options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
     driver = webdriver.Remote(
         command_executor=f"http://{host}:{port}",
         options=options,

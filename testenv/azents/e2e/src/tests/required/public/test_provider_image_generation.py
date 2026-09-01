@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import cast
+from typing import Protocol, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -13,7 +13,7 @@ import requests
 from azentspublicclient.api.user_v1_api import UserV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -44,6 +44,13 @@ _IMAGE_BYTES = _IMAGE_PATH.read_bytes()
 _IMAGE_BASE64 = base64.b64encode(_IMAGE_BYTES).decode()
 _IMAGE_SHA256 = hashlib.sha256(_IMAGE_BYTES).hexdigest()
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _BrowserLogReader(Protocol):
+    """Selenium browser-log capability absent from the WebDriver type stub."""
+
+    def get_log(self, log_type: str) -> list[dict[str, object]]:
+        """Return browser log entries for one configured log type."""
 
 
 def _submit(
@@ -316,13 +323,18 @@ def _wait_for_promoted_image_without_activity(driver: WebDriver) -> None:
             promoted_attachments,
             nested_attachments,
         ) = _image_projection_counts(driver)
+        try:
+            browser_logs = cast(_BrowserLogReader, driver).get_log("browser")[-20:]
+        except WebDriverException as log_error:
+            browser_logs = [{"log_capture_error": repr(log_error)}]
         raise AssertionError(
             "expected one promoted Exchange image outside Activity without a nested "
             "duplicate; "
             f"observed activities={activities}, cards={cards}, "
             f"completed_cards={completed_cards}, "
             f"promoted_images={promoted_attachments}, "
-            f"nested_images={nested_attachments}"
+            f"nested_images={nested_attachments}, "
+            f"browser_logs={browser_logs!r}"
         ) from exc
 
 
