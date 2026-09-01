@@ -41,7 +41,6 @@ RUN apt-get update \
         gnupg \
         vim-tiny \
         nano \
-        nix-bin \
         libnspr4 \
         libnss3 \
         libatk1.0-0 \
@@ -66,6 +65,37 @@ RUN apt-get update \
         sqlite3 \
         graphviz \
     && rm -rf /var/lib/apt/lists/*
+
+ARG PIXI_VERSION=0.78.0
+ARG TARGETARCH
+RUN set -eux; \
+    architecture="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${architecture}" in \
+        amd64) \
+            artifact="pixi-x86_64-unknown-linux-musl.tar.gz"; \
+            checksum="afe2e5ff0e23de0557d2fae1b08ec1f3445c79dc28abecf88b272d1f04c3a8bf" \
+            ;; \
+        arm64) \
+            artifact="pixi-aarch64-unknown-linux-musl.tar.gz"; \
+            checksum="83c3a4a24350c5d6edeab5cce17b33110ee01881a847f3ab84ba82d1261a1c0f" \
+            ;; \
+        *) \
+            echo "Unsupported Pixi architecture: ${architecture}" >&2; \
+            exit 1 \
+            ;; \
+    esac; \
+    curl -fsSL \
+        --retry 5 \
+        --retry-all-errors \
+        --connect-timeout 15 \
+        "https://github.com/prefix-dev/pixi/releases/download/v${PIXI_VERSION}/${artifact}" \
+        -o /tmp/pixi.tar.gz; \
+    echo "${checksum}  /tmp/pixi.tar.gz" | sha256sum --check --status; \
+    tar -xzf /tmp/pixi.tar.gz -C /usr/local/bin pixi; \
+    chown root:root /usr/local/bin/pixi; \
+    chmod 755 /usr/local/bin/pixi; \
+    rm /tmp/pixi.tar.gz; \
+    pixi --version | grep -F "pixi ${PIXI_VERSION}"
 
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -134,8 +164,10 @@ RUN chmod +x /usr/local/bin/azents-git-credential \
 RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid 1000 -m -d /home/agent -s /bin/bash agent
 
-COPY python/apps/azents-runtime-runner/docker/azents-nix-profile.sh /etc/profile.d/azents-nix.sh
-RUN chmod 644 /etc/profile.d/azents-nix.sh
+RUN mkdir -p /etc/pixi
+COPY python/apps/azents-runtime-runner/docker/azents-pixi-config.toml /etc/pixi/config.toml
+COPY python/apps/azents-runtime-runner/docker/azents-pixi-profile.sh /etc/profile.d/azents-pixi.sh
+RUN chmod 644 /etc/pixi/config.toml /etc/profile.d/azents-pixi.sh
 
 ENV HOME=/home/agent
 ENV PATH=/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
