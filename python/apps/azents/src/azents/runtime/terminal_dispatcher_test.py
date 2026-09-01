@@ -32,7 +32,10 @@ async def test_dispatcher_routes_typed_open_and_terminate_intents() -> None:
         runtime_coordination,
         request_id_factory=iter(("open-1", "terminate-1")).__next__,
     )
-    accepted = await control.register_runner(_registration(), registered_at=_NOW)
+    accepted = await control.register_runner(
+        _registration(),
+        registered_at=datetime.now(UTC),
+    )
     coordination = InMemoryRuntimeTerminalCoordinationStore()
     admitted = await coordination.admit_or_get(_admission(), admitted_at=_NOW)
     assert admitted.value is not None

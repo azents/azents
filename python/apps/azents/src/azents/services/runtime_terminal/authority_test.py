@@ -283,7 +283,7 @@ async def _register_runner(
             connection_id="connection-1",
             owner_replica_id="control-1",
         ),
-        registered_at=_NOW,
+        registered_at=datetime.datetime.now(datetime.UTC),
     )
 
 
