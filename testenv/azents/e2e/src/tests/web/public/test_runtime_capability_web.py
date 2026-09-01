@@ -116,6 +116,52 @@ def _click_button(driver: WebDriver, text: str) -> None:
     ).click()
 
 
+def _click_aria_button(driver: WebDriver, label: str) -> None:
+    """Click one visible button by exact accessible label."""
+    _wait(driver).until(
+        ec.element_to_be_clickable((By.XPATH, f"//button[@aria-label={label!r}]"))
+    ).click()
+
+
+def _open_terminal(driver: WebDriver) -> None:
+    """Open the Session Terminal and wait for its xterm input surface."""
+    _click_button(driver, "Open terminal")
+    textarea = WebDriverWait(driver, 120).until(
+        ec.presence_of_element_located((By.CSS_SELECTOR, ".xterm-helper-textarea"))
+    )
+    driver.execute_script("arguments[0].focus()", textarea)
+    driver.switch_to.active_element.send_keys(
+        "printf '__WEB_TERMINAL__ready__\\n'",
+        Keys.ENTER,
+    )
+
+
+def _exercise_desktop_terminal(driver: WebDriver) -> None:
+    """Exercise dock, focus, collapse, and reload reattachment."""
+    _open_terminal(driver)
+    _click_aria_button(driver, "Focus terminal")
+    _click_aria_button(driver, "Return to dock")
+    separator = _wait(driver).until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, "[role='separator'][aria-label='Resize Terminal dock']")
+        )
+    )
+    separator.send_keys(Keys.ARROW_UP)
+    _click_aria_button(driver, "Collapse")
+    _click_button(driver, "Open terminal")
+    driver.refresh()
+    _open_terminal(driver)
+
+
+def _exercise_mobile_terminal(driver: WebDriver) -> None:
+    """Exercise the focused-only mobile Terminal and key accessory."""
+    driver.set_window_size(390, 844)
+    _open_terminal(driver)
+    _assert_visible_text(driver, "Ctrl")
+    _assert_visible_text(driver, "Alt")
+    _click_aria_button(driver, "Back to chat")
+
+
 def _open_metrics_tab(driver: WebDriver) -> None:
     """Open the Runtime system metrics tab."""
     _wait(driver).until(
@@ -515,6 +561,7 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
     session_url = browser_driver.current_url
+    _exercise_desktop_terminal(browser_driver)
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
     _assert_visible_text(browser_driver, "Scope: Container")
@@ -553,6 +600,7 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Runtime connection")
     _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
+    _assert_visible_text(browser_driver, "Runtime is stopped", timeout_seconds=120)
     _open_metrics_tab(browser_driver)
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
@@ -591,6 +639,13 @@ def test_runtime_free_add_and_remove_progress(
         sentinel_after_stop_start.actual_instance,
         AgentWorkspaceDirectoryResponse,
     )
+
+    browser_driver.get(session_url)
+    _exercise_mobile_terminal(browser_driver)
+    browser_driver.set_window_size(1440, 1000)
+    _click_button(browser_driver, "Open terminal")
+    _click_button(browser_driver, "Terminate")
+    _assert_visible_text(browser_driver, "Exited", timeout_seconds=30)
 
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"

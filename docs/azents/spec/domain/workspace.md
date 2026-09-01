@@ -7,6 +7,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/5ffa2fdb4e51_add_session_working_folder_context.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/155e9db4ee7e_contract_session_working_folder_context.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
@@ -48,6 +49,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/api/public/runtime_profile/**
+  - python/apps/azents/src/azents/api/public/terminal/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
@@ -59,6 +61,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/workspace-settings/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
+  - typescript/apps/azents-web/src/features/runtime-terminal/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
@@ -103,12 +106,15 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-09-01
-spec_version: 76
+spec_version: 77
 ---
 
 # Workspace & Membership
@@ -311,6 +317,13 @@ exact durable Runtime Provider resource to one Provider-owned infrastructure Pro
 Workspace-owned policy that the selected infrastructure contract permits. The infrastructure
 Profile must belong to that exact Provider and match its Provider kind, and the Workspace Runtime
 Profile cannot be read or mutated through another Workspace.
+
+Infrastructure and Workspace Runtime Profiles each store a default-true
+`terminal_enabled` policy. Infrastructure policy is the Provider-owned ceiling;
+Workspace policy may narrow but cannot override a false infrastructure value. Agent
+policy is evaluated separately at Terminal admission. Profile Terminal-only changes
+publish source invalidation for active browser Terminals but do not change Runtime
+configuration digest, desired generation, or recreation status.
 
 The current Workspace policy surface is restrictive-only network authority for Kubernetes
 Profiles. Policy v1 remains direct-only CIDR narrowing. Policy v2 may preserve or reduce the
@@ -803,6 +816,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-01 (spec_version=77)** — Added default-true infrastructure and Workspace
+  Runtime Profile Terminal policy, restrictive hierarchy, live invalidation, and
+  no-recreation semantics.
 - **2026-08-31 (spec_version=76)** — Kept asynchronously loaded directory rows
   expanded with explicit idle, loading, failed, and loaded states, removed per-child
   Git metadata probes from generic Agent Workspace directory listings, moved repository inspection to the

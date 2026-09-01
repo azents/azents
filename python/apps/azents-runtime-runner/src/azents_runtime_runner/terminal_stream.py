@@ -54,6 +54,7 @@ _HEARTBEAT_INTERVAL_SECONDS = 10.0
 _HEARTBEAT_ACK_TIMEOUT_SECONDS = 30.0
 _RECONNECT_DELAY_SECONDS = 1.0
 _DEADLINE_POLL_SECONDS = 1.0
+_FINAL_EVENT_FLUSH_TIMEOUT_SECONDS = 5.0
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -76,6 +77,10 @@ class RunnerTerminalClient(Protocol):
 
     async def send(self, frame: RunnerTerminalEventFrame) -> None:
         """Send one Runner event frame."""
+        ...
+
+    async def finish(self, frame: RunnerTerminalEventFrame) -> None:
+        """Flush one final Runner event and finish the request stream."""
         ...
 
     async def close(self) -> None:
@@ -612,12 +617,16 @@ class RunnerTerminalStreamManager:
             with contextlib.suppress(
                 RuntimeRunnerTerminalStreamClosed,
                 grpc.aio.AioRpcError,
+                TimeoutError,
             ):
-                await client.send(
-                    RunnerTerminalExit(
-                        reason=final.reason,
-                        exit_code=final.exit_code,
-                    )
+                await asyncio.wait_for(
+                    client.finish(
+                        RunnerTerminalExit(
+                            reason=final.reason,
+                            exit_code=final.exit_code,
+                        )
+                    ),
+                    timeout=_FINAL_EVENT_FLUSH_TIMEOUT_SECONDS,
                 )
             return final
         finally:

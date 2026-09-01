@@ -6,6 +6,8 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7de5749cadd5_drop_shell_enabled_from_agents.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/10d8111b556c_add_session_auto_archive_fields.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/d0a55d801644_add_external_channel_response_modes.py
@@ -17,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/runtime_profile.py
+  - python/apps/azents/src/azents/core/runtime_capabilities.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
@@ -39,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_automatic_project/**
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -49,6 +53,7 @@ code_paths:
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
+  - python/apps/azents/src/azents/api/public/terminal/**
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
@@ -64,6 +69,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
+  - typescript/apps/azents-web/src/features/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
@@ -76,6 +82,9 @@ api_routes:
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
   - /runtime-profile/v1/workspaces/{handle}/profiles
   - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
   - /runtime-profile/v1/workspaces/{handle}/default
@@ -89,8 +98,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-27
-spec_version: 69
+last_verified_at: 2026-09-01
+spec_version: 70
 ---
 
 # Agent Domain Spec
@@ -121,7 +130,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `runtime_capability_version` | positive optimistic version for dedicated Runtime add/remove transitions and stale admission fencing |
 | `runtime_profile_id` | nullable exact Workspace Runtime Profile selection for a managed Agent. Null does not imply Runtime-free state |
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
-| `shell_enabled` | administrator setting for shell exposure; effective shell authority additionally requires managed Runtime capability |
+| `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
@@ -140,6 +149,14 @@ location selection copies the current value into the new participation setting, 
 later configured Bindings copy that setting. Legacy isolated-thread access replay
 without a setup claim copies the Agent value directly. Later Agent default changes
 never rewrite an active setting or existing Binding.
+
+`terminal_enabled` controls only human interactive Terminal access. Agent create and
+partial update expose the raw flag without requiring a currently managed Runtime. Agent
+responses also expose infrastructure-Profile, Workspace-Profile, effective policy, and
+the bounded denial scope. Effective access requires every policy level plus current
+managed Runtime, ready Runner `terminal.v1` capability, Session access, and working-folder
+authority. Runtime Toolkit projection instead depends only on managed Runtime capability
+and its optimistic version; there is no Agent Shell setting or compatibility fallback.
 
 ### 1.2 Runtime Profile selection
 
@@ -585,6 +602,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-01** (spec_version 70) — Added independent Agent interactive-Terminal
+  policy and effective denial projections, and removed the obsolete Shell setting
+  while preserving managed Runtime as the sole Runtime Toolkit authority.
 - **2026-08-27** (spec_version 69) — Resolved per-option input windows from a
   distinct model default, model maximum, and nullable user cap before combining
   main and lightweight limits.

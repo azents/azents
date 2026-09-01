@@ -169,6 +169,10 @@ class _Client:
         self.sent.append(frame)
         self.sent_event.set()
 
+    async def finish(self, frame: RunnerTerminalEventFrame) -> None:
+        self.sent.append(frame)
+        self.sent_event.set()
+
     async def close(self) -> None:
         self.closed.set()
 

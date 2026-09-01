@@ -83,11 +83,12 @@ class GrpcRunnerTerminalClient:
         self._channel = channel
         self._metadata = (("authorization", f"Bearer {runner_auth_token}"),)
         self._outbound: asyncio.Queue[
-            runtime_runner_terminal_pb2.RunnerTerminalMessage
+            runtime_runner_terminal_pb2.RunnerTerminalMessage | None
         ] = asyncio.Queue(maxsize=_MAX_OUTBOUND_MESSAGES)
         self._control_handler: RunnerTerminalControlFrameHandler | None = None
         self._accepted: asyncio.Future[RunnerTerminalStreamAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
+        self._finished = False
 
     @classmethod
     def from_endpoint(
@@ -132,9 +133,25 @@ class GrpcRunnerTerminalClient:
 
     async def send(self, frame: RunnerTerminalEventFrame) -> None:
         """Send one bounded Runner-to-Control Terminal frame."""
+        if self._finished:
+            raise RuntimeError("Terminal stream is already finished")
         if self._receiver_task is not None and self._receiver_task.done():
             raise RuntimeRunnerTerminalStreamClosed("Terminal stream is closed")
         await self._outbound.put(runner_terminal_event_to_message(frame))
+
+    async def finish(self, frame: RunnerTerminalEventFrame) -> None:
+        """Flush one final Runner event and finish the request stream."""
+        if self._finished:
+            raise RuntimeError("Terminal stream is already finished")
+        if self._receiver_task is None:
+            raise RuntimeError("Terminal stream is not registered")
+        if self._receiver_task.done():
+            await self._receiver_task
+            raise RuntimeRunnerTerminalStreamClosed("Terminal stream is closed")
+        self._finished = True
+        await self._outbound.put(runner_terminal_event_to_message(frame))
+        await self._outbound.put(None)
+        await self._receiver_task
 
     async def close(self) -> None:
         """Close the Terminal stream and its independently pooled channel."""
@@ -157,7 +174,10 @@ class GrpcRunnerTerminalClient:
     ) -> AsyncIterator[runtime_runner_terminal_pb2.RunnerTerminalMessage]:
         yield registration
         while True:
-            yield await self._outbound.get()
+            message = await self._outbound.get()
+            if message is None:
+                return
+            yield message
 
     async def _receive(
         self,

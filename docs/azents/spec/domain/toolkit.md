@@ -8,6 +8,7 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/core/runtime_profile.py
+  - python/apps/azents/src/azents/core/runtime_capabilities.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
@@ -60,7 +61,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-01
-spec_version: 103
+spec_version: 104
 ---
 
 # Toolkit
@@ -619,7 +620,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
 | `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
-| `runtime` | auto-bound only when the Agent is `managed` and shell-gated Runtime capabilities are enabled. Network authority comes from the current Workspace Runtime Profile configuration. | — |
+| `runtime` | auto-bound only when the Agent is `managed`; every declared Runtime capability is granted at the captured/current capability version. Network authority comes from the current Workspace Runtime Profile configuration. | — |
 | `claude_rules` | auto-bound only when managed filesystem capability is granted; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
 | `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation ID, `github_app_platform`: System Settings-resolved platform App JWT with App-ID binding checks | ToolkitConfig `encrypted_credentials` plus the current effective Platform GitHub App Section |
@@ -634,8 +635,9 @@ Memory Read/Write, Goal, Todo, managed VFS Skills, subagent collaboration, sched
 remote Toolkit operations do not require a managed Runtime. Runtime file/process tools,
 filesystem Skill discovery/materialization, AGENTS.md/Claude Rules filesystem projection, Runtime
 transfer, Workspace/Project/Git operations, and Runtime credential exposure declare stable Runtime
-capabilities and are projected only when the Agent is `managed`; shell-gated capabilities also
-require `shell_enabled`.
+capabilities and are projected exactly when the captured and current Agent capability is `managed`
+at the same optimistic version. `none` and `removing` project none of those capabilities. The
+independent browser `terminal_enabled` policy is never read by Toolkit resolution.
 
 Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose
 `AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing
@@ -884,6 +886,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-01 (spec_version=104)** — Made managed Runtime capability plus version
+  the complete Runtime Toolkit gate and removed the obsolete Agent Shell gate;
+  browser Terminal policy remains independent.
 - **2026-09-01** (spec_version 103) — Replaced unusable HOME-relative Nix
   guidance with native Workspace-resident Pixi global tool guidance.
 - **2026-09-01** (spec_version 102) — Added native Nix system-tool guidance to

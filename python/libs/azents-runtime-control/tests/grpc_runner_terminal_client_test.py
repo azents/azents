@@ -120,6 +120,46 @@ async def test_terminal_client_registers_resumes_and_dispatches_control_frames()
     await client.close()
 
 
+@pytest.mark.asyncio
+async def test_terminal_client_flushes_final_event_before_stream_completion() -> None:
+    """Finishing the request stream delivers the final event before close."""
+    sent: list[runtime_runner_terminal_pb2.RunnerTerminalMessage] = []
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_terminal_pb2.RunnerTerminalMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_terminal_pb2.TerminalControlMessage]:
+        assert metadata == (("authorization", "Bearer runner-token"),)
+        sent.append(await anext(requests))
+        yield runner_terminal_stream_accepted_to_message(
+            RunnerTerminalStreamAccepted(
+                stream_generation=2,
+                resume_from_output_sequence=11,
+                next_input_sequence=6,
+            )
+        )
+        sent.append(await anext(requests))
+        with pytest.raises(StopAsyncIteration):
+            await anext(requests)
+
+    client = GrpcRunnerTerminalClient(stream, runner_auth_token="runner-token")
+    client.set_control_handler(lambda _frame: asyncio.sleep(0))
+    await client.start(_registration())
+    await client.finish(
+        RunnerTerminalExit(
+            reason=RunnerTerminalTerminationReason.CALLER,
+            exit_code=None,
+        )
+    )
+
+    assert sent[1].exit.reason == (
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_CALLER
+    )
+    assert sent[1].exit.HasField("exit_code") is False
+    await client.close()
+
+
 @pytest.mark.parametrize(
     "frame",
     [

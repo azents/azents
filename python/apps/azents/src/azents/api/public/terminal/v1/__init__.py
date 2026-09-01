@@ -452,7 +452,9 @@ async def _receive_loop(
                 )
             case TerminalTerminateControl():
                 await attachment.terminate()
-                return
+                # Keep the receive side alive until the send loop delivers the
+                # asynchronous Runner exit event and owns socket completion.
+                await asyncio.Future()
             case _ as unreachable:
                 assert_never(unreachable)
 
