@@ -75,7 +75,6 @@ class AgentRuntimeRemovalFinalizerRepository:
                 RDBAgent.runtime_capability_version
                 == operation.committed_capability_version,
                 RDBAgent.runtime_profile_id.is_(None),
-                RDBAgent.shell_enabled.is_(False),
             )
             .with_for_update()
         )
@@ -103,7 +102,6 @@ class AgentRuntimeRemovalFinalizerRepository:
         agent.runtime_capability = AgentRuntimeCapability.NONE
         agent.runtime_capability_version += 1
         agent.runtime_profile_id = None
-        agent.shell_enabled = False
         agent.updated_at = now
 
         operation.status = AgentRuntimeRemovalStatus.COMPLETED

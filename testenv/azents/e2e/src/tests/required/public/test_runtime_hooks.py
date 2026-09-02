@@ -465,7 +465,6 @@ def _create_agent_with_runtime_hook_toolkit(
     mode: str,
     visible_prompt: str | None = None,
     hidden_prompt: str | None = None,
-    shell_enabled: bool = False,
     tool_search_enabled: bool = False,
 ) -> str:
     """runtime_hook_qa toolkit t t API t createt agent t t."""
@@ -497,7 +496,6 @@ def _create_agent_with_runtime_hook_toolkit(
             lightweight_model_selection=workspace.model_selection,
             type=AgentType.PUBLIC,
             runtime_profile_id=workspace.runtime_profile_id,
-            shell_enabled=shell_enabled,
             tool_search_enabled=tool_search_enabled,
         ),
         _headers=headers,
@@ -543,7 +541,6 @@ class TestRuntimeHooks:
             mode="observe",
             visible_prompt=_VISIBLE_PROMPT,
             hidden_prompt=_HIDDEN_PROMPT,
-            shell_enabled=True,
         )
         observe_message = "Create AGENTS.md"
         _run_message(

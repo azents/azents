@@ -51,11 +51,10 @@ from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 
 def _managed_runtime_capability_resolver() -> RuntimeCapabilityResolver:
-    """Return a managed shell-enabled Runtime capability resolver."""
+    """Return a managed Runtime capability resolver."""
     return RuntimeCapabilityResolver.from_agent(
         state=AgentRuntimeCapability.MANAGED,
         version=1,
-        shell_enabled=True,
     )
 
 
@@ -501,10 +500,10 @@ class TestSkillToolkit:
         assert service.resolve_calls[-1]["workspace_id"] == "workspace-current"
 
     @pytest.mark.asyncio
-    async def test_shell_disabled_keeps_managed_and_hides_filesystem_skills(
+    async def test_managed_runtime_projects_filesystem_and_managed_skills(
         self,
     ) -> None:
-        """Managed VFS Skills remain while filesystem Skills are denied."""
+        """Managed Runtime authority projects filesystem and managed Skills."""
         projection = _managed_projection()
         toolkit = SkillToolkit(
             store=_SkillStore(
@@ -521,7 +520,6 @@ class TestSkillToolkit:
             RuntimeCapabilityResolver.from_agent(
                 state=AgentRuntimeCapability.MANAGED,
                 version=1,
-                shell_enabled=False,
             )
         )
         context = TurnContext(
@@ -534,13 +532,10 @@ class TestSkillToolkit:
         prompt = await toolkit.get_static_prompt(context)
         state = await toolkit.update_context(context)
 
-        assert "/workspace/agent/project" not in prompt
+        assert "/workspace/agent/project" in prompt
         assert "azents://skills/azents/review/SKILL.md" in prompt
         [load_skill] = state.tools
-        with pytest.raises(FunctionToolError, match="Filesystem Skill capability"):
-            await load_skill.handler(
-                json.dumps({"skill_path": _skill_item().skill_path})
-            )
+        await load_skill.handler(json.dumps({"skill_path": _skill_item().skill_path}))
 
     @pytest.mark.asyncio
     async def test_prompt_and_catalog_recheck_filesystem_skill_authority(
@@ -551,7 +546,6 @@ class TestSkillToolkit:
         current = RuntimeCapabilityResolver.from_agent(
             state=AgentRuntimeCapability.REMOVING,
             version=2,
-            shell_enabled=False,
         )
 
         async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
@@ -574,7 +568,6 @@ class TestSkillToolkit:
             RuntimeCapabilityResolver.from_agent(
                 state=AgentRuntimeCapability.MANAGED,
                 version=1,
-                shell_enabled=True,
                 current_snapshot_provider=current_snapshot_provider,
             )
         )

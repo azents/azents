@@ -43,7 +43,6 @@ class AgentCreateRequest(BaseModel):
     enabled: Optional[StrictBool] = Field(default=True, description="Enabled state")
     type: Optional[AgentType] = Field(default=None, description="Visibility scope")
     runtime_profile_id: Optional[StrictStr] = None
-    shell_enabled: Optional[StrictBool] = Field(default=True, description="Shell enabled state")
     terminal_enabled: Optional[StrictBool] = Field(default=True, description="Interactive Terminal enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=True, description="Memory enabled state")
     tool_search_enabled: Optional[StrictBool] = Field(default=True, description="Tool Search enabled state")
@@ -51,7 +50,7 @@ class AgentCreateRequest(BaseModel):
     auto_archive_ttl_days: Optional[StrictInt] = Field(default=30, description="Inactivity period before automatic Session archive")
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "shell_enabled", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
+    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -192,7 +191,6 @@ class AgentCreateRequest(BaseModel):
             "enabled": obj.get("enabled") if obj.get("enabled") is not None else True,
             "type": obj.get("type"),
             "runtime_profile_id": obj.get("runtime_profile_id"),
-            "shell_enabled": obj.get("shell_enabled") if obj.get("shell_enabled") is not None else True,
             "terminal_enabled": obj.get("terminal_enabled") if obj.get("terminal_enabled") is not None else True,
             "memory_enabled": obj.get("memory_enabled") if obj.get("memory_enabled") is not None else True,
             "tool_search_enabled": obj.get("tool_search_enabled") if obj.get("tool_search_enabled") is not None else True,

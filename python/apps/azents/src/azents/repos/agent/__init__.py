@@ -78,7 +78,6 @@ class AgentRepository:
             type=create.type,
             runtime_profile_id=create.runtime_profile_id,
             runtime_capability=create.runtime_capability,
-            shell_enabled=create.shell_enabled,
             terminal_enabled=create.terminal_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
@@ -143,7 +142,6 @@ class AgentRepository:
         expected_runtime_profile_selection_version: int,
         capability: AgentRuntimeCapability,
         runtime_profile_id: str | None,
-        shell_enabled: bool,
     ) -> Agent | None:
         """Replace Runtime authority and Profile selection under both fences."""
         result = await session.execute(
@@ -162,7 +160,6 @@ class AgentRepository:
                 runtime_profile_selection_version=(
                     RDBAgent.runtime_profile_selection_version + 1
                 ),
-                shell_enabled=shell_enabled,
                 updated_at=sa.func.now(),
             )
             .returning(RDBAgent)
@@ -262,8 +259,6 @@ class AgentRepository:
             db_values["enabled"] = update["enabled"]
         if "type" in update:
             db_values["type"] = update["type"]
-        if "shell_enabled" in update:
-            db_values["shell_enabled"] = update["shell_enabled"]
         if "terminal_enabled" in update:
             db_values["terminal_enabled"] = update["terminal_enabled"]
         if "memory_enabled" in update:
@@ -396,7 +391,6 @@ class AgentRepository:
             runtime_profile_selection_version=(rdb.runtime_profile_selection_version),
             runtime_capability=rdb.runtime_capability,
             runtime_capability_version=rdb.runtime_capability_version,
-            shell_enabled=rdb.shell_enabled,
             terminal_enabled=rdb.terminal_enabled,
             memory_enabled=rdb.memory_enabled,
             tool_search_enabled=rdb.tool_search_enabled,

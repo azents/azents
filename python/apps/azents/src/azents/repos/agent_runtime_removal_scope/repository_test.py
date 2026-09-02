@@ -72,7 +72,6 @@ async def _seed_agent(
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.REMOVING,
         runtime_capability_version=2,
-        shell_enabled=False,
     )
     session.add(agent)
     await session.flush()

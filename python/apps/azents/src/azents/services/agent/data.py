@@ -53,7 +53,6 @@ class AgentOutput(BaseModel):
     ]
     runtime_add_available: bool
     runtime_remove_available: bool
-    shell_enabled: bool
     terminal_enabled: bool
     infrastructure_terminal_enabled: bool | None
     workspace_terminal_enabled: bool | None
@@ -138,7 +137,6 @@ class AgentOutput(BaseModel):
             runtime_remove_available=(
                 can_manage and data.runtime_capability is AgentRuntimeCapability.MANAGED
             ),
-            shell_enabled=data.shell_enabled,
             terminal_enabled=data.terminal_enabled,
             infrastructure_terminal_enabled=infrastructure_terminal_enabled,
             workspace_terminal_enabled=workspace_terminal_enabled,
@@ -223,7 +221,6 @@ class AgentCreateInput(BaseModel):
     runtime_profile_id: str | None = Field(
         default=None, description="Selected Workspace Runtime Profile ID"
     )
-    shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     terminal_enabled: bool = Field(
         default=True,
         description="Interactive Terminal enabled flag",
@@ -288,7 +285,6 @@ class AgentUpdateInput(TypedDict, total=False):
             description="Required optimistic version when replacing the selection",
         ),
     ]
-    shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     terminal_enabled: Annotated[
         bool,
         Field(description="Interactive Terminal enabled flag"),

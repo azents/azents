@@ -39,7 +39,6 @@ class AgentService:
         *,
         name: str | None = None,
         agent_type: str = "public",
-        shell_enabled: bool = True,
         memory_enabled: bool = True,
         model_config_id: str | None = None,
     ) -> Agent:
@@ -48,7 +47,7 @@ class AgentService:
         Phase 5 creates agents through ModelConfig using `model_config_id`. The
         `model` argument remains only as a legacy field on the returned dataclass.
 
-        Defaults create an AGENT-role runtime tool agent with shell enabled.
+        Defaults create an Agent with the API's standard capability settings.
         """
         actual_name = name if name is not None else f"Test Agent {unique()}"
         if model_config_id is None:
@@ -64,7 +63,6 @@ class AgentService:
                 name=actual_name,
                 additional_properties={"model_config_id": model_config_id},
                 type=AgentType(agent_type),
-                shell_enabled=shell_enabled,
             ),
             _headers={"Authorization": f"Bearer {user.access_token}"},
         )

@@ -63,7 +63,7 @@ The `agent-basic` fixture internally uses `setup/*.md` and `testenv/setup_handle
 Keep only setup entries that are actually referenced by fixtures, E2E tests, or prerequisites.
 
 <!-- SETUP-LIST:START -->
-- `agent-dummy-key` — Create agent with dummy-key LLM integration and shell tool enabled
+- `agent-dummy-key` — Create agent with dummy-key LLM integration and default Runtime selection
 - `llm-provider-dummy` — Register dummy-key OpenAI LLM integration and ModelConfig for LLM-bypass pipeline tests
 - `test-user-workspace` — Create new azents user and workspace, record in state.json
 <!-- SETUP-LIST:END -->

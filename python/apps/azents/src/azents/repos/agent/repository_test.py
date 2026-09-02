@@ -172,7 +172,6 @@ async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
             expected_runtime_profile_selection_version=7,
             capability=AgentRuntimeCapability.REMOVING,
             runtime_profile_id=None,
-            shell_enabled=False,
         )
 
     statement = session.execute.call_args.args[0]
@@ -184,7 +183,6 @@ async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
     assert params["runtime_profile_selection_version_1"] == 1
     assert params["runtime_profile_selection_version_2"] == 7
     assert params["runtime_profile_id"] is None
-    assert params["shell_enabled"] is False
 
 
 async def test_update_avatar_locks_agent_and_enqueues_prior_snapshot() -> None:

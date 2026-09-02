@@ -188,7 +188,6 @@ class SessionWorkingFolderBindingService:
         return RuntimeCapabilitySnapshot(
             state=AgentRuntimeCapability.MANAGED,
             version=runtime_target.runtime_capability_version,
-            shell_enabled=True,
         )
 
     async def _require_context_state(

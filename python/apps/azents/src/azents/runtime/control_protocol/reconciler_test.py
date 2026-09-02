@@ -316,7 +316,6 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
                 runtime_profile_selection_version=(
                     RDBAgent.runtime_profile_selection_version + 1
                 ),
-                shell_enabled=False,
             )
         )
         await session.execute(
@@ -1109,7 +1108,6 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
                 runtime_profile_selection_version=(
                     RDBAgent.runtime_profile_selection_version + 1
                 ),
-                shell_enabled=False,
             )
         )
 

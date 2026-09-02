@@ -117,7 +117,6 @@ async def test_pending_context_binds_from_current_runner_workspace() -> None:
         capability_snapshot=RuntimeCapabilitySnapshot(
             state=AgentRuntimeCapability.MANAGED,
             version=4,
-            shell_enabled=True,
         ),
         runtime_target=_target(),
     )
@@ -183,7 +182,6 @@ async def test_stale_capability_fails_before_context_lock() -> None:
             capability_snapshot=RuntimeCapabilitySnapshot(
                 state=AgentRuntimeCapability.MANAGED,
                 version=3,
-                shell_enabled=True,
             ),
             runtime_target=_target(),
         )
@@ -228,7 +226,6 @@ async def test_terminal_unbound_contexts_never_gain_authority(
             capability_snapshot=RuntimeCapabilitySnapshot(
                 state=AgentRuntimeCapability.MANAGED,
                 version=4,
-                shell_enabled=True,
             ),
             runtime_target=_target(),
         )

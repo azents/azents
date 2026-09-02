@@ -594,7 +594,6 @@ class RunExecutor:
             return RuntimeCapabilitySnapshot(
                 state=current_agent.runtime_capability,
                 version=current_agent.runtime_capability_version,
-                shell_enabled=current_agent.shell_enabled,
             )
 
         return RuntimeCapabilityResolver.from_agent(
@@ -604,7 +603,6 @@ class RunExecutor:
                 else AgentRuntimeCapability.NONE
             ),
             version=agent.runtime_capability_version if agent is not None else 1,
-            shell_enabled=agent.shell_enabled if agent is not None else False,
             current_snapshot_provider=current_snapshot_provider,
         )
 

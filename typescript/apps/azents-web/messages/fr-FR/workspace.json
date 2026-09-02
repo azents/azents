@@ -538,7 +538,6 @@
     "roleAgent": "Agent",
     "roleAgentDescription": "Exécute des sessions et possède les accès aux outils",
     "useParentToolkitsLabel": "Utiliser les toolkits du parent",
-    "shellEnabledLabel": "Activer le shell",
     "memoryEnabledLabel": "Activer la mémoire",
     "memoryEnabledDescription": "Permettre à cet agent de sauvegarder et rappeler des mémoires persistantes entre les conversations",
     "toolSearchEnabledLabel": "Activer la recherche d’outils",
@@ -562,7 +561,7 @@
       },
       "capabilities": {
         "label": "Outils",
-        "description": "Accès shell, outils intégrés et toolkits"
+        "description": "Terminal interactif, outils intégrés et toolkits"
       },
       "memory": {
         "label": "Memory",
@@ -585,8 +584,6 @@
         "inactive": "Inactive",
         "enabled": "Enabled",
         "disabled": "Disabled",
-        "shellEnabled": "Shell on",
-        "shellDisabled": "Shell off",
         "subagents": "{count} max · profondeur {depth}",
         "none": "Aucun",
         "projects": "{count} projets"
@@ -831,7 +828,6 @@
       "emptyDescription": "Créez une mémoire ou ajustez le filtre de recherche.",
       "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible."
     },
-    "shellEnabledDescription": "Autoriser cet agent à exécuter des commandes shell",
     "subagentsSectionLabel": "Sous-agents",
     "subagentMaxSubagentsLabel": "Nombre maximal de sous-agents",
     "subagentMaxSubagentsDescription": "Nombre maximal de sous-agents actifs sous une session racine. L’agent racine n’est pas compté.",
@@ -1303,8 +1299,6 @@
     },
     "runtimeFreeDefaultTitle": "Aucun environnement par défaut",
     "runtimeFreeDefaultDescription": "Sans environnement, l’agent conserve l’accès au modèle, à la mémoire, aux canaux externes et aux outils distants. Sélectionnez un profil uniquement si le shell local, les fichiers, l’espace de travail, les projets, Git, la compilation ou les tests sont nécessaires.",
-    "shellRuntimeRequiredTitle": "Environnement géré requis",
-    "shellRuntimeRequiredDescription": "Les paramètres du shell deviennent disponibles après avoir <runtimeLink>ajouté un environnement géré</runtimeLink>.",
     "scheduledTasks": {
       "title": "Tâches planifiées",
       "description": "Gérez les exécutions ponctuelles et récurrentes de cette session.",

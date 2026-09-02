@@ -213,7 +213,6 @@ def _make_after_read_context(
 _MANAGED_RUNTIME_CAPABILITY_RESOLVER = RuntimeCapabilityResolver.from_agent(
     state=AgentRuntimeCapability.MANAGED,
     version=1,
-    shell_enabled=True,
 )
 
 

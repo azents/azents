@@ -88,7 +88,6 @@ async def _seed_managed_agent(
         model_selection=selection,
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.MANAGED,
-        shell_enabled=True,
     )
     session.add(agent)
     await session.flush()
@@ -292,7 +291,6 @@ async def test_confirmation_rolls_back_agent_fence_when_operation_creation_fails
     assert agent.runtime_capability is AgentRuntimeCapability.MANAGED
     assert agent.runtime_capability_version == 1
     assert agent.runtime_profile_selection_version == 1
-    assert agent.shell_enabled is True
     assert operation is None
 
 
@@ -323,7 +321,6 @@ async def test_completed_idempotency_key_cannot_fence_readded_agent(
                 runtime_capability_version=4,
                 runtime_profile_selection_version=3,
                 runtime_profile_id=None,
-                shell_enabled=False,
             )
         )
 
@@ -385,7 +382,6 @@ async def test_coordinator_completes_no_runtime_removal_and_preserves_agent(
     assert agent.runtime_capability_version == 3
     assert agent.runtime_profile_selection_version == 2
     assert agent.runtime_profile_id is None
-    assert agent.shell_enabled is False
     assert operation is not None
     assert operation.status is AgentRuntimeRemovalStatus.COMPLETED
     assert operation.physical_deletion_required is False

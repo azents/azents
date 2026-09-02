@@ -248,7 +248,6 @@ def _create_agent(
     public_server_url: str,
     *,
     runtime_profile_provider_id: str | None,
-    shell_enabled: bool,
 ) -> _CreatedAgent:
     """Create an authenticated workspace administrator and one active Agent."""
     token, email, handle, agent_ids = _create_workspace_agents(
@@ -257,7 +256,6 @@ def _create_agent(
         public_server_url,
         agent_count=1,
         runtime_profile_provider_id=runtime_profile_provider_id,
-        shell_enabled=shell_enabled,
     )
     return _CreatedAgent(token, email, handle, agent_ids[0])
 
@@ -356,7 +354,6 @@ def _create_workspace_agents(
     *,
     agent_count: int,
     runtime_profile_provider_id: str | None,
-    shell_enabled: bool,
 ) -> _CreatedWorkspaceAgents:
     """Create one Workspace owner and a deterministic active Agent catalog."""
     suffix = unique()
@@ -410,7 +407,6 @@ def _create_workspace_agents(
                 lightweight_model_selection=model_selection,
                 type=AgentType.PUBLIC,
                 runtime_profile_id=runtime_profile_id,
-                shell_enabled=shell_enabled,
             ),
             _headers=headers,
         ).id
@@ -1409,7 +1405,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -1969,7 +1964,6 @@ def test_connection_update_and_repeated_disconnect(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -2072,7 +2066,6 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -2495,7 +2488,6 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         azents_public_server_url,
         agent_count=2,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     manager_token = _invite_workspace_user(
         public_api_client,
@@ -2701,7 +2693,6 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         azents_public_server_url,
         agent_count=1,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     with pytest.raises(ApiException) as foreign_error:
         external_api.external_channel_v1_get_multi_slack_connection(
@@ -2779,7 +2770,6 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         azents_public_server_url,
         agent_count=2,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -3110,7 +3100,6 @@ def test_provider_native_channel_work_progress_journey(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -3790,7 +3779,6 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -4019,7 +4007,6 @@ def run_connection_management_web_surface_uses_redacted_operational_state(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -4187,7 +4174,6 @@ def test_discord_single_activation_and_interaction_journey(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -4431,7 +4417,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -5025,7 +5010,6 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -5902,7 +5886,6 @@ def test_discord_configured_message_durably_provisions_conversation(
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -6212,7 +6195,6 @@ def test_discord_message_command_selector_and_component_journey(
         azents_public_server_url,
         agent_count=2,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -6562,7 +6544,6 @@ def test_discord_multi_management_and_lifecycle_journey(
         azents_public_server_url,
         agent_count=2,
         runtime_profile_provider_id=None,
-        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}
     external_api = ExternalChannelV1Api(public_api_client)

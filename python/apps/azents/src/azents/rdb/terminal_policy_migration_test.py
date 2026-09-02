@@ -12,6 +12,7 @@ from azents.consts import PROJECT_ROOT
 
 _PARENT_REVISION = "a66397c7eabc"
 _TERMINAL_POLICY_REVISION = "82df4f970f57"
+_SHELL_REMOVAL_REVISION = "7de5749cadd5"
 
 
 @contextmanager
@@ -78,6 +79,40 @@ def test_terminal_policy_migration_defaults_existing_rows_and_round_trips(
                 )
                 is True
             )
+
+
+def test_shell_policy_removal_drops_and_restores_default_enabled_column(
+    check_docker_availability: None,
+) -> None:
+    """The obsolete Agent Shell column drops and cleanly restores on downgrade."""
+    del check_docker_availability
+    with _migration_database() as (config, engine):
+        alembic_command.upgrade(config, _PARENT_REVISION)
+        _insert_parent_rows(engine)
+
+        alembic_command.upgrade(config, _SHELL_REMOVAL_REVISION)
+        assert "shell_enabled" not in {
+            column["name"] for column in sa.inspect(engine).get_columns("agents")
+        }
+
+        alembic_command.downgrade(config, _TERMINAL_POLICY_REVISION)
+        shell_column = next(
+            column
+            for column in sa.inspect(engine).get_columns("agents")
+            if column["name"] == "shell_enabled"
+        )
+        assert shell_column["nullable"] is False
+        assert shell_column["default"] in {"true", "true()"}
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(sa.text("SELECT shell_enabled FROM agents LIMIT 1"))
+                is True
+            )
+
+        alembic_command.upgrade(config, _SHELL_REMOVAL_REVISION)
+        assert "shell_enabled" not in {
+            column["name"] for column in sa.inspect(engine).get_columns("agents")
+        }
 
 
 def _insert_parent_rows(engine: sa.Engine) -> None:

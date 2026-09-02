@@ -50,7 +50,6 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 type = 'public',
                 runtime_profile_id = '',
                 expected_runtime_profile_selection_version = 1.0,
-                shell_enabled = True,
                 terminal_enabled = True,
                 memory_enabled = True,
                 tool_search_enabled = True,

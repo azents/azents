@@ -27,7 +27,6 @@ class RuntimeCapabilitySnapshot:
 
     state: AgentRuntimeCapability
     version: int
-    shell_enabled: bool
 
     def __post_init__(self) -> None:
         """Validate the durable snapshot values."""
@@ -43,20 +42,10 @@ class RuntimeCapabilityDefinition:
     """Code-owned policy for one product Runtime capability."""
 
     capability: RuntimeCapability
-    requires_shell_enabled: bool
 
 
 RUNTIME_CAPABILITY_CATALOG: dict[RuntimeCapability, RuntimeCapabilityDefinition] = {
-    capability: RuntimeCapabilityDefinition(
-        capability=capability,
-        requires_shell_enabled=capability
-        in {
-            RuntimeCapability.PROCESS_EXECUTION,
-            RuntimeCapability.RUNTIME_FILESYSTEM,
-            RuntimeCapability.FILESYSTEM_SKILLS,
-            RuntimeCapability.RUNTIME_CREDENTIALS,
-        },
-    )
+    capability: RuntimeCapabilityDefinition(capability=capability)
     for capability in RuntimeCapability
 }
 """All Runtime capability definitions declared by the server."""
@@ -111,7 +100,6 @@ class RuntimeCapabilityResolver:
         *,
         state: AgentRuntimeCapability,
         version: int,
-        shell_enabled: bool,
         current_snapshot_provider: RuntimeCapabilitySnapshotProvider | None = None,
     ) -> "RuntimeCapabilityResolver":
         """Create a resolver from the Agent row's capability fields."""
@@ -119,7 +107,6 @@ class RuntimeCapabilityResolver:
             RuntimeCapabilitySnapshot(
                 state=state,
                 version=version,
-                shell_enabled=shell_enabled,
             ),
             current_snapshot_provider=current_snapshot_provider,
         )
@@ -128,11 +115,7 @@ class RuntimeCapabilityResolver:
         """Return capabilities granted by the immutable Agent snapshot."""
         if self.snapshot.state is not AgentRuntimeCapability.MANAGED:
             return frozenset()
-        return frozenset(
-            capability
-            for capability, definition in RUNTIME_CAPABILITY_CATALOG.items()
-            if not definition.requires_shell_enabled or self.snapshot.shell_enabled
-        )
+        return frozenset(RUNTIME_CAPABILITY_CATALOG)
 
     def allows(self, capability: RuntimeCapability) -> bool:
         """Return whether the captured snapshot grants one capability."""
@@ -162,12 +145,7 @@ class RuntimeCapabilityResolver:
                 expected_version=self.snapshot.version,
                 actual_version=current.version,
             )
-        definition = RUNTIME_CAPABILITY_CATALOG[capability]
-        allowed = (
-            captured_allowed
-            and current.state is AgentRuntimeCapability.MANAGED
-            and (not definition.requires_shell_enabled or current.shell_enabled)
-        )
+        allowed = captured_allowed and current.state is AgentRuntimeCapability.MANAGED
         return RuntimeCapabilityDecision(
             allowed=allowed,
             capability=capability,

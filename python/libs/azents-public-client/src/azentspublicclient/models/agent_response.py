@@ -57,7 +57,6 @@ class AgentResponse(BaseModel):
     runtime_profile_configuration_status: StrictStr
     runtime_add_available: StrictBool
     runtime_remove_available: StrictBool
-    shell_enabled: StrictBool
     terminal_enabled: StrictBool
     infrastructure_terminal_enabled: Optional[StrictBool]
     workspace_terminal_enabled: Optional[StrictBool]
@@ -72,7 +71,7 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "shell_enabled", "terminal_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "terminal_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     @field_validator('runtime_profile_configuration_status')
     def runtime_profile_configuration_status_validate_enum(cls, value):
@@ -264,7 +263,6 @@ class AgentResponse(BaseModel):
             "runtime_profile_configuration_status": obj.get("runtime_profile_configuration_status"),
             "runtime_add_available": obj.get("runtime_add_available"),
             "runtime_remove_available": obj.get("runtime_remove_available"),
-            "shell_enabled": obj.get("shell_enabled"),
             "terminal_enabled": obj.get("terminal_enabled"),
             "infrastructure_terminal_enabled": obj.get("infrastructure_terminal_enabled"),
             "workspace_terminal_enabled": obj.get("workspace_terminal_enabled"),

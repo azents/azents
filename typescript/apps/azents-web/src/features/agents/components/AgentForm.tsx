@@ -125,7 +125,6 @@ export function AgentForm({
       type: "public",
       enabled: true,
       reasoning_effort: null,
-      shell_enabled: true,
       terminal_enabled: true,
       memory_enabled: true,
       tool_search_enabled: true,
@@ -181,7 +180,6 @@ export function AgentForm({
         type: agent.type,
         enabled: agent.enabled,
         reasoning_effort: defaultReasoningEffort,
-        shell_enabled: agent.shell_enabled,
         terminal_enabled: agent.terminal_enabled,
         memory_enabled: agent.memory_enabled,
         tool_search_enabled: agent.tool_search_enabled,
@@ -550,46 +548,10 @@ export function AgentForm({
             </Radio.Group>
           )}
 
-          {showCapabilities &&
-            (formState.type === "EDIT" &&
-            formState.agent.runtime_capability !== "managed" ? (
-              <Alert color="blue" title={t("shellRuntimeRequiredTitle")}>
-                {t.rich("shellRuntimeRequiredDescription", {
-                  runtimeLink: (chunks) => (
-                    <Anchor
-                      component={Link}
-                      href={`/w/${handle}/agents/${formState.agent.id}/settings/runtime`}
-                    >
-                      {chunks}
-                    </Anchor>
-                  ),
-                })}
-              </Alert>
-            ) : null)}
-
-          {showCapabilities && (
-            <Switch
-              label={t("shellEnabledLabel")}
-              description={t("shellEnabledDescription")}
-              disabled={
-                formState.type === "EDIT" &&
-                formState.agent.runtime_capability !== "managed"
-              }
-              checked={form.values.shell_enabled ?? false}
-              onChange={(e) =>
-                form.setFieldValue("shell_enabled", e.currentTarget.checked)
-              }
-            />
-          )}
-
           {showCapabilities && (
             <Switch
               label={t("terminalEnabledLabel")}
               description={t("terminalEnabledDescription")}
-              disabled={
-                formState.type === "EDIT" &&
-                formState.agent.runtime_capability !== "managed"
-              }
               checked={form.values.terminal_enabled ?? true}
               onChange={(e) =>
                 form.setFieldValue("terminal_enabled", e.currentTarget.checked)

@@ -19,7 +19,6 @@ Name | Type | Description | Notes
 **type** | [**AgentType**](AgentType.md) | Visibility scope | [optional] 
 **runtime_profile_id** | **str** |  | [optional] 
 **expected_runtime_profile_selection_version** | **int** | Required optimistic version when replacing the selection | [optional] 
-**shell_enabled** | **bool** | Shell enabled state | [optional] 
 **terminal_enabled** | **bool** | Interactive Terminal enabled state | [optional] 
 **memory_enabled** | **bool** | Memory enabled state | [optional] 
 **tool_search_enabled** | **bool** | Tool Search enabled state | [optional] 

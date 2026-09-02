@@ -1,6 +1,6 @@
 ---
 id: agent-dummy-key
-summary: Create agent with dummy-key LLM integration and shell tool enabled
+summary: Create agent with dummy-key LLM integration and default Runtime selection
 handler: testenv/setup_handlers/agent_dummy_key.py
 scope: run
 requires:

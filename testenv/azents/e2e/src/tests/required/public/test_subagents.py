@@ -253,7 +253,6 @@ def _create_agent(
         lightweight_model_selection=workspace.model_selection,
         type=AgentType.PUBLIC,
         runtime_profile_id=workspace.runtime_profile_id,
-        shell_enabled=True,
     )
     if max_subagents is not None:
         agent_create_request.subagent_settings = SubagentSettings(

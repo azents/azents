@@ -152,7 +152,6 @@ class AgentRuntimeTransitionService:
                     ),
                     capability=AgentRuntimeCapability.MANAGED,
                     runtime_profile_id=prepared.profile.id,
-                    shell_enabled=False,
                 )
             )
             if updated_agent is None:
