@@ -87,6 +87,14 @@ class _FileIdentity:
     ctime_ns: int
 
 
+@dataclass(frozen=True)
+class _OpenedFile:
+    """Opened directory-relative file identity."""
+
+    descriptor: int
+    name: str
+
+
 @dataclass
 class _ActiveTransfer:
     intent: RunnerTransferIntent
@@ -303,14 +311,18 @@ class RunnerTransferManager:
             intent.runtime_path,
             write=True,
         )
-        parent_fd, destination_name = _open_parent(
+        parent = _open_parent(
             str(destination_path),
             create=True,
         )
+        parent_fd = parent.descriptor
+        destination_name = parent.name
         stage_fd: int | None = None
         stage_name: str | None = None
         try:
-            stage_fd, stage_name = _open_temporary_file(parent_fd)
+            stage = _open_temporary_file(parent_fd)
+            stage_fd = stage.descriptor
+            stage_name = stage.name
             offset = 0
             digest = hashlib.sha256()
             complete: RunnerDownloadComplete | None = None
@@ -414,10 +426,12 @@ class RunnerTransferManager:
             intent.runtime_path,
             write=False,
         )
-        parent_fd, source_name = _open_parent(
+        parent = _open_parent(
             str(source_path),
             create=False,
         )
+        parent_fd = parent.descriptor
+        source_name = parent.name
         source_fd: int | None = None
         snapshot_fd: int | None = None
         snapshot_name: str | None = None
@@ -433,7 +447,9 @@ class RunnerTransferManager:
                     RunnerTransferFailure.INTEGRITY_FAILED,
                     reason="upload_source_size_mismatch",
                 )
-            snapshot_fd, snapshot_name = _open_temporary_file(parent_fd)
+            snapshot = _open_temporary_file(parent_fd)
+            snapshot_fd = snapshot.descriptor
+            snapshot_name = snapshot.name
             digest = hashlib.sha256()
             copied = 0
             while True:
@@ -746,7 +762,7 @@ def _remaining_timeout(intent: RunnerTransferIntent) -> float:
     return remaining
 
 
-def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
+def _open_parent(path: str, *, create: bool) -> _OpenedFile:
     candidate = PurePath(path)
     if (
         not candidate.is_absolute()
@@ -786,7 +802,7 @@ def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
                 )
             os.close(parent_fd)
             parent_fd = next_fd
-        return parent_fd, candidate.name
+        return _OpenedFile(descriptor=parent_fd, name=candidate.name)
     except BaseException:
         os.close(parent_fd)
         raise
@@ -821,7 +837,7 @@ def _write_all(fd: int, data: bytes) -> None:
         view = view[written:]
 
 
-def _open_temporary_file(parent_fd: int) -> tuple[int, str]:
+def _open_temporary_file(parent_fd: int) -> _OpenedFile:
     for _ in range(16):
         name = f".azents-transfer-{secrets.token_hex(16)}"
         try:
@@ -833,7 +849,7 @@ def _open_temporary_file(parent_fd: int) -> tuple[int, str]:
             )
         except FileExistsError:
             continue
-        return descriptor, name
+        return _OpenedFile(descriptor=descriptor, name=name)
     raise OSError("could not allocate a unique Runtime transfer staging file")
 
 

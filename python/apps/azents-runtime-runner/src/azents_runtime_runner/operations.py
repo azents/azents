@@ -202,6 +202,14 @@ class _MissingProcessRecord:
     recorded_at: float
 
 
+@dataclass(frozen=True)
+class _ProcessCommunication:
+    """Complete unmanaged process output."""
+
+    stdout: bytes
+    stderr: bytes
+
+
 class RunnerEventSink(Protocol):
     """Subset of the Control client used by operation handlers."""
 
@@ -537,7 +545,7 @@ class RunnerOperations:
             await self._final_error(operation, "COMMAND_START_FAILED", str(exc))
             return
         try:
-            stdout, stderr = await self._communicate_process(
+            communication = await self._communicate_process(
                 process,
                 timeout_seconds=timeout_seconds,
             )
@@ -564,17 +572,17 @@ class RunnerOperations:
                 termination=termination,
             )
             raise
-        if stdout:
+        if communication.stdout:
             await self._event(
                 operation,
                 RuntimeRunnerEventType.STDOUT,
-                {"text": stdout.decode(errors="replace")},
+                {"text": communication.stdout.decode(errors="replace")},
             )
-        if stderr:
+        if communication.stderr:
             await self._event(
                 operation,
                 RuntimeRunnerEventType.STDERR,
-                {"text": stderr.decode(errors="replace")},
+                {"text": communication.stderr.decode(errors="replace")},
             )
         await self._final_success(operation, {"exit_code": process.returncode or 0})
 
@@ -2195,7 +2203,7 @@ class RunnerOperations:
         process: ExecutionProcess,
         *,
         timeout_seconds: int,
-    ) -> tuple[bytes, bytes]:
+    ) -> _ProcessCommunication:
         del self
         stdout_task = asyncio.create_task(process.stdout.read())
         stderr_task = asyncio.create_task(process.stderr.read())
@@ -2212,7 +2220,10 @@ class RunnerOperations:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
-        return stdout_task.result(), stderr_task.result()
+        return _ProcessCommunication(
+            stdout=stdout_task.result(),
+            stderr=stderr_task.result(),
+        )
 
     def _log_backend_process_termination(
         self,

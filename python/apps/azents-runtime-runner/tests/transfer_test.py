@@ -33,7 +33,7 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
-from azents_runtime_runner.transfer import RunnerTransferManager
+from azents_runtime_runner.transfer import RunnerTransferManager, _OpenedFile
 from azents_runtime_runner.workspace import Workspace
 
 _UNRESTRICTED_WORKSPACE = Workspace("/tmp")
@@ -744,7 +744,7 @@ async def test_download_fails_closed_when_staging_file_cannot_be_created(
         )
     )
 
-    def fail_temporary_file_creation(parent_fd: int) -> tuple[int, str]:
+    def fail_temporary_file_creation(parent_fd: int) -> _OpenedFile:
         del parent_fd
         raise OSError(errno.EOPNOTSUPP, "Operation not supported")
 
