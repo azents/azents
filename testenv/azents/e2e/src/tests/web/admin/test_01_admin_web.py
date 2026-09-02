@@ -12,6 +12,7 @@ from azentsadminclient.models.file_lifecycle_settings_update_request import (
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.errorhandler import StaleElementReferenceException
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
@@ -30,7 +31,11 @@ _SIGNUP_PASSWORD = "TestPass123!"
 
 
 def _wait(driver: WebDriver) -> WebDriverWait:
-    return WebDriverWait(driver, 20)
+    return WebDriverWait(
+        driver,
+        20,
+        ignored_exceptions=(StaleElementReferenceException,),
+    )
 
 
 def _login_main_web(
@@ -58,9 +63,12 @@ def _login_admin_web(
     base_url: str,
     email: str,
     password: str,
+    entry_path: str = "/login",
+    expected_path: str = "/workspaces",
 ) -> None:
     driver.delete_all_cookies()
-    driver.get(f"{base_url}/login")
+    driver.get(f"{base_url}{entry_path}")
+    _wait(driver).until(ec.url_contains("/login"))
     email_input = _wait(driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email']"))
     )
@@ -73,7 +81,7 @@ def _login_admin_web(
         )
     )
     login_button.click()
-    _wait(driver).until(ec.url_contains("/workspaces"))
+    _wait(driver).until(ec.url_contains(expected_path))
     _wait(driver).until(ec.visibility_of_element_located((By.LINK_TEXT, "Users")))
 
 
@@ -238,9 +246,11 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
         base_url=azents_admin_web_gateway_url,
         email=system_bootstrap_evidence.email,
         password=_BOOTSTRAP_PASSWORD,
+        entry_path="/users",
+        expected_path="/users",
     )
-    if "/console/workspaces" not in browser_driver.current_url:
-        raise AssertionError("Admin Web path-prefix routing was not preserved")
+    if "/console/users" not in browser_driver.current_url:
+        raise AssertionError("Admin Web path-prefix deep link was not preserved")
     _assert_auth_cookies(
         browser_driver,
         names=_ADMIN_COOKIE_NAMES,

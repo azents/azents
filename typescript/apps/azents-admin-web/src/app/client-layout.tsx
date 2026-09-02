@@ -332,9 +332,7 @@ function AppContent({
       }}
     >
       {!isLoginPage ? (
-        <Authenticated key="main" redirectOnFail={loginPath}>
-          {content}
-        </Authenticated>
+        <Authenticated key="main">{content}</Authenticated>
       ) : (
         content
       )}
