@@ -1086,8 +1086,9 @@ class AgentRunRepository:
                 else None
             )
         if values:
-            for key, value in values.items():
-                setattr(rdb, key, value)
+            await session.execute(
+                sa.update(RDBAgentRun).where(RDBAgentRun.id == run_id).values(**values)
+            )
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)

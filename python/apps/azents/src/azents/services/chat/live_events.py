@@ -3,10 +3,11 @@
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Any, Literal, Protocol, assert_never, cast
+from typing import Annotated, Literal, Protocol, assert_never
 
 from fastapi import Depends
 from pydantic import TypeAdapter
+from redis.asyncio import Redis
 
 from azents.core.config import Config
 from azents.core.deps import get_appctx
@@ -63,6 +64,18 @@ _LIVE_EVENT_TTL_SECONDS = 300
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(PersistedChatAction)
 _agent_message_adapter = TypeAdapter(AgentMessagePayload)
+type AgentMailboxMessageKind = Literal[
+    "spawn_agent",
+    "send_message",
+    "followup_task",
+    "agent_result",
+]
+_agent_mailbox_message_kind_adapter = TypeAdapter(AgentMailboxMessageKind)
+
+
+def _agent_mailbox_message_kind(value: object) -> AgentMailboxMessageKind:
+    """Validate one Agent mailbox message kind."""
+    return _agent_mailbox_message_kind_adapter.validate_python(value)
 
 
 def _live_event_key(session_id: str) -> str:
@@ -367,24 +380,10 @@ def mailbox_item_to_pending_projection(
                 content=item.content,
             )
         elif mailbox_item.kind is MailboxItemKind.AGENT_MESSAGE:
-            message_kind = item.metadata.get("message_kind")
-            if message_kind not in {
-                "spawn_agent",
-                "send_message",
-                "followup_task",
-                "agent_result",
-            }:
-                raise ValueError("Agent mailbox item has an invalid message kind")
             presentation = PendingMailboxAgentMessagePresentation(
                 type="agent_message",
-                message_kind=cast(
-                    Literal[
-                        "spawn_agent",
-                        "send_message",
-                        "followup_task",
-                        "agent_result",
-                    ],
-                    message_kind,
+                message_kind=_agent_mailbox_message_kind(
+                    item.metadata.get("message_kind")
                 ),
                 content=item.content,
             )
@@ -844,35 +843,35 @@ class RedisLiveEventStore(BaseLiveEventStore):
 
     def __init__(
         self,
-        redis: object,
+        redis: Redis,
         *,
         ttl_seconds: int = _LIVE_EVENT_TTL_SECONDS,
     ) -> None:
-        self._redis = cast(Any, redis)
-        self._ttl_seconds = ttl_seconds
+        self.redis = redis
+        self.ttl_seconds = ttl_seconds
 
     async def list_by_session_id(self, session_id: str) -> list[Event]:
         """Fetch event live event projection list of session."""
-        values = await self._redis.hvals(_live_event_key(session_id))
+        values = await self.redis.hvals(_live_event_key(session_id))
         events = [_live_event_adapter.validate_json(value) for value in values]
         return sorted(events, key=lambda event: (event.created_at, event.id))
 
     async def upsert(self, event: Event) -> None:
         """Upsert Event live event projection."""
         key = _live_event_key(event.session_id)
-        await self._redis.hset(key, event.id, _live_event_adapter.dump_json(event))
-        await self._redis.expire(key, self._ttl_seconds)
+        await self.redis.hset(key, event.id, _live_event_adapter.dump_json(event))
+        await self.redis.expire(key, self.ttl_seconds)
 
     async def remove(self, session_id: str, event_id: str) -> None:
         """Remove one Event live event projection."""
-        await self._redis.hdel(_live_event_key(session_id), event_id)
+        await self.redis.hdel(_live_event_key(session_id), event_id)
 
     async def clear_session(self, session_id: str) -> None:
         """Remove all event live event projections of session."""
-        await self._redis.delete(_live_event_key(session_id))
+        await self.redis.delete(_live_event_key(session_id))
 
     async def _get(self, session_id: str, event_id: str) -> Event | None:
-        raw = await self._redis.hget(_live_event_key(session_id), event_id)
+        raw = await self.redis.hget(_live_event_key(session_id), event_id)
         if raw is None:
             return None
         return _live_event_adapter.validate_json(raw)

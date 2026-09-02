@@ -1,7 +1,7 @@
 """REST chat write service."""
 
 import dataclasses
-from typing import Annotated, assert_never
+from typing import Annotated, NamedTuple, assert_never
 
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
@@ -118,6 +118,13 @@ class AcceptedStopRequest:
     stop_request_id: str
     runtime_was_running: bool
     stopped_session_ids: list[str]
+
+
+class _IdempotentRecordResult(NamedTuple):
+    """Idempotent write record and creation outcome."""
+
+    record: ChatWriteRequest
+    created: bool
 
 
 @dataclasses.dataclass
@@ -775,7 +782,7 @@ class ChatWriteService:
         accepted_id: str,
         history_reload_required: bool,
         payload: dict[str, object],
-    ) -> tuple[ChatWriteRequest, bool]:
+    ) -> _IdempotentRecordResult:
         """Create REST write idempotency record and verify payload match."""
         record, created = await self.chat_write_request_repository.create_idempotent(
             session,
@@ -797,4 +804,4 @@ class ChatWriteService:
             raise ValueError("Client request ID already used for another session")
         if record.payload != payload:
             raise ValueError("Client request ID already used for another payload")
-        return record, created
+        return _IdempotentRecordResult(record=record, created=created)
