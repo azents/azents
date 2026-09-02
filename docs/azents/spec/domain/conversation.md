@@ -55,6 +55,8 @@ code_paths:
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/runtime/terminal_coordination/**
+  - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
@@ -113,8 +115,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-02
-spec_version: 159
+last_verified_at: 2026-09-03
+spec_version: 160
 ---
 
 # Conversation & Events
@@ -192,9 +194,19 @@ Only `pending` may become `bound`, using current-generation Runner evidence. `no
 One active interactive Terminal may exist per concrete `AgentSession`. Terminal identity is
 independent from Session identity and is indexed by Session, Agent, Runtime, desired
 generation, Runner generation, and attachment generation. The browser first reads a
-content-free projection, receives a one-time resource-bound ticket, and then uses the
-dedicated `azents.terminal.v1` WebSocket. Terminal frames never enter Chat history,
-live Chat actions, Mailbox, operation events, Goal, Todo, or context compaction.
+content-free projection whose state is `absent`, `stopped`, `starting`, `unavailable`,
+`ready`, `active`, or `ended`. The projection separately exposes whether Runtime start
+is available, whether open-or-attach is available, a bounded denial reason/scope, and
+an optional content-free Terminal summary containing lifecycle, attachment state,
+timestamps, final reason, aggregate byte counts, and replay truncation. Projection and
+ticket issuance never start a stopped Runtime.
+
+An available browser receives a 30-second, one-time, exact-resource ticket and then
+uses the dedicated `azents.terminal.v1` WebSocket. The socket requires the configured
+Main Web origin and Terminal subprotocol, consumes the ticket once, and revalidates
+current authority before attachment and while connected. Terminal frames never enter
+Chat history, live Chat actions, Mailbox, operation events, Goal, Todo, or context
+compaction.
 
 The active PTY and bounded input/output replay state are volatile. Redis and in-memory
 coordination implementations share one contract; loss fails the Terminal path closed
@@ -203,6 +215,13 @@ disconnect releases only the attachment and starts the bounded reattach grace. A
 reattachment keeps the Terminal ID and PTY when generation and authority remain current.
 Explicit terminate ends the PTY; collapsing or moving between docked and focused
 presentation does not.
+
+Capacity is bounded to one active Terminal per Session, eight per user, and sixteen
+per Runtime. Binary data chunks are at most 16 KiB, pending input is at most 64 KiB,
+and live unacknowledged output is at most 256 KiB. Retained replay is bounded by both
+1 MiB and 64 chunks and reports truncation instead of inventing missing output. A
+Terminal has a 30-minute idle timeout, an eight-hour absolute lifetime, and separate
+two-minute browser-attachment and Runner-stream reconnection grace periods.
 
 Terminal availability is effective server authority. Runtime-free Sessions are absent;
 stopped Runtime is explicit and never auto-started; policy, access, Runner capability,
@@ -1266,6 +1285,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-03** — v160. Added the exact interactive Terminal projection,
+  one-time ticket admission, quotas, frame/buffer/replay bounds, and idle,
+  maximum-lifetime, and reconnection limits.
 - **2026-09-02** — v159. Added Session-owned interactive Terminal identity,
   dedicated ticket/WebSocket transport, volatile reattachment/replay authority,
   explicit termination, and Runtime-priority invalidation.

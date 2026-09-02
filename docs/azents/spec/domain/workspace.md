@@ -45,6 +45,8 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
   - python/apps/azents/src/azents/services/runtime_recreation/**
+  - python/apps/azents/src/azents/services/terminal_policy/**
+  - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
@@ -113,8 +115,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-01
-spec_version: 77
+last_verified_at: 2026-09-03
+spec_version: 78
 ---
 
 # Workspace & Membership
@@ -324,6 +326,14 @@ Workspace policy may narrow but cannot override a false infrastructure value. Ag
 policy is evaluated separately at Terminal admission. Profile Terminal-only changes
 publish source invalidation for active browser Terminals but do not change Runtime
 configuration digest, desired generation, or recreation status.
+
+Terminal admission also requires the Agent's exact current Workspace Profile and
+infrastructure Profile chain to remain active and mutually consistent. After that
+policy resolves, the selected Session must have a `bound` working folder validated
+against the current Runtime capability version, desired generation, Runner generation,
+applied configuration, and Runner-reported Agent Workspace path. Missing or stale
+Profile or working-folder authority produces a fail-closed unavailable projection; it
+never selects another Profile, falls back to a fixed directory, or starts the Runtime.
 
 The current Workspace policy surface is restrictive-only network authority for Kubernetes
 Profiles. Policy v1 remains direct-only CIDR narrowing. Policy v2 may preserve or reduce the
@@ -816,6 +826,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-03 (spec_version=78)** — Added current Profile-chain and
+  Session working-folder authority to interactive Terminal admission and mapped the
+  Terminal policy and folder-binding services.
 - **2026-09-01 (spec_version=77)** — Added default-true infrastructure and Workspace
   Runtime Profile Terminal policy, restrictive hierarchy, live invalidation, and
   no-recreation semantics.
