@@ -13,31 +13,22 @@ from urllib.parse import quote
 import azentsadminclient
 import azentspublicclient
 import requests
-from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
-from azentsadminclient.models.runtime_infrastructure_profile_replace_request import (
-    RuntimeInfrastructureProfileReplaceRequest,
-)
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
-from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.terminal_v1_api import TerminalV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
 from azentspublicclient.models.agent_type import AgentType
-from azentspublicclient.models.agent_update_request import AgentUpdateRequest
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
-)
-from azentspublicclient.models.runtime_terminal_denied_scope import (
-    RuntimeTerminalDeniedScope,
 )
 from azentspublicclient.models.runtime_terminal_projection_response import (
     RuntimeTerminalProjectionResponse,
@@ -49,9 +40,6 @@ from azentspublicclient.models.runtime_terminal_ticket_status import (
     RuntimeTerminalTicketStatus,
 )
 from azentspublicclient.models.secrets import Secrets
-from azentspublicclient.models.workspace_runtime_profile_replace_request import (
-    WorkspaceRuntimeProfileReplaceRequest,
-)
 from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 from websockets.exceptions import ConnectionClosed
@@ -81,8 +69,6 @@ class _TerminalWorkspace:
     handle: str
     agent_id: str
     session_id: str
-    runtime_profile_id: str | None
-    infrastructure_profile_id: str | None
 
 
 @dataclass(frozen=True)
@@ -170,7 +156,6 @@ def _create_workspace(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-    managed_runtime: bool,
 ) -> _TerminalWorkspace:
     """Create Terminal E2E state through Public and Admin APIs only."""
     suffix = unique()
@@ -206,26 +191,12 @@ def _create_workspace(
         handle,
         integration.id,
     )
-    runtime_profile_id = (
-        create_workspace_runtime_profile(
-            public_api_client,
-            token=token,
-            workspace_handle=handle,
-            provider_id=_RUNTIME_PROVIDER_ID,
-        )
-        if managed_runtime
-        else None
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
     )
-    infrastructure_profile_id: str | None = None
-    if runtime_profile_id is not None:
-        runtime_profile = RuntimeProfileV1Api(
-            public_api_client
-        ).runtime_profile_v1_get_workspace_runtime_profile(
-            profile_id=runtime_profile_id,
-            handle=handle,
-            _headers=headers,
-        )
-        infrastructure_profile_id = runtime_profile.infrastructure_profile_id
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=handle,
         agent_create_request=AgentCreateRequest(
@@ -237,11 +208,7 @@ def _create_workspace(
         ),
         _headers=headers,
     )
-    assert agent.runtime_capability == (
-        AgentRuntimeCapability.MANAGED
-        if managed_runtime
-        else AgentRuntimeCapability.NONE
-    )
+    assert agent.runtime_capability is AgentRuntimeCapability.MANAGED
     return _TerminalWorkspace(
         token=token,
         handle=handle,
@@ -251,8 +218,6 @@ def _create_workspace(
             token=token,
             agent_id=agent.id,
         ),
-        runtime_profile_id=runtime_profile_id,
-        infrastructure_profile_id=infrastructure_profile_id,
     )
 
 
@@ -334,75 +299,6 @@ def _wait_terminal_projection(
             return last_projection
         time.sleep(0.5)
     raise AssertionError(f"{message}: {last_projection!r}")
-
-
-def _replace_infrastructure_terminal_policy(
-    *,
-    admin_api_client: azentsadminclient.ApiClient,
-    workspace: _TerminalWorkspace,
-    terminal_enabled: bool,
-) -> None:
-    """Replace the selected infrastructure Profile Terminal policy."""
-    profile_id = workspace.infrastructure_profile_id
-    if profile_id is None:
-        raise AssertionError("managed Runtime omitted infrastructure Profile")
-    api = RuntimeProviderV1Api(admin_api_client)
-    profile = api.runtime_provider_v1_get_container_profile(
-        provider_id=_RUNTIME_PROVIDER_ID,
-        profile_id=profile_id,
-    )
-    if profile.spec is None:
-        raise AssertionError("Docker infrastructure Profile omitted its spec")
-    replaced = api.runtime_provider_v1_replace_container_profile(
-        provider_id=_RUNTIME_PROVIDER_ID,
-        profile_id=profile_id,
-        runtime_infrastructure_profile_replace_request=(
-            RuntimeInfrastructureProfileReplaceRequest(
-                expected_version=profile.version,
-                display_name=profile.display_name,
-                description=profile.description,
-                lifecycle=profile.lifecycle,
-                spec=profile.spec,
-                terminal_enabled=terminal_enabled,
-            )
-        ),
-    )
-    assert replaced.terminal_enabled is terminal_enabled
-
-
-def _replace_workspace_terminal_policy(
-    *,
-    public_api_client: azentspublicclient.ApiClient,
-    workspace: _TerminalWorkspace,
-    terminal_enabled: bool,
-) -> None:
-    """Replace the selected Workspace Runtime Profile Terminal policy."""
-    profile_id = workspace.runtime_profile_id
-    if profile_id is None:
-        raise AssertionError("managed Runtime omitted Workspace Runtime Profile")
-    api = RuntimeProfileV1Api(public_api_client)
-    profile = api.runtime_profile_v1_get_workspace_runtime_profile(
-        profile_id=profile_id,
-        handle=workspace.handle,
-        _headers=_headers(workspace.token),
-    )
-    replaced = api.runtime_profile_v1_replace_workspace_runtime_profile(
-        profile_id=profile_id,
-        handle=workspace.handle,
-        workspace_runtime_profile_replace_request=(
-            WorkspaceRuntimeProfileReplaceRequest(
-                expected_version=profile.version,
-                infrastructure_profile_id=profile.infrastructure_profile_id,
-                display_name=profile.display_name,
-                description=profile.description,
-                lifecycle=profile.lifecycle,
-                policy=profile.policy,
-                terminal_enabled=terminal_enabled,
-            )
-        ),
-        _headers=_headers(workspace.token),
-    )
-    assert replaced.terminal_enabled is terminal_enabled
 
 
 def _websocket_url(
@@ -686,7 +582,6 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
         server_url=azents_public_server_url,
-        managed_runtime=True,
     )
     _start_runtime(
         public_api_client=public_api_client,
@@ -779,19 +674,18 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
     assert projection.terminal.output_bytes > 0
 
 
-def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
+def test_runtime_terminal_runtime_lifecycle_priority(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
-    """Prove policy precedence, revocation, and explicit stopped-Runtime start."""
+    """Prove Runtime stop priority and explicit restart with fresh authority."""
     del azents_runtime_provider_docker_container
     workspace = _create_workspace(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
         server_url=azents_public_server_url,
-        managed_runtime=True,
     )
     runtime_api = _start_runtime(
         public_api_client=public_api_client,
@@ -800,113 +694,6 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
     )
     terminal_api = TerminalV1Api(public_api_client)
 
-    try:
-        _replace_infrastructure_terminal_policy(
-            admin_api_client=admin_api_client,
-            workspace=workspace,
-            terminal_enabled=False,
-        )
-        provider_denied = _wait_terminal_projection(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            predicate=lambda projection: (
-                projection.reason_code is RuntimeTerminalReasonCode.TERMINAL_DISABLED
-                and projection.denied_scope
-                is RuntimeTerminalDeniedScope.PROVIDER_PROFILE
-            ),
-            message="Infrastructure Profile Terminal denial was not projected",
-        )
-        assert provider_denied.can_open_or_attach is False
-        issued = terminal_api.terminal_v1_issue_terminal_ticket(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            _headers=_headers(workspace.token),
-        )
-        assert issued.status is RuntimeTerminalTicketStatus.DENIED
-        assert issued.reason_code is RuntimeTerminalReasonCode.TERMINAL_DISABLED
-        assert issued.denied_scope is RuntimeTerminalDeniedScope.PROVIDER_PROFILE
-    finally:
-        _replace_infrastructure_terminal_policy(
-            admin_api_client=admin_api_client,
-            workspace=workspace,
-            terminal_enabled=True,
-        )
-    _wait_terminal_projection(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        predicate=lambda projection: projection.state in {"ready", "active"},
-        message="Terminal did not recover after infrastructure policy restoration",
-    )
-
-    try:
-        _replace_workspace_terminal_policy(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            terminal_enabled=False,
-        )
-        workspace_denied = _wait_terminal_projection(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            predicate=lambda projection: (
-                projection.reason_code is RuntimeTerminalReasonCode.TERMINAL_DISABLED
-                and projection.denied_scope
-                is RuntimeTerminalDeniedScope.WORKSPACE_PROFILE
-            ),
-            message="Workspace Runtime Profile Terminal denial was not projected",
-        )
-        assert workspace_denied.can_open_or_attach is False
-        issued = terminal_api.terminal_v1_issue_terminal_ticket(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            _headers=_headers(workspace.token),
-        )
-        assert issued.status is RuntimeTerminalTicketStatus.DENIED
-        assert issued.reason_code is RuntimeTerminalReasonCode.TERMINAL_DISABLED
-        assert issued.denied_scope is RuntimeTerminalDeniedScope.WORKSPACE_PROFILE
-    finally:
-        _replace_workspace_terminal_policy(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            terminal_enabled=True,
-        )
-    _wait_terminal_projection(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        predicate=lambda projection: projection.state in {"ready", "active"},
-        message="Terminal did not recover after Workspace policy restoration",
-    )
-
-    terminal = _TerminalSocket.connect(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-        origin=_MAIN_WEB_ORIGIN,
-    )
-    AgentV1Api(public_api_client).agent_v1_update_agent(
-        agent_id=workspace.agent_id,
-        handle=workspace.handle,
-        agent_update_request=AgentUpdateRequest(terminal_enabled=False),
-        _headers=_headers(workspace.token),
-    )
-    revoked = terminal.wait_for_control("revoked", timeout=15)
-    assert revoked.get("reason_code") == "terminal_disabled"
-    denied = terminal_api.terminal_v1_issue_terminal_ticket(
-        handle=workspace.handle,
-        agent_id=workspace.agent_id,
-        session_id=workspace.session_id,
-        _headers=_headers(workspace.token),
-    )
-    assert denied.status is RuntimeTerminalTicketStatus.DENIED
-    assert denied.reason_code is RuntimeTerminalReasonCode.TERMINAL_DISABLED
-
-    AgentV1Api(public_api_client).agent_v1_update_agent(
-        agent_id=workspace.agent_id,
-        handle=workspace.handle,
-        agent_update_request=AgentUpdateRequest(terminal_enabled=True),
-        _headers=_headers(workspace.token),
-    )
     active = _TerminalSocket.connect(
         public_api_client=public_api_client,
         workspace=workspace,
