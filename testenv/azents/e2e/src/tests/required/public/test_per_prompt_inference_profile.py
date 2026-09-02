@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -74,6 +74,13 @@ def _objects(value: object, *, label: str) -> list[dict[str, object]]:
         raise AssertionError(f"{label} is not an object list: {value!r}") from exc
 
 
+def _string(value: object, *, label: str) -> str:
+    """Validate a JSON string."""
+    if not isinstance(value, str):
+        raise AssertionError(f"{label} is not a string: {value!r}")
+    return value
+
+
 def _response_object(response: requests.Response) -> dict[str, object]:
     """Validate an HTTP JSON object response."""
     response.raise_for_status()
@@ -139,7 +146,11 @@ def _setup_profile_agent(
     )
     assert entries is not None
     by_identifier = {
-        cast(str, entry["provider_model_identifier"]): entry for entry in entries
+        _string(
+            entry.get("provider_model_identifier"),
+            label="provider model identifier",
+        ): entry
+        for entry in entries
     }
 
     def selection(identifier: str) -> dict[str, str]:
@@ -161,9 +172,9 @@ def _setup_profile_agent(
             {
                 "label": "Quality",
                 "model_selection": selection(
-                    cast(
-                        str,
-                        by_identifier["gpt-5.5"]["provider_model_identifier"],
+                    _string(
+                        by_identifier["gpt-5.5"].get("provider_model_identifier"),
+                        label="Quality provider model identifier",
                     )
                 ),
                 "settings": {
@@ -180,9 +191,9 @@ def _setup_profile_agent(
             {
                 "label": "Fast",
                 "model_selection": selection(
-                    cast(
-                        str,
-                        by_identifier["gpt-5.5-mini"]["provider_model_identifier"],
+                    _string(
+                        by_identifier["gpt-5.5-mini"].get("provider_model_identifier"),
+                        label="Fast provider model identifier",
                     )
                 ),
                 "settings": {
