@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+// Each admitted interactive Terminal owns one independent outbound Runner RPC.
+service RuntimeRunnerTerminal {
+  rpc ConnectTerminal(stream RunnerTerminalMessage)
+      returns (stream TerminalControlMessage);
+}
+
+message TerminalIdentity {
+  string terminal_id = 1;
+  string runtime_id = 2;
+  uint64 runner_generation = 3;
+}
+
+enum TerminalTerminationReason {
+  TERMINAL_TERMINATION_REASON_UNSPECIFIED = 0;
+  TERMINAL_TERMINATION_REASON_CALLER = 1;
+  TERMINAL_TERMINATION_REASON_IDLE = 2;
+  TERMINAL_TERMINATION_REASON_MAXIMUM_LIFETIME = 3;
+  TERMINAL_TERMINATION_REASON_DATA_STREAM_GRACE_EXPIRED = 4;
+  TERMINAL_TERMINATION_REASON_RUNTIME_INVALIDATED = 5;
+  TERMINAL_TERMINATION_REASON_RUNNER_REPLACED = 6;
+  TERMINAL_TERMINATION_REASON_POLICY_REVOKED = 7;
+  TERMINAL_TERMINATION_REASON_ACCESS_REVOKED = 8;
+  TERMINAL_TERMINATION_REASON_SHUTDOWN = 9;
+  TERMINAL_TERMINATION_REASON_PROTOCOL_VIOLATION = 10;
+  TERMINAL_TERMINATION_REASON_PROCESS_EXIT = 11;
+}
+
+enum TerminalStreamErrorCode {
+  TERMINAL_STREAM_ERROR_CODE_UNSPECIFIED = 0;
+  TERMINAL_STREAM_ERROR_CODE_STALE_AUTHORITY = 1;
+  TERMINAL_STREAM_ERROR_CODE_STALE_STREAM_GENERATION = 2;
+  TERMINAL_STREAM_ERROR_CODE_PROTOCOL_VIOLATION = 3;
+  TERMINAL_STREAM_ERROR_CODE_RESOURCE_EXHAUSTED = 4;
+  TERMINAL_STREAM_ERROR_CODE_TERMINATED = 5;
+}
+
+message TerminalStreamRegistration {
+  TerminalIdentity identity = 1;
+  uint64 stream_generation = 2;
+  string stream_nonce = 3;
+  uint64 last_control_acknowledged_output_sequence = 4;
+  uint64 highest_completely_applied_input_sequence = 5;
+  optional uint64 partial_input_sequence = 6;
+  optional uint32 partial_input_bytes_written = 7;
+}
+
+message TerminalStreamAccepted {
+  uint64 stream_generation = 1;
+  uint64 resume_from_output_sequence = 2;
+  uint64 next_input_sequence = 3;
+}
+
+message TerminalInputFrame {
+  uint64 sequence = 1;
+  bytes data = 2;
+}
+
+message TerminalInputAcknowledgement {
+  uint64 sequence = 1;
+}
+
+message TerminalOutputFrame {
+  uint64 sequence = 1;
+  bytes data = 2;
+}
+
+message TerminalOutputAcknowledgement {
+  uint64 sequence = 1;
+}
+
+message TerminalResize {
+  uint64 sequence = 1;
+  uint32 columns = 2;
+  uint32 rows = 3;
+}
+
+message TerminalHeartbeat {
+  uint64 monotonic_sequence = 1;
+}
+
+message TerminalHeartbeatAcknowledgement {
+  uint64 monotonic_sequence = 1;
+}
+
+message TerminalExit {
+  TerminalTerminationReason reason = 1;
+  optional sint32 exit_code = 2;
+}
+
+message TerminalTerminate {
+  TerminalTerminationReason reason = 1;
+}
+
+message TerminalStreamError {
+  TerminalStreamErrorCode code = 1;
+}
+
+message RunnerTerminalMessage {
+  oneof payload {
+    TerminalStreamRegistration register = 1;
+    TerminalOutputFrame output = 2;
+    TerminalInputAcknowledgement input_ack = 3;
+    TerminalHeartbeat heartbeat = 4;
+    TerminalExit exit = 5;
+    TerminalStreamError error = 6;
+  }
+}
+
+message TerminalControlMessage {
+  oneof payload {
+    TerminalStreamAccepted accepted = 1;
+    TerminalInputFrame input = 2;
+    TerminalResize resize = 3;
+    TerminalOutputAcknowledgement output_ack = 4;
+    TerminalTerminate terminate = 5;
+    TerminalHeartbeatAcknowledgement heartbeat_ack = 6;
+    TerminalStreamError error = 7;
+  }
+}

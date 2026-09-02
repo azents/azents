@@ -11,6 +11,10 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias
 
+from azents_runtime_control.runner_terminal import (
+    RunnerTerminalOpenIntentHandler,
+    RunnerTerminalTerminateIntentHandler,
+)
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferIntent,
@@ -197,6 +201,20 @@ class RunnerControlClient(Protocol):
         handler: RunnerTransferCancelHandler,
     ) -> None:
         """Set the direct metadata-only transfer cancellation handler."""
+        ...
+
+    def set_terminal_open_intent_handler(
+        self,
+        handler: RunnerTerminalOpenIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Terminal admission handler."""
+        ...
+
+    def set_terminal_terminate_intent_handler(
+        self,
+        handler: RunnerTerminalTerminateIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Terminal termination handler."""
         ...
 
     async def register_runner(

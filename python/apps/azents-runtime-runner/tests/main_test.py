@@ -7,6 +7,7 @@ import pytest
 from pytest import MonkeyPatch
 
 from azents_runtime_runner.main import (
+    _CAPABILITIES,
     RunnerLimitConfig,
     StructuredLogFormatter,
     _runtime_configuration_evidence_from_env,
@@ -14,6 +15,10 @@ from azents_runtime_runner.main import (
     run_runtime_runner,
     runner_limit_config_from_env,
 )
+
+
+def test_runner_advertises_terminal_capability() -> None:
+    assert "terminal.v1" in _CAPABILITIES
 
 
 @pytest.mark.asyncio

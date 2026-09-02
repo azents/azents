@@ -16,6 +16,7 @@ from azents_runtime_control.grpc_tls import (
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_runner_control_pb2,
+    runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import (
@@ -35,6 +36,14 @@ from azents_runtime_control.runner import (
     RunnerTransferIntentHandler,
     RuntimeRunnerEventType,
     RuntimeRunnerState,
+)
+from azents_runtime_control.runner_terminal import (
+    RunnerTerminalIdentity,
+    RunnerTerminalOpenIntent,
+    RunnerTerminalOpenIntentHandler,
+    RunnerTerminalTerminateIntent,
+    RunnerTerminalTerminateIntentHandler,
+    RunnerTerminalTerminationReason,
 )
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
@@ -112,6 +121,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._operation_cancel_handler: RunnerOperationCancelHandler | None = None
         self._transfer_intent_handler: RunnerTransferIntentHandler | None = None
         self._transfer_cancel_handler: RunnerTransferCancelHandler | None = None
+        self._terminal_open_intent_handler: RunnerTerminalOpenIntentHandler | None = (
+            None
+        )
+        self._terminal_terminate_intent_handler: (
+            RunnerTerminalTerminateIntentHandler | None
+        ) = None
         self._pending_heartbeat_acks: dict[
             str, asyncio.Future[RunnerHeartbeatAcknowledgement]
         ] = {}
@@ -170,6 +185,20 @@ class GrpcRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Set the direct metadata-only transfer cancellation handler."""
         self._transfer_cancel_handler = handler
+
+    def set_terminal_open_intent_handler(
+        self,
+        handler: RunnerTerminalOpenIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Terminal admission handler."""
+        self._terminal_open_intent_handler = handler
+
+    def set_terminal_terminate_intent_handler(
+        self,
+        handler: RunnerTerminalTerminateIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Terminal termination handler."""
+        self._terminal_terminate_intent_handler = handler
 
     async def register_runner(
         self,
@@ -422,6 +451,26 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 )
             await self._transfer_cancel_handler(
                 runner_transfer_cancel_from_message(message.transfer_cancel)
+            )
+            return
+        if payload == "terminal_open_intent":
+            if self._terminal_open_intent_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner Terminal admission handler is not registered"
+                )
+            await self._terminal_open_intent_handler(
+                runner_terminal_open_intent_from_message(message.terminal_open_intent)
+            )
+            return
+        if payload == "terminal_terminate_intent":
+            if self._terminal_terminate_intent_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner Terminal termination handler is not registered"
+                )
+            await self._terminal_terminate_intent_handler(
+                runner_terminal_terminate_intent_from_message(
+                    message.terminal_terminate_intent
+                )
             )
             return
         if payload == "error":
@@ -1724,6 +1773,68 @@ def runner_transfer_cancel_from_message(
     )
 
 
+def runner_terminal_open_intent_from_message(
+    message: runtime_runner_control_pb2.RunnerTerminalOpenIntent,
+) -> RunnerTerminalOpenIntent:
+    """Deserialize one bounded Runner Terminal open intent."""
+    if (
+        not message.HasField("idle_deadline_at")
+        or not message.HasField("maximum_deadline_at")
+        or not message.HasField("data_stream_grace_deadline_at")
+    ):
+        raise ValueError("Runner Terminal open intent deadlines are required")
+    return RunnerTerminalOpenIntent(
+        identity=_terminal_identity_from_message(message.identity),
+        owner_session_id=message.owner_session_id,
+        working_directory=message.working_directory,
+        columns=message.columns,
+        rows=message.rows,
+        idle_deadline_at=_datetime(message.idle_deadline_at),
+        maximum_deadline_at=_datetime(message.maximum_deadline_at),
+        data_stream_grace_deadline_at=_datetime(message.data_stream_grace_deadline_at),
+        stream_nonce=message.stream_nonce,
+        initial_stream_generation=message.initial_stream_generation,
+    )
+
+
+def runner_terminal_open_intent_to_message(
+    intent: RunnerTerminalOpenIntent,
+) -> runtime_runner_control_pb2.RunnerTerminalOpenIntent:
+    """Serialize one bounded Runner Terminal open intent."""
+    return runtime_runner_control_pb2.RunnerTerminalOpenIntent(
+        identity=_terminal_identity_to_message(intent.identity),
+        owner_session_id=intent.owner_session_id,
+        working_directory=intent.working_directory,
+        columns=intent.columns,
+        rows=intent.rows,
+        idle_deadline_at=_timestamp(intent.idle_deadline_at),
+        maximum_deadline_at=_timestamp(intent.maximum_deadline_at),
+        data_stream_grace_deadline_at=_timestamp(intent.data_stream_grace_deadline_at),
+        stream_nonce=intent.stream_nonce,
+        initial_stream_generation=intent.initial_stream_generation,
+    )
+
+
+def runner_terminal_terminate_intent_from_message(
+    message: runtime_runner_control_pb2.RunnerTerminalTerminateIntent,
+) -> RunnerTerminalTerminateIntent:
+    """Deserialize one bounded Runner Terminal terminate intent."""
+    return RunnerTerminalTerminateIntent(
+        identity=_terminal_identity_from_message(message.identity),
+        reason=_terminal_termination_reason_from_message(message.reason),
+    )
+
+
+def runner_terminal_terminate_intent_to_message(
+    intent: RunnerTerminalTerminateIntent,
+) -> runtime_runner_control_pb2.RunnerTerminalTerminateIntent:
+    """Serialize one bounded Runner Terminal terminate intent."""
+    return runtime_runner_control_pb2.RunnerTerminalTerminateIntent(
+        identity=_terminal_identity_to_message(intent.identity),
+        reason=_terminal_termination_reason_to_message(intent.reason),
+    )
+
+
 def runner_transfer_result_from_message(
     message: runtime_runner_control_pb2.RunnerTransferResult,
     *,
@@ -1839,6 +1950,110 @@ def _transfer_identity(
     )
 
 
+def _terminal_identity_from_message(
+    message: runtime_runner_terminal_pb2.TerminalIdentity,
+) -> RunnerTerminalIdentity:
+    return RunnerTerminalIdentity(
+        terminal_id=message.terminal_id,
+        runtime_id=message.runtime_id,
+        runner_generation=message.runner_generation,
+    )
+
+
+def _terminal_identity_to_message(
+    identity: RunnerTerminalIdentity,
+) -> runtime_runner_terminal_pb2.TerminalIdentity:
+    return runtime_runner_terminal_pb2.TerminalIdentity(
+        terminal_id=identity.terminal_id,
+        runtime_id=identity.runtime_id,
+        runner_generation=identity.runner_generation,
+    )
+
+
+def _terminal_termination_reason_from_message(
+    value: runtime_runner_terminal_pb2.TerminalTerminationReason.ValueType,
+) -> RunnerTerminalTerminationReason:
+    reasons = {
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_CALLER: (
+            RunnerTerminalTerminationReason.CALLER
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_IDLE: (
+            RunnerTerminalTerminationReason.IDLE
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_MAXIMUM_LIFETIME: (
+            RunnerTerminalTerminationReason.MAXIMUM_LIFETIME
+        ),
+        (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_DATA_STREAM_GRACE_EXPIRED
+        ): (RunnerTerminalTerminationReason.DATA_STREAM_GRACE_EXPIRED),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_RUNTIME_INVALIDATED: (
+            RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_RUNNER_REPLACED: (
+            RunnerTerminalTerminationReason.RUNNER_REPLACED
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_POLICY_REVOKED: (
+            RunnerTerminalTerminationReason.POLICY_REVOKED
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_ACCESS_REVOKED: (
+            RunnerTerminalTerminationReason.ACCESS_REVOKED
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_SHUTDOWN: (
+            RunnerTerminalTerminationReason.SHUTDOWN
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_PROTOCOL_VIOLATION: (
+            RunnerTerminalTerminationReason.PROTOCOL_VIOLATION
+        ),
+        runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_PROCESS_EXIT: (
+            RunnerTerminalTerminationReason.PROCESS_EXIT
+        ),
+    }
+    try:
+        return reasons[value]
+    except KeyError as error:
+        raise ValueError("Terminal termination reason is invalid") from error
+
+
+def _terminal_termination_reason_to_message(
+    reason: RunnerTerminalTerminationReason,
+) -> runtime_runner_terminal_pb2.TerminalTerminationReason.ValueType:
+    return {
+        RunnerTerminalTerminationReason.CALLER: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_CALLER
+        ),
+        RunnerTerminalTerminationReason.IDLE: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_IDLE
+        ),
+        RunnerTerminalTerminationReason.MAXIMUM_LIFETIME: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_MAXIMUM_LIFETIME
+        ),
+        RunnerTerminalTerminationReason.DATA_STREAM_GRACE_EXPIRED: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_DATA_STREAM_GRACE_EXPIRED
+        ),
+        RunnerTerminalTerminationReason.RUNTIME_INVALIDATED: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_RUNTIME_INVALIDATED
+        ),
+        RunnerTerminalTerminationReason.RUNNER_REPLACED: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_RUNNER_REPLACED
+        ),
+        RunnerTerminalTerminationReason.POLICY_REVOKED: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_POLICY_REVOKED
+        ),
+        RunnerTerminalTerminationReason.ACCESS_REVOKED: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_ACCESS_REVOKED
+        ),
+        RunnerTerminalTerminationReason.SHUTDOWN: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_SHUTDOWN
+        ),
+        RunnerTerminalTerminationReason.PROTOCOL_VIOLATION: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_PROTOCOL_VIOLATION
+        ),
+        RunnerTerminalTerminationReason.PROCESS_EXIT: (
+            runtime_runner_terminal_pb2.TERMINAL_TERMINATION_REASON_PROCESS_EXIT
+        ),
+    }[reason]
+
+
 def _transfer_direction(
     value: runtime_runner_transfer_pb2.TransferDirection.ValueType,
 ) -> RunnerTransferDirection:
@@ -1893,6 +2108,10 @@ __all__ = [
     "runner_runtime_configuration_evidence_from_message",
     "runner_event_from_message",
     "runner_state_report_from_message",
+    "runner_terminal_open_intent_from_message",
+    "runner_terminal_open_intent_to_message",
+    "runner_terminal_terminate_intent_from_message",
+    "runner_terminal_terminate_intent_to_message",
     "runner_transfer_cancel_from_message",
     "runner_transfer_intent_from_message",
     "runner_transfer_result_from_message",

@@ -53,6 +53,10 @@ from azents.runtime.control_protocol.grpc.provider_server import (
 from azents.runtime.control_protocol.grpc.runner_server import (
     add_runtime_runner_control_servicer,
 )
+from azents.runtime.control_protocol.grpc.runner_terminal_server import (
+    RejectingRuntimeRunnerTerminalBroker,
+    add_runtime_runner_terminal_servicer,
+)
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     add_runtime_runner_transfer_servicer,
 )
@@ -422,6 +426,11 @@ async def runtime_control_server_lifespan(
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
         runner_authenticator=runner_authenticator,
         transfer_result_sink=transfer_result_coordinator,
+    )
+    add_runtime_runner_terminal_servicer(
+        server,
+        broker=RejectingRuntimeRunnerTerminalBroker(),
+        runner_authenticator=runner_authenticator,
     )
     add_runtime_runner_transfer_servicer(
         server,

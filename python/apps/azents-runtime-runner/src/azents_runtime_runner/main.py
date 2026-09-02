@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import platform
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +26,9 @@ from azents_runtime_control.runner import (
     RunnerRegistration,
     RunnerRunLoop,
 )
+from azents_runtime_control.runner_terminal import (
+    RUNNER_TERMINAL_CAPABILITY,
+)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
@@ -40,6 +44,15 @@ from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.pixi import prepare_pixi_environment
 from azents_runtime_runner.system_metrics import create_system_metrics_collector
+from azents_runtime_runner.terminal import (
+    MAX_TERMINAL_CHUNK_BYTES,
+    MAX_TERMINAL_OUTPUT_WINDOW_BYTES,
+    LinuxPtyTerminalBackend,
+    RunnerTerminalRegistry,
+    TerminalExit,
+    TerminalLimits,
+)
+from azents_runtime_runner.terminal_stream import RunnerTerminalStreamManager
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.trust import prepare_runner_trust_environment
 from azents_runtime_runner.workspace import Workspace
@@ -65,6 +78,7 @@ _CAPABILITIES = (
     "file.bulk_move",
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_SYSTEM_METRICS_CAPABILITY,
+    RUNNER_TERMINAL_CAPABILITY,
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -74,6 +88,12 @@ _DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
 _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1_000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
+_TERMINAL_IDLE_TIMEOUT_SECONDS = 30 * 60.0
+_TERMINAL_MAXIMUM_LIFETIME_SECONDS = 8 * 60 * 60.0
+_TERMINAL_STREAM_GRACE_SECONDS = 2 * 60.0
+_TERMINAL_STREAM_ATTEMPT_TIMEOUT_SECONDS = 30.0
+_TERMINAL_MAX_ACTIVE_PER_SESSION = 1
+_TERMINAL_MAX_ACTIVE_PER_RUNTIME = 16
 _REMOVED_CONTAINMENT_ENV = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
 _LOGGER = logging.getLogger(__name__)
 _STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
@@ -242,15 +262,50 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 accepted = run_loop.accepted
                 return None if accepted is None else accepted.generation
 
+            terminal_registry = RunnerTerminalRegistry(
+                backend=LinuxPtyTerminalBackend(),
+                limits=TerminalLimits(
+                    max_active_per_session=_TERMINAL_MAX_ACTIVE_PER_SESSION,
+                    max_active_per_runtime=_TERMINAL_MAX_ACTIVE_PER_RUNTIME,
+                    idle_timeout_seconds=_TERMINAL_IDLE_TIMEOUT_SECONDS,
+                    maximum_lifetime_seconds=(_TERMINAL_MAXIMUM_LIFETIME_SECONDS),
+                    stream_grace_seconds=_TERMINAL_STREAM_GRACE_SECONDS,
+                    stream_attempt_timeout_seconds=(
+                        _TERMINAL_STREAM_ATTEMPT_TIMEOUT_SECONDS
+                    ),
+                    maximum_chunk_bytes=MAX_TERMINAL_CHUNK_BYTES,
+                    maximum_unacknowledged_output_bytes=(
+                        MAX_TERMINAL_OUTPUT_WINDOW_BYTES
+                    ),
+                ),
+                clock=time.monotonic,
+                utc_clock=lambda: datetime.now(UTC),
+            )
+            terminal_manager = RunnerTerminalStreamManager.from_endpoint(
+                registry=terminal_registry,
+                endpoint=endpoint,
+                runner_auth_token=runner_auth_token,
+                tls=control_tls,
+                allow_insecure=allow_insecure_control,
+                runtime_id=runtime_id,
+                workspace_root=workspace.root,
+                environment=inherited_environment,
+                accepted_generation=accepted_generation,
+            )
             transfer_manager = RunnerTransferManager(
                 control=client,
                 transfer=transfer_client,
                 accepted_generation=accepted_generation,
                 workspace=workspace,
             )
+            shutting_down = False
             try:
                 client.set_transfer_intent_handler(transfer_manager.handle_intent)
                 client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
+                client.set_terminal_open_intent_handler(terminal_manager.handle_open)
+                client.set_terminal_terminate_intent_handler(
+                    terminal_manager.handle_terminate
+                )
                 _LOGGER.info(
                     "Runtime Runner connecting to Control",
                     extra={
@@ -262,6 +317,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 await transfer_manager.start()
                 await run_loop.run_forever()
             except asyncio.CancelledError:
+                shutting_down = True
                 raise
             except (
                 RuntimeRunnerControlStreamClosed,
@@ -274,6 +330,15 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     extra={"runtime_id": runtime_id, "runner_id": runner_id},
                 )
             finally:
+                if shutting_down:
+                    await terminal_manager.close()
+                else:
+                    cleanup_tasks = await terminal_manager.invalidate_runtime()
+                    if cleanup_tasks:
+                        asyncio.create_task(
+                            _observe_terminal_cleanup(cleanup_tasks),
+                            name=f"runner-terminal-cleanup:{runtime_id}",
+                        )
                 await transfer_manager.close()
                 await transfer_client.close()
                 await operations.close()
@@ -294,6 +359,19 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
     finally:
         await execution_backend.close()
+
+
+async def _observe_terminal_cleanup(
+    cleanup_tasks: tuple[asyncio.Task[TerminalExit], ...],
+) -> None:
+    """Observe detached PTY cleanup without blocking Runtime reconnection."""
+    results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            _LOGGER.warning(
+                "Runtime Runner Terminal cleanup failed",
+                exc_info=(type(result), result, result.__traceback__),
+            )
 
 
 def runner_limit_config_from_env() -> RunnerLimitConfig:
