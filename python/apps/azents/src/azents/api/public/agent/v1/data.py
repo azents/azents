@@ -60,6 +60,18 @@ class AgentResponse(BaseModel):
     runtime_remove_available: bool
     shell_enabled: bool
     terminal_enabled: bool
+    infrastructure_terminal_enabled: bool | None
+    workspace_terminal_enabled: bool | None
+    effective_terminal_enabled: bool
+    terminal_denied_scope: (
+        Literal[
+            "runtime",
+            "provider_profile",
+            "workspace_profile",
+            "agent",
+        ]
+        | None
+    )
     memory_enabled: bool
     tool_search_enabled: bool
     max_turns: int | None
@@ -107,6 +119,10 @@ class AgentResponse(BaseModel):
             runtime_remove_available=data.runtime_remove_available,
             shell_enabled=data.shell_enabled,
             terminal_enabled=data.terminal_enabled,
+            infrastructure_terminal_enabled=data.infrastructure_terminal_enabled,
+            workspace_terminal_enabled=data.workspace_terminal_enabled,
+            effective_terminal_enabled=data.effective_terminal_enabled,
+            terminal_denied_scope=data.terminal_denied_scope,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,

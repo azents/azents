@@ -26,6 +26,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
+import { RuntimeTerminalPanel } from "@/features/runtime-terminal/components/RuntimeTerminalPanel";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { ChatView } from "./ChatView";
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "./ComposerSubscriptionUsage";
@@ -49,6 +50,8 @@ export function ChatSessionView({
   subscriptionUsage,
   workspacePanel,
   subagentNavigation,
+  terminal,
+  terminalMobile,
   runtimeDrawerOpened,
   onSessionTitleChange,
   onOpenRuntime,
@@ -75,7 +78,7 @@ export function ChatSessionView({
           )
         }
       />
-      {subagentNavigation !== null && (
+      {subagentNavigation !== null && terminal.presentation !== "focused" && (
         <Box
           px="md"
           py="xs"
@@ -160,7 +163,13 @@ export function ChatSessionView({
           </Group>
         </Box>
       )}
-      <Box flex={1} mih={0}>
+      <Box
+        flex={1}
+        mih={0}
+        style={{
+          display: terminal.presentation === "focused" ? "none" : "block",
+        }}
+      >
         <ChatView
           chatViewState={chatSession.chatViewState}
           chatTimelineState={chatSession.chatTimelineState}
@@ -212,6 +221,11 @@ export function ChatSessionView({
           }
         />
       </Box>
+      <RuntimeTerminalPanel
+        terminal={terminal}
+        mobile={terminalMobile}
+        onStartRuntime={workspacePanel.onStartRuntime}
+      />
       <Drawer
         hiddenFrom="lg"
         opened={runtimeDrawerOpened}

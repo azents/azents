@@ -14869,6 +14869,49 @@
             "type": "boolean",
             "title": "Terminal Enabled"
           },
+          "infrastructure_terminal_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infrastructure Terminal Enabled"
+          },
+          "workspace_terminal_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Terminal Enabled"
+          },
+          "effective_terminal_enabled": {
+            "type": "boolean",
+            "title": "Effective Terminal Enabled"
+          },
+          "terminal_denied_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "runtime",
+                  "provider_profile",
+                  "workspace_profile",
+                  "agent"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Denied Scope"
+          },
           "memory_enabled": {
             "type": "boolean",
             "title": "Memory Enabled"
@@ -14945,6 +14988,10 @@
           "runtime_remove_available",
           "shell_enabled",
           "terminal_enabled",
+          "infrastructure_terminal_enabled",
+          "workspace_terminal_enabled",
+          "effective_terminal_enabled",
+          "terminal_denied_scope",
           "memory_enabled",
           "tool_search_enabled",
           "max_turns",

@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated, assert_never
+from typing import Annotated, Literal, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.infra.s3.service import S3Service
@@ -113,6 +113,43 @@ def _get_workspace_s3_bucket(
 ) -> str:
     """Workspace S3 bucket name DI."""
     return config.workspace_s3.bucket
+
+
+def _terminal_denied_scope(
+    *,
+    capability: AgentRuntimeCapability,
+    runtime_profile_available: bool,
+    runtime_profile_reason: str | None,
+    infrastructure_terminal_enabled: bool | None,
+    workspace_terminal_enabled: bool | None,
+    agent_terminal_enabled: bool,
+) -> (
+    Literal[
+        "runtime",
+        "provider_profile",
+        "workspace_profile",
+        "agent",
+    ]
+    | None
+):
+    """Return the current effective Terminal policy denial scope."""
+    if capability is not AgentRuntimeCapability.MANAGED:
+        return "runtime"
+    if not runtime_profile_available:
+        if runtime_profile_reason in {
+            "infrastructure_profile_not_found",
+            "infrastructure_profile_unavailable",
+            "provider_unavailable",
+        }:
+            return "provider_profile"
+        return "workspace_profile"
+    if infrastructure_terminal_enabled is not True:
+        return "provider_profile"
+    if workspace_terminal_enabled is not True:
+        return "workspace_profile"
+    if not agent_terminal_enabled:
+        return "agent"
+    return None
 
 
 @dataclasses.dataclass
@@ -1136,6 +1173,8 @@ class AgentService:
         context_window = self._compute_effective_context_window(agent)
         runtime_profile_available = False
         runtime_profile_reason = "runtime_profile_unconfigured"
+        infrastructure_terminal_enabled: bool | None = None
+        workspace_terminal_enabled: bool | None = None
         if agent.runtime_profile_id is not None:
             try:
                 projection = await self.runtime_profile_service.get_profile(
@@ -1147,6 +1186,18 @@ class AgentService:
             else:
                 runtime_profile_available = projection.available
                 runtime_profile_reason = projection.reason_code
+                infrastructure_terminal_enabled = (
+                    projection.infrastructure_profile.terminal_enabled
+                )
+                workspace_terminal_enabled = projection.profile.terminal_enabled
+        terminal_denied_scope = _terminal_denied_scope(
+            capability=agent.runtime_capability,
+            runtime_profile_available=runtime_profile_available,
+            runtime_profile_reason=runtime_profile_reason,
+            infrastructure_terminal_enabled=infrastructure_terminal_enabled,
+            workspace_terminal_enabled=workspace_terminal_enabled,
+            agent_terminal_enabled=agent.terminal_enabled,
+        )
         return AgentOutput.convert_from(
             agent,
             avatar=avatar,
@@ -1162,6 +1213,10 @@ class AgentService:
             ),
             runtime_profile_available=runtime_profile_available,
             runtime_profile_availability_reason_code=runtime_profile_reason,
+            infrastructure_terminal_enabled=infrastructure_terminal_enabled,
+            workspace_terminal_enabled=workspace_terminal_enabled,
+            effective_terminal_enabled=terminal_denied_scope is None,
+            terminal_denied_scope=terminal_denied_scope,
             can_manage=can_manage,
         )
 

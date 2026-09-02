@@ -71,6 +71,7 @@ export interface InfrastructureProfileSubmission {
   displayName: string;
   description: string;
   lifecycle: RuntimeProfileLifecycle;
+  terminalEnabled: boolean;
   spec: RuntimeInfrastructureProfileSpec;
 }
 
@@ -366,6 +367,7 @@ export function InfrastructureProfilesSectionContainer({
           displayName: submission.displayName,
           description: submission.description,
           lifecycle: submission.lifecycle,
+          terminalEnabled: submission.terminalEnabled,
           spec: submission.spec,
         });
         return;
@@ -375,6 +377,7 @@ export function InfrastructureProfilesSectionContainer({
         displayName: submission.displayName,
         description: submission.description,
         lifecycle: submission.lifecycle,
+        terminalEnabled: submission.terminalEnabled,
         spec: submission.spec,
       });
     },

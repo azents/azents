@@ -59,6 +59,10 @@ class AgentResponse(BaseModel):
     runtime_remove_available: StrictBool
     shell_enabled: StrictBool
     terminal_enabled: StrictBool
+    infrastructure_terminal_enabled: Optional[StrictBool]
+    workspace_terminal_enabled: Optional[StrictBool]
+    effective_terminal_enabled: StrictBool
+    terminal_denied_scope: Optional[StrictStr]
     memory_enabled: StrictBool
     tool_search_enabled: StrictBool
     max_turns: Optional[StrictInt]
@@ -68,13 +72,23 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "shell_enabled", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "shell_enabled", "terminal_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     @field_validator('runtime_profile_configuration_status')
     def runtime_profile_configuration_status_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['not_applicable', 'profile_required', 'configured', 'unavailable']):
             raise ValueError("must be one of enum values ('not_applicable', 'profile_required', 'configured', 'unavailable')")
+        return value
+
+    @field_validator('terminal_denied_scope')
+    def terminal_denied_scope_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['runtime', 'provider_profile', 'workspace_profile', 'agent']):
+            raise ValueError("must be one of enum values ('runtime', 'provider_profile', 'workspace_profile', 'agent')")
         return value
 
     model_config = ConfigDict(
@@ -190,6 +204,21 @@ class AgentResponse(BaseModel):
         if self.runtime_profile_availability_reason_code is None and "runtime_profile_availability_reason_code" in self.model_fields_set:
             _dict['runtime_profile_availability_reason_code'] = None
 
+        # set to None if infrastructure_terminal_enabled (nullable) is None
+        # and model_fields_set contains the field
+        if self.infrastructure_terminal_enabled is None and "infrastructure_terminal_enabled" in self.model_fields_set:
+            _dict['infrastructure_terminal_enabled'] = None
+
+        # set to None if workspace_terminal_enabled (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_terminal_enabled is None and "workspace_terminal_enabled" in self.model_fields_set:
+            _dict['workspace_terminal_enabled'] = None
+
+        # set to None if terminal_denied_scope (nullable) is None
+        # and model_fields_set contains the field
+        if self.terminal_denied_scope is None and "terminal_denied_scope" in self.model_fields_set:
+            _dict['terminal_denied_scope'] = None
+
         # set to None if max_turns (nullable) is None
         # and model_fields_set contains the field
         if self.max_turns is None and "max_turns" in self.model_fields_set:
@@ -237,6 +266,10 @@ class AgentResponse(BaseModel):
             "runtime_remove_available": obj.get("runtime_remove_available"),
             "shell_enabled": obj.get("shell_enabled"),
             "terminal_enabled": obj.get("terminal_enabled"),
+            "infrastructure_terminal_enabled": obj.get("infrastructure_terminal_enabled"),
+            "workspace_terminal_enabled": obj.get("workspace_terminal_enabled"),
+            "effective_terminal_enabled": obj.get("effective_terminal_enabled"),
+            "terminal_denied_scope": obj.get("terminal_denied_scope"),
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),
             "max_turns": obj.get("max_turns"),

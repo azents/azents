@@ -7,6 +7,7 @@ import type { ChatSessionViewContainerOutput } from "../containers/useChatSessio
 import type { SubagentNavigationLinks } from "../subagentNavigation";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type { ComposerSubscriptionUsagePresentationProps } from "./ComposerSubscriptionUsage";
+import type { RuntimeTerminalContainerOutput } from "@/features/runtime-terminal/containers/useRuntimeTerminalContainer";
 import type {
   AgentModelSelection,
   AgentResponse,
@@ -75,8 +76,12 @@ const agent: AgentResponse = {
   runtime_profile_configuration_status: "configured",
   runtime_add_available: false,
   runtime_remove_available: true,
-  terminal_enabled: true,
   shell_enabled: true,
+  terminal_enabled: true,
+  infrastructure_terminal_enabled: true,
+  workspace_terminal_enabled: true,
+  effective_terminal_enabled: true,
+  terminal_denied_scope: null,
   memory_enabled: true,
   tool_search_enabled: false,
   max_turns: null,
@@ -245,6 +250,38 @@ const subagentNavigation: SubagentNavigationLinks = {
   },
 };
 
+const terminal: RuntimeTerminalContainerOutput = {
+  projection: {
+    state: "ready",
+    reason_code: null,
+    denied_scope: null,
+    can_start_runtime: false,
+    can_open_or_attach: true,
+    terminal: null,
+  },
+  projectionLoading: false,
+  presentation: "collapsed",
+  connection: { type: "idle" },
+  replayTruncated: false,
+  hasNewOutput: false,
+  ctrlActive: false,
+  altActive: false,
+  hostRef: noop,
+  onExpand: noop,
+  onFocus: noop,
+  onCollapse: noop,
+  onReturnToDock: noop,
+  onTerminate: noop,
+  onRetry: noop,
+  onToggleCtrl: noop,
+  onToggleAlt: noop,
+  onSoftwareKey: noop,
+  onFocusKeyboard: noop,
+  dockHeight: 260,
+  onDockResizeStart: noop,
+  onDockResizeBy: noop,
+};
+
 const args: ChatSessionViewContainerOutput = {
   handle: "engineering",
   agent,
@@ -255,6 +292,8 @@ const args: ChatSessionViewContainerOutput = {
   subscriptionUsage,
   workspacePanel,
   subagentNavigation: null,
+  terminal,
+  terminalMobile: false,
   runtimeDrawerOpened: false,
   onSessionTitleChange: noop,
   onOpenRuntime: noop,
@@ -295,5 +334,49 @@ export const LoadingHistory = {
 export const SubagentConversation = {
   args: {
     subagentNavigation,
+  },
+} satisfies Story;
+
+export const PolicyDeniedTerminal = {
+  args: {
+    terminal: {
+      ...terminal,
+      projection: {
+        state: "unavailable",
+        reason_code: "terminal_disabled",
+        denied_scope: "agent",
+        can_start_runtime: false,
+        can_open_or_attach: false,
+        terminal: null,
+      },
+    },
+  },
+} satisfies Story;
+
+export const RuntimeFreeTerminal = {
+  args: {
+    agent: {
+      ...agent,
+      runtime_capability: "none",
+      runtime_profile_id: null,
+      runtime_profile_available: false,
+      runtime_profile_availability_reason_code: "runtime_profile_unconfigured",
+      runtime_profile_configuration_status: "not_applicable",
+      infrastructure_terminal_enabled: null,
+      workspace_terminal_enabled: null,
+      effective_terminal_enabled: false,
+      terminal_denied_scope: "runtime",
+    },
+    terminal: {
+      ...terminal,
+      projection: {
+        state: "absent",
+        reason_code: "runtime_free_agent",
+        denied_scope: "runtime",
+        can_start_runtime: false,
+        can_open_or_attach: false,
+        terminal: null,
+      },
+    },
   },
 } satisfies Story;

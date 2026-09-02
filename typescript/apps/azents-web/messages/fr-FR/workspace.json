@@ -444,7 +444,13 @@
       "succeeded": "Réussi",
       "skipped": "Ignoré",
       "failed": "Échoué"
-    }
+    },
+    "terminalEnabledLabel": "Activer le terminal interactif",
+    "terminalEnabledDescription": "Autoriser l’ouverture du terminal dans les sessions des Agents utilisant ce profil de runtime.",
+    "terminalEffectiveEnabled": "Terminal disponible",
+    "terminalEffectiveDisabled": "Terminal indisponible",
+    "terminalInfrastructureDisabled": "Terminal désactivé par l’infrastructure",
+    "terminalWorkspaceDisabled": "Terminal désactivé par le profil Workspace"
   },
   "agents": {
     "headline": "Agents",
@@ -1385,6 +1391,17 @@
         "cronRequired": "Saisissez une expression Cron.",
         "timezoneRequired": "Saisissez un fuseau horaire IANA."
       }
+    },
+    "terminalEnabledLabel": "Activer le terminal interactif",
+    "terminalEnabledDescription": "Autoriser les personnes ayant accès à la session à ouvrir le terminal du runtime géré.",
+    "terminalCurrentEffectiveEnabled": "Terminal effectif actuel : disponible",
+    "terminalCurrentEffectiveDisabled": "Terminal effectif actuel : indisponible",
+    "terminalDeniedScopeLabel": "Bloqué par {scope}",
+    "terminalDeniedScope": {
+      "runtime": "le runtime géré",
+      "provider_profile": "le profil d’infrastructure",
+      "workspace_profile": "le profil Runtime du Workspace",
+      "agent": "l’Agent"
     }
   },
   "toolkits": {

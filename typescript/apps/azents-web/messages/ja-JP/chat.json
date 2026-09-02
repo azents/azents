@@ -811,5 +811,40 @@
   "runtimeFreeProjectTitle": "ローカルプロジェクトなしで開始",
   "runtimeFreeProjectDescription": "ローカルプロジェクトなしでも会話を開始できます。ワークスペースフォルダーの選択や Git worktree の作成には、<runtimeLink>管理対象ランタイムを追加</runtimeLink>してください。",
   "runtimeRemovingProjectTitle": "ランタイムを削除しています",
-  "runtimeRemovingProjectDescription": "ランタイムの削除が完了するまで、ローカルプロジェクトなしで会話を開始できます。"
+  "runtimeRemovingProjectDescription": "ランタイムの削除が完了するまで、ローカルプロジェクトなしで会話を開始できます。",
+  "terminal": {
+    "open": "ターミナルを開く",
+    "focus": "ターミナルに集中",
+    "returnToDock": "ドックに戻る",
+    "terminate": "終了",
+    "collapse": "折りたたむ",
+    "backToChat": "チャットに戻る",
+    "newOutput": "新しい出力",
+    "retry": "再接続",
+    "focusKeyboard": "ソフトウェアキーボードにフォーカス",
+    "stoppedTitle": "ランタイムは停止中です",
+    "stoppedDescription": "ターミナルを開いてもランタイムは自動起動しません。続行するには明示的に起動してください。",
+    "startRuntime": "ランタイムを起動",
+    "startingTitle": "ランタイムを起動中",
+    "startingDescription": "ランタイムと Runner の準備が完了するとターミナルを利用できます。",
+    "unavailableTitle": "ターミナルを利用できません",
+    "unavailableDescription": "現在のランタイム権限ではターミナルを利用できません。",
+    "replayTruncated": "以前の出力の一部は利用できません。ライブ接続は維持されています。",
+    "connection": {
+      "idle": "ターミナル",
+      "connecting": "接続中…",
+      "connected": "接続済み",
+      "reconnecting": "再接続中…",
+      "terminating": "終了中…",
+      "exited": "終了済み",
+      "revoked": "アクセスが取り消されました",
+      "error": "接続エラー"
+    },
+    "stateMessage": {
+      "exited": "ターミナルは終了しました。新しいターミナルを開くには再試行してください。",
+      "revoked": "ターミナルへのアクセスが取り消されました。アクセスの復旧後に再試行してください。",
+      "error": "ターミナルへの接続に失敗しました。再接続してください。"
+    },
+    "resizeDock": "ターミナルドックのサイズ変更"
+  }
 }

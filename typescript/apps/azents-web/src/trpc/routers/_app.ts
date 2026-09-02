@@ -14,6 +14,7 @@ import { memberProfileRouter } from "./member-profile";
 import { runtimeProfileRouter } from "./runtime-profile";
 import { scheduledTaskRouter } from "./scheduledTask";
 import { securityRouter } from "./security";
+import { terminalRouter } from "./terminal";
 import { toolkitRouter } from "./toolkit";
 import { userRouter } from "./user";
 import { workspaceRouter } from "./workspace";
@@ -33,6 +34,7 @@ export const appRouter = router({
   scheduledTask: scheduledTaskRouter,
   security: securityRouter,
   toolkit: toolkitRouter,
+  terminal: terminalRouter,
   user: userRouter,
   workspace: workspaceRouter,
   workspaceMember: workspaceMemberRouter,

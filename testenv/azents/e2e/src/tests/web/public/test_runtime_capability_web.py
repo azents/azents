@@ -187,6 +187,40 @@ def _wait_for_runtime_ready(
     WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_ready)
 
 
+def _wait_for_runtime_stopped(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> int:
+    """Wait for the authoritative Runtime lifecycle to converge to stopped."""
+    stopped_generation: int | None = None
+
+    def runtime_is_stopped(_: WebDriver) -> bool:
+        nonlocal stopped_generation
+        runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=_headers(token),
+        )
+        lifecycle = runtime.lifecycle
+        if (
+            lifecycle is not None
+            and lifecycle.target == "stopped"
+            and lifecycle.convergence == "stable"
+            and lifecycle.availability == "stopped"
+        ):
+            stopped_generation = lifecycle.desired_generation
+            return True
+        return False
+
+    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_stopped)
+    assert stopped_generation is not None
+    return stopped_generation
+
+
 def _wait_for_runtime_start_authorized(
     driver: WebDriver,
     *,
@@ -520,7 +554,6 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
     _open_metrics_tab(browser_driver)
-    _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
             (
@@ -530,20 +563,17 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
 
-    stopped_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
-        agent_id=agent.id,
+    stopped_generation = _wait_for_runtime_stopped(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
         handle=workspace.handle,
-        _headers=_headers(workspace.token),
+        agent_id=agent.id,
     )
-    assert stopped_runtime.lifecycle is not None
-    assert stopped_runtime.lifecycle.availability == "stopped"
-    stopped_generation = stopped_runtime.lifecycle.desired_generation
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
-        )
-    ).click()
-    _click_button(browser_driver, "Start runtime")
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
+    )
+    _click_button(browser_driver, "Start")
     _wait_for_runtime_ready(
         browser_driver,
         runtime_api=runtime_api,

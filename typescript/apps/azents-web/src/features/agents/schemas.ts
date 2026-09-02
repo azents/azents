@@ -45,6 +45,7 @@ export const agentFormSchema = z
       .nullable()
       .optional(),
     shell_enabled: z.boolean().optional(),
+    terminal_enabled: z.boolean().optional(),
     memory_enabled: z.boolean().optional(),
     tool_search_enabled: z.boolean(),
     max_turns: z.number().int().positive().nullable().optional(),
