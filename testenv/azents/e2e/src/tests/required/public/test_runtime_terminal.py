@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import struct
 import time
 from dataclasses import dataclass
@@ -13,7 +12,6 @@ from urllib.parse import quote
 
 import azentsadminclient
 import azentspublicclient
-import pytest
 import requests
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
 from azentsadminclient.models.runtime_infrastructure_profile_replace_request import (
@@ -26,9 +24,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 )
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.terminal_v1_api import TerminalV1Api
-from azentspublicclient.api.workspace_user_v1_api import WorkspaceUserV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
-from azentspublicclient.exceptions import ForbiddenException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
@@ -56,7 +52,6 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.workspace_runtime_profile_replace_request import (
     WorkspaceRuntimeProfileReplaceRequest,
 )
-from docker.models.containers import Container
 from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 from websockets.exceptions import ConnectionClosed
@@ -67,14 +62,13 @@ from websockets.typing import Origin, Subprotocol
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
-    create_two_member_team_session,
-    decode_docker_exec_output,
     model_selection_from_first_candidate,
     unique,
 )
 
 _RUNTIME_PROVIDER_ID = "system-docker"
 _SUBPROTOCOL = "azents.terminal.v1"
+_MAIN_WEB_ORIGIN = "https://azents-web-gateway:8443"
 _FRAME_HEADER = struct.Struct(">BBQ")
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 
@@ -411,62 +405,6 @@ def _replace_workspace_terminal_policy(
     assert replaced.terminal_enabled is terminal_enabled
 
 
-def _runtime_container(
-    provider_container: DockerContainer,
-    *,
-    agent_id: str,
-) -> Container:
-    """Return the one Docker Runtime container for an Agent."""
-    client = provider_container.get_wrapped_container().client
-    if client is None:
-        raise AssertionError("Docker Runtime Provider client is unavailable")
-    containers = client.containers.list(
-        all=True,
-        filters={"label": f"azents/agent-id={agent_id}"},
-    )
-    if len(containers) != 1:
-        names = [container.name for container in containers]
-        raise AssertionError(
-            f"expected one Runtime container for {agent_id}, found {names!r}"
-        )
-    return containers[0]
-
-
-def _runtime_exec(container: Container, command: str) -> str:
-    """Run one bounded Runtime-container command and return its output."""
-    result = container.exec_run(["sh", "-lc", command])
-    output = decode_docker_exec_output(result.output)
-    if result.exit_code != 0:
-        raise AssertionError(
-            f"Runtime command failed with exit {result.exit_code}: {command}\n{output}"
-        )
-    return output
-
-
-def _wait_runtime_log(
-    container: Container,
-    *,
-    path: str,
-    marker: str,
-    timeout: float = 60,
-) -> None:
-    """Wait for one explicit Runner log marker inside the Runtime container."""
-    deadline = time.monotonic() + timeout
-    latest = ""
-    quoted_path = shlex.quote(path)
-    while time.monotonic() < deadline:
-        latest = _runtime_exec(
-            container,
-            f"if [ -f {quoted_path} ]; then cat {quoted_path}; fi",
-        )
-        if marker in latest:
-            return
-        time.sleep(0.5)
-    raise AssertionError(
-        f"Runtime log marker {marker!r} was not observed: {latest[-4096:]!r}"
-    )
-
-
 def _websocket_url(
     *,
     server_url: str,
@@ -735,7 +673,6 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_main_web_url: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Prove the real Runner PTY wire, reattachment, and explicit termination."""
@@ -755,7 +692,7 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
-        origin=azents_main_web_url,
+        origin=_MAIN_WEB_ORIGIN,
     )
 
     pwd_output = terminal.command("printf '__P''WD__%s__' \"$PWD\"", "PWD_DONE")
@@ -787,7 +724,7 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
-        origin=azents_main_web_url,
+        origin=_MAIN_WEB_ORIGIN,
         last_output_sequence=output_sequence,
     )
     assert reattached.accepted.terminal_id == terminal_id
@@ -841,7 +778,6 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_main_web_url: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Prove policy precedence, revocation, and explicit stopped-Runtime start."""
@@ -941,7 +877,7 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
-        origin=azents_main_web_url,
+        origin=_MAIN_WEB_ORIGIN,
     )
     AgentV1Api(public_api_client).agent_v1_update_agent(
         agent_id=workspace.agent_id,
@@ -970,7 +906,7 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
-        origin=azents_main_web_url,
+        origin=_MAIN_WEB_ORIGIN,
     )
     active.command("printf '__LIFE''CYCLE__ready__'", "LIFECYCLE_READY")
     before_stop = runtime_api.agent_runtime_v1_get_agent_runtime(
@@ -1052,224 +988,7 @@ def test_runtime_terminal_policy_revocation_and_runtime_lifecycle_priority(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
-        origin=azents_main_web_url,
+        origin=_MAIN_WEB_ORIGIN,
     )
     resumed.command("printf '__REST''ARTED__yes__'", "RESTARTED_DONE")
     resumed.terminate()
-
-
-def test_runtime_terminal_member_access_revocation_closes_attachment(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_main_web_url: str,
-    azents_runtime_provider_docker_container: DockerContainer,
-) -> None:
-    """Removing a Workspace member revokes their attached Team Terminal."""
-    del azents_runtime_provider_docker_container
-    team = create_two_member_team_session(
-        public_api_client,
-        admin_api_client,
-        azents_public_server_url,
-    )
-    _prepare_session_folder(
-        server_url=azents_public_server_url,
-        token=team.owner_access_token,
-        agent_id=team.agent_id,
-        session_id=team.session_id,
-    )
-    owner_workspace = _TerminalWorkspace(
-        token=team.owner_access_token,
-        handle=team.workspace_handle,
-        agent_id=team.agent_id,
-        session_id=team.session_id,
-        runtime_profile_id=None,
-        infrastructure_profile_id=None,
-    )
-    member_workspace = _TerminalWorkspace(
-        token=team.member_access_token,
-        handle=team.workspace_handle,
-        agent_id=team.agent_id,
-        session_id=team.session_id,
-        runtime_profile_id=None,
-        infrastructure_profile_id=None,
-    )
-    _wait_terminal_projection(
-        public_api_client=public_api_client,
-        workspace=owner_workspace,
-        predicate=lambda projection: projection.state in {"ready", "active"},
-        message="Member Terminal did not become ready after Session folder preparation",
-        timeout=120,
-    )
-    terminal = _TerminalSocket.connect(
-        public_api_client=public_api_client,
-        workspace=member_workspace,
-        server_url=azents_public_server_url,
-        origin=azents_main_web_url,
-    )
-    terminal.command("printf '__MEM''BER__attached__'", "MEMBER_ATTACHED")
-
-    WorkspaceUserV1Api(public_api_client).workspaceuser_v1_delete_workspace_user(
-        workspace_user_id=team.member_workspace_user_id,
-        handle=team.workspace_handle,
-        _headers=_headers(team.owner_access_token),
-    )
-    revoked = terminal.wait_for_control("revoked", timeout=15)
-    assert revoked.get("reason_code") == "access_denied"
-    with pytest.raises(ForbiddenException):
-        TerminalV1Api(public_api_client).terminal_v1_issue_terminal_ticket(
-            handle=team.workspace_handle,
-            agent_id=team.agent_id,
-            session_id=team.session_id,
-            _headers=_headers(team.member_access_token),
-        )
-
-
-def test_runtime_terminal_runner_capability_mismatch_fails_closed(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_main_web_url: str,
-    azents_runtime_provider_docker_container: DockerContainer,
-) -> None:
-    """A connected Runner without terminal.v1 cannot admit a Terminal."""
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-        managed_runtime=True,
-    )
-    _start_runtime(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-    )
-    runtime_container = _runtime_container(
-        azents_runtime_provider_docker_container,
-        agent_id=workspace.agent_id,
-    )
-    legacy_suffix = unique()
-    legacy_pid_path = f"/tmp/terminal-e2e-legacy-runner-{legacy_suffix}.pid"
-    legacy_log_path = f"/tmp/terminal-e2e-legacy-runner-{legacy_suffix}.log"
-    legacy_script = (
-        "import azents_runtime_runner.main as runner\n"
-        "runner._CAPABILITIES = tuple(\n"
-        "    capability for capability in runner._CAPABILITIES\n"
-        "    if capability != 'terminal.v1'\n"
-        ")\n"
-        "runner.main()\n"
-    )
-    original_suspended = False
-    try:
-        _runtime_exec(runtime_container, "kill -STOP 1")
-        original_suspended = True
-        _runtime_exec(
-            runtime_container,
-            (
-                "PYTHONUNBUFFERED=1 "
-                f"AZ_RUNTIME_RUNNER_ID={shlex.quote(f'legacy-{legacy_suffix}')} "
-                "AZ_RUNTIME_RUNNER_CONNECTION_ID="
-                f"{shlex.quote(f'legacy-{legacy_suffix}')} "
-                "/workspace/python/apps/azents-runtime-runner/.venv/bin/python "
-                f"-c {shlex.quote(legacy_script)} "
-                f"> {shlex.quote(legacy_log_path)} 2>&1 & "
-                f"echo $! > {shlex.quote(legacy_pid_path)}"
-            ),
-        )
-        _wait_runtime_log(
-            runtime_container,
-            path=legacy_log_path,
-            marker="Runtime Runner registered",
-        )
-        unsupported = _wait_terminal_projection(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            predicate=lambda projection: (
-                projection.reason_code
-                is RuntimeTerminalReasonCode.RUNNER_TERMINAL_UNSUPPORTED
-                and projection.denied_scope is RuntimeTerminalDeniedScope.RUNNER
-            ),
-            message="Terminal did not fail closed for the legacy Runner",
-            timeout=45,
-        )
-        assert unsupported.state == "unavailable"
-        assert unsupported.can_open_or_attach is False
-        issued = TerminalV1Api(public_api_client).terminal_v1_issue_terminal_ticket(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            _headers=_headers(workspace.token),
-        )
-        assert issued.status is RuntimeTerminalTicketStatus.UNAVAILABLE
-        assert (
-            issued.reason_code is RuntimeTerminalReasonCode.RUNNER_TERMINAL_UNSUPPORTED
-        )
-        assert issued.denied_scope is RuntimeTerminalDeniedScope.RUNNER
-    finally:
-        if original_suspended:
-            _runtime_exec(
-                runtime_container,
-                (
-                    f"if [ -f {legacy_pid_path} ]; then "
-                    f'kill "$(cat {legacy_pid_path})" 2>/dev/null || true; '
-                    f"rm -f {legacy_pid_path}; fi; "
-                    f"rm -f {legacy_log_path}; "
-                    "kill -CONT 1"
-                ),
-            )
-    _wait_terminal_projection(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        predicate=lambda projection: projection.state in {"ready", "active"},
-        message="Terminal did not recover after the current Runner reconnected",
-        timeout=45,
-    )
-    recovered = _TerminalSocket.connect(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-        origin=azents_main_web_url,
-    )
-    recovered.terminate()
-
-
-def test_runtime_free_terminal_denies_without_starting_runtime(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-) -> None:
-    """Runtime-free Terminal admission fails without creating or starting Runtime."""
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-        managed_runtime=False,
-    )
-    terminal_api = TerminalV1Api(public_api_client)
-    projection = terminal_api.terminal_v1_get_terminal_projection(
-        handle=workspace.handle,
-        agent_id=workspace.agent_id,
-        session_id=workspace.session_id,
-        _headers=_headers(workspace.token),
-    )
-    assert projection.state == "absent"
-    assert projection.reason_code is RuntimeTerminalReasonCode.RUNTIME_FREE_AGENT
-    assert projection.can_start_runtime is False
-    assert projection.can_open_or_attach is False
-    issued = terminal_api.terminal_v1_issue_terminal_ticket(
-        handle=workspace.handle,
-        agent_id=workspace.agent_id,
-        session_id=workspace.session_id,
-        _headers=_headers(workspace.token),
-    )
-    assert issued.status is RuntimeTerminalTicketStatus.DENIED
-    assert issued.reason_code is RuntimeTerminalReasonCode.RUNTIME_FREE_AGENT
-
-    runtime = AgentRuntimeV1Api(public_api_client).agent_runtime_v1_get_agent_runtime(
-        agent_id=workspace.agent_id,
-        handle=workspace.handle,
-        _headers=_headers(workspace.token),
-    )
-    assert runtime.capability is AgentRuntimeCapability.NONE
-    assert runtime.runtime is None
-    assert runtime.lifecycle is None

@@ -236,6 +236,7 @@ async def test_terminate_keeps_send_loop_alive_until_exit_is_delivered() -> None
     assert {"type": "exit", "reason": "caller", "exit_code": None} in [
         json.loads(item) for item in websocket.texts
     ]
+    assert websocket.closed == (1000, "Terminal exited")
 
 
 @pytest.mark.asyncio

@@ -247,6 +247,10 @@ class _TerminalSocketProtocolError(RuntimeError):
         self.reason = reason
 
 
+class _TerminalSocketComplete(Exception):
+    """Signal normal Terminal socket completion after the final control."""
+
+
 class _TerminalWebSocket(Protocol):
     async def accept(self, subprotocol: str | None = None) -> None: ...
 
@@ -364,6 +368,8 @@ async def _run_terminal_socket(
             task.result()
     except WebSocketDisconnect:
         pass
+    except _TerminalSocketComplete:
+        await websocket.close(reason="Terminal exited")
     except _TerminalSocketProtocolError as error:
         await websocket.close(code=error.code, reason=error.reason)
     except RuntimeTerminalAdmissionError as error:
@@ -498,6 +504,7 @@ async def _send_server_event(
                 websocket,
                 TerminalExitControl(reason=event.reason, exit_code=event.exit_code),
             )
+            raise _TerminalSocketComplete
         case RuntimeTerminalRevoked():
             await _send_control(
                 websocket,

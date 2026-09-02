@@ -3,7 +3,11 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReason
+from azents_runtime_control.runner_terminal import (
+    RunnerTerminalIdentity,
+    RunnerTerminalStreamRegistration,
+    RunnerTerminalTerminationReason,
+)
 
 from azents.runtime.terminal_coordination.data import (
     RuntimeTerminalAdmission,
@@ -56,6 +60,24 @@ class _Dispatcher:
 async def test_runner_replacement_invalidates_runtime_terminals() -> None:
     store = InMemoryRuntimeTerminalCoordinationStore()
     await store.admit_or_get(_admission(), admitted_at=_NOW)
+    await store.register_runner_stream(
+        RunnerTerminalStreamRegistration(
+            identity=RunnerTerminalIdentity(
+                terminal_id="terminal-1",
+                runtime_id="runtime-1",
+                runner_generation=1,
+            ),
+            stream_generation=1,
+            stream_nonce="nonce-1",
+            last_control_acknowledged_output_sequence=0,
+            highest_completely_applied_input_sequence=0,
+            partial_input_sequence=None,
+            partial_input_bytes_written=None,
+        ),
+        desired_generation=1,
+        connected_at=_NOW,
+        lease_seconds=45,
+    )
     observer = RuntimeTerminalRunnerGenerationObserver(
         store=store,
         clock=lambda: _NOW,
@@ -69,7 +91,7 @@ async def test_runner_replacement_invalidates_runtime_terminals() -> None:
 
     record = await store.get_terminal("terminal-1", current_time=_NOW)
     assert record is not None
-    assert record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+    assert record.lifecycle is RuntimeTerminalLifecycle.EXITED
     assert record.termination_reason is RunnerTerminalTerminationReason.RUNNER_REPLACED
 
 
@@ -93,7 +115,7 @@ async def test_policy_source_update_invalidates_indexed_terminals() -> None:
 
     record = await store.get_terminal("terminal-1", current_time=_NOW)
     assert record is not None
-    assert record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+    assert record.lifecycle is RuntimeTerminalLifecycle.EXITED
     assert record.termination_reason is RunnerTerminalTerminationReason.POLICY_REVOKED
 
 
@@ -112,7 +134,7 @@ async def test_runtime_lifecycle_change_invalidates_runtime_terminals() -> None:
 
     record = await store.get_terminal("terminal-1", current_time=_NOW)
     assert record is not None
-    assert record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+    assert record.lifecycle is RuntimeTerminalLifecycle.EXITED
     assert (
         record.termination_reason is RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
     )
@@ -135,7 +157,7 @@ async def test_authentication_session_revocation_invalidates_exact_terminals() -
 
     record = await store.get_terminal("terminal-1", current_time=_NOW)
     assert record is not None
-    assert record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+    assert record.lifecycle is RuntimeTerminalLifecycle.EXITED
     assert record.termination_reason is RunnerTerminalTerminationReason.ACCESS_REVOKED
     assert dispatcher.terminated == [
         ("terminal-1", RunnerTerminalTerminationReason.ACCESS_REVOKED)

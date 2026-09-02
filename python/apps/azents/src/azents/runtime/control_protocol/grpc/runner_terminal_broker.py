@@ -198,6 +198,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
         self._last_heartbeat_sequence = 0
         self._termination_sent = False
         self._closed = False
+        self._cleanup_completed = False
         self._outbound: asyncio.Queue[RunnerTerminalControlFrame] = asyncio.Queue(
             maxsize=_MAX_OUTBOUND_CONTROLS
         )
@@ -264,14 +265,37 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
         return self._control_frames()
 
     async def close(self) -> None:
-        """Detach only this stream generation and start the Runner grace."""
-        if self._closed:
+        """Finalize requested termination or detach this stream generation."""
+        if self._cleanup_completed:
             return
+        self._cleanup_completed = True
         self._closed = True
+        current_time = self._now()
+        record = await self._store.get_terminal(
+            self.terminal_id,
+            current_time=current_time,
+        )
+        if (
+            record is not None
+            and record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+        ):
+            finalized = await self._store.finalize_terminal(
+                self.terminal_id,
+                runner_stream_generation=self.stream_generation,
+                reason=(
+                    record.termination_reason
+                    or RunnerTerminalTerminationReason.PROTOCOL_VIOLATION
+                ),
+                exit_code=None,
+                finalized_at=current_time,
+                final_ttl_seconds=_RUNNER_STREAM_GRACE_SECONDS,
+            )
+            if finalized.status is RuntimeTerminalMutationStatus.APPLIED:
+                return
         await self._store.detach_runner_stream(
             self.terminal_id,
             runner_stream_generation=self.stream_generation,
-            detached_at=self._now(),
+            detached_at=current_time,
             grace_seconds=_RUNNER_STREAM_GRACE_SECONDS,
         )
 

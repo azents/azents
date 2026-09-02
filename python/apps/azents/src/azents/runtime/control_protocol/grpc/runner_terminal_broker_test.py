@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from azents_runtime_control.runner_terminal import (
     RunnerTerminalExit,
+    RunnerTerminalHeartbeat,
     RunnerTerminalIdentity,
     RunnerTerminalInputAcknowledgement,
     RunnerTerminalInputFrame,
@@ -131,6 +132,67 @@ async def test_broker_bridges_coordinated_input_output_and_detach() -> None:
     assert detached is not None
     assert detached.runner_stream is None
     assert detached.runner_stream_grace_expires_at == _NOW + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_closing_terminating_stream_finalizes_without_exit_frame() -> None:
+    store = InMemoryRuntimeTerminalCoordinationStore()
+    await store.admit_or_get(_admission(), admitted_at=_NOW)
+    broker = CoordinatedRuntimeRunnerTerminalBroker(
+        store=store,
+        clock=lambda: _NOW,
+        monotonic_clock=lambda: 0.0,
+    )
+    stream = await broker.connect(
+        _registration(),
+        authority=_authority(),
+        connected_at=_NOW,
+    )
+    terminated = await store.request_termination(
+        "terminal-1",
+        reason=RunnerTerminalTerminationReason.CALLER,
+        requested_at=_NOW,
+    )
+    assert terminated.status is RuntimeTerminalMutationStatus.APPLIED
+
+    await stream.close()
+
+    final = await store.get_terminal("terminal-1", current_time=_NOW)
+    assert final is not None
+    assert final.lifecycle is RuntimeTerminalLifecycle.EXITED
+    assert final.termination_reason is RunnerTerminalTerminationReason.CALLER
+    assert final.runner_stream is None
+
+
+@pytest.mark.asyncio
+async def test_closed_terminating_stream_still_finalizes_during_cleanup() -> None:
+    store = InMemoryRuntimeTerminalCoordinationStore()
+    await store.admit_or_get(_admission(), admitted_at=_NOW)
+    broker = CoordinatedRuntimeRunnerTerminalBroker(
+        store=store,
+        clock=lambda: _NOW,
+        monotonic_clock=lambda: 0.0,
+    )
+    stream = await broker.connect(
+        _registration(),
+        authority=_authority(),
+        connected_at=_NOW,
+    )
+    terminated = await store.request_termination(
+        "terminal-1",
+        reason=RunnerTerminalTerminationReason.CALLER,
+        requested_at=_NOW,
+    )
+    assert terminated.status is RuntimeTerminalMutationStatus.APPLIED
+
+    await stream.receive(RunnerTerminalHeartbeat(monotonic_sequence=1))
+    await stream.close()
+
+    final = await store.get_terminal("terminal-1", current_time=_NOW)
+    assert final is not None
+    assert final.lifecycle is RuntimeTerminalLifecycle.EXITED
+    assert final.termination_reason is RunnerTerminalTerminationReason.CALLER
+    assert final.runner_stream is None
 
 
 @pytest.mark.asyncio
