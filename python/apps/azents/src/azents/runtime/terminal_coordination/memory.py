@@ -1297,8 +1297,6 @@ def _finalization_authorized(
     return (
         record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
         and record.runner_stream is None
-        and record.runner_stream_grace_expires_at is not None
-        and record.runner_stream_grace_expires_at <= finalized_at
     )
 
 

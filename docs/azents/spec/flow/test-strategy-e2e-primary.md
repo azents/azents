@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-01
-spec_version: 42
+last_verified_at: 2026-09-02
+spec_version: 43
 ---
 
 # E2E Primary Test Strategy
@@ -281,6 +281,14 @@ Always-on required CI does not depend on external credentials.
 - Deterministic Optional Managed Runtime E2E creates a Runtime-free Agent through public APIs,
   executes and persists a model-only turn, verifies no logical or physical Runtime appears, and
   confirms Runtime-backed Workspace projection remains unavailable.
+- Interactive Runtime Terminal required E2E creates product state through Public/Admin
+  APIs and uses the real Docker Runtime Provider, Runtime Control, Runner, and Linux
+  PTY. Exactly two focused journeys verify the byte/control protocol, working
+  directory, resize, Ctrl-C, bounded reattachment, explicit termination, and Runtime
+  stop/start generation authority. Policy hierarchy, access revocation, Runtime-free
+  denial, Runner capability mismatch, responsive presentation, and Web wiring remain
+  in deterministic backend, protocol, component, and story coverage rather than
+  independent full-stack journeys.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - Optional Managed Runtime Web Surface E2E creates all product state through public/admin APIs,
@@ -355,6 +363,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-02** (spec_version 43) — Added two focused real-Docker Runtime
+  Terminal journeys for protocol behavior and Runtime lifecycle authority while
+  retaining policy and Web presentation coverage in deterministic lower layers.
 - **2026-09-01** (spec_version 42) — Reused compatible Subagent E2E Workspace and
   Agent Runtime setup across isolated journey Sessions, and replaced the interrupted
   child wall-clock sleep with the existing explicit Runtime-hook barrier.

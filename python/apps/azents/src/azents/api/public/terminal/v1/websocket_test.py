@@ -15,6 +15,8 @@ from azents.api.public.terminal.v1 import (
     _CLOSE_REVOKED,
     _receive_attach,
     _receive_loop,
+    _revalidate_loop,
+    _run_terminal_socket,
     _send_initial_state,
     _SocketProgress,
     _TerminalSocketProtocolError,
@@ -23,6 +25,7 @@ from azents.api.public.terminal.v1 import (
 from azents.api.public.terminal.v1.wire import TERMINAL_WEBSOCKET_SUBPROTOCOL
 from azents.services.runtime_terminal.data import (
     RuntimeTerminalAttachmentAccepted,
+    RuntimeTerminalExited,
     RuntimeTerminalLifecycle,
     RuntimeTerminalOutput,
     RuntimeTerminalReasonCode,
@@ -87,6 +90,7 @@ class _Attachment:
         self.acks: list[int] = []
         self.heartbeats: list[int] = []
         self.terminated = False
+        self.terminated_event = asyncio.Event()
 
     def replay(self) -> tuple[RuntimeTerminalOutput, ...]:
         return (RuntimeTerminalOutput(sequence=6, data=b"\xffreplay"),)
@@ -105,6 +109,7 @@ class _Attachment:
 
     async def terminate(self) -> None:
         self.terminated = True
+        self.terminated_event.set()
 
     async def revoke(self, reason_code: RuntimeTerminalReasonCode) -> None:
         del reason_code
@@ -175,7 +180,10 @@ async def test_receive_loop_routes_typed_controls_and_binary_input() -> None:
         changed=asyncio.Event(),
     )
 
-    await _receive_loop(websocket, attachment, progress)
+    task = asyncio.create_task(_receive_loop(websocket, attachment, progress))
+    await asyncio.wait_for(attachment.terminated_event.wait(), timeout=1)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
 
     assert attachment.inputs == [(1, b"pwd\n")]
     assert attachment.resizes == [(1, 120, 40)]
@@ -185,6 +193,89 @@ async def test_receive_loop_routes_typed_controls_and_binary_input() -> None:
     assert json.loads(websocket.texts[0]) == {
         "type": "heartbeat_ack",
         "sequence": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_terminate_keeps_send_loop_alive_until_exit_is_delivered() -> None:
+    websocket = _WebSocket(
+        [
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({"type": "terminate"}),
+            }
+        ]
+    )
+
+    class _TerminatingAttachment(_Attachment):
+        async def events(self) -> AsyncIterator[RuntimeTerminalServerEvent]:
+            await self.terminated_event.wait()
+            yield RuntimeTerminalExited(reason="caller", exit_code=None)
+
+    attachment = _TerminatingAttachment()
+    service = AsyncMock()
+    progress = _SocketProgress(
+        highest_output_sent=6,
+        highest_output_acknowledged=6,
+        output_acknowledged_at=time.monotonic(),
+        changed=asyncio.Event(),
+    )
+    del progress
+
+    await asyncio.wait_for(
+        _run_terminal_socket(
+            websocket,
+            service,
+            AsyncMock(),
+            attachment,
+        ),
+        timeout=1,
+    )
+
+    assert attachment.terminated is True
+    assert {"type": "exit", "reason": "caller", "exit_code": None} in [
+        json.loads(item) for item in websocket.texts
+    ]
+    assert websocket.closed == (1000, "Terminal exited")
+
+
+@pytest.mark.asyncio
+async def test_revalidation_sends_revoked_before_terminating_pty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    class _OrderedWebSocket(_WebSocket):
+        async def send_text(self, data: str) -> None:
+            order.append("revoked")
+            await super().send_text(data)
+
+    class _OrderedAttachment(_Attachment):
+        async def revoke(self, reason_code: RuntimeTerminalReasonCode) -> None:
+            order.append("terminate")
+            await super().revoke(reason_code)
+
+    monkeypatch.setattr(
+        "azents.api.public.terminal.v1._REVALIDATION_SECONDS",
+        0,
+    )
+    websocket = _OrderedWebSocket()
+    attachment = _OrderedAttachment()
+    service = AsyncMock()
+    service.revalidate.return_value = RuntimeTerminalReasonCode.ACCESS_DENIED
+
+    with pytest.raises(_TerminalSocketProtocolError):
+        await _revalidate_loop(
+            websocket,
+            service,
+            AsyncMock(),
+            attachment,
+        )
+
+    assert order == ["revoked", "terminate"]
+    assert json.loads(websocket.texts[0]) == {
+        "type": "revoked",
+        "reason_code": "access_denied",
     }
 
 

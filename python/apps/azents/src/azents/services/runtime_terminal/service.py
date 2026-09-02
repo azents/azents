@@ -8,6 +8,7 @@ from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReas
 
 from azents.runtime.terminal_coordination.data import (
     MAX_REPLAY_BYTES,
+    TERMINAL_FINAL_TTL_SECONDS,
     RuntimeTerminalMutationStatus,
     RuntimeTerminalRecord,
     RuntimeTerminalTicket,
@@ -37,6 +38,7 @@ from azents.services.runtime_terminal.data import (
     RuntimeTerminalProjectionState,
     RuntimeTerminalReasonCode,
     RuntimeTerminalResource,
+    RuntimeTerminalRevoked,
     RuntimeTerminalServerEvent,
     RuntimeTerminalSocketAdmission,
     RuntimeTerminalStatusChanged,
@@ -294,13 +296,14 @@ class RuntimeTerminalService:
     ) -> RuntimeTerminalAttachment:
         """Create or attach the Session singleton through volatile coordination."""
         now = self._now()
+        requested_admission = _coordination_admission(
+            admission.authority,
+            terminal_id=self.terminal_id_factory(),
+            stream_nonce=self.stream_nonce_factory(),
+            created_at=now,
+        )
         admitted = await self.coordination.admit_or_get(
-            _coordination_admission(
-                admission.authority,
-                terminal_id=self.terminal_id_factory(),
-                stream_nonce=self.stream_nonce_factory(),
-                created_at=now,
-            ),
+            requested_admission,
             admitted_at=now,
         )
         if admitted.status is not RuntimeTerminalMutationStatus.APPLIED:
@@ -324,9 +327,30 @@ class RuntimeTerminalService:
                     reason=stale_reason,
                     requested_at=now,
                 )
-            raise RuntimeTerminalAdmissionError(
-                RuntimeTerminalReasonCode.TERMINAL_REVOKED
-            )
+                if terminated.value.runner_stream is None:
+                    finalized = await self.coordination.finalize_terminal(
+                        record.admission.terminal_id,
+                        runner_stream_generation=None,
+                        reason=stale_reason,
+                        exit_code=None,
+                        finalized_at=now,
+                        final_ttl_seconds=TERMINAL_FINAL_TTL_SECONDS,
+                    )
+                    if finalized.status is RuntimeTerminalMutationStatus.APPLIED:
+                        replacement = await self.coordination.admit_or_get(
+                            requested_admission,
+                            admitted_at=now,
+                        )
+                        if (
+                            replacement.status is RuntimeTerminalMutationStatus.APPLIED
+                            and replacement.value is not None
+                        ):
+                            record = replacement.value
+                            stale_reason = None
+            if stale_reason is not None:
+                raise RuntimeTerminalAdmissionError(
+                    RuntimeTerminalReasonCode.TERMINAL_REVOKED
+                )
         attached = await self.coordination.attach_browser(
             record.admission.terminal_id,
             user_id=admission.claims.user_id,
@@ -583,6 +607,10 @@ class CoordinatedRuntimeTerminalAttachment:
                     for item in batch.outputs:
                         self.output_sequence = item.sequence
                         yield _output(item)
+            revocation_reason = _revocation_reason_code(record.termination_reason)
+            if revocation_reason is not None:
+                yield RuntimeTerminalRevoked(reason_code=revocation_reason)
+                return
             if record.lifecycle is CoordinationLifecycle.EXITED:
                 yield RuntimeTerminalExited(
                     reason=(
@@ -803,6 +831,16 @@ def _revocation_termination_reason(
     }:
         return RunnerTerminalTerminationReason.POLICY_REVOKED
     return RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
+
+
+def _revocation_reason_code(
+    reason: RunnerTerminalTerminationReason | None,
+) -> RuntimeTerminalReasonCode | None:
+    if reason is RunnerTerminalTerminationReason.ACCESS_REVOKED:
+        return RuntimeTerminalReasonCode.ACCESS_DENIED
+    if reason is RunnerTerminalTerminationReason.POLICY_REVOKED:
+        return RuntimeTerminalReasonCode.TERMINAL_DISABLED
+    return None
 
 
 def _require_applied(status: RuntimeTerminalMutationStatus) -> None:

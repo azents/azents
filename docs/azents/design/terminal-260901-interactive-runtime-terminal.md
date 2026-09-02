@@ -1,7 +1,7 @@
 ---
 title: "Interactive Runtime Terminal Design"
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 tags: [terminal, runtime, session, websocket, security, frontend, testenv]
 document_role: primary
 document_type: design
@@ -349,7 +349,8 @@ Rollback before the column drop is ordinary application rollback. Rollback after
 
 ### PR 5 — E2E, Specs, and final cleanup
 
-- required API and Web E2E matrix;
+- focused required Terminal protocol and Runtime-lifecycle E2E;
+- deterministic backend and Web component coverage for the remaining matrix;
 - Living Spec updates and spec review;
 - Helm timeout/connection documentation and render tests where chart values change;
 - removal/absence verification;
@@ -407,24 +408,15 @@ Application heartbeat and reconnect behavior do not assume a specific Ingress co
 | Public API + real Docker Runtime | Open PTY in Session working folder | `pwd`, UTF-8 echo, shell PID, exit metadata |
 | Public API + real Docker Runtime | Resize and Ctrl-C | `stty size` matches requested rows/columns; foreground sleep interrupted while shell survives |
 | Public API + real Docker Runtime | Browser/stream reconnect | same shell PID after reconnect; bounded replay status and ordered output |
-| Public API + real Docker Runtime | Runtime lifecycle priority | stop/restart proceeds with active Terminal; old PTY ends; Workspace sentinel persists according to existing lifecycle |
-| Public API | Policy hierarchy | each Provider/Workspace/Agent deny blocks open; lower allow cannot override; raw and effective projections are correct |
-| Public API | Active revocation | an open Terminal exits within the revocation bound after each policy/access change |
-| Public API | Runtime-free Agent | no ticket, no Terminal state, no Runtime auto-start |
-| Public API | Runner capability mismatch | old-capability Runner fails closed without PTY allocation |
-| Main Web desktop | Collapsed/Docked/Focused | one PTY persists, dock resizes, terminate differs from collapse |
-| Main Web reload | Reattach | same active Terminal and shell PID; truncation state is visible when forced |
-| Main Web stopped Runtime | Explicit Start | no start before click; connect after lifecycle reaches ready |
-| Main Web mobile | Focused-only flow | no Docked state, key accessory, viewport resize, Chat return, terminate |
-| Main Web management | Three policy levels | authorized controls, effective denial scope, active launcher removal/revocation |
+| Public API + real Docker Runtime | Runtime lifecycle priority | stop/start proceeds with an active Terminal; old PTY ends; a new Terminal attaches to the new Runtime generation |
 
 ### E2E plan
 
-The existing `required` Docker Runtime suite gains protocol-level Terminal journeys using the real Public API, Runtime Control, Docker Provider, Runner, and PTY. A typed Python WebSocket client verifies exact bytes and control frames without depending on browser renderer internals.
+The existing `required` Docker Runtime suite gains two focused protocol-level Terminal journeys using the real Public API, Runtime Control, Docker Provider, Runner, and PTY. A typed Python WebSocket client verifies exact bytes and control frames without depending on browser renderer internals.
 
-The existing `web` Runtime capability journey is extended using its product-created Workspace/Profile/Agent and Runtime lifecycle helpers. Selenium interacts with the xterm input textarea through stable accessible selectors and verifies product status, presentation, lifecycle, and policy surfaces. Byte-perfect PTY assertions remain in the protocol E2E; Web E2E proves browser wiring and user-visible flow.
+Policy hierarchy, active revocation, Runtime-free denial, Runner capability mismatch, responsive presentation, reconnect state transitions, management controls, and xterm wiring remain in deterministic backend, protocol, container, component, and story coverage. They do not add independent full-stack E2E journeys because those journeys duplicate Runtime creation and Web image startup without adding a distinct integration boundary.
 
-All state is created through Public/Admin APIs or visible UI. Tests never write directly to PostgreSQL. No external credentials or live prerequisite snapshot is required. The existing Docker Runtime Provider, Web TLS gateway, and worktree-built images are sufficient.
+All E2E state is created through Public/Admin APIs. Tests never write directly to PostgreSQL. No external credentials or live prerequisite snapshot is required. The required journey uses the existing Docker Runtime Provider and worktree-built Server, Runner, and Provider images; it supplies the configured Web origin without starting Web or Admin Web images.
 
 ### Deterministic lower-level coverage
 
@@ -438,7 +430,7 @@ All state is created through Public/Admin APIs or visible UI. Tests never write 
 
 ### CI policy
 
-Every implementation PR runs its path-selected Python, TypeScript, migration, Docker build, Helm, required E2E, and Web E2E checks. The full stack is created first. CI is then monitored across all PRs with `gh`; failures are fixed on the owning branch and later branches are rebased with the repository stacked-PR script. Optional/live tests are not part of this feature and cannot substitute for required credential-free E2E.
+Every implementation PR runs its path-selected Python, TypeScript, migration, Docker build, Helm, required E2E, and Web E2E checks. Terminal coverage must not increase aggregate required-plus-Web E2E execution time by 5% or more compared with its direct predecessor. Full-stack journeys are limited to integration boundaries that deterministic lower-level tests cannot cover. CI is then monitored across all PRs with `gh`; failures are fixed on the owning branch and later branches are rebased with the repository stacked-PR script. Optional/live tests are not part of this feature and cannot substitute for required credential-free E2E.
 
 ## Removal and Replacement
 

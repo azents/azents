@@ -7,6 +7,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from azents_runtime_control.grpc_runner_terminal_client import (
+    RuntimeRunnerTerminalStreamClosed,
+)
 from azents_runtime_control.runner_terminal import (
     RunnerTerminalControlFrame,
     RunnerTerminalEventFrame,
@@ -169,6 +172,10 @@ class _Client:
         self.sent.append(frame)
         self.sent_event.set()
 
+    async def finish(self, frame: RunnerTerminalEventFrame) -> None:
+        self.sent.append(frame)
+        self.sent_event.set()
+
     async def close(self) -> None:
         self.closed.set()
 
@@ -186,6 +193,13 @@ class _HangingClient(_Client):
         self.started.set()
         await asyncio.Future()
         raise AssertionError("unreachable")
+
+
+class _FailingFinishClient(_Client):
+    async def finish(self, frame: RunnerTerminalEventFrame) -> None:
+        self.sent.append(frame)
+        self.sent_event.set()
+        raise RuntimeRunnerTerminalStreamClosed("final event flush failed")
 
 
 @pytest.mark.asyncio
@@ -226,8 +240,13 @@ async def test_open_intent_allocates_pty_and_bridges_input_ack() -> None:
         )
     )
     await asyncio.wait_for(client.closed.wait(), timeout=1)
+    await asyncio.wait_for(process.closed_event.wait(), timeout=1)
     assert await registry.get(terminal_id="terminal-1") is None
     assert process.closed is True
+    assert client.sent[-1] == RunnerTerminalExit(
+        reason=RunnerTerminalTerminationReason.CALLER,
+        exit_code=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -342,6 +361,60 @@ async def test_terminate_intent_returns_before_pty_cleanup_finishes() -> None:
     terminate_gate.set()
     await asyncio.wait_for(clients[0].closed.wait(), timeout=1)
     await asyncio.wait_for(process.closed_event.wait(), timeout=1)
+    assert clients[0].sent == [
+        RunnerTerminalExit(
+            reason=RunnerTerminalTerminationReason.CALLER,
+            exit_code=None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_final_exit_reconnects_after_one_failed_flush() -> None:
+    process = _Process()
+    clients: list[_Client] = []
+    client_created = asyncio.Event()
+    reconnected = asyncio.Event()
+
+    def client_factory() -> _Client:
+        client: _Client
+        if not clients:
+            client = _FailingFinishClient()
+        else:
+            client = _Client()
+            reconnected.set()
+        clients.append(client)
+        client_created.set()
+        return client
+
+    manager, _registry = _manager(
+        backend=_Backend(process),
+        client_factory=client_factory,
+    )
+    await manager.handle_open(_open_intent())
+    await asyncio.wait_for(client_created.wait(), timeout=1)
+    await asyncio.wait_for(clients[0].started.wait(), timeout=1)
+
+    await manager.handle_terminate(
+        RunnerTerminalTerminateIntent(
+            identity=_identity(),
+            reason=RunnerTerminalTerminationReason.CALLER,
+        )
+    )
+    await asyncio.wait_for(reconnected.wait(), timeout=2)
+    await asyncio.wait_for(clients[1].started.wait(), timeout=1)
+    await asyncio.wait_for(clients[1].closed.wait(), timeout=1)
+
+    expected_exit = RunnerTerminalExit(
+        reason=RunnerTerminalTerminationReason.CALLER,
+        exit_code=None,
+    )
+    assert clients[0].sent == [expected_exit]
+    assert clients[1].sent == [expected_exit]
+    assert clients[0].registration is not None
+    assert clients[0].registration.stream_generation == 1
+    assert clients[1].registration is not None
+    assert clients[1].registration.stream_generation == 2
 
 
 @pytest.mark.asyncio

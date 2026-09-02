@@ -247,6 +247,10 @@ class _TerminalSocketProtocolError(RuntimeError):
         self.reason = reason
 
 
+class _TerminalSocketComplete(Exception):
+    """Signal normal Terminal socket completion after the final control."""
+
+
 class _TerminalWebSocket(Protocol):
     async def accept(self, subprotocol: str | None = None) -> None: ...
 
@@ -364,6 +368,8 @@ async def _run_terminal_socket(
             task.result()
     except WebSocketDisconnect:
         pass
+    except _TerminalSocketComplete:
+        await websocket.close(reason="Terminal exited")
     except _TerminalSocketProtocolError as error:
         await websocket.close(code=error.code, reason=error.reason)
     except RuntimeTerminalAdmissionError as error:
@@ -452,7 +458,9 @@ async def _receive_loop(
                 )
             case TerminalTerminateControl():
                 await attachment.terminate()
-                return
+                # Keep the receive side alive until the send loop delivers the
+                # asynchronous Runner exit event and owns socket completion.
+                await asyncio.Future()
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -496,6 +504,7 @@ async def _send_server_event(
                 websocket,
                 TerminalExitControl(reason=event.reason, exit_code=event.exit_code),
             )
+            raise _TerminalSocketComplete
         case RuntimeTerminalRevoked():
             await _send_control(
                 websocket,
@@ -521,11 +530,13 @@ async def _revalidate_loop(
         await asyncio.sleep(_REVALIDATION_SECONDS)
         reason = await service.revalidate(admission)
         if reason is not None:
-            await attachment.revoke(reason)
-            await _send_control(
-                websocket,
-                TerminalRevokedControl(reason_code=reason),
-            )
+            try:
+                await _send_control(
+                    websocket,
+                    TerminalRevokedControl(reason_code=reason),
+                )
+            finally:
+                await attachment.revoke(reason)
             raise _TerminalSocketProtocolError(
                 code=_CLOSE_REVOKED,
                 reason="Terminal authority is revoked",

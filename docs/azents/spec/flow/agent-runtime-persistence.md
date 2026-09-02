@@ -12,12 +12,16 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/rdb/models/agent.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7de5749cadd5_drop_shell_enabled_from_agents.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/agent_runtime_add/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/agent_runtime_system_metrics/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
@@ -39,7 +43,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-09-01
-spec_version: 32
+spec_version: 33
 ---
 
 # Agent Runtime Persistence
@@ -61,6 +65,15 @@ An Agent stores capability `none`, `managed`, or `removing` independently from o
 Runtime Profile selection or no selection. Existing Agents were backfilled to `managed`; new Agents
 default to `none` and do not create a logical Runtime. Explicit add from `none` requires an
 available Profile and creates or rearms the logical row in stopped desired state.
+
+Interactive Terminal policy is independent durable configuration on infrastructure
+Profile, Workspace Profile, and Agent rows. Each default-true flag contributes to a
+server-computed effective policy and bounded denial scope, but none contributes to the
+Runtime configuration digest, desired/applied slot, lifecycle generation, or Runtime
+Toolkit authority. Terminal-only policy mutation therefore does not recreate or
+reconcile physical compute. The obsolete per-Agent Shell policy column and API
+contract do not exist; managed capability plus version is the sole Runtime Toolkit
+gate.
 
 The logical Runtime persists durable Provider routing IDs and a monotonic
 `configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
@@ -234,7 +247,7 @@ correctness; Redis may only accelerate wake-up.
 Removal clears Session Project/worktree metadata, Runtime-only Toolkit projections, Agent Project
 defaults/presets/catalog, and automatic Project policy items while preserving the automatic policy
 settings row. It terminally invalidates every retained `pending` or `bound` Session folder binding.
-After exact physical acknowledgement, finalization clears Profile selection, keeps shell disabled,
+After exact physical acknowledgement, finalization clears Profile selection,
 deletes the bounded configuration-state row, keeps the Runtime-owned sequence high-water mark,
 and sets capability to `none`.
 
@@ -391,6 +404,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-01 (spec_version=33)** — Separated three-level interactive-Terminal
+  policy from Runtime configuration and Toolkit authority, and removed the obsolete
+  Agent Shell column and removal-finalizer mutation.
 - **2026-09-01 (spec_version=32)** — Replaced HOME-relative Nix state with Pixi
   global environments, exposed commands, manifest, and cache under the existing
   persistent Runner HOME.

@@ -54,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
@@ -65,10 +66,13 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
+  - python/apps/azents/src/azents/api/public/terminal/**
   - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/features/runtime-terminal/**
+  - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py
   - python/apps/azents/src/azents/engine/tools/skill.py
@@ -106,8 +110,11 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
+  - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-02
-spec_version: 158
+spec_version: 159
 ---
 
 # Conversation & Events
@@ -179,6 +186,30 @@ Its managed working-folder binding is an independent lifecycle:
 
 Only `pending` may become `bound`, using current-generation Runner evidence. `none` and
 `invalidated` never bind after a later Runtime add.
+
+### Session-owned interactive Terminal
+
+One active interactive Terminal may exist per concrete `AgentSession`. Terminal identity is
+independent from Session identity and is indexed by Session, Agent, Runtime, desired
+generation, Runner generation, and attachment generation. The browser first reads a
+content-free projection, receives a one-time resource-bound ticket, and then uses the
+dedicated `azents.terminal.v1` WebSocket. Terminal frames never enter Chat history,
+live Chat actions, Mailbox, operation events, Goal, Todo, or context compaction.
+
+The active PTY and bounded input/output replay state are volatile. Redis and in-memory
+coordination implementations share one contract; loss fails the Terminal path closed
+without changing durable Session, Runtime, Project, or Agent Workspace state. Browser
+disconnect releases only the attachment and starts the bounded reattach grace. A
+reattachment keeps the Terminal ID and PTY when generation and authority remain current.
+Explicit terminate ends the PTY; collapsing or moving between docked and focused
+presentation does not.
+
+Terminal availability is effective server authority. Runtime-free Sessions are absent;
+stopped Runtime is explicit and never auto-started; policy, access, Runner capability,
+working-folder, lifecycle, generation, and coordination failures are bounded denial
+states. Runtime stop, restart, reset, recreation, repair, removal, Runner replacement,
+Session archive, or access revocation invalidates the Terminal without becoming a
+Runtime lifecycle lock or wait condition.
 
 ## 2. AgentSession
 
@@ -1235,6 +1266,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-02** — v159. Added Session-owned interactive Terminal identity,
+  dedicated ticket/WebSocket transport, volatile reattachment/replay authority,
+  explicit termination, and Runtime-priority invalidation.
 - **2026-09-01** — v157. Included External Channel invocation-role messages in
   compaction summary input and the mixed-source last-five Recent User Messages
   section while excluding context-role messages from both.

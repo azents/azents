@@ -16,6 +16,7 @@ from azents.services.runtime_terminal.data import (
     RuntimeTerminalProjectionState,
     RuntimeTerminalReasonCode,
     RuntimeTerminalResource,
+    RuntimeTerminalRevoked,
     RuntimeTerminalTicketStatus,
 )
 from azents.services.runtime_terminal.service import (
@@ -187,8 +188,8 @@ async def test_attach_admits_session_singleton_and_dispatches_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reattach_rejects_stale_runtime_generation_singleton() -> None:
-    """Fresh authority cannot attach to an old-generation Session singleton."""
+async def test_reattach_replaces_stale_runtime_generation_singleton() -> None:
+    """Fresh authority replaces an old-generation singleton without a stream."""
     service, coordination, dispatcher, resolver = _service(_authority())
     first_ticket = await service.issue_ticket(
         user_id="user-1",
@@ -213,6 +214,7 @@ async def test_reattach_rejects_stale_runtime_generation_singleton() -> None:
         resolver.authority,
         desired_generation=9,
     )
+    service.terminal_id_factory = lambda: "terminal-2"
     second_ticket = await service.issue_ticket(
         user_id="user-1",
         authentication_session_id="auth-session-1",
@@ -224,23 +226,24 @@ async def test_reattach_rejects_stale_runtime_generation_singleton() -> None:
         resource=_RESOURCE,
     )
 
-    with pytest.raises(RuntimeTerminalAdmissionError) as error:
-        await service.attach(
-            second_admission,
-            RuntimeTerminalAttachRequest(
-                columns=80,
-                rows=24,
-                last_output_sequence=None,
-            ),
-        )
-
-    assert error.value.reason_code is RuntimeTerminalReasonCode.TERMINAL_REVOKED
-    record = await coordination.get_terminal("terminal-1", current_time=_NOW)
-    assert record is not None
-    assert (
-        record.termination_reason is RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
+    second = await service.attach(
+        second_admission,
+        RuntimeTerminalAttachRequest(
+            columns=80,
+            rows=24,
+            last_output_sequence=None,
+        ),
     )
+
+    old_record = await coordination.get_terminal("terminal-1", current_time=_NOW)
+    assert old_record is not None
+    assert (
+        old_record.termination_reason
+        is RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
+    )
+    assert second.accepted.terminal_id == "terminal-2"
     assert dispatcher.terminated == ["terminal-1"]
+    await second.close()
 
 
 @pytest.mark.asyncio
@@ -360,6 +363,52 @@ async def test_revalidation_revokes_runtime_and_policy_authority_changes() -> No
         await service.revalidate(admission)
         is RuntimeTerminalReasonCode.TERMINAL_DISABLED
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("termination_reason", "reason_code"),
+    [
+        (
+            RunnerTerminalTerminationReason.ACCESS_REVOKED,
+            RuntimeTerminalReasonCode.ACCESS_DENIED,
+        ),
+        (
+            RunnerTerminalTerminationReason.POLICY_REVOKED,
+            RuntimeTerminalReasonCode.TERMINAL_DISABLED,
+        ),
+    ],
+)
+async def test_attachment_projects_coordinated_revocation_before_exit(
+    termination_reason: RunnerTerminalTerminationReason,
+    reason_code: RuntimeTerminalReasonCode,
+) -> None:
+    service, coordination, _dispatcher, _resolver = _service(_authority())
+    ticket = await service.issue_ticket(
+        user_id="user-1",
+        authentication_session_id="auth-session-1",
+        resource=_RESOURCE,
+    )
+    assert ticket.ticket is not None
+    admission = await service.consume_ticket(ticket=ticket.ticket, resource=_RESOURCE)
+    attachment = await service.attach(
+        admission,
+        RuntimeTerminalAttachRequest(
+            columns=80,
+            rows=24,
+            last_output_sequence=None,
+        ),
+    )
+    await coordination.request_termination(
+        "terminal-1",
+        reason=termination_reason,
+        requested_at=_NOW,
+    )
+
+    event = await anext(attachment.events())
+
+    assert event == RuntimeTerminalRevoked(reason_code=reason_code)
+    await attachment.close()
 
 
 def _service(

@@ -12,7 +12,9 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
+  - python/apps/azents/src/azents/api/public/terminal/**
   - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/services/agent_runtime_removal/**
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -46,12 +48,15 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
+  - typescript/apps/azents-web/src/features/runtime-terminal/**
+  - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - testenv/azents/e2e/src/support/runtime_profiles.py
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
+  - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-08-28
-spec_version: 71
+last_verified_at: 2026-09-01
+spec_version: 72
 ---
 
 # Agent Runtime Control
@@ -86,6 +91,37 @@ flowchart LR
     Backend --> Runner
     Store --> Queue
 ```
+
+## Interactive Terminal Control
+
+The Runner advertises hidden capability `terminal.v1`. Runtime Control carries only
+bounded open and terminate intents on the existing Runner Control stream. Each active
+Terminal then uses one dedicated outbound bidirectional Runner gRPC stream for opaque
+PTY input/output, resize, acknowledgement, status, and exit events. Existing Runner
+operation and Runtime transfer streams never carry PTY bytes.
+
+Terminal admission freezes Runtime ID, desired generation, current Runner connection
+generation, Session working-folder authority, and Terminal identity. The Runner PTY
+registry rejects stale generations, duplicate opens, malformed sequences, and unknown
+Terminal IDs. Control-stream disconnect or a newer Runner generation terminates every
+old-generation PTY. A data-stream interruption may reconnect only during the bounded
+grace while Control generation remains current; ordered input and replay evidence
+resume the same PTY without replaying accepted input.
+
+Runtime lifecycle always has priority. Stop, restart, reset, recreation, repair,
+removal, and Runner replacement publish Terminal invalidation and proceed immediately;
+they never acquire a Terminal lock, wait for browser acknowledgement, or wait for PTY
+cleanup. The Linux Runner owns PTY allocation, process-session cleanup, TERM/KILL
+escalation, idle and maximum lifetime, and complete Session-wide teardown. Shared
+protocol contracts remain OS-neutral so another Runner backend can implement the same
+surface later.
+
+Terminal coordination is separate from ordinary Runtime operation coordination while
+sharing the Redis-or-memory deployment choice. It stores bounded volatile attachment,
+sequence, replay, quota, heartbeat, and revocation state only. PostgreSQL receives no
+Terminal bytes or transcript. Structured logs and metrics retain identifiers, bounded
+lifecycle reasons, durations, byte counts, truncation, quota, and cleanup outcomes,
+never command, output, environment, or working-directory content.
 
 ## Runtime File Transfer
 
@@ -756,6 +792,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-01 (spec_version=72)** — Added `terminal.v1`, dedicated per-Terminal
+  Runner gRPC streams, volatile fenced coordination, Linux PTY lifecycle, privacy
+  boundaries, and Runtime-priority invalidation without lifecycle locks.
 - **2026-08-28** (spec_version 71) — Made connection registration and
   operation request admission atomic, bound operation metadata to the exact target
   subject and request identity, and generation-fenced Runner cancellation/start plus

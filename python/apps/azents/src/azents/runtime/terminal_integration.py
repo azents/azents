@@ -9,7 +9,10 @@ from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReas
 
 from azents.runtime.control_protocol.service import RuntimeRunnerGenerationObserver
 from azents.runtime.terminal_coordination.data import (
+    TERMINAL_FINAL_TTL_SECONDS,
     RuntimeTerminalInvalidationSource,
+    RuntimeTerminalLifecycle,
+    RuntimeTerminalMutationStatus,
 )
 from azents.runtime.terminal_coordination.store import (
     RuntimeTerminalCoordinationStore,
@@ -123,11 +126,18 @@ class RuntimeTerminalRunnerGenerationObserver:
         *,
         reason: RunnerTerminalTerminationReason,
     ) -> None:
-        await self._store.invalidate(
+        now = _aware_now(self._clock)
+        invalidated = await self._store.invalidate(
             source=RuntimeTerminalInvalidationSource.RUNTIME,
             source_id=runtime_id,
             reason=reason,
-            invalidated_at=_aware_now(self._clock),
+            invalidated_at=now,
+        )
+        await _finalize_runner_authority_invalidated(
+            self._store,
+            invalidated.terminal_ids,
+            reason=reason,
+            finalized_at=now,
         )
 
 
@@ -302,6 +312,69 @@ async def _dispatch_invalidated(
             reason=reason,
             requested_at=requested_at,
         )
+        current = await store.get_terminal(terminal_id, current_time=requested_at)
+        if (
+            current is not None
+            and current.lifecycle is RuntimeTerminalLifecycle.TERMINATING
+            and current.runner_stream is None
+        ):
+            await _finalize_without_runner_stream(
+                store,
+                terminal_id,
+                reason=reason,
+                finalized_at=requested_at,
+            )
+
+
+async def _finalize_runner_authority_invalidated(
+    store: RuntimeTerminalCoordinationStore,
+    terminal_ids: Sequence[str],
+    *,
+    reason: RunnerTerminalTerminationReason,
+    finalized_at: datetime,
+) -> None:
+    for terminal_id in terminal_ids:
+        record = await store.get_terminal(terminal_id, current_time=finalized_at)
+        if (
+            record is None
+            or record.lifecycle is not RuntimeTerminalLifecycle.TERMINATING
+        ):
+            continue
+        finalized = await store.finalize_terminal(
+            terminal_id,
+            runner_stream_generation=(
+                None
+                if record.runner_stream is None
+                else record.runner_stream.generation
+            ),
+            reason=reason,
+            exit_code=None,
+            finalized_at=finalized_at,
+            final_ttl_seconds=TERMINAL_FINAL_TTL_SECONDS,
+        )
+        if finalized.status is not RuntimeTerminalMutationStatus.APPLIED:
+            raise RuntimeError(
+                "Runtime Terminal Runner-authority finalization was rejected"
+            )
+
+
+async def _finalize_without_runner_stream(
+    store: RuntimeTerminalCoordinationStore,
+    terminal_id: str,
+    *,
+    reason: RunnerTerminalTerminationReason,
+    finalized_at: datetime,
+) -> None:
+    finalized = await store.finalize_terminal(
+        terminal_id,
+        runner_stream_generation=None,
+        reason=reason,
+        exit_code=None,
+        finalized_at=finalized_at,
+        final_ttl_seconds=TERMINAL_FINAL_TTL_SECONDS,
+    )
+    if finalized.status is not RuntimeTerminalMutationStatus.APPLIED:
+        raise RuntimeError("Runtime Terminal invalidation finalization was rejected")
 
 
 def _log_observer_failures(

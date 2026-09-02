@@ -294,6 +294,32 @@ async def test_no_runner_invalidation_gets_bounded_finalization_grace(
 
 
 @pytest.mark.asyncio
+async def test_control_can_finalize_terminating_terminal_without_runner_stream(
+    store: RuntimeTerminalCoordinationStore,
+) -> None:
+    record = await _admit(store)
+    requested = await store.request_termination(
+        record.admission.terminal_id,
+        reason=RunnerTerminalTerminationReason.RUNTIME_INVALIDATED,
+        requested_at=_NOW,
+    )
+    assert requested.status is RuntimeTerminalMutationStatus.APPLIED
+
+    finalized = await store.finalize_terminal(
+        record.admission.terminal_id,
+        runner_stream_generation=None,
+        reason=RunnerTerminalTerminationReason.RUNTIME_INVALIDATED,
+        exit_code=None,
+        finalized_at=_NOW,
+        final_ttl_seconds=120,
+    )
+
+    assert finalized.status is RuntimeTerminalMutationStatus.APPLIED
+    assert finalized.value is not None
+    assert finalized.value.lifecycle is RuntimeTerminalLifecycle.EXITED
+
+
+@pytest.mark.asyncio
 async def test_authentication_session_expiry_requests_access_revocation(
     store: RuntimeTerminalCoordinationStore,
 ) -> None:
