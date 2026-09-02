@@ -4,6 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
@@ -72,10 +73,18 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
+class _AgentRuntimeFixture(NamedTuple):
+    """Created Workspace, Agent, and Runtime identities."""
+
+    workspace_id: str
+    agent_id: str
+    runtime_id: str
+
+
 async def _create_agent_runtime(
     session: AsyncSession,
     handle: str = "event-runtime-ws",
-) -> tuple[str, str, str]:
+) -> _AgentRuntimeFixture:
     """Create AgentRuntime for tests."""
     workspace_id = await _create_workspace(session, handle)
     integration = RDBLLMProviderIntegration(
@@ -112,7 +121,11 @@ async def _create_agent_runtime(
     runtime.workspace_path = "/workspace/agent"
     session.add(runtime)
     await session.flush()
-    return workspace_id, agent.id, runtime.id
+    return _AgentRuntimeFixture(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        runtime_id=runtime.id,
+    )
 
 
 def _model_selection() -> AgentModelSelection:

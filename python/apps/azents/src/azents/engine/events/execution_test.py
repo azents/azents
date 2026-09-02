@@ -5,7 +5,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, cast
+from typing import AsyncContextManager
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -251,9 +251,9 @@ class _RunRepo:
         finalized_at: datetime.datetime,
     ) -> AgentRunState:
         """Record suppression of an intermediate bridge predecessor result."""
-        del session, finalized_at
+        del finalized_at
         self.parent_result_suppressed = True
-        return await self.get_by_id(cast(AsyncSession, object()), run_id)
+        return await self.get_by_id(session, run_id)
 
 
 class _TranscriptRepo:

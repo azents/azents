@@ -2,14 +2,14 @@
 
 import asyncio
 import datetime
-from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from typing import TypeVar
+from unittest.mock import AsyncMock, MagicMock, Mock
 from zoneinfo import ZoneInfo
 
 import pytest
 from azcommon.result import Failure, Result, Success
-from fastapi import BackgroundTasks, HTTPException
-from pydantic import ValidationError
+from fastapi import BackgroundTasks, HTTPException, WebSocket
+from pydantic import TypeAdapter, ValidationError
 
 from azents.api.public.chat.v1 import (
     # Pin Session-folder retry finalization behavior directly.
@@ -113,6 +113,7 @@ from azents.services.agent_session_input import (
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
 )
+from azents.services.archived_session_retention import ArchivedSessionRetentionService
 from azents.services.chat import ChatSessionService
 from azents.services.chat.data import (
     AgentSessionDirectoryPage,
@@ -163,6 +164,19 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.services.turn_action import TurnActionCapabilityRegistry
+from azents.testing.types import require_instance
+
+T = TypeVar("T")
+_JSON_VALUE_OBJECT = TypeAdapter(dict[str, JSONValue])
+_OBJECT = TypeAdapter(dict[str, object])
+_STRING_OBJECT = TypeAdapter(dict[str, str])
+_STRING_LIST = TypeAdapter(list[str])
+_REASONING_EFFORT = TypeAdapter(ModelReasoningEffort | None)
+
+
+def _typed_fake(value: object, expected: type[T]) -> T:
+    """Wrap one focused fake in a runtime-validated concrete dependency mock."""
+    return require_instance(MagicMock(spec=expected, wraps=value), expected)
 
 
 class _MemoryBroker:
@@ -371,7 +385,7 @@ async def test_health_check_ack_requires_current_confirmed_generation() -> None:
     generation = object()
     task = asyncio.create_task(
         _run_session_receive_loop(
-            cast(Any, websocket),
+            _typed_fake(websocket, WebSocket),
             session_id="session-1",
             send_lock=asyncio.Lock(),
             registration=registration,
@@ -448,7 +462,7 @@ class _BufferedInputService(AgentSessionInputService):
         self.calls.append("create_buffered_agent_action_input")
         self.kwargs.append(kwargs)
         session_id = self.target_session_id or str(kwargs["agent_session_id"])
-        message = cast(InputMessage, kwargs["message"])
+        message = require_instance(kwargs["message"], InputMessage)
         input_buffer = MailboxItem(
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
@@ -466,7 +480,7 @@ class _BufferedInputService(AgentSessionInputService):
                 else None
             ),
             metadata={"source": "chat"},
-            action=cast(dict[str, JSONValue], kwargs["action"]),
+            action=_JSON_VALUE_OBJECT.validate_python(kwargs["action"]),
             attachments=[],
             file_parts=[],
             created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
@@ -531,7 +545,7 @@ class _BufferedInputService(AgentSessionInputService):
         session_id: str,
     ) -> MailboxItem:
         """Create an InputBuffer for test responses."""
-        message = cast(InputMessage, kwargs["message"])
+        message = require_instance(kwargs["message"], InputMessage)
         return MailboxItem(
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
@@ -900,10 +914,7 @@ class _ModelProfileWriteService(ChatWriteService):
             raise ValueError(self.error)
         session_id = str(kwargs["session_id"])
         model_target_label = str(kwargs["model_target_label"])
-        reasoning_effort = cast(
-            ModelReasoningEffort | None,
-            kwargs["reasoning_effort"],
-        )
+        reasoning_effort = _REASONING_EFFORT.validate_python(kwargs["reasoning_effort"])
         request = ChatWriteRequest(
             id="write-request-1",
             session_id=session_id,
@@ -914,7 +925,7 @@ class _ModelProfileWriteService(ChatWriteService):
             accepted_type=ChatWriteRequestType.MODEL_PROFILE,
             accepted_id=session_id,
             history_reload_required=False,
-            payload=cast(dict[str, object], kwargs["payload"]),
+            payload=_OBJECT.validate_python(kwargs["payload"]),
             created_at=datetime.datetime(2026, 8, 19, tzinfo=datetime.UTC),
         )
         return AcceptedModelProfile(
@@ -959,8 +970,8 @@ class _RestWriteIdempotencyService(ChatWriteService):
                 order_sequence=0,
                 content=str(kwargs["text"]),
                 idempotency_key=str(kwargs["client_request_id"]),
-                metadata=cast(dict[str, str], kwargs["metadata"]),
-                attachments=cast(list[str], kwargs["attachments"]),
+                metadata=_STRING_OBJECT.validate_python(kwargs["metadata"]),
+                attachments=_STRING_LIST.validate_python(kwargs["attachments"]),
                 file_parts=[],
                 created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
             )
@@ -1014,7 +1025,7 @@ class _RestWriteIdempotencyService(ChatWriteService):
             accepted_type=write_type,
             accepted_id=accepted_id,
             history_reload_required=True,
-            payload=cast(dict[str, object], kwargs["payload"]),
+            payload=_OBJECT.validate_python(kwargs["payload"]),
             created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
         )
         return record
@@ -1037,8 +1048,11 @@ def _turn_action_capabilities(
 ) -> TurnActionCapabilityRegistry:
     """Create a TurnAction registry for route tests."""
     return TurnActionCapabilityRegistry(
-        agent_session_repository=cast(AgentSessionRepository, object()),
-        goal_store=cast(GoalStateStore, object()),
+        agent_session_repository=require_instance(
+            MagicMock(spec=AgentSessionRepository),
+            AgentSessionRepository,
+        ),
+        goal_store=require_instance(MagicMock(spec=GoalStateStore), GoalStateStore),
         skill_store=skill_store or _EmptySkillStore(),
         vfs_projection_service=None,
     )
@@ -1761,7 +1775,10 @@ class TestAgentSessionRoutes:
     async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
         """Agent session list preserves primary metadata for the UI contract."""
         chat_service = _AgentSessionRouteChatService()
-        retention_service = cast(Any, Mock())
+        retention_service = require_instance(
+            MagicMock(spec=ArchivedSessionRetentionService),
+            ArchivedSessionRetentionService,
+        )
         retention_service.get_settings = AsyncMock(
             return_value=Mock(archived_session_retention_days=30)
         )
@@ -1794,7 +1811,10 @@ class TestAgentSessionRoutes:
     ) -> None:
         """Archived directory pages expose retention metadata."""
         chat_service = _AgentSessionRouteChatService()
-        retention_service = cast(Any, Mock())
+        retention_service = require_instance(
+            MagicMock(spec=ArchivedSessionRetentionService),
+            ArchivedSessionRetentionService,
+        )
         retention_service.get_settings = AsyncMock(
             return_value=Mock(archived_session_retention_days=14)
         )
