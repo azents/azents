@@ -5,7 +5,7 @@ import datetime
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -117,6 +117,13 @@ class _ManagedRootCreationAuthority:
 type _RootCreationAuthority = (
     _RuntimeFreeRootCreationAuthority | _ManagedRootCreationAuthority
 )
+
+
+def _cursor_result(value: object) -> CursorResult[Any]:
+    """Validate one SQLAlchemy mutation result with rowcount evidence."""
+    if not isinstance(value, CursorResult):
+        raise RuntimeError("SQLAlchemy mutation did not return CursorResult")
+    return value
 
 
 class AgentSessionRepository:
@@ -367,8 +374,7 @@ class AgentSessionRepository:
             raise ValueError("Working-folder cleanup status must be terminal")
         if len(summary) > 500:
             raise ValueError("Working-folder cleanup summary exceeds 500 characters")
-        result = cast(
-            CursorResult[Any],
+        result = _cursor_result(
             await session.execute(
                 sa.update(RDBSessionAgentContext)
                 .where(
@@ -381,7 +387,7 @@ class AgentSessionRepository:
                     working_folder_cleanup_summary=summary,
                     working_folder_cleanup_completed_at=completed_at,
                 )
-            ),
+            )
         )
         await session.flush()
         return result.rowcount == 1
@@ -1692,8 +1698,7 @@ class AgentSessionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Claim AgentSession lifecycle start marker once initially."""
-        result = cast(
-            CursorResult[Any],
+        result = _cursor_result(
             await session.execute(
                 sa.update(RDBAgentSession)
                 .where(
@@ -1701,7 +1706,7 @@ class AgentSessionRepository:
                     RDBAgentSession.lifecycle_started_at.is_(None),
                 )
                 .values(lifecycle_started_at=now)
-            ),
+            )
         )
         await session.flush()
         return result.rowcount == 1

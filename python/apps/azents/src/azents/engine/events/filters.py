@@ -4,7 +4,7 @@ import dataclasses
 import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated, Literal, NamedTuple, Protocol
+from typing import Annotated, Literal, NamedTuple, Protocol, assert_never
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,7 @@ from azents.engine.events.system_reminders import (
     format_plain_system_reminder,
 )
 from azents.engine.events.types import (
+    ArtifactOutputPart,
     AssistantMessagePayload,
     Attachment,
     AttachmentOutputPart,
@@ -564,12 +565,14 @@ def _visible_part(part: UserContentPart | OutputContentPart | ToolOutputPart) ->
             media_type=part.media_type,
             availability=part.availability,
         )
-    return _format_visible_metadata(
-        "Artifact",
-        name=getattr(part, "name", None),
-        media_type=getattr(part, "media_type", None),
-        status=getattr(part, "status", None),
-    )
+    if isinstance(part, ArtifactOutputPart):
+        return _format_visible_metadata(
+            "Artifact",
+            name=part.name,
+            media_type=part.media_type,
+            status=part.status,
+        )
+    assert_never(part)
 
 
 def _format_visible_metadata(label: str, **fields: object) -> str:
@@ -630,12 +633,14 @@ def _visible_part_value(
             "media_type": part.media_type,
             "availability": part.availability,
         }
-    return {
-        "type": "artifact",
-        "name": getattr(part, "name", None),
-        "media_type": getattr(part, "media_type", None),
-        "status": getattr(part, "status", None),
-    }
+    if isinstance(part, ArtifactOutputPart):
+        return {
+            "type": "artifact",
+            "name": part.name,
+            "media_type": part.media_type,
+            "status": part.status,
+        }
+    assert_never(part)
 
 
 def _drop_none_values(value: dict[str, object | None]) -> dict[str, object]:

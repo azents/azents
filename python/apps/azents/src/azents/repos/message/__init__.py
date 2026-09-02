@@ -1,6 +1,7 @@
 """Message repository based on Event transcript."""
 
 import json
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +58,21 @@ _INVISIBLE_RETRY_ELIGIBILITY_ROLES = {
     MessageRole.COMPACTION_STARTED,
     MessageRole.COMPACTION,
 }
+
+
+class ChatMessagePage(NamedTuple):
+    """Paginated ChatMessage projection."""
+
+    items: list[ChatMessage]
+    has_more: bool
+
+
+class EventPage(NamedTuple):
+    """Bidirectional paginated Event projection."""
+
+    items: list[Event]
+    has_more: bool
+    has_newer: bool
 
 
 def _validate_payload(row: RDBEvent) -> EventPayload:
@@ -557,7 +573,7 @@ class MessageRepository:
         session_id: str,
         limit: int = 50,
         before: str | None = None,
-    ) -> tuple[list[ChatMessage], bool]:
+    ) -> ChatMessagePage:
         """Fetch session messages paginated in reverse order."""
         query = sa.select(RDBEvent).where(
             RDBEvent.session_id == session_id,
@@ -582,7 +598,7 @@ class MessageRepository:
             message = event_to_chat_message(row)
             if message is not None and not self._is_empty(message):
                 messages.append(message)
-        return messages, has_more
+        return ChatMessagePage(items=messages, has_more=has_more)
 
     async def list_events_by_session_id_paginated(
         self,
@@ -591,7 +607,7 @@ class MessageRepository:
         limit: int = 50,
         before: str | None = None,
         after: str | None = None,
-    ) -> tuple[list[Event], bool, bool]:
+    ) -> EventPage:
         """Fetch session events with bidirectional cursor."""
         query = sa.select(RDBEvent).where(
             RDBEvent.session_id == session_id,
@@ -644,7 +660,11 @@ class MessageRepository:
                     )
                 )
             )
-        return [_to_event(row) for row in rows], has_more, has_newer
+        return EventPage(
+            items=[_to_event(row) for row in rows],
+            has_more=has_more,
+            has_newer=has_newer,
+        )
 
     async def get_latest_retry_visible_event(
         self,
