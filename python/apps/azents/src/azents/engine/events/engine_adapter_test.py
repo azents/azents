@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -151,6 +151,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
 )
 from azents.testing.model_stream import make_test_model_stream_watchdog
+from azents.testing.types import require_instance
 
 
 class _OpenToolAdmissionBarrier:
@@ -2720,9 +2721,9 @@ def _agent_engine_adapter(
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
         model_file_pin_repo=_ModelFilePinRepo(),
-        terminal_finalization_coordinator=cast(
+        terminal_finalization_coordinator=require_instance(
+            AsyncMock(spec=TerminalRunFinalizationCoordinator),
             TerminalRunFinalizationCoordinator,
-            AsyncMock(),
         ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call

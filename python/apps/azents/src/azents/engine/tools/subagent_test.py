@@ -4,16 +4,18 @@
 
 import datetime
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeVar
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import (
     BrokerMessage,
+    SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
 )
@@ -35,23 +37,29 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.tools import ToolkitStatus, TurnContext
+from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
+from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionToolError
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.mailbox import MailboxEnqueue
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.services.subagent_coordination import (
     ListedAgent,
+    SubagentCoordinationService,
     SubagentListProjection,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
 )
+from azents.testing.types import require_instance
 
 from .subagent import (
     SpawnAgentInput,
@@ -61,6 +69,19 @@ from .subagent import (
 
 _NOW = datetime.datetime.now(datetime.UTC)
 _PARENT_RUN_ID = "parent-run".rjust(32, "0")
+T = TypeVar("T")
+
+
+def _typed_fake(value: object, expected: type[T]) -> T:
+    """Wrap one focused fake in an interface-constrained dependency mock."""
+    return MagicMock(spec=expected, wraps=value)
+
+
+def _text_result(value: object) -> str:
+    """Validate one text tool result."""
+    if not isinstance(value, str):
+        raise AssertionError(f"Expected text tool result, got {type(value).__name__}")
+    return value
 
 
 async def _noop_publish(event: object) -> None:
@@ -70,10 +91,11 @@ async def _noop_publish(event: object) -> None:
 
 def _publish_to(
     events: list[SubagentTreeChanged],
-) -> Callable[[SubagentTreeChanged], Awaitable[None]]:
+) -> PublishEventFn:
     """Return an async publisher that appends to a list."""
 
-    async def publish(event: SubagentTreeChanged) -> None:
+    async def publish(event: PublishedEvent) -> None:
+        assert isinstance(event, SubagentTreeChanged)
         events.append(event)
 
     return publish
@@ -82,7 +104,7 @@ def _publish_to(
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
     """Yield a placeholder DB session for Toolkit tests."""
-    yield cast(AsyncSession, object())
+    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
 
 def _session_agent(
@@ -728,6 +750,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
     coordination_service = _SubagentCoordinationService()
     agent = _agent()
     agent_repository = _AgentRepository(agent)
+    event_transcript_repository = _EventTranscriptRepository()
     published_events: list[SubagentTreeChanged] = []
 
     async def publish_event(event: object) -> None:
@@ -736,17 +759,29 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
 
     toolkit = SubagentToolkit(
         session_manager=_session_manager,
-        agent_session_repository=agent_session_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
-        agent_run_repository=run_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
-        event_transcript_repository=_EventTranscriptRepository(),  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
-        subagent_coordination_service=coordination_service,  # ty: ignore[invalid-argument-type] # Focused fake implements list_agents only.
-        agent_mailbox_service=AgentMailboxService(
-            mailbox_item_service=mailbox_item_service,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised mailbox operations.
-            agent_session_repository=agent_session_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
+        agent_session_repository=_typed_fake(
+            agent_session_repository,
+            AgentSessionRepository,
         ),
-        mailbox_item_service=mailbox_item_service,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised mailbox operations.
-        broker=broker,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised broker operations.
-        agent_repository=agent_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
+        agent_run_repository=_typed_fake(run_repository, AgentRunRepository),
+        event_transcript_repository=_typed_fake(
+            event_transcript_repository,
+            EventTranscriptRepository,
+        ),
+        subagent_coordination_service=_typed_fake(
+            coordination_service,
+            SubagentCoordinationService,
+        ),
+        agent_mailbox_service=AgentMailboxService(
+            mailbox_item_service=_typed_fake(mailbox_item_service, MailboxService),
+            agent_session_repository=_typed_fake(
+                agent_session_repository,
+                AgentSessionRepository,
+            ),
+        ),
+        mailbox_item_service=_typed_fake(mailbox_item_service, MailboxService),
+        broker=_typed_fake(broker, SessionBroker),
+        agent_repository=_typed_fake(agent_repository, AgentRepository),
         agent=agent,
         subagent_settings=SubagentSettings(),
     )
@@ -1042,7 +1077,7 @@ async def test_send_message_is_queue_only() -> None:
 
     result = await tool.handler(json.dumps({"agent_name": "child", "message": "note"}))
 
-    assert json.loads(cast(str, result)) == {
+    assert json.loads(_text_result(result)) == {
         "status": "queued",
         "agent_name": "child",
         "agent_path": "/root/child",
@@ -1076,7 +1111,7 @@ async def test_send_message_from_child_can_target_root() -> None:
         json.dumps({"agent_name": "/root", "message": "status update"})
     )
 
-    assert json.loads(cast(str, result)) == {
+    assert json.loads(_text_result(result)) == {
         "status": "queued",
         "agent_name": "root",
         "agent_path": "/root",
@@ -1114,7 +1149,7 @@ async def test_followup_task_wakes_target_child() -> None:
 
     result = await tool.handler(json.dumps({"agent_name": "child", "task": "work"}))
 
-    assert json.loads(cast(str, result)) == {
+    assert json.loads(_text_result(result)) == {
         "status": "assigned",
         "agent_name": "child",
         "agent_path": "/root/child",
@@ -1195,7 +1230,7 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
 
     result = await tool.handler(json.dumps({"agent_name": "child", "task": "continue"}))
 
-    assert json.loads(cast(str, result))["status"] == "assigned"
+    assert json.loads(_text_result(result))["status"] == "assigned"
     assert len(input_service.enqueued) == 1
     assert repo.marked_running == []
     assert len(broker.messages) == 1
@@ -1264,7 +1299,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
 
     result = await tool.handler(json.dumps({"agent_name": "child"}))
 
-    assert json.loads(cast(str, result)) == {"previous_status": "running"}
+    assert json.loads(_text_result(result)) == {"previous_status": "running"}
     assert repo.locked_session_agents == ["root-agent"]
     assert repo.stop_requests == [("child-session", "subagent_interrupt", None)]
     assert len(broker.messages) == 1
@@ -1296,16 +1331,24 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
         ]
     }
     service = toolkit.subagent_coordination_service
-    assert isinstance(service, _SubagentCoordinationService)
-    assert service.calls == [("child-session", 3)]
+    assert isinstance(service, MagicMock)
+    coordination_service = require_instance(
+        service._mock_wraps,
+        _SubagentCoordinationService,
+    )
+    assert coordination_service.calls == [("child-session", 3)]
 
 
 async def test_list_agents_rejects_missing_current_projection() -> None:
     """list_agents raises when the current SessionAgent cannot be projected."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     service = toolkit.subagent_coordination_service
-    assert isinstance(service, _SubagentCoordinationService)
-    service.projection = None
+    assert isinstance(service, MagicMock)
+    coordination_service = require_instance(
+        service._mock_wraps,
+        _SubagentCoordinationService,
+    )
+    coordination_service.projection = None
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1344,7 +1387,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _publish_to(published_events)),
+            publish_event=_publish_to(published_events),
             session_id="root-session",
         )
     )
@@ -1353,7 +1396,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     result = await tool.handler(json.dumps({"name": "reviewer", "task": "Review it"}))
 
     child = repo.created_children[0]
-    assert json.loads(cast(str, result)) == {
+    assert json.loads(_text_result(result)) == {
         "agent_name": "reviewer",
         "agent_path": "/root/reviewer",
         "status": "spawned",
@@ -1515,7 +1558,7 @@ async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residu
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _publish_to(events)),
+            publish_event=_publish_to(events),
             session_id="root-session",
         )
     )
@@ -1553,14 +1596,18 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _publish_to(events)),
+            publish_event=_publish_to(events),
             session_id="root-session",
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
     assert "`Quality` Reasoning efforts" in tool.spec.description
 
-    agent_repository = cast(_AgentRepository, toolkit.agent_repository)
+    assert isinstance(toolkit.agent_repository, MagicMock)
+    agent_repository = require_instance(
+        toolkit.agent_repository._mock_wraps,
+        _AgentRepository,
+    )
     current_agent = agent_repository.agent.model_copy(deep=True)
     current_option = current_agent.selectable_model_options[0]
     current_option.settings = current_option.settings.model_copy(
@@ -1596,7 +1643,7 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _publish_to(events)),
+            publish_event=_publish_to(events),
             session_id="root-session",
         )
     )
@@ -1637,7 +1684,7 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _publish_to(events)),
+            publish_event=_publish_to(events),
             session_id="root-session",
         )
     )
@@ -1720,7 +1767,11 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
         _run_repo,
         _published_events,
     ) = await _make_toolkit()
-    event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
+    assert isinstance(toolkit.event_transcript_repository, MagicMock)
+    event_repo = require_instance(
+        toolkit.event_transcript_repository._mock_wraps,
+        _EventTranscriptRepository,
+    )
     event_repo.forked_events = [
         _event(
             EventKind.USER_MESSAGE,
@@ -1766,7 +1817,11 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
         _run_repo,
         _published_events,
     ) = await _make_toolkit()
-    event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
+    assert isinstance(toolkit.event_transcript_repository, MagicMock)
+    event_repo = require_instance(
+        toolkit.event_transcript_repository._mock_wraps,
+        _EventTranscriptRepository,
+    )
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",

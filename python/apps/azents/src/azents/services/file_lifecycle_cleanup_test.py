@@ -4,11 +4,14 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import TypeVar
+from unittest.mock import MagicMock
 
 import pytest
+from azcommon.infra.s3.service import S3Service
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ArtifactStatus,
     EventKind,
@@ -22,19 +25,33 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
 )
+from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
-from azents.repos.agent_session import ModelFileGCLaggingSession
+from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_session import AgentSessionRepository, ModelFileGCLaggingSession
+from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
+from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
+from azents.services.uploads.handlers.avatar import AvatarUploadHandler
 from azents.services.uploads.schema import (
     StoredImage,
     StoredImageFile,
     StoredImageThumbnails,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)
+T = TypeVar("T")
+
+
+def _typed_fake(value: object, expected: type[T]) -> T:
+    """Wrap one focused fake in a runtime-validated concrete dependency mock."""
+    return require_instance(MagicMock(spec=expected, wraps=value), expected)
 
 
 class _ArtifactRepo:
@@ -445,10 +462,17 @@ class _Config:
     workspace_s3 = _WorkspaceS3Config()
 
 
+def _config() -> Config:
+    """Return a Config-shaped mock with the instance-only S3 field populated."""
+    config = MagicMock(spec=Config, wraps=_Config())
+    config.workspace_s3 = _WorkspaceS3Config()
+    return config
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
     """Return fake session context."""
-    yield cast(AsyncSession, object())
+    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
 
 def _artifact() -> Artifact:
@@ -624,22 +648,40 @@ def _service(
     """Build service with fake dependencies."""
     return FileLifecycleCleanupService(
         session_manager=_session_manager,
-        artifact_repository=cast(Any, _ArtifactRepo(artifacts or [])),
-        exchange_file_repository=cast(Any, _ExchangeRepo(exchange_files or [])),
-        model_file_repository=cast(Any, model_file_repo or _ModelFileRepo([])),
-        model_file_pin_repository=cast(Any, _PinRepo()),
-        agent_session_repository=cast(
-            Any,
+        artifact_repository=_typed_fake(
+            _ArtifactRepo(artifacts or []),
+            ArtifactRepository,
+        ),
+        exchange_file_repository=_typed_fake(
+            _ExchangeRepo(exchange_files or []),
+            ExchangeFileRepository,
+        ),
+        model_file_repository=_typed_fake(
+            model_file_repo or _ModelFileRepo([]),
+            ModelFileRepository,
+        ),
+        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+        agent_session_repository=_typed_fake(
             agent_session_repo or _AgentSessionRepo([]),
+            AgentSessionRepository,
         ),
-        transcript_repository=cast(Any, transcript_repo or _TranscriptRepo([])),
-        avatar_cleanup_repository=cast(
-            Any,
+        transcript_repository=_typed_fake(
+            transcript_repo or _TranscriptRepo([]),
+            EventTranscriptRepository,
+        ),
+        avatar_cleanup_repository=_typed_fake(
             avatar_cleanup_repo or _AvatarCleanupRepo([]),
+            AgentAvatarCleanupRepository,
         ),
-        avatar_handler=cast(Any, avatar_handler or _AvatarHandler()),
-        s3_service=cast(Any, s3_service or _S3Service()),
-        config=cast(Any, _Config()),
+        avatar_handler=_typed_fake(
+            avatar_handler or _AvatarHandler(),
+            AvatarUploadHandler,
+        ),
+        s3_service=_typed_fake(
+            s3_service or _S3Service(),
+            S3Service,
+        ),
+        config=_config(),
     )
 
 
@@ -651,16 +693,25 @@ async def test_cleanup_once_expires_ttl_resources_and_retries_blob_deletion() ->
     s3 = _S3Service()
     service = FileLifecycleCleanupService(
         session_manager=_session_manager,
-        artifact_repository=cast(Any, artifact_repo),
-        exchange_file_repository=cast(Any, exchange_repo),
-        model_file_repository=cast(Any, _ModelFileRepo([])),
-        model_file_pin_repository=cast(Any, _PinRepo()),
-        agent_session_repository=cast(Any, _AgentSessionRepo([])),
-        transcript_repository=cast(Any, _TranscriptRepo([])),
-        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
-        avatar_handler=cast(Any, _AvatarHandler()),
-        s3_service=cast(Any, s3),
-        config=cast(Any, _Config()),
+        artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
+        exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
+        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+        agent_session_repository=_typed_fake(
+            _AgentSessionRepo([]),
+            AgentSessionRepository,
+        ),
+        transcript_repository=_typed_fake(
+            _TranscriptRepo([]),
+            EventTranscriptRepository,
+        ),
+        avatar_cleanup_repository=_typed_fake(
+            _AvatarCleanupRepo([]),
+            AgentAvatarCleanupRepository,
+        ),
+        avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
+        s3_service=_typed_fake(s3, S3Service),
+        config=_config(),
     )
 
     summary = await service.cleanup_once(lease_owner="scheduler-1")
@@ -731,16 +782,25 @@ async def test_cleanup_once_counts_pending_blob_deletion_attempts() -> None:
     exchange_repo = _ExchangeRepo([expired_exchange_file])
     service = FileLifecycleCleanupService(
         session_manager=_session_manager,
-        artifact_repository=cast(Any, _ArtifactRepo([])),
-        exchange_file_repository=cast(Any, exchange_repo),
-        model_file_repository=cast(Any, _ModelFileRepo([])),
-        model_file_pin_repository=cast(Any, _PinRepo()),
-        agent_session_repository=cast(Any, _AgentSessionRepo([])),
-        transcript_repository=cast(Any, _TranscriptRepo([])),
-        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
-        avatar_handler=cast(Any, _AvatarHandler()),
-        s3_service=cast(Any, _S3Service()),
-        config=cast(Any, _Config()),
+        artifact_repository=_typed_fake(_ArtifactRepo([]), ArtifactRepository),
+        exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
+        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+        agent_session_repository=_typed_fake(
+            _AgentSessionRepo([]),
+            AgentSessionRepository,
+        ),
+        transcript_repository=_typed_fake(
+            _TranscriptRepo([]),
+            EventTranscriptRepository,
+        ),
+        avatar_cleanup_repository=_typed_fake(
+            _AvatarCleanupRepo([]),
+            AgentAvatarCleanupRepository,
+        ),
+        avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
+        s3_service=_typed_fake(_S3Service(), S3Service),
+        config=_config(),
     )
 
     summary = await service.cleanup_once(lease_owner="scheduler-1")
@@ -758,16 +818,28 @@ async def test_cleanup_once_counts_blob_deletion_failures() -> None:
     artifact_repo = _ArtifactRepo([_artifact()])
     service = FileLifecycleCleanupService(
         session_manager=_session_manager,
-        artifact_repository=cast(Any, artifact_repo),
-        exchange_file_repository=cast(Any, _ExchangeRepo([])),
-        model_file_repository=cast(Any, _ModelFileRepo([])),
-        model_file_pin_repository=cast(Any, _PinRepo()),
-        agent_session_repository=cast(Any, _AgentSessionRepo([])),
-        transcript_repository=cast(Any, _TranscriptRepo([])),
-        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
-        avatar_handler=cast(Any, _AvatarHandler()),
-        s3_service=cast(Any, _FailingS3Service()),
-        config=cast(Any, _Config()),
+        artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
+        exchange_file_repository=_typed_fake(
+            _ExchangeRepo([]),
+            ExchangeFileRepository,
+        ),
+        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+        agent_session_repository=_typed_fake(
+            _AgentSessionRepo([]),
+            AgentSessionRepository,
+        ),
+        transcript_repository=_typed_fake(
+            _TranscriptRepo([]),
+            EventTranscriptRepository,
+        ),
+        avatar_cleanup_repository=_typed_fake(
+            _AvatarCleanupRepo([]),
+            AgentAvatarCleanupRepository,
+        ),
+        avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
+        s3_service=_typed_fake(_FailingS3Service(), S3Service),
+        config=_config(),
     )
 
     summary = await service.cleanup_once(lease_owner="scheduler-1")
