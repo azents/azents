@@ -587,6 +587,10 @@ class SessionGitWorktreeService:
                 raise ValueError(
                     "The client tool call identity is already bound to another request."
                 )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                session_id,
+            )
         return AgentCreateGitWorktreeAdmission(
             mailbox_item_id=admission.id,
             bridge_identity=bridge_identity,
@@ -774,6 +778,10 @@ class SessionGitWorktreeService:
                 raise ValueError(
                     "The client tool call identity is already bound to another request."
                 )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                session_id,
+            )
         return AgentRemoveGitWorktreeAdmission(
             mailbox_item_id=admission.id,
             bridge_identity=bridge_identity,
@@ -4433,6 +4441,10 @@ class SessionGitWorktreeService:
                             payload=continuation_payload,
                         ),
                         idempotency_key=continuation_idempotency_key,
+                    )
+                    await self.agent_session_repository.mark_running_for_input_wakeup(
+                        session,
+                        execution.session_id,
                     )
                 await self.action_execution_repository.delete_by_id(
                     session,

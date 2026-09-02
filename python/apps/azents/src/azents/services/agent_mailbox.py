@@ -214,11 +214,6 @@ class AgentMailboxService:
         await mark_activity(session, session_agent_id=source.id)
         if target.id != source.id:
             await mark_activity(session, session_agent_id=target.id)
-        if scheduling_mode == MailboxSchedulingMode.WAKE_SESSION:
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                target.agent_session_id,
-            )
         return result.mailbox_item
 
     @staticmethod

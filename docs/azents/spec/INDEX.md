@@ -13,13 +13,13 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-08-27 | 69 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-01 | 157 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-02 | 158 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-01 | 68 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-27 | 21 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
-| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-21 | 8 |
+| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-02 | 9 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-01 | 103 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |
@@ -29,7 +29,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-01 | 166 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-02 | 167 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-01 | 32 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -44,7 +44,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-08-31 | 17 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-08-23 | 31 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-31 | 41 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |

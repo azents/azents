@@ -1124,7 +1124,7 @@ async def test_followup_task_wakes_target_child() -> None:
     assert input_service.enqueued[0].content == "work"
     assert input_service.enqueued[0].sender_user_id is None
     assert repo.last_task_updates == [("child-agent", "work")]
-    assert repo.marked_running == ["child-session"]
+    assert repo.marked_running == []
     assert len(broker.messages) == 1
     wake = broker.messages[0]
     assert isinstance(wake, SessionWakeUp)
@@ -1197,7 +1197,7 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
 
     assert json.loads(cast(str, result))["status"] == "assigned"
     assert len(input_service.enqueued) == 1
-    assert repo.marked_running == ["child-session"]
+    assert repo.marked_running == []
     assert len(broker.messages) == 1
 
 
@@ -1386,7 +1386,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert input_service.enqueued[0].content == "Review it"
     assert input_service.enqueued[0].sender_user_id is None
     assert repo.locked_session_agents == ["root-agent", "root-agent"]
-    assert repo.marked_running == [child.agent_session_id]
+    assert repo.marked_running == []
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]

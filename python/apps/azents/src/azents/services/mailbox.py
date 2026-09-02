@@ -300,7 +300,21 @@ class MailboxService:
         session: AsyncSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
-        """Create one pending input buffer without deciding wake semantics."""
+        """Create one pending input and persist its wake transition."""
+        result = await self._enqueue_without_running_transition(session, input)
+        if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                input.session_id,
+            )
+        return result
+
+    async def _enqueue_without_running_transition(
+        self,
+        session: AsyncSession,
+        input: MailboxEnqueue,
+    ) -> MailboxAdmissionResult:
+        """Create one pending input before applying its Session transition."""
         existing = None
         if input.idempotency_key is not None:
             existing = await self.mailbox_item_repository.get_by_idempotency_key(
@@ -362,9 +376,33 @@ class MailboxService:
         session: AsyncSession,
         inputs: Sequence[MailboxEnqueue],
     ) -> list[MailboxAdmissionResult]:
-        """Create pending input buffers without deciding wake semantics."""
-        results = [await self.enqueue(session, input) for input in inputs]
+        """Create pending inputs and persist each distinct wake transition."""
+        results = [
+            await self._enqueue_without_running_transition(session, input)
+            for input in inputs
+        ]
+        wake_session_ids = {
+            input.session_id
+            for input in inputs
+            if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION
+        }
+        for session_id in sorted(wake_session_ids):
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                session_id,
+            )
         return results
+
+    async def enqueue_idle_continuations(
+        self,
+        session: AsyncSession,
+        inputs: Sequence[MailboxEnqueue],
+    ) -> list[MailboxAdmissionResult]:
+        """Create idle-hook inputs whose caller owns the resulting Session state."""
+        return [
+            await self._enqueue_without_running_transition(session, input)
+            for input in inputs
+        ]
 
     async def enqueue_many_in_transaction(
         self,

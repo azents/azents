@@ -106,8 +106,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-09-01
-spec_version: 157
+last_verified_at: 2026-09-02
+spec_version: 158
 ---
 
 # Conversation & Events
@@ -210,6 +210,12 @@ Only `pending` may become `bound`, using current-generation Runner evidence. `no
 | `run_state` / `run_heartbeat_at`                                                                 | enum / timestamptz    | Session execution recovery state                                                                                                  |
 | `pending_command_*`                                                                              | mixed                 | Single pending idle command for this session                                                                                      |
 | `stop_requested_*`                                                                               | mixed                 | Durable stop intent for this session                                                                                              |
+
+Mailbox scheduling mode owns the durable run-state transition. Admission of any `wake_session`
+item changes the active Session to `running` in the same transaction, including idempotent replay;
+`queue_only` admission leaves the current state unchanged. After acquiring the Session lease, a
+Worker reads the Session without a row lock and refuses to inspect mailbox or recoverable execution
+work unless that durable state is `running`.
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.

@@ -29,8 +29,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-08-21
-spec_version: 8
+last_verified_at: 2026-09-02
+spec_version: 9
 ---
 
 # Scheduled Task Domain Spec
@@ -152,8 +152,9 @@ user Scheduled Tasks. Each pass:
 2. revalidates current Session, Agent, and optional Binding authority;
 3. creates an immutable admitted cycle snapshot;
 4. inserts one typed `scheduled_task_trigger` wake-producing Mailbox item;
-5. advances or fences the Task schedule state in the same transaction; and
-6. publishes the ordinary payload-free Session wake after commit.
+5. transitions the target Session to `running` in the same transaction;
+6. advances or fences the Task schedule state in that transaction; and
+7. publishes the ordinary payload-free Session wake after commit.
 
 An already-active recurring Task coalesces later due work into at most one
 `pending_scheduled_for`. Invalid or removed authority deletes or skips future

@@ -1809,11 +1809,11 @@ class TestMailboxService:
         assert result.events == []
         assert result.deleted_buffer_ids == [buffer_id]
 
-    async def test_enqueue_creates_buffer_without_marking_session_running(
+    async def test_enqueue_wake_session_marks_session_running(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Enqueue only appends pending rows; producers own wake transitions."""
+        """Wake-producing admission persists the matching Session transition."""
         session_id, user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-enqueue-running",
@@ -1856,7 +1856,89 @@ class TestMailboxService:
         assert result.mailbox_item.session_id == session_id
         assert result.mailbox_item.content == "wake me"
         assert after is not None
+        assert after.run_state == AgentSessionRunState.RUNNING
+
+    async def test_enqueue_queue_only_keeps_session_idle(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Queue-only mailbox admission preserves the idle Session state."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-enqueue-queue-only",
+        )
+        service = _mailbox_item_service(rdb_session_manager)
+
+        async with rdb_session_manager() as session:
+            result = await service.enqueue(
+                session,
+                MailboxEnqueue(
+                    session_id=session_id,
+                    kind=MailboxItemKind.AGENT_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
+                    content="keep queued",
+                    idempotency_key=None,
+                    metadata={"source": "test"},
+                    action=None,
+                    attachments=[],
+                    file_parts=[],
+                ),
+            )
+            after = await AgentSessionRepository().get_by_id(
+                session,
+                session_id,
+            )
+
+        assert result.created is True
+        assert after is not None
         assert after.run_state == AgentSessionRunState.IDLE
+
+    async def test_idempotent_wake_reapplies_running_transition(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A replay repairs an idle Session while preserving one mailbox row."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-enqueue-replay-running",
+        )
+        service = _mailbox_item_service(rdb_session_manager)
+        enqueue = MailboxEnqueue(
+            session_id=session_id,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            sender_user_id=user_id,
+            order_group=None,
+            order_sequence=0,
+            content="wake me once",
+            idempotency_key="client-request-replay",
+            metadata={"source": "test"},
+            action=None,
+            attachments=[],
+            file_parts=[],
+        )
+
+        async with rdb_session_manager() as session:
+            created = await service.enqueue(session, enqueue)
+            await AgentSessionRepository().mark_idle(session, session_id)
+            replay = await service.enqueue(session, enqueue)
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                session_id,
+            )
+
+        assert created.created is True
+        assert replay.created is False
+        assert replay.mailbox_item.id == created.mailbox_item.id
+        assert agent_session is not None
+        assert agent_session.run_state is AgentSessionRunState.RUNNING
 
     async def test_pending_queries_separate_mailbox_from_wake_intent(
         self,

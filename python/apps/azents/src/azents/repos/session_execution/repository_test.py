@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStatus,
     LLMProvider,
     MailboxItemKind,
@@ -98,6 +99,8 @@ async def _create_execution_subject(
     )
     agent_session = await session.get(RDBAgentSession, created.id)
     assert agent_session is not None
+    await AgentSessionRepository().mark_running(session, created.id)
+    await session.refresh(agent_session)
     return agent_session, agent.id
 
 
@@ -185,6 +188,28 @@ async def _archive_with_scheduled_continuation(
 
 class TestSessionExecutionRepository:
     """Fail-closed tests for the canonical Session execution projection."""
+
+    async def test_load_canonical_snapshot_rejects_idle_session(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Mailbox work cannot execute without durable running admission."""
+        agent_session, _agent_id = await _create_execution_subject(
+            rdb_session,
+            handle="execution-idle-session",
+        )
+        agent_session.run_state = AgentSessionRunState.IDLE
+        await rdb_session.flush()
+
+        with pytest.raises(
+            CanonicalExecutionSnapshotError,
+            match="AgentSession is not running",
+        ):
+            await SessionExecutionRepository().load_canonical_snapshot(
+                rdb_session,
+                session_id=agent_session.id,
+                owner_generation=agent_session.owner_generation,
+            )
 
     async def test_load_canonical_snapshot_rejects_stale_owner_generation(
         self,

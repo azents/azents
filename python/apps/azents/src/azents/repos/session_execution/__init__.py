@@ -7,6 +7,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
     AgentSessionKind,
+    AgentSessionRunState,
     AgentSessionStatus,
     MailboxItemKind,
     SessionAgentKind,
@@ -43,14 +44,14 @@ class SessionExecutionRepository:
         session_id: str,
         owner_generation: int,
     ) -> CanonicalExecutionSnapshot:
-        """Lock and validate execution authority and non-mailbox work state."""
+        """Load and validate execution authority and non-mailbox work state."""
         agent_session = await session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .with_for_update()
+            sa.select(RDBAgentSession).where(RDBAgentSession.id == session_id)
         )
         if agent_session is None:
             raise CanonicalExecutionSnapshotError("AgentSession not found")
+        if agent_session.run_state is not AgentSessionRunState.RUNNING:
+            raise CanonicalExecutionSnapshotError("AgentSession is not running")
         oldest_input = await session.scalar(
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)

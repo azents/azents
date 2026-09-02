@@ -1385,7 +1385,13 @@ class TestSessionGitWorktreeService:
                 session,
                 fixture.session_id,
             )
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                fixture.session_id,
+            )
         assert len(mailbox_items) == 1
+        assert agent_session is not None
+        assert agent_session.run_state is AgentSessionRunState.RUNNING
         admitted_action = AgentCreateGitWorktreeAction.model_validate(
             mailbox_items[0].presentation.action
         )
@@ -1471,7 +1477,13 @@ class TestSessionGitWorktreeService:
                 session,
                 fixture.session_id,
             )
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                fixture.session_id,
+            )
         assert len(mailbox_items) == 1
+        assert agent_session is not None
+        assert agent_session.run_state is AgentSessionRunState.RUNNING
         admitted_action = AgentRemoveGitWorktreeAction.model_validate(
             mailbox_items[0].presentation.action
         )
@@ -1513,6 +1525,11 @@ class TestSessionGitWorktreeService:
             client_tool_call_id="call-remove-clean",
             force=False,
         )
+        async with rdb_session_manager() as session:
+            await AgentSessionRepository().mark_idle(
+                session,
+                fixture.session_id,
+            )
 
         result = await fixture.service.run_agent_remove_git_worktree_action(
             agent_id=fixture.agent_id,
@@ -1553,6 +1570,10 @@ class TestSessionGitWorktreeService:
                 )
                 if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
             ]
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                fixture.session_id,
+            )
         assert [project.path for project in projects] == [fixture.source_project_path]
         assert len(allocations) == 1
         assert allocations[0].status is SessionGitWorktreeStatus.CLEANED
@@ -1567,6 +1588,8 @@ class TestSessionGitWorktreeService:
             )
         ]
         assert len(continuations) == 1
+        assert agent_session is not None
+        assert agent_session.run_state is AgentSessionRunState.RUNNING
         payload = continuations[0].payload
         assert isinstance(payload, TurnActionContinuationMailboxPayload)
         assert payload.terminal_status is ActionExecutionStatus.COMPLETED

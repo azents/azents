@@ -556,11 +556,11 @@ async def _add_workspace_user(
 class TestAgentSessionInputService:
     """AgentSessionInputService tests."""
 
-    async def test_create_buffered_agent_input_marks_running_before_return(
+    async def test_create_buffered_agent_input_delegates_wake_to_mailbox_service(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """REST input storage marks runtime running before broker send."""
+        """Delegate the durable REST input wake transition to MailboxService."""
         calls: list[str] = []
         runtime_repository = _RuntimeRepositoryDouble(calls)
         session_repository = _AgentSessionRepositoryDouble(calls)
@@ -605,7 +605,6 @@ class TestAgentSessionInputService:
             "get_by_id",
             "ensure_for_agent",
             "enqueue_mailbox_item",
-            "mark_running_for_input_wakeup",
         ]
         assert mailbox_item_service.enqueued is not None
         assert mailbox_item_service.enqueued.session_id == "session-1"
@@ -1987,6 +1986,12 @@ class TestAgentSessionInputService:
             request_payload={"request": "test"},
             client_request_id="client-request-1",
         )
+        assert isinstance(first, Success)
+        async with rdb_session_manager() as session:
+            await AgentSessionRepository().mark_idle(
+                session,
+                agent_session.id,
+            )
         second = await service.create_buffered_agent_input(
             agent_id=agent_id,
             agent_session_id=agent_session.id,
@@ -2002,7 +2007,6 @@ class TestAgentSessionInputService:
             client_request_id="client-request-1",
         )
 
-        assert isinstance(first, Success)
         assert isinstance(second, Success)
         first_value = first.value
         second_value = second.value
@@ -2015,7 +2019,13 @@ class TestAgentSessionInputService:
             buffers = await MailboxRepository().list_by_session_id(
                 session, agent_session.id
             )
+            replayed_session = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
         assert len(buffers) == 2
+        assert replayed_session is not None
+        assert replayed_session.run_state is AgentSessionRunState.RUNNING
         setup_buffer, user_buffer = buffers
         assert setup_buffer.kind is MailboxItemKind.ACTION_MESSAGE
         assert setup_buffer.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
