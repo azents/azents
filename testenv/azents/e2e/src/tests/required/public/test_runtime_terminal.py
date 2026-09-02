@@ -639,7 +639,12 @@ class _TerminalSocket:
         assert sequence > self.output_sequence, (sequence, self.output_sequence)
         self.output_sequence = sequence
         self.output.extend(data)
-        self.connection.send(json.dumps({"type": "output_ack", "sequence": sequence}))
+        try:
+            self.connection.send(
+                json.dumps({"type": "output_ack", "sequence": sequence})
+            )
+        except ConnectionClosed:
+            return
 
 
 def _control(message: str) -> dict[str, object]:
