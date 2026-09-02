@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-18
-spec_version: 42
+last_verified_at: 2026-09-03
+spec_version: 43
 ---
 
 # File Exchange Storage
@@ -268,6 +268,10 @@ later `import_file` must explicitly copy them into the new Runtime.
   files adds only the remaining available slots. Every selected file is limited
   to 20 MiB before upload, matching the Public API boundary.
 - Composer attachments and user-originated sent attachments, including images, render as fixed-width compact tiles in a non-wrapping horizontal strip. Input-buffer projections use the same compact presentation.
+- A selected attachment whose upload fails remains removable and expands into a
+  bounded error tile with a wrapping filename plus localized failure reason and any
+  available detail shown inline. Failure information does not depend on a truncated
+  label or hover-only tooltip.
 - Attachment strips expose horizontal overflow with a dynamic 40px transparency mask: right edge at the start, both edges in the middle, left edge at the end, and no mask without overflow. Dragging a strip does not activate a tile.
 - Agent-originated image-only output renders as an adaptive gallery whenever the original images are available; generated thumbnail metadata is optional. A single image preserves its aspect ratio with a 480px maximum height. Multiple images use square two-column cells, and sets larger than four expose a `+N` count on the fourth visible cell.
 - Any client- or provider-tool result with visible Exchange attachments closes the preceding Activity and renders as the ordinary standalone Agent attachment group. Images use the adaptive gallery and non-image files use the compact strip; neither path exposes Base64.
@@ -290,6 +294,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-03** — v43. Kept failed Composer attachments removable while
+  presenting their localized reason and available detail inline in a wrapping error
+  tile.
 - **2026-08-18** — v42. Documented the Main Web five-attachment Composer
   boundary and the shared 20 MiB per-upload client/API limit.
 

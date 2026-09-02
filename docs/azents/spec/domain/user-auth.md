@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-08-18
+updated: 2026-09-03
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -59,6 +59,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/login/**
   - typescript/apps/azents-admin-web/src/providers/auth-provider.ts
   - typescript/apps/azents-admin-web/src/shared/lib/auth-cookies.ts
+  - typescript/apps/azents-admin-web/src/shared/lib/auth-policy.ts
   - typescript/apps/azents-admin-web/src/trpc/**
   - typescript/apps/azents-web/src/app/(app)/login/**
   - typescript/apps/azents-web/src/features/auth/**
@@ -83,8 +84,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-08-18
-spec_version: 12
+last_verified_at: 2026-09-03
+spec_version: 13
 ---
 
 # User & Authentication
@@ -312,6 +313,18 @@ Admin Web uses Public API password login and refresh, but stores its own `az-adm
 
 Protected Admin Web tRPC procedures refresh the user session through the Public API when needed, enforce same-origin mutation requests, and forward the resulting user bearer token to the Admin API. Login and session checks require a live `system_admin` assignment. Refresh rejection, logout, or self-revocation clears Admin cookies and returns the browser to Admin login. No machine credential, GitHub organization login, shared cookie, or unauthenticated fallback remains.
 
+When the configured Admin Web public base URL has a non-root path, authentication
+navigation uses native full-page replacement so the gateway prefix cannot race with
+SPA routing. An authentication failure outside the login route preserves the current
+path, query, and fragment as `returnTo` only when the URL is same-origin and remains
+inside the configured base path. Cross-origin or out-of-base-path locations return to
+the prefixed login route without a target, and the login route never redirects to
+itself recursively. Successful login accepts `returnTo` only when it remains
+same-origin, inside the base path, and outside the login route; missing, malformed,
+cross-origin, out-of-base-path, and login-loop targets use the prefixed `/workspaces`
+fallback. Logout uses the same native prefixed navigation. A root public base keeps
+the ordinary Refine/SPA redirect contract instead.
+
 ### 3.10 Workspace invitation integration
 
 Workspace invitation remains email-bound membership intent. Invitation can be created for email without user, and after signup token redeem with same email and login, pending invitation API returns it.
@@ -454,6 +467,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-03** (v13) — Added path-prefixed Admin Web native authentication
+  navigation, safe `returnTo` preservation, `/workspaces` fallback, and the
+  corresponding auth-policy authority mapping.
 - **2026-08-18** (v12) — Restricted Main Web post-login `next` propagation and redirects to same-origin path references, with `/workspaces` as the invalid or absent fallback.
 - **2026-08-18** (v11) — Corrected the existing-install operator CLI contract to
   accept repeated exact-email options, process grants sequentially, and preserve

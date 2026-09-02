@@ -19,9 +19,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/agent_runtime_add/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal/**
+  - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
+  - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/services/terminal_policy/**
   - python/apps/azents/src/azents/services/agent_runtime_system_metrics/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
@@ -42,8 +45,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-01
-spec_version: 33
+last_verified_at: 2026-09-03
+spec_version: 34
 ---
 
 # Agent Runtime Persistence
@@ -74,6 +77,14 @@ Toolkit authority. Terminal-only policy mutation therefore does not recreate or
 reconcile physical compute. The obsolete per-Agent Shell policy column and API
 contract do not exist; managed capability plus version is the sole Runtime Toolkit
 gate.
+
+Terminal tickets, attachments, sequence cursors, replay windows, PTY state, and
+input/output bytes are volatile coordination state. They are not written to
+PostgreSQL, object storage, Session events, Runtime configuration history, analytics,
+raw logs, traces, or metric labels. Only content-free current/recent lifecycle
+summaries and aggregate byte counts may be projected while the bounded volatile record
+exists. Coordination loss ends the Terminal path without changing durable Runtime,
+Session, Project, or Agent Workspace state.
 
 The logical Runtime persists durable Provider routing IDs and a monotonic
 `configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
@@ -404,6 +415,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-03 (spec_version=34)** — Added the non-persistent Terminal
+  ticket/attachment/replay/PTY boundary and mapped Terminal policy plus Runtime
+  removal authority.
 - **2026-09-01 (spec_version=33)** — Separated three-level interactive-Terminal
   policy from Runtime configuration and Toolkit authority, and removed the obsolete
   Agent Shell column and removal-finalizer mutation.

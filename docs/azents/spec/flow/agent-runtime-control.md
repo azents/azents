@@ -11,8 +11,13 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
+  - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
+  - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/agent_runtime_transition/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/services/terminal_policy/**
+  - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/api/public/terminal/**
   - python/apps/azents/src/azents/api/public/chat/**
@@ -55,8 +60,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-01
-spec_version: 72
+last_verified_at: 2026-09-03
+spec_version: 73
 ---
 
 # Agent Runtime Control
@@ -107,6 +112,21 @@ Terminal IDs. Control-stream disconnect or a newer Runner generation terminates 
 old-generation PTY. A data-stream interruption may reconnect only during the bounded
 grace while Control generation remains current; ordered input and replay evidence
 resume the same PTY without replaying accepted input.
+
+Server coordination admits at most one active Terminal per Session, eight per user,
+and sixteen per Runtime; the Runner independently enforces the Session and Runtime
+ceilings. Terminal data frames are limited to 16 KiB, queued input to 64 KiB, live
+unacknowledged output to 256 KiB, and replay to the smaller of 1 MiB or 64 chunks.
+Tickets expire after 30 seconds. PTY authority has a 30-minute idle deadline, an
+eight-hour absolute deadline, and two-minute browser and Runner-stream grace periods.
+These bounds are the same for Redis and in-memory coordination.
+
+Natural process exit and requested termination remain asynchronous Runner outcomes.
+The Runner keeps a terminating stream alive for final status/exit delivery and retries
+a failed or interrupted final flush by reconnecting within the overall stream grace.
+The browser receive path likewise waits for the final exit or revocation control after
+requesting termination instead of treating the terminate request itself as completion.
+Authority invalidation or exhausted grace still closes the path fail-closed.
 
 Runtime lifecycle always has priority. Stop, restart, reset, recreation, repair,
 removal, and Runner replacement publish Terminal invalidation and proceed immediately;
@@ -792,6 +812,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-03 (spec_version=73)** — Added concrete Terminal quotas,
+  frame/buffer/replay and lifetime bounds, final-exit reconnect delivery, and the
+  policy, folder, transition, and removal authority mappings.
 - **2026-09-01 (spec_version=72)** — Added `terminal.v1`, dedicated per-Terminal
   Runner gRPC streams, volatile fenced coordination, Linux PTY lifecycle, privacy
   boundaries, and Runtime-priority invalidation without lifecycle locks.
