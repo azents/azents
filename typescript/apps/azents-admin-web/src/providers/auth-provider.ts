@@ -2,9 +2,13 @@
 
 import { z } from "zod/v4";
 import {
+  getNativeLoginUrl,
+  getNativePostLoginUrl,
+  getNativePublicRouteUrl,
   getPublicRoutePath,
   getPublicRouteUrl,
-} from "@/shared/lib/auth-policy";
+  isPublicRouteUrl,
+} from "../shared/lib/auth-policy.ts";
 import type { AuthProvider } from "@refinedev/core";
 
 const LoginInputSchema = z.object({
@@ -31,8 +35,19 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 export function createAuthProvider(publicBaseUrl: string): AuthProvider {
   const sessionUrl = getPublicRouteUrl(publicBaseUrl, "/api/session");
-  const homePath = getPublicRoutePath(publicBaseUrl, "/");
+  const homePath = getPublicRoutePath(publicBaseUrl, "/workspaces");
   const loginPath = getPublicRoutePath(publicBaseUrl, "/login");
+
+  const navigateAfterAuth = (
+    path: string,
+    nativeUrl: string | null,
+  ): string | null => {
+    if (!nativeUrl) {
+      return path;
+    }
+    window.location.replace(nativeUrl);
+    return null;
+  };
 
   return {
     login: async (input) => {
@@ -62,7 +77,11 @@ export function createAuthProvider(publicBaseUrl: string): AuthProvider {
           },
         };
       }
-      return { success: true, redirectTo: homePath };
+      const redirectTo = navigateAfterAuth(
+        homePath,
+        getNativePostLoginUrl(publicBaseUrl, window.location.href),
+      );
+      return redirectTo ? { success: true, redirectTo } : { success: true };
     },
     logout: async () => {
       const response = await fetch(sessionUrl, {
@@ -78,7 +97,11 @@ export function createAuthProvider(publicBaseUrl: string): AuthProvider {
           },
         };
       }
-      return { success: true, redirectTo: loginPath };
+      const redirectTo = navigateAfterAuth(
+        loginPath,
+        getNativePublicRouteUrl(publicBaseUrl, "/login"),
+      );
+      return redirectTo ? { success: true, redirectTo } : { success: true };
     },
     check: async () => {
       const response = await fetch(sessionUrl, {
@@ -89,7 +112,16 @@ export function createAuthProvider(publicBaseUrl: string): AuthProvider {
       if (response.ok) {
         return { authenticated: true };
       }
-      return { authenticated: false, redirectTo: loginPath, logout: true };
+      if (isPublicRouteUrl(publicBaseUrl, window.location.href, "/login")) {
+        return { authenticated: false, logout: true };
+      }
+      const redirectTo = navigateAfterAuth(
+        loginPath,
+        getNativeLoginUrl(publicBaseUrl, window.location.href),
+      );
+      return redirectTo
+        ? { authenticated: false, redirectTo, logout: true }
+        : { authenticated: false, logout: true };
     },
     getPermissions: () => Promise.resolve(["system_admin"]),
     getIdentity: async () => {
