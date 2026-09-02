@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -19,6 +20,9 @@ from azents.repos.system_user_role.data import (
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+)
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.services.user import UserService
 
@@ -44,6 +48,7 @@ def _make_user_service(
         session_repository=SessionRepository(),
         owner_lifecycle_repository=OwnerLifecycleRepository(),
         session_manager=session_manager,
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
     )
 
 
@@ -191,6 +196,7 @@ class TestSystemUserRoleService:
         user_repo = UserRepository()
         role_repo = SystemUserRoleRepository()
         user_service = _make_user_service(rdb_session_manager)
+        user_service.terminal_invalidation_publisher = AsyncMock()
         async with rdb_session_manager() as session:
             first_user = await user_repo.create(
                 session,
@@ -225,6 +231,9 @@ class TestSystemUserRoleService:
         )
         result = await user_service.delete(first_user.id)
         assert isinstance(result, Success)
+        publisher = user_service.terminal_invalidation_publisher
+        publish = publisher.publish_user_terminal_invalidation
+        publish.assert_awaited_once_with(first_user.id)
         async with rdb_session_manager() as session:
             deleted_user = await user_repo.get(session, first_user.id)
             assert deleted_user is not None

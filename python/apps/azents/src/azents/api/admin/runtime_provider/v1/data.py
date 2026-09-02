@@ -187,6 +187,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     schema_version: int
     spec: RuntimeInfrastructureProfileSpec | None
     required_capabilities: list[str]
+    terminal_enabled: bool
     version: int
     digest: str
     compatible: bool
@@ -219,6 +220,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
             schema_version=profile.schema_version,
             spec=spec,
             required_capabilities=list(profile.required_capabilities),
+            terminal_enabled=profile.terminal_enabled,
             version=profile.version,
             digest=profile.digest,
             compatible=compatibility.compatible,
@@ -408,6 +410,7 @@ class RuntimeInfrastructureProfileCreateRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle = RuntimeProfileLifecycle.ACTIVE
     spec: RuntimeInfrastructureProfileSpec
+    terminal_enabled: bool = True
 
 
 class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
@@ -418,6 +421,7 @@ class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle
     spec: RuntimeInfrastructureProfileSpec
+    terminal_enabled: bool
 
 
 class RuntimeProviderPolicyUpdateRequest(BaseModel):

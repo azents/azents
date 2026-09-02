@@ -45,6 +45,9 @@ from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+)
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
@@ -193,6 +196,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
             ScheduledTaskLifecycleRepository()
         ),
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         session_manager=rdb_session_manager,
         runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
         session_working_folder_binding_service=cast(

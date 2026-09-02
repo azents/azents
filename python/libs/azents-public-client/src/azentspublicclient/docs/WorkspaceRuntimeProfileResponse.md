@@ -15,6 +15,9 @@ Name | Type | Description | Notes
 **policy** | [**WorkspaceRuntimeProfilePolicy**](WorkspaceRuntimeProfilePolicy.md) |  | 
 **infrastructure_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
 **effective_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
+**terminal_enabled** | **bool** |  | 
+**infrastructure_terminal_enabled** | **bool** |  | 
+**effective_terminal_enabled** | **bool** |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 
 **available** | **bool** |  | 

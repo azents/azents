@@ -57,6 +57,11 @@ from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
     RuntimeProfileWorkspaceUnavailable,
 )
+from azents.services.terminal_policy.invalidation import (
+    TerminalPolicyInvalidationPublisherDependency,
+    TerminalPolicySourceInvalidation,
+    TerminalPolicySourceScope,
+)
 from azents.services.uploads import UploadService, UploadValidationError
 from azents.services.uploads.deps import get_upload_service
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
@@ -142,6 +147,9 @@ class AgentService:
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
     avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
+    terminal_policy_invalidation_publisher: (
+        TerminalPolicyInvalidationPublisherDependency
+    )
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -407,6 +415,7 @@ class AgentService:
                 runtime_profile_id=runtime_profile_id,
                 runtime_capability=runtime_capability,
                 shell_enabled=shell_enabled,
+                terminal_enabled=create.terminal_enabled,
                 memory_enabled=create.memory_enabled,
                 tool_search_enabled=create.tool_search_enabled,
                 max_turns=create.max_turns,
@@ -525,6 +534,10 @@ class AgentService:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        terminal_policy_changed = (
+            "terminal_enabled" in update
+            and update["terminal_enabled"] != existing.terminal_enabled
+        ) or ("type" in update and update["type"] != existing.type)
         if (
             "runtime_profile_id" in update
             and (
@@ -672,6 +685,8 @@ class AgentService:
             repo_update["type"] = update["type"]
         if "memory_enabled" in update:
             repo_update["memory_enabled"] = update["memory_enabled"]
+        if "terminal_enabled" in update:
+            repo_update["terminal_enabled"] = update["terminal_enabled"]
         if "tool_search_enabled" in update:
             repo_update["tool_search_enabled"] = update["tool_search_enabled"]
         if "max_turns" in update:
@@ -778,6 +793,15 @@ class AgentService:
             result = await self.repository.update_by_id(session, agent_id, repo_update)
         match result:
             case Success(value):
+                if terminal_policy_changed:
+                    publisher = self.terminal_policy_invalidation_publisher
+                    await publisher.publish_terminal_policy_invalidation(
+                        TerminalPolicySourceInvalidation(
+                            scope=TerminalPolicySourceScope.AGENT,
+                            source_id=value.id,
+                            source_version=value.updated_at.isoformat(),
+                        )
+                    )
                 return Success(await self._build_output(value, can_manage=True))
             case Failure(error):
                 return Failure(error)
@@ -825,6 +849,14 @@ class AgentService:
                 workspace_id=decommissioned.workspace_id,
                 requested_by_workspace_user_id=workspace_user_id,
             )
+        publisher = self.terminal_policy_invalidation_publisher
+        await publisher.publish_terminal_policy_invalidation(
+            TerminalPolicySourceInvalidation(
+                scope=TerminalPolicySourceScope.AGENT,
+                source_id=decommissioned.id,
+                source_version=decommissioned.updated_at.isoformat(),
+            )
+        )
         return Success(AgentDecommissionOutput(job=job))
 
     async def list_admins(
@@ -967,6 +999,14 @@ class AgentService:
                     workspace_user_id=target_workspace_user_id,
                 )
             )
+        publisher = self.terminal_policy_invalidation_publisher
+        await publisher.publish_terminal_policy_invalidation(
+            TerminalPolicySourceInvalidation(
+                scope=TerminalPolicySourceScope.AGENT,
+                source_id=agent.id,
+                source_version=agent.updated_at.isoformat(),
+            )
+        )
         return Success(None)
 
     async def request_avatar_upload(

@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
@@ -34,8 +34,9 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
     description: Annotated[str, Field(strict=True, max_length=4000)]
     lifecycle: Optional[RuntimeProfileLifecycle] = None
     policy: WorkspaceRuntimeProfilePolicy
+    terminal_enabled: Optional[StrictBool] = True
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["infrastructure_profile_id", "display_name", "description", "lifecycle", "policy"]
+    __properties: ClassVar[List[str]] = ["infrastructure_profile_id", "display_name", "description", "lifecycle", "policy", "terminal_enabled"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,7 +103,8 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "lifecycle": obj.get("lifecycle"),
-            "policy": WorkspaceRuntimeProfilePolicy.from_dict(obj["policy"]) if obj.get("policy") is not None else None
+            "policy": WorkspaceRuntimeProfilePolicy.from_dict(obj["policy"]) if obj.get("policy") is not None else None,
+            "terminal_enabled": obj.get("terminal_enabled") if obj.get("terminal_enabled") is not None else True
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

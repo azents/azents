@@ -31,6 +31,9 @@ from azents.repos.password_reset_token.data import (
 from azents.repos.session import SessionRepository
 from azents.repos.user import UserRepository
 from azents.repos.user_email import UserEmailRepository
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 from .data import (
     CreatePasswordResetTokenInput,
@@ -80,6 +83,7 @@ class PasswordResetTokenService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     config: Annotated[Config, Depends(get_config)]
 
     async def create(
@@ -294,6 +298,9 @@ class PasswordResetTokenService:
                     redeemed_at=now,
                 ),
             )
+        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
+            token.user_id
+        )
         return Success(None)
 
     async def revoke(self, token_id: str) -> bool:

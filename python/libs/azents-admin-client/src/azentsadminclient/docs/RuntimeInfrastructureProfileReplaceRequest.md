@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **description** | **str** |  | 
 **lifecycle** | [**RuntimeProfileLifecycle**](RuntimeProfileLifecycle.md) |  | 
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
+**terminal_enabled** | **bool** |  | 
 
 ## Example
 

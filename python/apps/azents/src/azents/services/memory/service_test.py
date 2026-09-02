@@ -53,6 +53,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         runtime_capability=AgentRuntimeCapability.MANAGED,
         runtime_capability_version=1,
         shell_enabled=True,
+        terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,
         max_turns=None,

@@ -191,6 +191,13 @@ class RDBAgent(RDBModel):
     shell_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=True
     )
+    # Enable human interactive Terminal access independently of Worker tools.
+    terminal_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa.true(),
+    )
     # Enable the memory system.
     memory_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=True

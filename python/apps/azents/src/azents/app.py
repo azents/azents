@@ -17,13 +17,20 @@ from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.job_runtime.deps import get_job_runtime
+from azents.runtime import deps as runtime_deps
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
 from azents.services.runtime_provider_bootstrap.runner import (
     RuntimeProviderBootstrapRunner,
 )
+from azents.services.runtime_terminal.invalidation import (
+    get_runtime_terminal_invalidation_publisher,
+)
 from azents.services.system_bootstrap.service import SystemBootstrapService
+from azents.services.terminal_policy.invalidation import (
+    get_terminal_policy_invalidation_publisher,
+)
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
 
@@ -300,6 +307,12 @@ def _create_dependency_overrides(appctx: AppContext[Config]) -> di.DependencyOve
     """Create dependency overrides."""
     return {
         get_appctx: lambda: appctx,
+        get_runtime_terminal_invalidation_publisher: (
+            runtime_deps.get_runtime_terminal_invalidation_publisher
+        ),
+        get_terminal_policy_invalidation_publisher: (
+            runtime_deps.get_runtime_terminal_policy_invalidation_publisher
+        ),
     }
 
 

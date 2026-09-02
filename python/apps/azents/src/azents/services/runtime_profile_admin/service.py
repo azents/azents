@@ -42,6 +42,11 @@ from azents.repos.runtime_provider_policy.repository import (
 )
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import Workspace
+from azents.services.terminal_policy.invalidation import (
+    TerminalPolicyInvalidationPublisherDependency,
+    TerminalPolicySourceInvalidation,
+    TerminalPolicySourceScope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +110,9 @@ class RuntimeProfileAdminService:
         RuntimeProviderPolicyRepository, Depends(RuntimeProviderPolicyRepository)
     ]
     workspace_repository: Annotated[WorkspaceRepository, Depends(WorkspaceRepository)]
+    terminal_policy_invalidation_publisher: (
+        TerminalPolicyInvalidationPublisherDependency
+    )
 
     async def list_profiles(
         self,
@@ -169,6 +177,7 @@ class RuntimeProfileAdminService:
         description: str,
         lifecycle: RuntimeProfileLifecycle,
         spec: RuntimeInfrastructureProfileInternalSpec,
+        terminal_enabled: bool,
         actor_user_id: str,
     ) -> RuntimeInfrastructureProfileProjection:
         """Create one typed Profile and enqueue its first source version."""
@@ -195,6 +204,7 @@ class RuntimeProfileAdminService:
                         required_capabilities=tuple(
                             sorted(required_runtime_profile_capabilities(spec))
                         ),
+                        terminal_enabled=terminal_enabled,
                         digest=digest_runtime_profile_document(spec),
                         actor_user_id=actor_user_id,
                     ),
@@ -235,6 +245,7 @@ class RuntimeProfileAdminService:
         description: str,
         lifecycle: RuntimeProfileLifecycle,
         spec: RuntimeInfrastructureProfileInternalSpec,
+        terminal_enabled: bool,
         actor_user_id: str,
     ) -> RuntimeInfrastructureProfileProjection:
         """Replace one Profile with optimistic version fencing."""
@@ -256,25 +267,32 @@ class RuntimeProfileAdminService:
                     code="profile_not_found",
                     message="Runtime infrastructure Profile was not found.",
                 )
+            replacement = RuntimeInfrastructureProfileReplace(
+                display_name=display_name,
+                description=description,
+                lifecycle=lifecycle,
+                contract_family=spec.contract_family,
+                schema_version=spec.schema_version,
+                spec=spec.model_dump(mode="json"),
+                required_capabilities=tuple(
+                    sorted(required_runtime_profile_capabilities(spec))
+                ),
+                terminal_enabled=terminal_enabled,
+                digest=digest_runtime_profile_document(spec),
+                actor_user_id=actor_user_id,
+            )
+            terminal_only_change = _infrastructure_terminal_only_change(
+                current,
+                replacement,
+            )
+            terminal_changed = current.terminal_enabled != terminal_enabled
             try:
                 profile = await self.profile_repository.replace_infrastructure_profile(
                     session,
                     provider_id=provider.id,
                     profile_id=profile_id,
                     expected_version=expected_version,
-                    replacement=RuntimeInfrastructureProfileReplace(
-                        display_name=display_name,
-                        description=description,
-                        lifecycle=lifecycle,
-                        contract_family=spec.contract_family,
-                        schema_version=spec.schema_version,
-                        spec=spec.model_dump(mode="json"),
-                        required_capabilities=tuple(
-                            sorted(required_runtime_profile_capabilities(spec))
-                        ),
-                        digest=digest_runtime_profile_document(spec),
-                        actor_user_id=actor_user_id,
-                    ),
+                    replacement=replacement,
                 )
             except IntegrityError as error:
                 raise RuntimeProfileAdminUnavailable(
@@ -292,15 +310,16 @@ class RuntimeProfileAdminService:
                     message="Runtime infrastructure Profile version is stale.",
                     current_profile=latest,
                 )
-            await self.profile_repository.enqueue_reconcile_task(
-                session,
-                source_type=RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE,
-                source_id=profile.id,
-                source_version=str(profile.version),
-                available_at=tznow(),
-            )
+            if not terminal_only_change:
+                await self.profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE,
+                    source_id=profile.id,
+                    source_version=str(profile.version),
+                    available_at=tznow(),
+                )
             contract, revision_id = await self._current_contract(session, provider)
-            return RuntimeInfrastructureProfileProjection(
+            projection = RuntimeInfrastructureProfileProjection(
                 profile=profile,
                 compatibility=evaluate_runtime_profile_compatibility(
                     spec,
@@ -311,6 +330,16 @@ class RuntimeProfileAdminService:
                 ),
                 capability_revision_id=revision_id,
             )
+        if terminal_changed:
+            publisher = self.terminal_policy_invalidation_publisher
+            await publisher.publish_terminal_policy_invalidation(
+                TerminalPolicySourceInvalidation(
+                    scope=TerminalPolicySourceScope.INFRASTRUCTURE_PROFILE,
+                    source_id=profile.id,
+                    source_version=str(profile.version),
+                )
+            )
+        return projection
 
     async def get_profile_deletion_impact(
         self,
@@ -589,3 +618,21 @@ class RuntimeProfileAdminService:
                 code="profile_kind_mismatch",
                 message="Profile kind does not match the owning Provider kind.",
             )
+
+
+def _infrastructure_terminal_only_change(
+    current: RuntimeInfrastructureProfile,
+    replacement: RuntimeInfrastructureProfileReplace,
+) -> bool:
+    """Return whether only the non-physical Terminal policy flag changed."""
+    return (
+        current.terminal_enabled != replacement.terminal_enabled
+        and current.display_name == replacement.display_name
+        and current.description == replacement.description
+        and current.lifecycle is replacement.lifecycle
+        and current.contract_family == replacement.contract_family
+        and current.schema_version == replacement.schema_version
+        and current.spec == replacement.spec
+        and current.required_capabilities == replacement.required_capabilities
+        and current.digest == replacement.digest
+    )

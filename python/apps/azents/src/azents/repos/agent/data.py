@@ -69,6 +69,7 @@ class Agent(BaseModel):
         description="Optimistic Agent Runtime capability version",
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
+    terminal_enabled: bool = Field(description="Interactive Terminal enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(description="Tool Search enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
@@ -128,6 +129,10 @@ class AgentCreate(BaseModel):
         description="Initial managed Runtime capability state"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
+    terminal_enabled: bool = Field(
+        default=True,
+        description="Interactive Terminal enabled flag",
+    )
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(
         default=True, description="Tool Search enabled flag"
@@ -170,6 +175,10 @@ class AgentUpdate(TypedDict, total=False):
     enabled: Annotated[bool, Field(description="Enabled flag")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
+    terminal_enabled: Annotated[
+        bool,
+        Field(description="Interactive Terminal enabled flag"),
+    ]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]

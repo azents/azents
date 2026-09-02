@@ -90,6 +90,9 @@ from azents.services.root_agent_session_creation.data import (
     ExplicitRootWorkspaceIntent,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
@@ -408,6 +411,7 @@ class ChatSessionService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
         Depends(AgentRuntimeService),
@@ -1402,6 +1406,10 @@ class ChatSessionService:
                     now=archived_at,
                 )
             await session.commit()
+            publisher = self.terminal_invalidation_publisher
+            publish = publisher.publish_agent_session_terminal_invalidation
+            for archived_session_id in session_ids:
+                await publish(archived_session_id)
             try:
                 run_archive_cleanup = (
                     self.session_git_worktree_service.run_archive_cleanup_for_root_tree

@@ -187,6 +187,7 @@ async def create_pod_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             spec=request_body.spec,
+            terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
     except RuntimeProfileAdminUnavailable as error:
@@ -214,6 +215,7 @@ async def create_container_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             spec=request_body.spec,
+            terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
     except RuntimeProfileAdminUnavailable as error:
@@ -374,6 +376,7 @@ async def replace_pod_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             spec=request_body.spec,
+            terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
     except RuntimeProfileAdminUnavailable as error:
@@ -401,6 +404,7 @@ async def replace_container_profile(
             description=request_body.description,
             lifecycle=request_body.lifecycle,
             spec=request_body.spec,
+            terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
     except RuntimeProfileAdminUnavailable as error:

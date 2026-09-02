@@ -26,6 +26,9 @@ from azents.services.credential.providers import (
     PasswordCredentialProvider,
 )
 from azents.services.credential.service import CredentialService
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+)
 
 from . import AuthService
 from .data import (
@@ -82,6 +85,7 @@ def _make_auth_service(
             user_repo=UserRepository(),
         ),
         session_manager=session_manager,
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         auth_config=_TEST_AUTH_CONFIG,
         email_config=None,
     )
@@ -308,12 +312,16 @@ class TestAuthServiceLogout:
         """Revoke session."""
         # Given: valid session
         service, session_id, refresh_token = session_with_tokens
+        service.terminal_invalidation_publisher = AsyncMock()
 
         # When: logout
         result = await service.logout(LogoutInput(session_id=session_id))
 
         # Then: success
         assert isinstance(result, Success)
+        publisher = service.terminal_invalidation_publisher
+        publish = publisher.publish_authentication_session_terminal_invalidation
+        publish.assert_awaited_once_with(session_id)
 
         # Then: refresh token fails (revoked)
         refresh_result = await service.refresh_token(

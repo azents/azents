@@ -39,6 +39,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     policy: WorkspaceRuntimeProfilePolicy
     infrastructure_network: Optional[RuntimeNetworkProjection]
     effective_network: Optional[RuntimeNetworkProjection]
+    terminal_enabled: StrictBool
+    infrastructure_terminal_enabled: StrictBool
+    effective_terminal_enabled: StrictBool
     version: StrictInt
     digest: StrictStr
     available: StrictBool
@@ -51,7 +54,7 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "infrastructure_profile_id", "display_name", "description", "lifecycle", "policy", "infrastructure_network", "effective_network", "version", "digest", "available", "availability_reason_code", "capability_revision_id", "infrastructure_profile_version", "compatible", "missing_capabilities", "incompatible_constraints", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "provider_id", "infrastructure_profile_id", "display_name", "description", "lifecycle", "policy", "infrastructure_network", "effective_network", "terminal_enabled", "infrastructure_terminal_enabled", "effective_terminal_enabled", "version", "digest", "available", "availability_reason_code", "capability_revision_id", "infrastructure_profile_version", "compatible", "missing_capabilities", "incompatible_constraints", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -149,6 +152,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
             "policy": WorkspaceRuntimeProfilePolicy.from_dict(obj["policy"]) if obj.get("policy") is not None else None,
             "infrastructure_network": RuntimeNetworkProjection.from_dict(obj["infrastructure_network"]) if obj.get("infrastructure_network") is not None else None,
             "effective_network": RuntimeNetworkProjection.from_dict(obj["effective_network"]) if obj.get("effective_network") is not None else None,
+            "terminal_enabled": obj.get("terminal_enabled"),
+            "infrastructure_terminal_enabled": obj.get("infrastructure_terminal_enabled"),
+            "effective_terminal_enabled": obj.get("effective_terminal_enabled"),
             "version": obj.get("version"),
             "digest": obj.get("digest"),
             "available": obj.get("available"),

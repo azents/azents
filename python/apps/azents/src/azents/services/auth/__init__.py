@@ -31,6 +31,9 @@ from azents.services._utils import (
     generate_refresh_token,
 )
 from azents.services.credential.service import CredentialService
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisherDependency,
+)
 
 from .data import (
     InvalidCredentials,
@@ -69,6 +72,7 @@ class AuthService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     email_config: Annotated[EmailConfig | None, Depends(get_email_config)]
 
@@ -321,6 +325,9 @@ class AuthService:
 
         match result:
             case Success():
+                publisher = self.terminal_invalidation_publisher
+                publish = publisher.publish_authentication_session_terminal_invalidation
+                await publish(input.session_id)
                 return Success(None)
             case Failure():
                 return Failure(SessionNotFound(session_id=input.session_id))

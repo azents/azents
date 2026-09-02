@@ -28,6 +28,25 @@ from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.terminal_coordination.redis import (
+    RedisRuntimeTerminalCoordinationStore,
+)
+from azents.runtime.terminal_coordination.store import (
+    RuntimeTerminalCoordinationStore,
+)
+from azents.runtime.terminal_dispatcher import (
+    RuntimeTerminalControlDispatcherAdapter,
+)
+from azents.runtime.terminal_integration import (
+    CoordinatedRuntimeTerminalInvalidationPublisher,
+    RuntimeTerminalPolicyInvalidationPublisher,
+)
+from azents.services.runtime_terminal.invalidation import (
+    RuntimeTerminalInvalidationPublisher,
+)
+from azents.services.terminal_policy.invalidation import (
+    TerminalPolicyInvalidationPublisher,
+)
 from azents.utils.appctx import AppContext
 
 _API_SERVICE_IDENTITY = "azents-api"
@@ -53,11 +72,88 @@ async def get_runtime_coordination_store(
     )
 
 
+async def get_runtime_terminal_coordination_store(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+    config: Annotated[Config, Depends(get_config)],
+) -> RuntimeTerminalCoordinationStore:
+    """Return the process-wide volatile Runtime Terminal coordination store."""
+
+    async def create() -> AsyncIterator[RuntimeTerminalCoordinationStore]:
+        redis = create_redis_client(config.redis.url)
+        try:
+            yield RedisRuntimeTerminalCoordinationStore(redis)
+        finally:
+            await redis.aclose()
+
+    return await appctx.get_variable(
+        f"{__name__}.get_runtime_terminal_coordination_store",
+        create,
+    )
+
+
 def get_runtime_control_protocol(
     store: Annotated[RuntimeCoordinationStore, Depends(get_runtime_coordination_store)],
 ) -> RuntimeControlProtocolService:
     """Return the Runtime control protocol service."""
     return RuntimeControlProtocolService(store)
+
+
+def get_runtime_terminal_control_dispatcher(
+    control_protocol: Annotated[
+        RuntimeControlProtocolService,
+        Depends(get_runtime_control_protocol),
+    ],
+    terminal_coordination: Annotated[
+        RuntimeTerminalCoordinationStore,
+        Depends(get_runtime_terminal_coordination_store),
+    ],
+    runtime_coordination: Annotated[
+        RuntimeCoordinationStore,
+        Depends(get_runtime_coordination_store),
+    ],
+) -> RuntimeTerminalControlDispatcherAdapter:
+    """Return metadata-only Terminal intent dispatch on current Runner Control."""
+    return RuntimeTerminalControlDispatcherAdapter(
+        control_protocol=control_protocol,
+        terminal_coordination=terminal_coordination,
+        runtime_coordination=runtime_coordination,
+    )
+
+
+def get_runtime_terminal_policy_invalidation_publisher(
+    store: Annotated[
+        RuntimeTerminalCoordinationStore,
+        Depends(get_runtime_terminal_coordination_store),
+    ],
+    dispatcher: Annotated[
+        RuntimeTerminalControlDispatcherAdapter,
+        Depends(get_runtime_terminal_control_dispatcher),
+    ],
+) -> TerminalPolicyInvalidationPublisher:
+    """Return policy invalidation backed by volatile Terminal coordination."""
+    return RuntimeTerminalPolicyInvalidationPublisher(
+        store=store,
+        dispatcher=dispatcher,
+        clock=_utc_now,
+    )
+
+
+def get_runtime_terminal_invalidation_publisher(
+    store: Annotated[
+        RuntimeTerminalCoordinationStore,
+        Depends(get_runtime_terminal_coordination_store),
+    ],
+    dispatcher: Annotated[
+        RuntimeTerminalControlDispatcherAdapter,
+        Depends(get_runtime_terminal_control_dispatcher),
+    ],
+) -> RuntimeTerminalInvalidationPublisher:
+    """Return Runtime lifecycle invalidation backed by Terminal coordination."""
+    return CoordinatedRuntimeTerminalInvalidationPublisher(
+        store=store,
+        dispatcher=dispatcher,
+        clock=_utc_now,
+    )
 
 
 def get_runtime_runner_operation_client(

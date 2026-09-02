@@ -30,6 +30,7 @@ Name | Type | Description | Notes
 **runtime_add_available** | **bool** |  | 
 **runtime_remove_available** | **bool** |  | 
 **shell_enabled** | **bool** |  | 
+**terminal_enabled** | **bool** |  | 
 **memory_enabled** | **bool** |  | 
 **tool_search_enabled** | **bool** |  | 
 **max_turns** | **int** |  | 

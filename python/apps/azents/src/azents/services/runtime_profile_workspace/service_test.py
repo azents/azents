@@ -16,11 +16,16 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileDeleteOutcome,
     WorkspaceRuntimeProfileDeletion,
+    WorkspaceRuntimeProfileReplace,
+)
+from azents.services.terminal_policy.invalidation import (
+    NoopTerminalPolicyInvalidationPublisher,
 )
 
 from .service import (
     RuntimeProfileWorkspaceService,
     RuntimeProfileWorkspaceUnavailable,
+    _workspace_terminal_only_change,
 )
 
 
@@ -37,6 +42,7 @@ def _profile(*, version: int = 8) -> WorkspaceRuntimeProfile:
         lifecycle=RuntimeProfileLifecycle.ACTIVE,
         policy={"schema_version": 1},
         version=version,
+        terminal_enabled=True,
         digest="a" * 64,
         created_by_workspace_user_id=None,
         updated_by_workspace_user_id=None,
@@ -82,8 +88,29 @@ def _service(
         policy_repository=cast(Any, AsyncMock()),
         control_repository=cast(Any, AsyncMock()),
         workspace_repository=cast(Any, AsyncMock()),
+        terminal_policy_invalidation_publisher=(
+            NoopTerminalPolicyInvalidationPublisher()
+        ),
     )
     return service, profile_repository, transaction
+
+
+def test_terminal_only_workspace_change_skips_physical_reconciliation() -> None:
+    """The Terminal flag alone is classified as non-physical Profile work."""
+    current = _profile()
+    replacement = WorkspaceRuntimeProfileReplace(
+        provider_id=current.provider_id,
+        infrastructure_profile_id=current.infrastructure_profile_id,
+        display_name=current.display_name,
+        description=current.description,
+        lifecycle=current.lifecycle,
+        policy=current.policy,
+        terminal_enabled=False,
+        digest=current.digest,
+        actor_workspace_user_id="workspace-user-1",
+    )
+
+    assert _workspace_terminal_only_change(current, replacement) is True
 
 
 async def test_delete_profile_returns_committed_impact_and_logs_actor(

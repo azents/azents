@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,11 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.repos.agent.data import Agent
+from azents.services.terminal_policy.invalidation import (
+    NoopTerminalPolicyInvalidationPublisher,
+    TerminalPolicySourceInvalidation,
+    TerminalPolicySourceScope,
+)
 from azents.services.uploads.schema import (
     StoredImage,
     StoredImageFile,
@@ -76,6 +82,7 @@ def _make_agent(
         runtime_capability=runtime_capability,
         runtime_capability_version=1,
         shell_enabled=shell_enabled,
+        terminal_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,
         max_turns=None,
@@ -136,8 +143,87 @@ def _make_service() -> AgentService:
         s3_service=s3_service,
         workspace_s3_bucket="bucket",
         avatar_cdn_base_url=None,
+        terminal_policy_invalidation_publisher=(
+            NoopTerminalPolicyInvalidationPublisher()
+        ),
         session_manager=session_manager,
     )
+
+
+async def test_terminal_policy_invalidation_publishes_only_after_commit() -> None:
+    """A committed Agent policy change invalidates after its DB transaction."""
+    service = _make_service()
+    repository = cast(Any, service.repository)
+    existing = _make_agent()
+    updated = existing.model_copy(update={"terminal_enabled": False})
+    repository.get_by_id.return_value = existing
+    repository.update_by_id.return_value = Success(updated)
+    completed_transactions = 0
+    invalidations: list[TerminalPolicySourceInvalidation] = []
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        nonlocal completed_transactions
+        yield AsyncMock(spec=AsyncSession)
+        completed_transactions += 1
+
+    class _Publisher:
+        async def publish_terminal_policy_invalidation(
+            self,
+            invalidation: TerminalPolicySourceInvalidation,
+        ) -> None:
+            assert completed_transactions == 2
+            invalidations.append(invalidation)
+
+    service.session_manager = session_manager
+    service.terminal_policy_invalidation_publisher = _Publisher()
+
+    result = await service.update_by_id(
+        existing.id,
+        {"terminal_enabled": False},
+        workspace_id=existing.workspace_id,
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Success)
+    assert invalidations == [
+        TerminalPolicySourceInvalidation(
+            scope=TerminalPolicySourceScope.AGENT,
+            source_id=existing.id,
+            source_version=updated.updated_at.isoformat(),
+        )
+    ]
+
+
+async def test_terminal_policy_invalidation_is_not_published_on_rollback() -> None:
+    """A failed Agent policy write never publishes volatile invalidation."""
+    service = _make_service()
+    repository = cast(Any, service.repository)
+    existing = _make_agent()
+    repository.get_by_id.return_value = existing
+    repository.update_by_id.side_effect = RuntimeError("write failed")
+    invalidations: list[TerminalPolicySourceInvalidation] = []
+
+    class _Publisher:
+        async def publish_terminal_policy_invalidation(
+            self,
+            invalidation: TerminalPolicySourceInvalidation,
+        ) -> None:
+            invalidations.append(invalidation)
+
+    service.terminal_policy_invalidation_publisher = _Publisher()
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await service.update_by_id(
+            existing.id,
+            {"terminal_enabled": False},
+            workspace_id=existing.workspace_id,
+            workspace_user_id="workspace-user-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+    assert invalidations == []
 
 
 class TestAgentServiceModelSelection:

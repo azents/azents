@@ -38,6 +38,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     schema_version: StrictInt
     spec: Optional[RuntimeInfrastructureProfileSpec]
     required_capabilities: List[StrictStr]
+    terminal_enabled: StrictBool
     version: StrictInt
     digest: StrictStr
     compatible: StrictBool
@@ -48,7 +49,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "profile_kind", "display_name", "description", "lifecycle", "contract_family", "schema_version", "spec", "required_capabilities", "version", "digest", "compatible", "compatibility_reason_code", "missing_capabilities", "incompatible_constraints", "capability_revision_id", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "profile_kind", "display_name", "description", "lifecycle", "contract_family", "schema_version", "spec", "required_capabilities", "terminal_enabled", "version", "digest", "compatible", "compatibility_reason_code", "missing_capabilities", "incompatible_constraints", "capability_revision_id", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -135,6 +136,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
             "schema_version": obj.get("schema_version"),
             "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
             "required_capabilities": obj.get("required_capabilities"),
+            "terminal_enabled": obj.get("terminal_enabled"),
             "version": obj.get("version"),
             "digest": obj.get("digest"),
             "compatible": obj.get("compatible"),

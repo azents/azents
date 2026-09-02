@@ -1053,6 +1053,7 @@ class _AgentRepository:
             runtime_profile_selection_version=1,
             runtime_capability=AgentRuntimeCapability.MANAGED,
             runtime_capability_version=1,
+            terminal_enabled=True,
             created_at=now,
             updated_at=now,
         )

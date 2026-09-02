@@ -273,6 +273,8 @@ Class | Method | HTTP request | Description
 *SecurityV1Api* | [**security_v1_remove_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_remove_password) | **DELETE** /security/v1/password | Remove Password
 *SecurityV1Api* | [**security_v1_send_elevation_code**](azentspublicclient/docs/SecurityV1Api.md#security_v1_send_elevation_code) | **POST** /security/v1/elevate/send-code | Send Elevation Code
 *SecurityV1Api* | [**security_v1_set_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_set_password) | **POST** /security/v1/password | Set Password
+*TerminalV1Api* | [**terminal_v1_get_terminal_projection**](azentspublicclient/docs/TerminalV1Api.md#terminal_v1_get_terminal_projection) | **GET** /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id} | Get Terminal Projection
+*TerminalV1Api* | [**terminal_v1_issue_terminal_ticket**](azentspublicclient/docs/TerminalV1Api.md#terminal_v1_issue_terminal_ticket) | **POST** /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket | Issue Terminal Ticket
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_connect_oauth**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_connect_oauth) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connect | Connect Oauth
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_disconnect_oauth_connection**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_disconnect_oauth_connection) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connection | Disconnect Oauth Connection
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_exchange_oauth_connection**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_exchange_oauth_connection) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/exchange | Exchange Oauth Connection
@@ -683,6 +685,13 @@ Class | Method | HTTP request | Description
  - [RuntimeSystemMetricState](azentspublicclient/docs/RuntimeSystemMetricState.md)
  - [RuntimeSystemMetricsSummary](azentspublicclient/docs/RuntimeSystemMetricsSummary.md)
  - [RuntimeTerminalDeleteAcknowledgementKind](azentspublicclient/docs/RuntimeTerminalDeleteAcknowledgementKind.md)
+ - [RuntimeTerminalDeniedScope](azentspublicclient/docs/RuntimeTerminalDeniedScope.md)
+ - [RuntimeTerminalLifecycle](azentspublicclient/docs/RuntimeTerminalLifecycle.md)
+ - [RuntimeTerminalProjectionResponse](azentspublicclient/docs/RuntimeTerminalProjectionResponse.md)
+ - [RuntimeTerminalReasonCode](azentspublicclient/docs/RuntimeTerminalReasonCode.md)
+ - [RuntimeTerminalSummaryResponse](azentspublicclient/docs/RuntimeTerminalSummaryResponse.md)
+ - [RuntimeTerminalTicketResponse](azentspublicclient/docs/RuntimeTerminalTicketResponse.md)
+ - [RuntimeTerminalTicketStatus](azentspublicclient/docs/RuntimeTerminalTicketStatus.md)
  - [ScheduledTaskCreateRequest](azentspublicclient/docs/ScheduledTaskCreateRequest.md)
  - [ScheduledTaskCurrentCycleEnvelope](azentspublicclient/docs/ScheduledTaskCurrentCycleEnvelope.md)
  - [ScheduledTaskCurrentCycleResponse](azentspublicclient/docs/ScheduledTaskCurrentCycleResponse.md)

@@ -3,6 +3,7 @@
 import datetime
 import logging
 from typing import Literal, cast
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -89,6 +90,10 @@ from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
+)
+from azents.services.runtime_terminal.invalidation import (
+    NoopRuntimeTerminalInvalidationPublisher,
+    RuntimeTerminalInvalidationPublisher,
 )
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import SessionGitWorktreeService
@@ -398,6 +403,7 @@ def _service(
     runner_operations: RuntimeRunnerOperationClient | None = None,
     runtime_target_resolver: RuntimeOperationTargetResolver | None = None,
     binding_preflight_error: SessionWorkingFolderBindingError | None = None,
+    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisher | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -455,6 +461,10 @@ def _service(
         ),
         scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
             ScheduledTaskLifecycleRepository()
+        ),
+        terminal_invalidation_publisher=(
+            terminal_invalidation_publisher
+            or NoopRuntimeTerminalInvalidationPublisher()
         ),
         session_manager=rdb_session_manager,
         runtime_target_resolver=(runtime_target_resolver or _RuntimeTargetResolver()),
@@ -1552,10 +1562,15 @@ class TestChatSessionTeamSessions:
         assert isinstance(create_result, Success)
 
         folder_delete_runner = _FolderDeleteRunner()
+        terminal_invalidation_publisher = AsyncMock()
         archive_result = await _service(
             rdb_session_manager,
             agent_runtime_repository=_ReadyRuntimeRepository(),
             runner_operations=folder_delete_runner,
+            terminal_invalidation_publisher=cast(
+                RuntimeTerminalInvalidationPublisher,
+                terminal_invalidation_publisher,
+            ),
         ).archive_agent_session(
             agent_id=agent_id,
             session_id=create_result.value.id,
@@ -1564,6 +1579,10 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(archive_result, Success)
         assert archive_result.value.archived_session_id == create_result.value.id
+        publish = (
+            terminal_invalidation_publisher.publish_agent_session_terminal_invalidation
+        )
+        publish.assert_awaited_once_with(create_result.value.id)
         list_result = await _service(rdb_session_manager).list_agent_sessions(
             agent_id=agent_id,
             user_id=user_id,

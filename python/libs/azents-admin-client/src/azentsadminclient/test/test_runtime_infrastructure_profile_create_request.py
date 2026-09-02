@@ -38,7 +38,8 @@ class TestRuntimeInfrastructureProfileCreateRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                spec = None
+                spec = None,
+                terminal_enabled = True
             )
         else:
             return RuntimeInfrastructureProfileCreateRequest(

@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_network_projection import RuntimeNetworkProjection
@@ -38,11 +38,12 @@ class SelectableInfrastructureProfileResponse(BaseModel):
     spec: RuntimeInfrastructureProfileSpec
     infrastructure_network: RuntimeNetworkProjection
     required_capabilities: List[StrictStr]
+    terminal_enabled: StrictBool
     version: StrictInt
     digest: StrictStr
     capability_revision_id: StrictStr
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_display_name", "provider_kind", "profile_kind", "display_name", "description", "spec", "infrastructure_network", "required_capabilities", "version", "digest", "capability_revision_id"]
+    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_display_name", "provider_kind", "profile_kind", "display_name", "description", "spec", "infrastructure_network", "required_capabilities", "terminal_enabled", "version", "digest", "capability_revision_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -118,6 +119,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
             "infrastructure_network": RuntimeNetworkProjection.from_dict(obj["infrastructure_network"]) if obj.get("infrastructure_network") is not None else None,
             "required_capabilities": obj.get("required_capabilities"),
+            "terminal_enabled": obj.get("terminal_enabled"),
             "version": obj.get("version"),
             "digest": obj.get("digest"),
             "capability_revision_id": obj.get("capability_revision_id")

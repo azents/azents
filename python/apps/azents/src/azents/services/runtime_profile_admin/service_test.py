@@ -27,13 +27,21 @@ from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfileDeleteOutcome,
     RuntimeInfrastructureProfileDeletion,
     RuntimeInfrastructureProfileDeletionImpact,
+    RuntimeInfrastructureProfileReplace,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileUsage,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.workspace.data import Workspace
+from azents.services.terminal_policy.invalidation import (
+    NoopTerminalPolicyInvalidationPublisher,
+)
 
-from .service import RuntimeProfileAdminService, RuntimeProfileAdminUnavailable
+from .service import (
+    RuntimeProfileAdminService,
+    RuntimeProfileAdminUnavailable,
+    _infrastructure_terminal_only_change,
+)
 
 
 def _provider() -> RuntimeProvider:
@@ -76,6 +84,7 @@ def _infrastructure_profile(*, version: int = 7) -> RuntimeInfrastructureProfile
         spec={"schema_version": 1},
         required_capabilities=("kubernetes.pod-profile",),
         version=version,
+        terminal_enabled=True,
         digest="a" * 64,
         created_by_user_id=None,
         updated_by_user_id=None,
@@ -97,6 +106,7 @@ def _workspace_profile() -> WorkspaceRuntimeProfile:
         lifecycle=RuntimeProfileLifecycle.ACTIVE,
         policy={"schema_version": 1, "network_restriction": None},
         version=3,
+        terminal_enabled=True,
         digest="b" * 64,
         created_by_workspace_user_id=None,
         updated_by_workspace_user_id=None,
@@ -134,6 +144,9 @@ def _service() -> tuple[
         provider_repository=provider_repository,
         policy_repository=cast(Any, AsyncMock()),
         workspace_repository=workspace_repository,
+        terminal_policy_invalidation_publisher=(
+            NoopTerminalPolicyInvalidationPublisher()
+        ),
     )
     provider_repository.get_by_provider_id.return_value = _provider()
     return (
@@ -143,6 +156,25 @@ def _service() -> tuple[
         workspace_repository,
         transaction,
     )
+
+
+def test_terminal_only_infrastructure_change_skips_physical_reconciliation() -> None:
+    """The Terminal flag alone is classified as non-physical Profile work."""
+    current = _infrastructure_profile()
+    replacement = RuntimeInfrastructureProfileReplace(
+        display_name=current.display_name,
+        description=current.description,
+        lifecycle=current.lifecycle,
+        contract_family=current.contract_family,
+        schema_version=current.schema_version,
+        spec=current.spec,
+        required_capabilities=current.required_capabilities,
+        terminal_enabled=False,
+        digest=current.digest,
+        actor_user_id="admin-1",
+    )
+
+    assert _infrastructure_terminal_only_change(current, replacement) is True
 
 
 async def test_get_profile_deletion_impact_returns_fresh_projection(

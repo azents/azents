@@ -39,7 +39,8 @@ class TestWorkspaceRuntimeProfileCreateRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                policy = None
+                policy = None,
+                terminal_enabled = True
             )
         else:
             return WorkspaceRuntimeProfileCreateRequest(
