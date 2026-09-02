@@ -271,10 +271,6 @@ class ChatWriteService:
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
             )
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                session_id,
-            )
             mailbox_item = result.mailbox_item
 
         return AcceptedEditInput(

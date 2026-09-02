@@ -11,6 +11,7 @@ from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -35,6 +36,10 @@ def get_user_scheduled_task_dispatcher(
         ScheduledTaskCycleRepository,
         Depends(ScheduledTaskCycleRepository),
     ],
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
+    ],
     mailbox_repository: Annotated[
         MailboxRepository,
         Depends(MailboxRepository),
@@ -52,6 +57,7 @@ def get_user_scheduled_task_dispatcher(
     """Compose the bounded user Scheduled Task dispatcher."""
     return ScheduledTaskDispatcher(
         session_manager=session_manager,
+        agent_session_repository=agent_session_repository,
         cycle_repository=cycle_repository,
         mailbox_repository=mailbox_repository,
         broker=broker,

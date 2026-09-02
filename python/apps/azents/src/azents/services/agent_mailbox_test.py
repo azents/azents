@@ -216,18 +216,17 @@ def _service(
 
 
 @pytest.mark.parametrize(
-    ("operation", "expected_kind", "expected_mode", "wakes"),
+    ("operation", "expected_kind", "expected_mode"),
     [
-        ("spawn", "spawn_agent", MailboxSchedulingMode.WAKE_SESSION, True),
-        ("message", "send_message", MailboxSchedulingMode.QUEUE_ONLY, False),
-        ("followup", "followup_task", MailboxSchedulingMode.WAKE_SESSION, True),
+        ("spawn", "spawn_agent", MailboxSchedulingMode.WAKE_SESSION),
+        ("message", "send_message", MailboxSchedulingMode.QUEUE_ONLY),
+        ("followup", "followup_task", MailboxSchedulingMode.WAKE_SESSION),
     ],
 )
 async def test_instruction_operations_own_scheduling_intent(
     operation: str,
     expected_kind: str,
     expected_mode: MailboxSchedulingMode,
-    wakes: bool,
 ) -> None:
     service, input_service, session_repository = _service()
     source = _session_agent(
@@ -263,9 +262,7 @@ async def test_instruction_operations_own_scheduling_intent(
     assert input.sender_user_id is None
     assert input.metadata["message_kind"] == expected_kind
     assert session_repository.activity_ids == ["root-agent", "child-agent"]
-    assert session_repository.running_session_ids == (
-        ["child-session"] if wakes else []
-    )
+    assert session_repository.running_session_ids == []
 
 
 @pytest.mark.parametrize(

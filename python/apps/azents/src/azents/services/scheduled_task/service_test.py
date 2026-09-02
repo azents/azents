@@ -17,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.engine.events.types import ScheduledTaskTriggerPayload
 from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -185,6 +186,25 @@ class _MailboxRepository:
         assert create.idempotency_key == idempotency_key
         self.creates.append(create)
         return object()
+
+
+class _AgentSessionRepository:
+    """Stage or reject a durable running transition in the fake transaction."""
+
+    def __init__(self, *, reject: bool = False) -> None:
+        self.reject = reject
+        self.running_session_ids: list[str] = []
+
+    async def mark_running_for_input_wakeup(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        if self.reject:
+            raise ValueError("Active AgentSession not found")
+        tx = cast(_TransactionSession, session)
+        tx.staged.append("running")
+        self.running_session_ids.append(session_id)
 
 
 class _AuthorityValidator:
@@ -397,11 +417,16 @@ def _dispatcher(
     broker: _Broker,
     clock: Callable[[], datetime.datetime],
     authority_validator: _AuthorityValidator | _SelectiveAuthorityValidator,
+    agent_session_repository: _AgentSessionRepository | None = None,
     batch_size: int = 1,
 ) -> ScheduledTaskDispatcher:
     """Compose a dispatcher from deterministic fakes."""
     return ScheduledTaskDispatcher(
         session_manager=cast(SessionManager[AsyncSession], manager),
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            agent_session_repository or _AgentSessionRepository(),
+        ),
         cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
         mailbox_repository=cast(MailboxRepository, mailbox_repository),
         broker=cast(SessionBroker, broker),
@@ -516,6 +541,40 @@ async def test_dispatch_rolls_back_when_lease_expires_during_admission() -> None
 
 
 @pytest.mark.asyncio
+async def test_dispatch_rolls_back_when_session_running_transition_is_rejected() -> (
+    None
+):
+    """A stale Session authority cannot commit a cycle or wake-producing trigger."""
+    task = _task()
+    manager = _SessionManager()
+    repository = _TaskRepository(claimed=task, locked=task)
+    cycle_repository = _CycleRepository()
+    mailbox_repository = _MailboxRepository()
+    broker = _Broker()
+    dispatcher = _dispatcher(
+        manager=manager,
+        repository=repository,
+        cycle_repository=cycle_repository,
+        mailbox_repository=mailbox_repository,
+        broker=broker,
+        clock=_clock(
+            _NOW + datetime.timedelta(seconds=10),
+            _NOW + datetime.timedelta(seconds=20),
+        ),
+        authority_validator=_AuthorityValidator(None),
+        agent_session_repository=_AgentSessionRepository(reject=True),
+    )
+
+    with pytest.raises(ValueError, match="Active AgentSession not found"):
+        await dispatcher.dispatch_once(lease_owner="scheduler-1", now=_NOW)
+
+    assert len(cycle_repository.snapshots) == 1
+    assert len(mailbox_repository.creates) == 1
+    assert manager.committed == []
+    assert broker.messages == []
+
+
+@pytest.mark.asyncio
 async def test_dispatch_coalesces_active_recurring_occurrence_without_wake() -> None:
     """An active recurring cycle keeps one earliest pending occurrence."""
     task = _task(
@@ -582,7 +641,11 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert summary.claimed == 1
     assert summary.admitted == 1
     assert summary.wake_failed == 1
-    assert manager.committed == ["cycle", "mailbox"]
+    assert manager.committed == ["cycle", "mailbox", "running"]
+    assert cast(
+        _AgentSessionRepository,
+        dispatcher.agent_session_repository,
+    ).running_session_ids == [task.session_id]
     assert len(cycle_repository.snapshots) == 1
     trigger = mailbox_repository.creates[0]
     assert trigger.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER
@@ -703,5 +766,5 @@ async def test_dispatch_deletes_invalid_authority_and_continues() -> None:
     assert len(cycle_repository.snapshots) == 1
     assert cycle_repository.snapshots[0].task_id == valid.id
     assert len(mailbox_repository.creates) == 1
-    assert manager.committed == ["task_deleted", "cycle", "mailbox"]
+    assert manager.committed == ["task_deleted", "cycle", "mailbox", "running"]
     assert broker.messages == [SessionWakeUp(session_id=valid.session_id)]

@@ -50,7 +50,7 @@ class _MailboxService:
     def __init__(self) -> None:
         self.enqueued_batches: list[list[MailboxEnqueue]] = []
 
-    async def enqueue_many(
+    async def enqueue_idle_continuations(
         self,
         session: object,
         inputs: list[MailboxEnqueue],

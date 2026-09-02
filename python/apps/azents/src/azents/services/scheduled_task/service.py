@@ -32,6 +32,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
     MailboxItemCreate,
@@ -598,6 +599,7 @@ class ScheduledTaskDispatcher:
         self,
         session_manager: SessionManager[AsyncSession],
         *,
+        agent_session_repository: AgentSessionRepository,
         cycle_repository: ScheduledTaskCycleRepository,
         mailbox_repository: MailboxRepository,
         broker: SessionBroker,
@@ -608,6 +610,7 @@ class ScheduledTaskDispatcher:
         lease_duration: datetime.timedelta = _DEFAULT_LEASE,
     ) -> None:
         self.session_manager = session_manager
+        self.agent_session_repository = agent_session_repository
         self.cycle_repository = cycle_repository
         self.mailbox_repository = mailbox_repository
         self.broker = broker
@@ -807,6 +810,10 @@ class ScheduledTaskDispatcher:
                     payload=payload,
                 ),
                 idempotency_key=f"scheduled-task-trigger:{cycle_id}",
+            )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                task.session_id,
             )
             await self._complete_claim(
                 session,

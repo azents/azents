@@ -960,17 +960,12 @@ class ChatSessionService:
                     return Failure(error)
                 case _:
                     assert_never(workspace_result)
-            setup_input_created = await self._enqueue_setup_actions(
+            await self._enqueue_setup_actions(
                 session,
                 agent_session=created,
                 workspace_items=workspace_items,
                 user_id=user_id,
             )
-            if setup_input_created:
-                await self.agent_session_repository.mark_running_for_input_wakeup(
-                    session,
-                    created.id,
-                )
             await session.commit()
         return Success(created)
 

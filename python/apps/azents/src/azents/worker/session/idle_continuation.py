@@ -139,7 +139,10 @@ class IdleContinuationService:
                 )
                 for continuation in continuations
             ]
-            enqueue_results = await self.mailbox_item_service.enqueue_many(
+            enqueue_idle_continuations = (
+                self.mailbox_item_service.enqueue_idle_continuations
+            )
+            enqueue_results = await enqueue_idle_continuations(
                 session,
                 continuation_inputs,
             )

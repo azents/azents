@@ -1795,6 +1795,96 @@ class TestAgentSessionRepository:
 
         assert rejected is None
 
+    async def test_mark_running_for_input_wakeup_rejects_archived_session(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A wake transition fails instead of silently accepting stale authority."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "input-wakeup-archived-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "input-wakeup-archived",
+        )
+        repo = AgentSessionRepository()
+        agent_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        await repo.archive(
+            rdb_session,
+            agent_session.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        with pytest.raises(ValueError, match="Active AgentSession not found"):
+            await repo.mark_running_for_input_wakeup(
+                rdb_session,
+                agent_session.id,
+            )
+
+    async def test_mark_running_for_input_wakeup_does_not_rewrite_running_session(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An already-running Session avoids heartbeat and row-version churn."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "input-wakeup-running-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "input-wakeup-running",
+        )
+        repo = AgentSessionRepository()
+        agent_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        await repo.mark_running_for_input_wakeup(
+            rdb_session,
+            agent_session.id,
+        )
+        before = (
+            await rdb_session.execute(
+                sa.select(
+                    RDBAgentSession.run_heartbeat_at,
+                    RDBAgentSession.updated_at,
+                ).where(RDBAgentSession.id == agent_session.id)
+            )
+        ).one()
+
+        await repo.mark_running_for_input_wakeup(
+            rdb_session,
+            agent_session.id,
+        )
+        after = (
+            await rdb_session.execute(
+                sa.select(
+                    RDBAgentSession.run_heartbeat_at,
+                    RDBAgentSession.updated_at,
+                ).where(RDBAgentSession.id == agent_session.id)
+            )
+        ).one()
+
+        assert after == before
+
     async def test_subtree_stop_lock_serializes_concurrent_child_creation(
         self,
         rdb_engine: AsyncEngine,

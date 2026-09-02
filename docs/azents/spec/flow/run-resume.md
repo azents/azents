@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-08-23
-spec_version: 31
+last_verified_at: 2026-09-02
+spec_version: 32
 ---
 
 # Run Resume
@@ -50,7 +50,9 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 ## Canonical Recovery And Cutover Replay
 
 `SessionWakeUp(session_id)` is only a routing signal. On every ordinary recovery, the Worker claims
-the Session owner generation before loading one immutable PostgreSQL canonical snapshot of the active
+the Session owner generation before loading one immutable PostgreSQL canonical snapshot through a
+non-locking Session read. Before reading mailbox state or recoverable execution work, the Worker
+requires the durable Session `run_state` to be `running`. The snapshot then validates the active
 Session, Agent, Workspace, root tree/context, pending command, recoverable Run, and idle continuation.
 Mailbox state is not captured in this snapshot. The leased Session runner reads and consumes the
 current FIFO directly, so producer appends remain ordinary queue activity rather than invalidating
@@ -118,8 +120,9 @@ continuation. Any leftover active operation is cancelled rather than resumed.
 
 Broker wake-up routing uses the ownership lease:
 
-1. A producer commits model input or control state to Postgres, then stores a wake-up signal in the
-   per-session wake-up list.
+1. A producer commits model input or control state and the Session `running` transition to Postgres,
+   then stores a wake-up signal in the per-session wake-up list. Queue-only mailbox work does not
+   change the Session run state.
 2. If the session has a live owner heartbeat, the producer publishes the wake-up to the owner
    worker's direct stream.
 3. If there is no live owner heartbeat, the producer publishes to the global incoming stream.
@@ -153,13 +156,12 @@ sequenceDiagram
         WA->>R: renew owner heartbeat<br/>(does not need a new user message)
     end
 
-    API->>DB: commit input/control state
+    API->>DB: commit input/control state<br/>and run_state=RUNNING
     API->>R: RPUSH session wake-up
     R->>R: owner heartbeat is live
     R->>WA: XADD owner direct stream
     WA->>R: XREADGROUP owner direct stream
     WA->>R: drain session wake-up list
-    WA->>DB: mark run_state=RUNNING
     WA->>DB: process follow-up input
 
     Note over WA: If WA stops gracefully
@@ -188,14 +190,13 @@ sequenceDiagram
     WA->>R: renew heartbeat every 30s
     Note over WA: crash / OOM / node loss
     Note over R: heartbeat expires after 120s<br/>sticky lease key may still exist
-    API->>DB: commit input/control state
+    API->>DB: commit input/control state<br/>and run_state=RUNNING
     API->>R: RPUSH session wake-up signal
     R->>R: sticky owner exists, heartbeat missing
     R->>WB: XADD global incoming
     WB->>R: observe stale owner heartbeat
     WB->>R: steal session lease + heartbeat
     WB->>R: drain session wake-up list
-    WB->>DB: mark run_state=RUNNING
     WB->>DB: resume from durable transcript / input buffers
 ```
 

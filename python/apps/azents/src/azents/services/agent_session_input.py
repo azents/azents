@@ -336,6 +336,10 @@ class AgentSessionInputService:
                             session,
                             agent_session=agent_session,
                         )
+                    await self._reapply_existing_mailbox_wake(
+                        session,
+                        mailbox_item,
+                    )
                     return Success(
                         BufferedAgentSessionInputResult(
                             agent_runtime_id=(
@@ -444,10 +448,6 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
-            )
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                agent_session.id,
             )
 
         return Success(
@@ -559,6 +559,10 @@ class AgentSessionInputService:
                             "Session creation idempotency record resolved an input "
                             "outside its Session"
                         )
+                    await self._reapply_existing_mailbox_wake(
+                        session,
+                        mailbox_item,
+                    )
                     return Success(
                         CreatedAgentSessionInputResult(
                             agent_runtime_id=(
@@ -721,10 +725,6 @@ class AgentSessionInputService:
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
             )
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                agent_session.id,
-            )
 
         return Success(
             CreatedAgentSessionInputResult(
@@ -835,6 +835,10 @@ class AgentSessionInputService:
                             "Session creation idempotency record resolved an input "
                             "outside its Session"
                         )
+                    await self._reapply_existing_mailbox_wake(
+                        session,
+                        mailbox_item,
+                    )
                     return Success(
                         CreatedAgentSessionInputResult(
                             agent_runtime_id=(
@@ -996,10 +1000,6 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
-            )
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                agent_session.id,
             )
 
         return Success(
@@ -1403,6 +1403,10 @@ class AgentSessionInputService:
                 "Session creation idempotency record resolved an input "
                 "outside its Session"
             )
+        await self._reapply_existing_mailbox_wake(
+            session,
+            mailbox_item,
+        )
         return Success(
             CreatedAgentSessionInputResult(
                 agent_runtime_id=runtime.id if runtime is not None else None,
@@ -1411,6 +1415,22 @@ class AgentSessionInputService:
                 mailbox_item=mailbox_item,
                 created=False,
             )
+        )
+
+    async def _reapply_existing_mailbox_wake(
+        self,
+        session: AsyncSession,
+        mailbox_item: MailboxItem | None,
+    ) -> None:
+        """Repair the Session transition for one replayed wake-producing item."""
+        if (
+            mailbox_item is None
+            or mailbox_item.scheduling_mode is not MailboxSchedulingMode.WAKE_SESSION
+        ):
+            return
+        await self.agent_session_repository.mark_running_for_input_wakeup(
+            session,
+            mailbox_item.session_id,
         )
 
     async def _resolve_runtime_for_input(

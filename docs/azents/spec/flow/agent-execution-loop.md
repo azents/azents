@@ -85,8 +85,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-01
-spec_version: 166
+last_verified_at: 2026-09-02
+spec_version: 167
 ---
 
 # Agent Execution Loop
@@ -103,8 +103,10 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. After claiming Session ownership, the Worker repeatedly reads the current FIFO InputBuffer head
-   until the mailbox is empty or another execution boundary stops consumption. The canonical
+1. After claiming Session ownership, the Worker performs a non-locking durable Session read and
+   requires `AgentSession.run_state = running` before reading any mailbox or recoverable execution
+   work. It then repeatedly reads the current FIFO InputBuffer head until the mailbox is empty or
+   another execution boundary stops consumption. The canonical
    execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
    profile and attachment metadata outside a database session and then locks the same head for atomic
    preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
@@ -146,9 +148,16 @@ The broker receives and sends only `SessionWakeUp(session_id)` and
 `SessionStopSignal(session_id)`. These are routing notifications, not execution envelopes: they
 contain no User, sender, requester, Agent, Workspace, interface, prompt, capability, or resource
 identity. Before any run, Toolkit, model, or resource operation, the Worker claims the Session owner
-generation and loads one immutable canonical PostgreSQL snapshot. That snapshot validates the active
-Session, Agent, Workspace, current/root SessionAgent lineage and context, exact owner generation, and
-expected FIFO InputBuffer, pending command, recoverable Run, or idle-continuation work.
+generation and loads one immutable canonical PostgreSQL snapshot without taking a Session row lock.
+The snapshot rejects any Session whose durable `run_state` is not `running` before reading mailbox
+state, then validates the active Session, Agent, Workspace, current/root SessionAgent lineage and
+context, exact owner generation, and expected FIFO InputBuffer, pending command, recoverable Run, or
+idle-continuation work.
+
+Every producer that admits a `wake_session` Mailbox item transitions the active Session to
+`running` in the same PostgreSQL transaction as the mailbox write. Idempotent replay reapplies that
+transition even when it reuses the existing Mailbox row. `queue_only` admission intentionally
+preserves the current Session run state.
 
 Team and private User Sessions use the same internal execution authority. `InputMessage`,
 `InvokeInput`, `RunRequest`, generic resolve contexts, and Toolkit/turn contexts contain no

@@ -1921,8 +1921,8 @@ class AgentSessionRepository:
     ) -> None:
         """Transition AgentSession to RUNNING recovery target on buffered input."""
         if not await self.lock_agent_parent_for_session(session, session_id):
-            return
-        await session.execute(
+            raise ValueError("AgentSession parent Agent not found")
+        updated_id = await session.scalar(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
@@ -1933,7 +1933,24 @@ class AgentSessionRepository:
                 run_state=AgentSessionRunState.RUNNING,
                 run_heartbeat_at=sa.func.now(),
             )
+            .returning(RDBAgentSession.id)
         )
+        if updated_id is not None:
+            await session.flush()
+            return
+        current = (
+            await session.execute(
+                sa.select(
+                    RDBAgentSession.status,
+                    RDBAgentSession.run_state,
+                ).where(RDBAgentSession.id == session_id)
+            )
+        ).one_or_none()
+        if current != (
+            AgentSessionStatus.ACTIVE,
+            AgentSessionRunState.RUNNING,
+        ):
+            raise ValueError("Active AgentSession not found")
         await session.flush()
 
     async def admit_input_wakeup(
