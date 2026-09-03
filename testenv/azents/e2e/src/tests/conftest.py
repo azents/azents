@@ -18,7 +18,7 @@ from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import NamedTuple, TypeVar
 
 import azentsadminclient
 import azentspublicclient
@@ -107,8 +107,26 @@ _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 _JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
+_STRING_MAPPING_ADAPTER = TypeAdapter(dict[str, str])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 _IMAGE_BUILD_OBSERVABILITY_LOCK = threading.Lock()
+_T = TypeVar("_T")
+
+
+class _S3Credentials(NamedTuple):
+    """Credentials shared by the E2E RustFS fixture."""
+
+    access_key: str
+    secret_key: str
+
+
+class _E2EImageCacheOptions(NamedTuple):
+    """Resolved image cache import/export settings."""
+
+    cache_from: list[dict[str, str]]
+    cache_to: dict[str, str] | None
+    cache_backend: str
+    cache_scope: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -327,8 +345,11 @@ def postgres_container(
 
 
 @pytest.fixture(scope="session")
-def s3_credentials() -> tuple[str, str]:
-    return random_secret(16), random_secret(32)
+def s3_credentials() -> _S3Credentials:
+    return _S3Credentials(
+        access_key=random_secret(16),
+        secret_key=random_secret(32),
+    )
 
 
 def _wait_for_fixture_health(
@@ -364,9 +385,12 @@ def _write_core_prerequisite_observability(
     artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
     if artifact_root is None:
         return
-    task_seconds = sum(
-        cast(float, timing["duration_seconds"]) for timing in task_timings.values()
-    )
+    task_seconds = 0.0
+    for timing in task_timings.values():
+        duration_seconds = timing.get("duration_seconds")
+        if not isinstance(duration_seconds, (float, int)):
+            raise TypeError("task timing duration_seconds must be numeric")
+        task_seconds += float(duration_seconds)
     try:
         artifact_path = Path(artifact_root) / "core-prerequisite-timings.json"
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
@@ -422,11 +446,12 @@ def _start_tracked_prerequisite_container(
 @pytest.fixture(scope="session")
 def core_prerequisites(
     container_network: Network,
-    s3_credentials: tuple[str, str],
+    s3_credentials: _S3Credentials,
 ) -> Generator[_CorePrerequisites, None, None]:
     """Prepare independent images and infrastructure services concurrently."""
     _initialize_testcontainers_reaper()
-    access_key, secret_key = s3_credentials
+    access_key = s3_credentials.access_key
+    secret_key = s3_credentials.secret_key
     python_image = "python:3.14-alpine"
     postgres = (
         PostgresContainer(
@@ -527,7 +552,7 @@ def core_prerequisites(
     started_at = time.monotonic()
     completed = False
 
-    def timed_task(name: str, operation: Callable[[], Any]) -> Any:
+    def timed_task(name: str, operation: Callable[[], _T]) -> _T:
         task_started_at = time.monotonic()
         outcome = "success"
         try:
@@ -558,7 +583,7 @@ def core_prerequisites(
                 readiness=readiness,
             )
 
-        return cast(DockerContainer, timed_task(name, operation))
+        return timed_task(name, operation)
 
     def start_openai_services() -> None:
         start_container(
@@ -617,7 +642,7 @@ def core_prerequisites(
             ]
             for future in futures:
                 future.result()
-            e2e_images = cast(dict[str, str], image_future.result())
+            e2e_images = _STRING_MAPPING_ADAPTER.validate_python(image_future.result())
         completed = True
         _write_core_prerequisite_observability(
             completed=True,
@@ -765,15 +790,15 @@ def discord_provider_fake_url(
 
 
 @pytest.fixture(scope="session")
-def rustfs_access_key(s3_credentials: tuple[str, str]) -> str:
+def rustfs_access_key(s3_credentials: _S3Credentials) -> str:
     """RustFS access key."""
-    return s3_credentials[0]
+    return s3_credentials.access_key
 
 
 @pytest.fixture(scope="session")
-def rustfs_secret_key(s3_credentials: tuple[str, str]) -> str:
+def rustfs_secret_key(s3_credentials: _S3Credentials) -> str:
     """RustFS secret key."""
-    return s3_credentials[1]
+    return s3_credentials.secret_key
 
 
 # =============================================================================
@@ -935,12 +960,10 @@ def _build_e2e_image(
     image_tag: str,
     dockerfile: Path,
     cache_repository: str,
-    build_contexts: dict[str, str] | None = None,
+    build_contexts: dict[str, str | Path] | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
-    cache_from, cache_to, cache_backend, cache_scope = _get_e2e_image_cache_options(
-        cache_repository
-    )
+    cache_options = _get_e2e_image_cache_options(cache_repository)
     builder = os.environ.get(_DOCKER_BUILDER_ENV)
     started_at = time.monotonic()
     completed = False
@@ -951,18 +974,18 @@ def _build_e2e_image(
             file=str(dockerfile),
             tags=[image_tag],
             builder=builder,
-            cache_from=cache_from or None,
-            cache_to=cache_to,
-            build_contexts=cast(Any, build_contexts or {}),
+            cache_from=cache_options.cache_from or None,
+            cache_to=cache_options.cache_to,
+            build_contexts=build_contexts or {},
             load=True,
         )
         completed = True
     finally:
         _write_e2e_image_build_observability(
             cache_repository=cache_repository,
-            cache_backend=cache_backend,
-            cache_scope=cache_scope,
-            cache_export_enabled=cache_to is not None,
+            cache_backend=cache_options.cache_backend,
+            cache_scope=cache_options.cache_scope,
+            cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,
             duration_seconds=time.monotonic() - started_at,
         )
@@ -970,7 +993,7 @@ def _build_e2e_image(
 
 def _get_e2e_image_cache_options(
     cache_repository: str,
-) -> tuple[list[dict[str, str]], dict[str, str] | None, str, str | None]:
+) -> _E2EImageCacheOptions:
     """Return cache import/export settings for one E2E product image."""
     builder = os.environ.get(_DOCKER_BUILDER_ENV)
     gha_scope_prefix = os.environ.get(_GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV)
@@ -999,7 +1022,12 @@ def _get_e2e_image_cache_options(
             if cache_repository in write_repositories
             else None
         )
-        return cache_from, cache_to, "gha", cache_scope
+        return _E2EImageCacheOptions(
+            cache_from=cache_from,
+            cache_to=cache_to,
+            cache_backend="gha",
+            cache_scope=cache_scope,
+        )
 
     cache_from: list[dict[str, str]] = []
     cache_to: dict[str, str] | None = None
@@ -1020,7 +1048,12 @@ def _get_e2e_image_cache_options(
                 "mode": "min",
             }
 
-    return cache_from, cache_to, "local" if cache_from or cache_to else "none", None
+    return _E2EImageCacheOptions(
+        cache_from=cache_from,
+        cache_to=cache_to,
+        cache_backend="local" if cache_from or cache_to else "none",
+        cache_scope=None,
+    )
 
 
 def _write_e2e_image_build_observability(
@@ -2067,8 +2100,10 @@ def _provider_resource_id(
         payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
         items = _JSON_OBJECT_LIST_ADAPTER.validate_python(payload.get("items"))
         matches = [item for item in items if item.get("provider_id") == provider_id]
-        if len(matches) == 1 and isinstance(matches[0].get("id"), str):
-            return cast(str, matches[0]["id"])
+        if len(matches) == 1:
+            provider_resource_id = matches[0].get("id")
+            if isinstance(provider_resource_id, str):
+                return provider_resource_id
         last_error = f"inventory contained {len(matches)} matching Providers"
         time.sleep(0.5)
     pytest.fail(
@@ -2639,13 +2674,12 @@ def selenium_container(
         status_url = f"http://{host}:{port}/status"
         for _ in range(60):
             try:
-                payload = cast(
-                    dict[str, object],
-                    requests.get(status_url, timeout=2).json(),
+                payload = _JSON_OBJECT_ADAPTER.validate_python(
+                    requests.get(status_url, timeout=2).json()
                 )
                 value = payload.get("value")
                 if isinstance(value, dict):
-                    status = cast(dict[str, object], value)
+                    status = _JSON_OBJECT_ADAPTER.validate_python(value)
                     if status.get("ready") is True:
                         break
             except requests.exceptions.RequestException:
@@ -2678,7 +2712,7 @@ def browser_driver(
     try:
         yield driver
     finally:
-        node = cast(pytest.Item, cast(Any, request).node)
+        node = request.node
         report = node.stash.get(_BROWSER_CALL_REPORT, None)
         artifact_root = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
         if report is not None and report.failed and artifact_root:

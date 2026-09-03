@@ -7,7 +7,7 @@ import re
 import struct
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, NamedTuple
 from urllib.parse import quote
 
 import azentsadminclient
@@ -80,6 +80,13 @@ class _AcceptedTerminal:
     working_directory: str
     next_input_sequence: int
     replay_maximum_sequence: int
+
+
+class _DecodedOutputFrame(NamedTuple):
+    """Decoded ordered Terminal output frame."""
+
+    sequence: int
+    data: bytes
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -381,11 +388,11 @@ class _TerminalSocket:
         while True:
             message = connection.recv(timeout=20)
             if isinstance(message, bytes):
-                sequence, data = _decode_output_frame(message)
-                output_sequence = max(output_sequence, sequence)
-                if data:
+                decoded = _decode_output_frame(message)
+                output_sequence = max(output_sequence, decoded.sequence)
+                if decoded.data:
                     connection.send(
-                        json.dumps({"type": "output_ack", "sequence": sequence})
+                        json.dumps({"type": "output_ack", "sequence": decoded.sequence})
                     )
                 continue
             control = _control(message)
@@ -531,13 +538,16 @@ class _TerminalSocket:
         return self.wait_for_output(encoded_marker)
 
     def _accept_output(self, frame: bytes) -> None:
-        sequence, data = _decode_output_frame(frame)
-        assert sequence > self.output_sequence, (sequence, self.output_sequence)
-        self.output_sequence = sequence
-        self.output.extend(data)
+        decoded = _decode_output_frame(frame)
+        assert decoded.sequence > self.output_sequence, (
+            decoded.sequence,
+            self.output_sequence,
+        )
+        self.output_sequence = decoded.sequence
+        self.output.extend(decoded.data)
         try:
             self.connection.send(
-                json.dumps({"type": "output_ack", "sequence": sequence})
+                json.dumps({"type": "output_ack", "sequence": decoded.sequence})
             )
         except ConnectionClosed:
             return
@@ -551,7 +561,7 @@ def _control(message: str) -> dict[str, object]:
         raise AssertionError(f"Invalid Terminal control: {message!r}") from exc
 
 
-def _decode_output_frame(frame: bytes) -> tuple[int, bytes]:
+def _decode_output_frame(frame: bytes) -> _DecodedOutputFrame:
     """Decode one versioned ordered Terminal output frame."""
     if len(frame) <= _FRAME_HEADER.size:
         raise AssertionError(f"Truncated Terminal output frame: {frame!r}")
@@ -559,7 +569,10 @@ def _decode_output_frame(frame: bytes) -> tuple[int, bytes]:
     assert version == 1
     assert frame_type == 2
     assert sequence > 0
-    return sequence, frame[_FRAME_HEADER.size :]
+    return _DecodedOutputFrame(
+        sequence=sequence,
+        data=frame[_FRAME_HEADER.size :],
+    )
 
 
 def _marked_value(output: bytes, label: str) -> str:

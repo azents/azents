@@ -1,6 +1,6 @@
 """Real-browser E2E coverage for Main Web and Admin Web auth boundaries."""
 
-from typing import Any, cast
+from typing import Any
 
 import azentsadminclient
 import azentspublicclient
@@ -295,7 +295,8 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
     with ordinary_client:
         with pytest.raises(azentsadminclient.ApiException) as revoked:
             SystemV1Api(ordinary_client).system_v1_get_system_admin_me()
-    if cast(Any, revoked.value).status != 403:
+    status = vars(revoked.value).get("status")
+    if status != 403:
         raise AssertionError("self-revoked Admin session did not lose authorization")
 
 

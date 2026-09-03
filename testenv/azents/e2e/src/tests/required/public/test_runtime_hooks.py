@@ -2,7 +2,6 @@
 
 import json
 import time
-from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -13,6 +12,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 )
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.configuration import Configuration
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
@@ -50,16 +50,19 @@ _HIDDEN_PROMPT = "RUNTIME_HOOK_QA_HIDDEN_PROMPT_3754"
 _DENY_MESSAGE = "Runtime hook QA denied this tool call."
 _REPLACEMENT_OUTPUT = "Runtime hook QA replaced the tool output."
 _SENSITIVE_MARKER = "RUNTIME_HOOK_QA_SECRET_SHOULD_NOT_APPEAR"
-_OBJECT_DICT_ADAPTER: TypeAdapter[dict[object, object]] = TypeAdapter(
-    dict[object, object]
-)
+_OBJECT_DICT_ADAPTER: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
 _OBJECT_LIST_ADAPTER: TypeAdapter[list[object]] = TypeAdapter(list[object])
 
 
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
     """Generated client t API host stringt t."""
-    configuration = cast(Any, public_api_client).configuration
-    return str(configuration.host)
+    configuration = vars(public_api_client).get("configuration")
+    if not isinstance(configuration, Configuration):
+        raise AssertionError("public API client omitted configuration")
+    host = configuration.host
+    if not isinstance(host, str):
+        raise AssertionError("public API client configuration omitted host")
+    return host
 
 
 def _message_texts(item: dict[str, object]) -> list[str]:
@@ -90,7 +93,7 @@ def _message_texts(item: dict[str, object]) -> list[str]:
     return texts
 
 
-def _object_dict(value: object) -> dict[object, object] | None:
+def _object_dict(value: object) -> dict[str, object] | None:
     """external JSON object t typed dict t verifyt."""
     if not isinstance(value, dict):
         return None
@@ -158,7 +161,11 @@ def _journal_items(mock_openai_url: str) -> list[dict[str, object]]:
     if payload is None:
         raise AssertionError(f"AIMock journal is not a list: {raw_payload!r}")
     return [
-        cast("dict[str, object]", item) for item in payload if isinstance(item, dict)
+        item
+        for raw_item in payload
+        if isinstance(raw_item, dict)
+        for item in [_object_dict(raw_item)]
+        if item is not None
     ]
 
 
@@ -351,7 +358,9 @@ def _run_message(
     raw_payload: object = response.json()
     if not isinstance(raw_payload, dict):
         raise AssertionError(f"REST write response is not an object: {raw_payload!r}")
-    payload = cast("dict[str, object]", raw_payload)
+    payload = _object_dict(raw_payload)
+    if payload is None:
+        raise AssertionError(f"REST write response is not an object: {raw_payload!r}")
     observed_session_id = payload.get("session_id")
     if not isinstance(observed_session_id, str):
         raise AssertionError(

@@ -33,7 +33,12 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
-from azents_runtime_runner.transfer import RunnerTransferManager, _OpenedFile
+import azents_runtime_runner.transfer as transfer_module
+from azents_runtime_runner.transfer import (
+    RunnerTransferManager,
+    _OpenedFile,
+    _TransferKey,
+)
 from azents_runtime_runner.workspace import Workspace
 
 _UNRESTRICTED_WORKSPACE = Workspace("/tmp")
@@ -398,6 +403,7 @@ async def test_untrusted_transfer_identifiers_cannot_escape_staging_directory(
 @pytest.mark.asyncio
 async def test_exact_duplicate_intent_reuses_one_completed_result(
     tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An exact repeated instruction cannot publish the destination twice."""
     destination = tmpfs_path / "destination.bin"
@@ -418,12 +424,17 @@ async def test_exact_duplicate_intent_reuses_one_completed_result(
     )
     intent = _intent(destination, data=data)
 
+    reaped = asyncio.Event()
+    original_reap = manager._reap
+
+    async def reap(key: _TransferKey) -> None:
+        await original_reap(key)
+        reaped.set()
+
+    monkeypatch.setattr(manager, "_reap", reap)
     await manager.handle_intent(intent)
     assert (await _result(control)).outcome is RunnerTransferOutcome.SUCCEEDED
-    await asyncio.wait_for(
-        _wait_for_active_count(manager, expected=0),
-        timeout=1,
-    )
+    await reaped.wait()
     await manager.handle_intent(intent)
     await asyncio.wait_for(
         _wait_for_result_count(control, expected=2),
@@ -860,15 +871,6 @@ async def _wait_for_result_count(control: _Control, *, expected: int) -> None:
         await control.result_ready.wait()
 
 
-async def _wait_for_active_count(
-    manager: RunnerTransferManager,
-    *,
-    expected: int,
-) -> None:
-    while len(manager._active) != expected:
-        await asyncio.sleep(0)
-
-
 @pytest.mark.asyncio
 async def test_failed_result_sink_unblocks_queue_and_shutdown(
     tmpfs_path: Path,
@@ -927,6 +929,7 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
 @pytest.mark.asyncio
 async def test_post_publication_cancellation_waits_for_successful_result_enqueue(
     tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cancellation after publication cannot erase the committed success result."""
     control = _BlockingControl()
@@ -958,12 +961,31 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
     )
     destination = tmpfs_path / "destination.bin"
     committed = _intent(destination, data=data, transfer_id="transfer-3")
+    destination_committed = asyncio.Event()
+    original_replace = transfer_module.os.replace
+
+    def replace(
+        src: str,
+        dst: str,
+        *,
+        src_dir_fd: int,
+        dst_dir_fd: int,
+    ) -> None:
+        original_replace(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+        destination_committed.set()
+
+    monkeypatch.setattr(transfer_module.os, "replace", replace)
 
     await manager.handle_intent(first)
     await asyncio.wait_for(control.entered.wait(), timeout=1)
     await manager.handle_intent(second)
     await manager.handle_intent(committed)
-    await asyncio.wait_for(_wait_for_path(destination), timeout=1)
+    await destination_committed.wait()
 
     await manager.handle_cancel(
         RunnerTransferCancel(
@@ -985,8 +1007,3 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
     assert committed_result.outcome is RunnerTransferOutcome.SUCCEEDED
     assert committed_result.destination_committed is True
     await manager.close()
-
-
-async def _wait_for_path(path: Path) -> None:
-    while not path.exists():
-        await asyncio.sleep(0)

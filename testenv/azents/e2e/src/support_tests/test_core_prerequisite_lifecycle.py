@@ -3,13 +3,32 @@
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Self
 from unittest.mock import Mock
 
 import pytest
 from testcontainers.core.container import DockerContainer
 
 from tests import conftest as e2e_conftest
+
+
+class _FakeContainer(DockerContainer):
+    """Typed container fake for lifecycle compensation tests."""
+
+    def __init__(self) -> None:
+        self.start_error: Exception | None = None
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> Self:
+        if self.start_error is not None:
+            raise self.start_error
+        self.started = True
+        return self
+
+    def stop(self, force: bool = True, delete_volume: bool = True) -> None:
+        del force, delete_volume
+        self.stopped = True
 
 
 def test_reaper_initialization_respects_disabled_configuration(
@@ -48,25 +67,25 @@ def test_reaper_initialization_runs_once_when_enabled(
 
 def test_partial_start_failure_stops_container_before_reraising() -> None:
     """Compensate when Testcontainers creates state and then raises."""
-    container = Mock(spec=DockerContainer)
-    container.start.side_effect = RuntimeError("partial start")
+    container = _FakeContainer()
+    container.start_error = RuntimeError("partial start")
     started_containers: list[DockerContainer] = []
 
     with pytest.raises(RuntimeError, match="partial start"):
         e2e_conftest._start_tracked_prerequisite_container(
-            cast(DockerContainer, container),
+            container,
             started_containers=started_containers,
             started_containers_lock=threading.Lock(),
             readiness=None,
         )
 
-    container.stop.assert_called_once_with()
+    assert container.stopped
     assert started_containers == []
 
 
 def test_started_container_is_tracked_before_readiness() -> None:
     """Make readiness failures eligible for session cleanup."""
-    container = Mock(spec=DockerContainer)
+    container = _FakeContainer()
     started_containers: list[DockerContainer] = []
 
     def readiness(started: DockerContainer) -> None:
@@ -75,14 +94,14 @@ def test_started_container_is_tracked_before_readiness() -> None:
 
     with pytest.raises(RuntimeError, match="not ready"):
         e2e_conftest._start_tracked_prerequisite_container(
-            cast(DockerContainer, container),
+            container,
             started_containers=started_containers,
             started_containers_lock=threading.Lock(),
             readiness=readiness,
         )
 
-    container.start.assert_called_once_with()
-    container.stop.assert_not_called()
+    assert container.started
+    assert not container.stopped
     assert started_containers == [container]
 
 
