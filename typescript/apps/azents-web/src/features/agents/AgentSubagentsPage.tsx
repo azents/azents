@@ -3,9 +3,9 @@
 /** Agent Subagents page. */
 
 import { Box } from "@mantine/core";
-import { AgentSessionHeader } from "./components/AgentSessionHeader";
+import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
+import { useSubagentTreePanelContainer } from "@/shared/subagent-tree/useSubagentTreeContainer";
 import { SubagentTreePanel } from "./components/SubagentTreePanel";
-import { useSubagentTreePanelContainer } from "./containers/useSubagentTreePanelContainer";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSubagentsPageProps {

@@ -19,8 +19,8 @@ import {
   SessionRawEventsView,
   SessionSystemPromptView,
 } from "@/features/chat/context/SessionContextView";
+import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
 import { trpc } from "@/trpc/client";
-import { AgentSessionHeader } from "./components/AgentSessionHeader";
 import type { AgentResponse } from "@azents/public-client";
 
 export type AgentContextPageView = "context" | "system-prompt" | "raw-events";

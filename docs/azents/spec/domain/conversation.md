@@ -73,7 +73,7 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
-  - typescript/apps/azents-web/src/features/runtime-terminal/**
+  - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py

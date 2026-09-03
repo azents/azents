@@ -7,11 +7,11 @@
  */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { AgentForm } from "./components/AgentForm";
+import { AgentFormContainer } from "./containers/AgentFormContainer";
 import { useAgentFormContainer } from "./containers/useAgentFormContainer";
 
 export const AgentFormPage = createReactContainer(
   "AgentFormPage",
   useAgentFormContainer,
-  AgentForm,
+  AgentFormContainer,
 );

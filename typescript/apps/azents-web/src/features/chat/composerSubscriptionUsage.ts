@@ -1,8 +1,8 @@
 import {
   subscriptionUsageSummaryLimits,
   supportsSubscriptionUsage,
-} from "../llm-settings/subscriptionUsage.ts";
-import type { SubscriptionUsageState } from "../llm-settings/subscriptionUsage.ts";
+} from "../../shared/subscription-usage/subscriptionUsage.ts";
+import type { SubscriptionUsageState } from "../../shared/subscription-usage/subscriptionUsage.ts";
 import type { AgentResponse } from "@azents/public-client";
 
 export interface ComposerSubscriptionSelection {

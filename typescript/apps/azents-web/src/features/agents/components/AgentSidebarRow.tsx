@@ -9,7 +9,7 @@
 import { Badge, Box, Group, NavLink, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { AgentAvatar } from "./AgentAvatar";
+import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import styles from "./AgentSidebarRow.module.css";
 import type { AgentResponse } from "@azents/public-client";
 

@@ -1,5 +1,5 @@
 import { Box, rem } from "@mantine/core";
-import { WorkspacePanel } from "./WorkspacePanel";
+import { WorkspacePanelContainer } from "../containers/WorkspacePanelContainer";
 import type {
   AgentWorkspaceServerState,
   WorkspaceEntry,
@@ -422,7 +422,7 @@ const fileState: WorkspacePanelState = {
 };
 
 const meta = {
-  component: WorkspacePanel,
+  component: WorkspacePanelContainer,
   decorators: [
     (Story) => (
       <Box h="100dvh" maw="40rem">
@@ -477,7 +477,7 @@ const meta = {
     onDeleteWorktreeProjectEntry: noop,
     onSetBrowserMode: noop,
   },
-} satisfies Meta<typeof WorkspacePanel>;
+} satisfies Meta<typeof WorkspacePanelContainer>;
 
 export default meta;
 

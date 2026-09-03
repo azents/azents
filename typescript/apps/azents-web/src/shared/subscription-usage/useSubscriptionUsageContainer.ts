@@ -2,15 +2,15 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { trpc } from "@/trpc/client";
 import {
   projectSubscriptionUsageState,
   supportsSubscriptionUsage,
-} from "../subscriptionUsage";
+} from "@/shared/subscription-usage/subscriptionUsage";
+import { trpc } from "@/trpc/client";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
-} from "../subscriptionUsage";
+} from "@/shared/subscription-usage/subscriptionUsage";
 
 export interface SubscriptionUsageContainerProps {
   enabled: boolean;

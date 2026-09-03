@@ -36,7 +36,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { AgentAvatar } from "./AgentAvatar";
-import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
+import { useAgentFocusedShellMobileNav } from "./AgentFocusedShellMobileNav";
 import classes from "./AgentSessionHeader.module.css";
 import type {
   AgentResponse,

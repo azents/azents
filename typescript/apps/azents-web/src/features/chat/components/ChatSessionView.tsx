@@ -25,9 +25,9 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
-import { RuntimeTerminalPanel } from "@/features/runtime-terminal/components/RuntimeTerminalPanel";
-import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
+import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
+import { RuntimeTerminalPanel } from "@/shared/runtime-terminal/components/RuntimeTerminalPanel";
+import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
 import { ChatView } from "./ChatView";
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "./ComposerSubscriptionUsage";
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
@@ -250,7 +250,7 @@ export function ChatSessionView({
         }}
       >
         <Box h="100%" mih={0}>
-          <WorkspacePanel {...workspacePanel} />
+          <WorkspacePanelContainer {...workspacePanel} />
         </Box>
       </Drawer>
     </Box>

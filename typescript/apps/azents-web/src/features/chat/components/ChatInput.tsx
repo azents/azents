@@ -25,8 +25,8 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { memo } from "react";
+import { AttachmentPreviewBarContainer } from "../containers/AttachmentPreviewBarContainer";
 import { useChatInputContainer } from "../containers/useChatInputContainer";
-import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import classes from "./ChatInput.module.css";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import { TokenUsageDetails, TokenUsageIndicator } from "./TokenUsageIndicator";
@@ -709,7 +709,7 @@ function ChatInputView({
         >
           <Stack gap={rem(4)}>
             {pendingFiles.length > 0 && !editingMessageId && (
-              <AttachmentPreviewBar
+              <AttachmentPreviewBarContainer
                 pendingFiles={pendingFiles}
                 onRemove={removeFile}
               />

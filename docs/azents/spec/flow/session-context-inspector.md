@@ -5,7 +5,7 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-07-21
+last_verified_at: 2026-09-03
 spec_version: 18
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
@@ -19,7 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/types.py
   - python/apps/azents/src/azents/engine/events/execution.py
   - python/apps/azents/src/azents/engine/events/openai_responses.py
-  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
+  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx

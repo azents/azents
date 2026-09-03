@@ -41,8 +41,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/features/session-channels/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/(workspace)/integrations/slack/**
-  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.module.css
+  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
+  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.module.css
   - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
   - typescript/apps/azents-web/src/features/chat/externalChannelMessage.ts
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
@@ -65,7 +65,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-01
+last_verified_at: 2026-09-03
 spec_version: 68
 ---
 

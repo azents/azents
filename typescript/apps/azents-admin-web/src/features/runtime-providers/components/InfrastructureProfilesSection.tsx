@@ -22,9 +22,6 @@ import {
   Textarea,
   TextInput,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { useEffect, useState } from "react";
-import { useConfig } from "@/config/client";
 import { getPublicRoutePath } from "@/shared/lib/auth-policy";
 import {
   baseResourceValue,
@@ -45,8 +42,9 @@ import type {
   RuntimeInfrastructureProfileDeletionImpactResponse,
   RuntimeInfrastructureProfileResponse,
 } from "@azents/admin-client";
+import type { UseFormReturnType } from "@mantine/form";
 
-interface InfrastructureProfileFormValues {
+export interface InfrastructureProfileFormValues {
   displayName: string;
   description: string;
   lifecycle: "active" | "disabled";
@@ -81,7 +79,7 @@ interface InfrastructureProfileFormValues {
   dockerNetworkName: string;
 }
 
-interface InfrastructureProfileFormUnits {
+export interface InfrastructureProfileFormUnits {
   runnerCpuRequest: string;
   runnerCpuLimit: string;
   runnerMemoryRequest: string;
@@ -134,7 +132,7 @@ function statusLabel(status: string): string {
     .join(" ");
 }
 
-function blankValues(
+export function blankValues(
   kind: InfrastructureProfileKind,
 ): InfrastructureProfileFormValues {
   return {
@@ -173,7 +171,7 @@ function blankValues(
   };
 }
 
-function resourceUnitsForValues(
+export function resourceUnitsForValues(
   values: InfrastructureProfileFormValues,
 ): InfrastructureProfileFormUnits {
   return {
@@ -280,7 +278,7 @@ function tolerationsToText(tolerations?: KubernetesToleration[]): string {
     .join("\n");
 }
 
-function valuesFromProfile(
+export function valuesFromProfile(
   profile: RuntimeInfrastructureProfileResponse,
 ): InfrastructureProfileFormValues {
   const spec = profile.spec;
@@ -684,64 +682,32 @@ function ResourceFields({
 function InfrastructureProfileEditor({
   kind,
   editorState,
+  form,
+  units,
   submitting,
   errorMessage,
   onClose,
   onSubmit,
+  onSetNumber,
+  onSetUnit,
 }: Pick<
   InfrastructureProfilesSectionProps,
   "editorState" | "submitting" | "errorMessage" | "onCloseEditor" | "onSubmit"
 > & {
   kind: InfrastructureProfileKind;
+  form: UseFormReturnType<InfrastructureProfileFormValues>;
+  units: InfrastructureProfileFormUnits;
   onClose: () => void;
-}): React.ReactElement {
-  const labels = profileLabels(kind);
-  const form = useForm<InfrastructureProfileFormValues>({
-    mode: "controlled",
-    initialValues: blankValues(kind),
-    validate: {
-      displayName: (value) => (value.trim() ? null : "Name is required."),
-      storageClassName: (value) =>
-        kind === "kubernetes_pod" && !value.trim()
-          ? "Storage class is required."
-          : null,
-      nodeSelector: (value) =>
-        lines(value).some((line) => !line.includes("="))
-          ? "Use one key=value selector per line."
-          : null,
-      tolerations: (value) =>
-        lines(value).some((line) => line.split("|").length < 2)
-          ? "Use key|operator|value|effect|seconds."
-          : null,
-    },
-  });
-  const [units, setUnits] = useState<InfrastructureProfileFormUnits>(() =>
-    resourceUnitsForValues(blankValues(kind)),
-  );
-
-  useEffect(() => {
-    const nextValues =
-      editorState.type === "EDIT"
-        ? valuesFromProfile(editorState.profile)
-        : blankValues(kind);
-    form.setValues(nextValues);
-    setUnits(resourceUnitsForValues(nextValues));
-    form.resetDirty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when the selected editor target changes.
-  }, [editorState]);
-
-  const setNumber = (
+  onSetNumber: (
     field: keyof InfrastructureProfileFormValues,
     value: number | null,
-  ): void => {
-    form.setFieldValue(field, value);
-  };
-  const setUnit = (
+  ) => void;
+  onSetUnit: (
     field: keyof InfrastructureProfileFormUnits,
     unit: string,
-  ): void => {
-    setUnits((currentUnits) => ({ ...currentUnits, [field]: unit }));
-  };
+  ) => void;
+}): React.ReactElement {
+  const labels = profileLabels(kind);
 
   return (
     <Modal
@@ -803,8 +769,8 @@ function InfrastructureProfileEditor({
                 prefix="runner"
                 values={form.values}
                 units={units}
-                onChange={setNumber}
-                onUnitChange={setUnit}
+                onChange={onSetNumber}
+                onUnitChange={onSetUnit}
               />
               <Divider label="Workspace volume" />
               <SimpleGrid cols={{ base: 1, sm: 2 }}>
@@ -826,7 +792,9 @@ function InfrastructureProfileEditor({
                   onChange={(value) =>
                     form.setFieldValue("storageRequestBytes", value ?? 1)
                   }
-                  onUnitChange={(unit) => setUnit("storageRequestBytes", unit)}
+                  onUnitChange={(unit) =>
+                    onSetUnit("storageRequestBytes", unit)
+                  }
                 />
               </SimpleGrid>
               <Divider label="Network and identity" />
@@ -957,8 +925,8 @@ function InfrastructureProfileEditor({
                     prefix="dind"
                     values={form.values}
                     units={units}
-                    onChange={setNumber}
-                    onUnitChange={setUnit}
+                    onChange={onSetNumber}
+                    onUnitChange={onSetUnit}
                   />
                   <SimpleGrid cols={{ base: 1, sm: 2 }}>
                     <QuantityInput
@@ -974,7 +942,7 @@ function InfrastructureProfileEditor({
                         form.setFieldValue("dockerStorageBytes", value ?? 1)
                       }
                       onUnitChange={(unit) =>
-                        setUnit("dockerStorageBytes", unit)
+                        onSetUnit("dockerStorageBytes", unit)
                       }
                     />
                     <QuantityInput
@@ -993,7 +961,7 @@ function InfrastructureProfileEditor({
                         )
                       }
                       onUnitChange={(unit) =>
-                        setUnit("sharedTemporaryStorageBytes", unit)
+                        onSetUnit("sharedTemporaryStorageBytes", unit)
                       }
                     />
                   </SimpleGrid>
@@ -1013,8 +981,12 @@ function InfrastructureProfileEditor({
                   allowDecimal
                   decimalScale={3}
                   step={0.1}
-                  onChange={(value) => setNumber("dockerCpuReservation", value)}
-                  onUnitChange={(unit) => setUnit("dockerCpuReservation", unit)}
+                  onChange={(value) =>
+                    onSetNumber("dockerCpuReservation", value)
+                  }
+                  onUnitChange={(unit) =>
+                    onSetUnit("dockerCpuReservation", unit)
+                  }
                 />
                 <QuantityInput
                   label="CPU limit"
@@ -1025,8 +997,8 @@ function InfrastructureProfileEditor({
                   allowDecimal
                   decimalScale={3}
                   step={0.1}
-                  onChange={(value) => setNumber("dockerCpuLimit", value)}
-                  onUnitChange={(unit) => setUnit("dockerCpuLimit", unit)}
+                  onChange={(value) => onSetNumber("dockerCpuLimit", value)}
+                  onUnitChange={(unit) => onSetUnit("dockerCpuLimit", unit)}
                 />
                 <QuantityInput
                   label="Memory reservation"
@@ -1038,10 +1010,10 @@ function InfrastructureProfileEditor({
                   decimalScale={10}
                   step={1}
                   onChange={(value) =>
-                    setNumber("dockerMemoryReservation", value)
+                    onSetNumber("dockerMemoryReservation", value)
                   }
                   onUnitChange={(unit) =>
-                    setUnit("dockerMemoryReservation", unit)
+                    onSetUnit("dockerMemoryReservation", unit)
                   }
                 />
                 <QuantityInput
@@ -1053,8 +1025,8 @@ function InfrastructureProfileEditor({
                   allowDecimal
                   decimalScale={10}
                   step={1}
-                  onChange={(value) => setNumber("dockerMemoryLimit", value)}
-                  onUnitChange={(unit) => setUnit("dockerMemoryLimit", unit)}
+                  onChange={(value) => onSetNumber("dockerMemoryLimit", value)}
+                  onUnitChange={(unit) => onSetUnit("dockerMemoryLimit", unit)}
                 />
               </SimpleGrid>
               <TextInput
@@ -1083,15 +1055,15 @@ function InfrastructureProfileEditor({
 
 function DeletionImpactSummary({
   impact,
+  publicBaseUrl,
   onPreviousReferences,
   onNextReferences,
 }: {
   impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+  publicBaseUrl: string;
   onPreviousReferences: () => void;
   onNextReferences: () => void;
 }): React.ReactElement {
-  const { publicBaseUrl } = useConfig();
-
   return (
     <Stack gap="sm">
       {impact.applied_only_running_runtime_count > 0 ? (
@@ -1230,6 +1202,7 @@ function DeletionImpactSummary({
 
 function InfrastructureProfileDeletionModal({
   state,
+  publicBaseUrl,
   onClose,
   onRetryImpact,
   onPreviousReferences,
@@ -1237,6 +1210,7 @@ function InfrastructureProfileDeletionModal({
   onConfirm,
 }: {
   state: InfrastructureProfileDeletionState;
+  publicBaseUrl: string;
   onClose: () => void;
   onRetryImpact: () => void;
   onPreviousReferences: () => void;
@@ -1316,6 +1290,7 @@ function InfrastructureProfileDeletionModal({
         {impact !== null && (
           <DeletionImpactSummary
             impact={impact}
+            publicBaseUrl={publicBaseUrl}
             onPreviousReferences={onPreviousReferences}
             onNextReferences={onNextReferences}
           />
@@ -1350,9 +1325,28 @@ function InfrastructureProfileDeletionModal({
   );
 }
 
+interface InfrastructureProfilesSectionViewProps extends InfrastructureProfilesSectionProps {
+  editorForm: UseFormReturnType<InfrastructureProfileFormValues>;
+  editorUnits: InfrastructureProfileFormUnits;
+  publicBaseUrl: string;
+  onSetEditorNumber: (
+    field: keyof InfrastructureProfileFormValues,
+    value: number | null,
+  ) => void;
+  onSetEditorUnit: (
+    field: keyof InfrastructureProfileFormUnits,
+    unit: string,
+  ) => void;
+}
+
 export function InfrastructureProfilesSection({
   profileKind,
   state,
+  editorForm,
+  editorUnits,
+  publicBaseUrl,
+  onSetEditorNumber,
+  onSetEditorUnit,
   editorState,
   operationState,
   deletionState,
@@ -1370,7 +1364,7 @@ export function InfrastructureProfilesSection({
   onPreviousDeletionReferences,
   onNextDeletionReferences,
   onConfirmDeletion,
-}: InfrastructureProfilesSectionProps): React.ReactElement {
+}: InfrastructureProfilesSectionViewProps): React.ReactElement {
   if (profileKind === null || state.type === "IDLE") {
     return (
       <Alert color="gray">
@@ -1568,14 +1562,19 @@ export function InfrastructureProfilesSection({
       <InfrastructureProfileEditor
         kind={profileKind}
         editorState={editorState}
+        form={editorForm}
+        units={editorUnits}
         submitting={submitting}
         errorMessage={errorMessage}
         onCloseEditor={onCloseEditor}
         onClose={onCloseEditor}
         onSubmit={onSubmit}
+        onSetNumber={onSetEditorNumber}
+        onSetUnit={onSetEditorUnit}
       />
       <InfrastructureProfileDeletionModal
         state={deletionState}
+        publicBaseUrl={publicBaseUrl}
         onClose={onCloseDeletion}
         onRetryImpact={onRetryDeletionImpact}
         onPreviousReferences={onPreviousDeletionReferences}

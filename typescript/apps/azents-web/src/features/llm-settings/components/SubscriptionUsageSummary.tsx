@@ -29,11 +29,11 @@ import {
   subscriptionUsageAdditionalLimits,
   subscriptionUsageProgressColor,
   subscriptionUsageSummaryLimits,
-} from "../subscriptionUsage";
+} from "@/shared/subscription-usage/subscriptionUsage";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
-} from "../subscriptionUsage";
+} from "@/shared/subscription-usage/subscriptionUsage";
 import type {
   SubscriptionUsageAvailableResponse,
   SubscriptionUsageLimitResponse,

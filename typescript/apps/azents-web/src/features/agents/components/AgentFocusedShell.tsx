@@ -8,14 +8,8 @@
  */
 import { Box, Drawer, Group, rem } from "@mantine/core";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AgentFocusedShellMobileNavProvider } from "@/shared/agent-session/AgentFocusedShellMobileNav";
 import { trpc } from "@/trpc/client";
 import {
   AgentFocusedSidebar,
@@ -30,13 +24,6 @@ interface AgentFocusedShellProps {
   agent: AgentResponse;
   children: ReactNode;
 }
-
-interface AgentFocusedShellMobileNavContextValue {
-  openAgentNavigation: () => void;
-}
-
-const AgentFocusedShellMobileNavContext =
-  createContext<AgentFocusedShellMobileNavContextValue | null>(null);
 
 const AGENT_RAIL_WIDTH = rem(288);
 
@@ -296,7 +283,7 @@ export function AgentFocusedShell({
   };
 
   return (
-    <AgentFocusedShellMobileNavContext.Provider value={mobileNavContext}>
+    <AgentFocusedShellMobileNavProvider value={mobileNavContext}>
       <Drawer
         opened={drawerOpened}
         onClose={closeDrawer}
@@ -333,10 +320,6 @@ export function AgentFocusedShell({
           {children}
         </Box>
       </Group>
-    </AgentFocusedShellMobileNavContext.Provider>
+    </AgentFocusedShellMobileNavProvider>
   );
-}
-
-export function useAgentFocusedShellMobileNav(): AgentFocusedShellMobileNavContextValue | null {
-  return useContext(AgentFocusedShellMobileNavContext);
 }

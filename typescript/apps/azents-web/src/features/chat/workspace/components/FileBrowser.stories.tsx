@@ -1,7 +1,7 @@
 import { Box } from "@mantine/core";
 import { useCallback, useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { FileBrowser } from "./FileBrowser";
+import { FileBrowserContainer } from "../containers/FileBrowserContainer";
 import type { WorkspaceDirectoryLoadState, WorkspaceEntry } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -56,7 +56,7 @@ function DirectoryBrowser({
 
   return (
     <Box h="30rem" w="28rem">
-      <FileBrowser
+      <FileBrowserContainer
         root={root}
         cwd={root}
         path={root}
