@@ -438,6 +438,14 @@ class AgentDecommissionRuntimeServiceProtocol(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
+class AgentDecommissionAdvanceResult:
+    """Result of advancing one Agent decommission job."""
+
+    completed: bool
+    waiting_retention: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class AgentDecommissionSummary:
     """Result of one bounded Agent decommission scheduler pass."""
 
@@ -536,7 +544,7 @@ class AgentDecommissionService:
             claimed_count += 1
 
             try:
-                completed, waiting_retention = await self._advance(
+                advance_result = await self._advance(
                     job=job,
                     lease_owner=lease_owner,
                 )
@@ -560,8 +568,8 @@ class AgentDecommissionService:
                 )
                 continue
 
-            completed_count += int(completed)
-            waiting_retention_count += int(waiting_retention)
+            completed_count += int(advance_result.completed)
+            waiting_retention_count += int(advance_result.waiting_retention)
 
         return AgentDecommissionSummary(
             claimed_count=claimed_count,
@@ -577,7 +585,7 @@ class AgentDecommissionService:
         *,
         job: AgentDecommissionJob,
         lease_owner: str,
-    ) -> tuple[bool, bool]:
+    ) -> AgentDecommissionAdvanceResult:
         """Advance one owned decommission job without bypassing session purge."""
         async with self.session_manager() as session:
             roots = await self.agent_session_repository.list_root_trees_by_agent_id(
@@ -610,7 +618,10 @@ class AgentDecommissionService:
                 lease_owner=lease_owner,
                 status=AgentDecommissionStatus.WAITING_RETENTION,
             )
-            return False, True
+            return AgentDecommissionAdvanceResult(
+                completed=False,
+                waiting_retention=True,
+            )
 
         await self._set_status(
             job_id=job.id,
@@ -631,7 +642,10 @@ class AgentDecommissionService:
             )
         if not completed:
             raise RuntimeError("Agent decommission lease was lost before finalization")
-        return True, False
+        return AgentDecommissionAdvanceResult(
+            completed=True,
+            waiting_retention=False,
+        )
 
     async def _retire_root_tree(
         self,

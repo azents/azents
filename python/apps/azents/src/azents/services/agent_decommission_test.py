@@ -26,7 +26,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
 )
-from azents.services.agent_decommission import AgentDecommissionService
+from azents.services.agent_decommission import (
+    AgentDecommissionAdvanceResult,
+    AgentDecommissionService,
+)
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.session_lifecycle.orchestrator import (
     TransitionOperation,
@@ -120,12 +123,15 @@ class _FailureIsolatingCoordinator(AgentDecommissionService):
         *,
         job: AgentDecommissionJob,
         lease_owner: str,
-    ) -> tuple[bool, bool]:
+    ) -> AgentDecommissionAdvanceResult:
         """Fail the first job and complete the second one."""
         del lease_owner
         if job.id == "failed":
             raise RuntimeError("provider unavailable")
-        return True, False
+        return AgentDecommissionAdvanceResult(
+            completed=True,
+            waiting_retention=False,
+        )
 
 
 @pytest.mark.asyncio
