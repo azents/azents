@@ -546,6 +546,60 @@ def test_discord_fake_hands_off_delivered_message_components_transiently(
     assert "Private setup guidance." not in str(evidence)
 
 
+def test_discord_fake_correlates_transient_components_by_channel(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Keep concurrent channel controls available for their matching callback."""
+    discord_fake_url, _ = discord_fake_urls
+    first_channel_id = "400000000000000011"
+    second_channel_id = "400000000000000012"
+    first_custom_id = "a:st:first:claim:1:1:signature"
+    second_custom_id = "a:st:second:claim:1:1:signature"
+
+    for channel_id, custom_id in (
+        (first_channel_id, first_custom_id),
+        (second_channel_id, second_custom_id),
+    ):
+        response = _sdk_call(
+            discord_fake_url,
+            "create_message",
+            guild_id=STATE.guild_id,
+            channel_id=channel_id,
+            content="Private setup guidance.",
+            nonce=f"component-handoff-{channel_id}",
+            components=[
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "label": "Answer in threads",
+                            "custom_id": custom_id,
+                        }
+                    ],
+                }
+            ],
+            embeds=None,
+        )
+        response.raise_for_status()
+
+    second = requests.get(
+        f"{discord_fake_url}/__testenv/transient-component",
+        params={"scope": "settings", "channel_id": second_channel_id},
+        timeout=5,
+    )
+    second.raise_for_status()
+    assert second.json() == {"custom_id": second_custom_id}
+
+    first = requests.get(
+        f"{discord_fake_url}/__testenv/transient-component",
+        params={"scope": "settings", "channel_id": first_channel_id},
+        timeout=5,
+    )
+    first.raise_for_status()
+    assert first.json() == {"custom_id": first_custom_id}
+
+
 def test_discord_fake_preserves_state_for_one_shot_scenarios(
     discord_fake_urls: tuple[str, str],
 ) -> None:
