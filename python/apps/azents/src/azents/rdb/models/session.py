@@ -28,7 +28,6 @@ class RDBSession(RDBModel):
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     refresh_token: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     expires_at: Mapped[datetime.datetime] = mapped_column(
@@ -83,9 +82,15 @@ class RDBSession(RDBModel):
     UQ_REFRESH_TOKEN = sa.UniqueConstraint(
         "refresh_token", name="uq_sessions_refresh_token"
     )
+    IX_USER_ID = sa.Index("ix_sessions_user_id", "user_id")
     IX_REFRESH_TOKEN = sa.Index("ix_sessions_refresh_token", "refresh_token")
     IX_PREV_REFRESH_TOKEN = sa.Index(
         "ix_sessions_prev_refresh_token", "prev_refresh_token"
     )
 
-    __table_args__ = (UQ_REFRESH_TOKEN, IX_REFRESH_TOKEN, IX_PREV_REFRESH_TOKEN)
+    __table_args__ = (
+        UQ_REFRESH_TOKEN,
+        IX_USER_ID,
+        IX_REFRESH_TOKEN,
+        IX_PREV_REFRESH_TOKEN,
+    )
