@@ -5,9 +5,9 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -62,13 +62,16 @@ from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeState,
     _agents_appendix_candidates_for_path,  # Exercise root containment directly.
 )
+from azents.engine.tools.import_file import ImportFileStagingConfiguration
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
     PresentFilePublicationExecutor,
+    RuntimeInstructionContext,
     ServerToRuntimeTransferExecutor,
 )
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
+    RuntimeFileApplyPatchResult,
     RuntimeFileEditResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
@@ -118,11 +121,18 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderAuthority,
     SessionWorkingFolderBindingService,
 )
-from azents.testing.types import is_string_object_dict
+from azents.testing.types import is_string_object_dict, require_instance
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class _ProcessOutputCallback(Protocol):
+    async def __call__(self, event: RuntimeProcessOutputDelta) -> None:
+        """Handle one streamed process output delta."""
+        ...
 
 
 async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
@@ -347,11 +357,14 @@ def _runtime_configuration_state(
 ) -> RuntimeConfigurationState:
     """Create one bounded desired Runtime configuration state."""
     now = datetime(2026, 8, 11, tzinfo=UTC)
-    desired_document = (
-        _runtime_configuration_document()
-        if document is _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT
-        else cast(RuntimeConfigurationDocument | None, document)
-    )
+    if document is _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT:
+        desired_document = _runtime_configuration_document()
+    elif document is None:
+        desired_document = None
+    elif isinstance(document, RuntimeConfigurationDocument):
+        desired_document = document
+    else:
+        raise AssertionError("Unexpected Runtime configuration document")
     return RuntimeConfigurationState(
         runtime_id="runtime-1",
         desired=RuntimeConfigurationSlot(
@@ -658,6 +671,29 @@ class _FakeRunnerOperations:
         self.files[path] = data
         return RuntimeFileWriteResult(bytes_written=len(data), final_cursor="0-1")
 
+    async def apply_patch(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        base_path: str,
+        patch: bytes,
+        schema_version: int,
+        deadline_at: datetime,
+    ) -> RuntimeFileApplyPatchResult:
+        """Return an empty patch result for unrelated Runtime tool tests."""
+        del (
+            runtime_id,
+            runner_generation,
+            owner_session_id,
+            base_path,
+            patch,
+            schema_version,
+            deadline_at,
+        )
+        return RuntimeFileApplyPatchResult(changes=(), final_cursor="0-1")
+
     async def edit_file(
         self,
         *,
@@ -809,6 +845,34 @@ _MANAGED_RUNTIME_CAPABILITY_RESOLVER = RuntimeCapabilityResolver.from_agent(
 )
 
 
+def _runner_operations(toolkit: RuntimeToolkit) -> _FakeRunnerOperations:
+    """Return the concrete Runner fake attached to a Runtime toolkit."""
+    return require_instance(toolkit.runner_operations, _FakeRunnerOperations)
+
+
+def _runtime_repo(toolkit: RuntimeToolkit) -> AsyncMock:
+    """Return the mocked Runtime repository attached to a toolkit."""
+    return require_instance(toolkit.agent_runtime_repo, AsyncMock)
+
+
+def _runtime_service(toolkit: RuntimeToolkit) -> AsyncMock:
+    """Return the mocked Runtime service attached to a toolkit."""
+    return require_instance(toolkit.agent_runtime_service, AsyncMock)
+
+
+def _test_import_staging_configuration() -> ImportFileStagingConfiguration:
+    """Build a minimal import configuration for provider construction tests."""
+    return ImportFileStagingConfiguration(
+        s3_service=AsyncMock(),
+        workspace_bucket="test-bucket",
+        transfer_object_prefix="runtime-transfer",
+        multipart_copy_threshold=5 * 1024 * 1024,
+        multipart_part_size=5 * 1024 * 1024,
+        maximum_size=16 * 1024 * 1024,
+        deadline_after=timedelta(minutes=5),
+    )
+
+
 def _make_toolkit(
     config: ShellToolkitConfig | None = None,
     *,
@@ -898,9 +962,9 @@ def _make_toolkit(
         return RuntimeOperationTarget(
             id=runtime.id,
             runtime_capability_version=1,
-            desired_generation=getattr(runtime, "desired_generation", 7),
+            desired_generation=runtime.desired_generation,
             runner_generation=runtime.runner_generation,
-            configuration_sequence=getattr(runtime, "configuration_sequence", 1),
+            configuration_sequence=runtime.configuration_sequence,
             configuration_digest="a" * 64,
             workspace_path=runtime.workspace_path,
         )
@@ -947,20 +1011,11 @@ def _make_toolkit(
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
     if server_to_runtime_transfer_service is None:
-        server_to_runtime_transfer_service = cast(
-            ServerToRuntimeTransferExecutor,
-            AsyncMock(),
-        )
+        server_to_runtime_transfer_service = AsyncMock()
     if runtime_to_server_publication_service is None:
-        runtime_to_server_publication_service = cast(
-            PresentFilePublicationExecutor,
-            AsyncMock(),
-        )
+        runtime_to_server_publication_service = AsyncMock()
     if runtime_to_provider_delivery_service is None:
-        runtime_to_provider_delivery_service = cast(
-            RuntimeToProviderDeliveryExecutor,
-            AsyncMock(),
-        )
+        runtime_to_provider_delivery_service = AsyncMock()
 
     toolkit = RuntimeToolkit(
         config=config or ShellToolkitConfig(),
@@ -969,19 +1024,19 @@ def _make_toolkit(
         model_file_service=AsyncMock(),
         vfs_projection_service=None,
         agent_id=agent_id,
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         session_manager=session_manager,
         agent_runtime_repo=agent_runtime_repo,
         agent_runtime_service=agent_runtime_service,
         agent_session_repository=agent_session_repository,
         session_working_folder_binding_service=(session_working_folder_binding_service),
         project_repo=project_repo,
-        agents_store=cast(Any, agents_store),
+        agents_store=agents_store,
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
         runtime_image_read_service=runtime_image_read_service,
         runtime_to_server_publication_service=runtime_to_server_publication_service,
         runtime_to_provider_delivery_service=runtime_to_provider_delivery_service,
-        import_file_staging_configuration=cast(Any, object()),
+        import_file_staging_configuration=_test_import_staging_configuration(),
         runtime_capability_resolver=runtime_capability_resolver,
     )
     toolkit.set_session_id(session_id)
@@ -990,9 +1045,6 @@ def _make_toolkit(
         configuration_digest="a" * 64,
         desired_generation=7,
     )
-    cast(Any, toolkit)._test_runner_operations = runner_operations
-    cast(Any, toolkit)._test_agent_runtime_repo = agent_runtime_repo
-    cast(Any, toolkit)._test_agent_runtime_service = agent_runtime_service
     return toolkit
 
 
@@ -1086,31 +1138,19 @@ class TestBuiltinToolkitProviderResolve:
             agent_runtime_service=runtime_service,
             agent_session_repository=AsyncMock(spec=AgentSessionRepository),
             session_working_folder_binding_service=binding_service,
-            runner_operations=cast(
-                Any,
-                _FakeRunnerOperations(
-                    {
-                        "/workspace/agent/AGENTS.md": b"ROOT_RULE",
-                        "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
-                        "/workspace/agent/app/file.py": b"print('hi')",
-                    }
-                ),
+            runner_operations=_FakeRunnerOperations(
+                {
+                    "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                    "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
+                    "/workspace/agent/app/file.py": b"print('hi')",
+                }
             ),
             project_repo=project_repo,
-            server_to_runtime_transfer_service=cast(
-                ServerToRuntimeTransferExecutor,
-                AsyncMock(),
-            ),
+            server_to_runtime_transfer_service=AsyncMock(),
             runtime_image_read_service=None,
-            runtime_to_server_publication_service=cast(
-                PresentFilePublicationExecutor,
-                AsyncMock(),
-            ),
-            runtime_to_provider_delivery_service=cast(
-                RuntimeToProviderDeliveryExecutor,
-                AsyncMock(),
-            ),
-            import_file_staging_configuration=cast(Any, object()),
+            runtime_to_server_publication_service=AsyncMock(),
+            runtime_to_provider_delivery_service=AsyncMock(),
+            import_file_staging_configuration=_test_import_staging_configuration(),
         )
         toolkit = await provider.resolve(
             ShellToolkitConfig(),
@@ -1254,10 +1294,7 @@ class TestRuntimeToolkitUpdateContext:
             )
 
         assert error.value.metadata["kind"] == "runtime_capability_denied"
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         assert runner_operations.file_operation_calls == []
 
     @pytest.mark.asyncio
@@ -1316,9 +1353,9 @@ class TestRuntimeToolkitUpdateContext:
     @pytest.mark.asyncio
     async def test_update_context_registers_required_runtime_services(self) -> None:
         """Runtime services are registered without waiting for Runner readiness."""
-        transfer_service = cast(ServerToRuntimeTransferExecutor, AsyncMock())
-        publication_service = cast(PresentFilePublicationExecutor, AsyncMock())
-        delivery_service = cast(RuntimeToProviderDeliveryExecutor, AsyncMock())
+        transfer_service = AsyncMock()
+        publication_service = AsyncMock()
+        delivery_service = AsyncMock()
         toolkit = _make_toolkit(
             projects=[
                 _make_project(path="/workspace/agent/zeta"),
@@ -1331,8 +1368,10 @@ class TestRuntimeToolkitUpdateContext:
 
         await toolkit.update_context(_make_context())
 
-        instruction_context = cast(Any, toolkit)._agents_context
-        assert instruction_context is not None
+        instruction_context = require_instance(
+            toolkit._agents_context,
+            RuntimeInstructionContext,
+        )
         assert [project.path for project in instruction_context.projects] == [
             "/workspace/agent/alpha",
             "/workspace/agent/zeta",
@@ -1342,15 +1381,15 @@ class TestRuntimeToolkitUpdateContext:
         assert instruction_context.publication_service is publication_service
         assert instruction_context.provider_delivery_service is delivery_service
         assert callable(instruction_context.resolve_runtime_target)
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
         runtime_repo.get_by_agent_id.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_update_context_does_not_wait_for_runtime_ready(self) -> None:
         """A starting Runtime still exposes every required file service."""
-        transfer_service = cast(ServerToRuntimeTransferExecutor, AsyncMock())
-        publication_service = cast(PresentFilePublicationExecutor, AsyncMock())
-        delivery_service = cast(RuntimeToProviderDeliveryExecutor, AsyncMock())
+        transfer_service = AsyncMock()
+        publication_service = AsyncMock()
+        delivery_service = AsyncMock()
         toolkit = _make_toolkit(
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
             runner_state=RuntimeRunnerState.STARTING,
@@ -1364,11 +1403,14 @@ class TestRuntimeToolkitUpdateContext:
         assert {"exec_command", "write_stdin", "read"} <= {
             tool.spec.name for tool in state.tools
         }
-        instruction_context = cast(Any, toolkit)._agents_context
+        instruction_context = require_instance(
+            toolkit._agents_context,
+            RuntimeInstructionContext,
+        )
         assert instruction_context.transfer_service is transfer_service
         assert instruction_context.publication_service is publication_service
         assert instruction_context.provider_delivery_service is delivery_service
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
         runtime_repo.get_by_agent_id.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1376,10 +1418,14 @@ class TestRuntimeToolkitUpdateContext:
         """The shared target resolver follows the ordinary tool execution lifecycle."""
         toolkit = _make_toolkit()
         await toolkit.update_context(_make_context())
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
         runtime_repo.get_by_agent_id.assert_awaited_once()
 
-        target = await cast(Any, toolkit)._agents_context.resolve_runtime_target()
+        instruction_context = require_instance(
+            toolkit._agents_context,
+            RuntimeInstructionContext,
+        )
+        target = await instruction_context.resolve_runtime_target()
 
         assert target == ServerToRuntimeTarget(
             runtime_id="runtime-1",
@@ -1399,12 +1445,13 @@ class TestRuntimeToolkitUpdateContext:
             }
         )
         await toolkit.update_context(_make_context())
-        storage = cast(Any, toolkit)._agents_context.file_storage
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
+        instruction_context = require_instance(
+            toolkit._agents_context,
+            RuntimeInstructionContext,
         )
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        storage = instruction_context.file_storage
+        runner_operations = _runner_operations(toolkit)
+        runtime_repo = _runtime_repo(toolkit)
 
         await storage.get("/workspace/agent/file.txt", agent_id="agent-1")
         await storage.stat("/workspace/agent/file.txt", agent_id="agent-1")
@@ -1465,11 +1512,8 @@ class TestRuntimeToolkitUpdateContext:
         toolkit.set_runtime_agent_id("parent-agent")
         state = await toolkit.update_context(_make_context())
         read_tool = _find_tool(state.tools, "read")
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runner_operations = _runner_operations(toolkit)
+        runtime_repo = _runtime_repo(toolkit)
 
         output = await read_tool.handler(
             json.dumps({"path": "/workspace/agent/file.txt"})
@@ -1506,7 +1550,7 @@ class TestRuntimeToolkitUpdateContext:
         )
         state = await toolkit.update_context(_make_context())
         read_tool = _find_tool(state.tools, "read")
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
 
         output = await read_tool.handler(
             json.dumps({"path": "/workspace/agent/file.txt"})
@@ -1580,7 +1624,7 @@ class TestRuntimeToolkitUpdateContext:
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
             runner_state=RuntimeRunnerState.STARTING,
         )
-        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        runtime_service = _runtime_service(toolkit)
         profile_repository = runtime_service.runtime_profile_repository
         profile_repository.get_configuration_state.return_value = (
             _runtime_configuration_state(
@@ -1625,7 +1669,7 @@ class TestRuntimeToolkitUpdateContext:
     async def test_prompt_uses_generic_unavailable_for_blocked_profile(self) -> None:
         """Blocked desired Profiles do not expose internal diagnostics."""
         toolkit = _make_toolkit()
-        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        runtime_service = _runtime_service(toolkit)
         profile_repository = runtime_service.runtime_profile_repository
         profile_repository.get_configuration_state.return_value = (
             _runtime_configuration_state(
@@ -1650,7 +1694,7 @@ class TestRuntimeToolkitUpdateContext:
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
         )
-        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        runtime_service = _runtime_service(toolkit)
         profile_repository = runtime_service.runtime_profile_repository
         profile_repository.get_configuration_state.return_value = (
             _runtime_configuration_state(
@@ -1679,7 +1723,7 @@ class TestRuntimeToolkitUpdateContext:
 
         assert "Runtime-dependent operations are currently unavailable." not in prompt
         assert isinstance(result, FunctionToolResult)
-        assert cast(Any, toolkit)._expected_runtime_authority == (
+        assert toolkit._expected_runtime_authority == (
             RuntimeOperationAuthority(
                 configuration_sequence=1,
                 configuration_digest="a" * 64,
@@ -1691,7 +1735,7 @@ class TestRuntimeToolkitUpdateContext:
     async def test_prompt_includes_agent_workspace_path(self) -> None:
         """Prompt includes the current Runner-reported workspace path."""
         toolkit = _make_toolkit(agent_id="agent-1")
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
         runtime_repo.get_by_agent_id.return_value.workspace_path = "/runtime/home"
         ctx = _make_context()
         await toolkit.update_context(ctx)
@@ -1917,10 +1961,7 @@ class TestRuntimeToolkitUpdateContext:
             storage_files={"/workspace/agent/app/file.py": b"print('hi')"},
         )
         await toolkit.update_context(_make_context())
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
 
         first = await toolkit.append_agents_after_read(
             MagicMock(
@@ -1974,10 +2015,7 @@ class TestRuntimeToolkitUpdateContext:
             storage_files={"/workspace/agent/AGENTS.md": b"ROOT_RULE"},
         )
         await toolkit.update_context(_make_context())
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         runner_operations.stat_started_event = asyncio.Event()
         runner_operations.stat_continue_event = asyncio.Event()
 
@@ -2045,10 +2083,10 @@ async def test_runtime_file_storage_reads_one_bounded_range() -> None:
         {"/workspace/agent/report.txt": b"abcdef"}
     )
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2088,10 +2126,10 @@ async def test_runtime_file_storage_revalidates_authority_for_each_operation() -
     service = AsyncMock()
     service.resolve_operation_target.return_value = target
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=service,
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
         expected_authority_provider=lambda: authority,
@@ -2117,10 +2155,10 @@ async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> N
     )
     runner_operations.read_unavailable_message = "runner disconnected"
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2142,10 +2180,10 @@ async def test_runtime_text_storage_maps_runner_disconnect_to_storage_error() ->
     )
     runner_operations.read_unavailable_message = "runner disconnected"
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2169,10 +2207,10 @@ async def test_runtime_text_storage_maps_runner_decode_error() -> None:
         code="FILE_READ_TEXT_DECODE_ERROR",
     )
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2198,10 +2236,10 @@ async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
         code="FILE_READ_TEXT_UNSUPPORTED_ENCODING",
     )
     storage = RuntimeRunnerFileStorage(
-        runner_operations=cast(Any, runner_operations),
+        runner_operations=runner_operations,
         agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=cast(Any, _make_mock_session_manager()),
+        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2398,12 +2436,9 @@ class TestProcessToolHandler:
     async def test_exec_command_calls_runtime_runner_process_start(self) -> None:
         """exec_command starts a Runner-owned process and returns metadata."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         ctx = _make_context()
-        publish_event = cast(AsyncMock, ctx.publish_event)
+        publish_event = require_instance(ctx.publish_event, AsyncMock)
         state = await toolkit.update_context(ctx)
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2414,7 +2449,7 @@ class TestProcessToolHandler:
         assert result.metadata["kind"] == "exec_command_result"
         assert "session_id" not in result.metadata
         assert result.metadata["process_id"] == "proc-1"
-        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        runtime_service = _runtime_service(toolkit)
         expected_authority = runtime_service.resolve_operation_target.await_args.kwargs[
             "expected_authority"
         ]
@@ -2440,11 +2475,10 @@ class TestProcessToolHandler:
             type(call.args[0]) for call in publish_event.await_args_list
         ]
         assert published_event_types == [RuntimeReadyEvent]
-        callback = cast(
-            Any,
+        callback = require_instance(
             runner_operations.process_start_calls[0]["process_output_callback"],
+            _ProcessOutputCallback,
         )
-        assert callback is not None
         await callback(
             RuntimeProcessOutputDelta(
                 process_id="proc-1",
@@ -2463,10 +2497,7 @@ class TestProcessToolHandler:
     async def test_exec_command_preserves_explicit_workdir(self) -> None:
         """exec_command does not replace an explicitly supplied workdir."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2487,10 +2518,7 @@ class TestProcessToolHandler:
     async def test_exec_command_cancel_terminates_session_processes(self) -> None:
         """User stop cancel hook terminates all session-owned processes."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2528,10 +2556,7 @@ class TestProcessToolHandler:
         )
 
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         toolkit.set_peer_toolkits([envvar_peer])
 
         ctx = _make_context()
@@ -2581,20 +2606,14 @@ class TestProcessToolHandler:
             await tool.handler(json.dumps({"command": "echo denied"}))
 
         peer.expose_env.assert_not_awaited()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         assert runner_operations.process_start_calls == []
 
     @pytest.mark.asyncio
     async def test_write_stdin_calls_runtime_runner_process_write(self) -> None:
         """write_stdin writes to an existing Runner process."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
         tool = _find_tool(state.tools, "write_stdin")
@@ -2623,10 +2642,7 @@ class TestProcessToolHandler:
     async def test_write_stdin_empty_poll_defaults_to_longer_yield(self) -> None:
         """Empty write_stdin polls use the Codex-style polling default."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "write_stdin")
 
@@ -2639,10 +2655,7 @@ class TestProcessToolHandler:
     async def test_write_stdin_accepts_zero_yield_for_all_modes(self) -> None:
         """write_stdin forwards zero yields for immediate process snapshots."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "write_stdin")
 
@@ -2688,14 +2701,16 @@ class TestProcessToolHandler:
         exec_tool = _find_tool(state.tools, "exec_command")
         write_tool = _find_tool(state.tools, "write_stdin")
 
-        exec_properties = cast(
-            dict[str, Any], exec_tool.spec.input_schema["properties"]
+        exec_properties = require_instance(
+            exec_tool.spec.input_schema["properties"],
+            dict,
         )
-        write_properties = cast(
-            dict[str, Any], write_tool.spec.input_schema["properties"]
+        write_properties = require_instance(
+            write_tool.spec.input_schema["properties"],
+            dict,
         )
-        exec_yield = cast(dict[str, Any], exec_properties["yield_time_ms"])
-        write_yield = cast(dict[str, Any], write_properties["yield_time_ms"])
+        exec_yield = exec_properties["yield_time_ms"]
+        write_yield = write_properties["yield_time_ms"]
         assert exec_yield["default"] == 10000
         assert exec_yield["minimum"] == 250
         assert exec_yield["maximum"] == 30000
@@ -2745,8 +2760,8 @@ class TestProcessToolHandler:
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             runner_state=RuntimeRunnerState.UNKNOWN,
         )
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        runtime_repo = _runtime_repo(toolkit)
+        runtime_service = _runtime_service(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2770,10 +2785,12 @@ class TestProcessToolHandler:
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             runner_state=RuntimeRunnerState.UNKNOWN,
         )
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo = _runtime_repo(toolkit)
         runtime_repo.get_by_agent_id.side_effect = [
             SimpleNamespace(
                 id="runtime-1",
+                configuration_sequence=1,
+                desired_generation=7,
                 desired_state=RuntimeDesiredState.RUNNING,
                 provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
                 provider_observed_state=RuntimeProviderObservedState.STOPPING,
@@ -2783,6 +2800,8 @@ class TestProcessToolHandler:
             ),
             SimpleNamespace(
                 id="runtime-1",
+                configuration_sequence=1,
+                desired_generation=7,
                 desired_state=RuntimeDesiredState.RUNNING,
                 provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
                 provider_observed_state=RuntimeProviderObservedState.RUNNING,
@@ -2791,10 +2810,7 @@ class TestProcessToolHandler:
                 workspace_path="/workspace/agent",
             ),
         ]
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2889,7 +2905,7 @@ class TestProcessToolHandler:
         """Runtime Runner process execution emits only clear ready event."""
         toolkit = _make_toolkit()
         ctx = _make_context()
-        publish_event = cast(AsyncMock, ctx.publish_event)
+        publish_event = require_instance(ctx.publish_event, AsyncMock)
         state = await toolkit.update_context(ctx)
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2904,15 +2920,12 @@ class TestProcessToolHandler:
     ) -> None:
         """Runner process operation failure is delivered only as tool failure."""
         toolkit = _make_toolkit()
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
         runner_operations.process_unavailable_message = (
             "Runner operation route unavailable: subject-1"
         )
         ctx = _make_context()
-        publish_event = cast(AsyncMock, ctx.publish_event)
+        publish_event = require_instance(ctx.publish_event, AsyncMock)
         state = await toolkit.update_context(ctx)
         tool = _find_tool(state.tools, "exec_command")
 
@@ -2991,10 +3004,7 @@ class TestEditHandler:
         toolkit = _make_toolkit(storage_files=files)
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "edit")
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
+        runner_operations = _runner_operations(toolkit)
 
         result = await tool.handler(
             json.dumps(

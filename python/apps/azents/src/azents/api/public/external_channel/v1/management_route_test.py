@@ -164,6 +164,31 @@ def _discord_status() -> ExternalChannelConnectionStatusSnapshot:
     )
 
 
+def _service_method(service: AsyncMock, name: str) -> AsyncMock:
+    """Return one explicitly supported management mock method."""
+    methods = {
+        "add_multi_route": service.add_multi_route,
+        "disconnect_multi_connection": service.disconnect_multi_connection,
+        "get_multi_connection": service.get_multi_connection,
+        "get_multi_connection_impact": service.get_multi_connection_impact,
+        "get_multi_route_impact": service.get_multi_route_impact,
+        "list_multi_channel_defaults": service.list_multi_channel_defaults,
+        "list_multi_routes": service.list_multi_routes,
+        "remove_multi_route": service.remove_multi_route,
+        "reenable_multi_route": service.reenable_multi_route,
+        "replace_multi_channel_default": service.replace_multi_channel_default,
+        "clear_multi_channel_default": service.clear_multi_channel_default,
+        "setup_discord": service.setup_discord,
+        "update_discord": service.update_discord,
+        "update_multi_discord": service.update_multi_discord,
+        "validate_multi_connection": service.validate_multi_connection,
+    }
+    try:
+        return methods[name]
+    except KeyError as error:
+        raise AssertionError(f"Unsupported management mock method: {name}") from error
+
+
 def _client(
     service: AsyncMock,
     *,
@@ -479,7 +504,7 @@ def test_discord_creation_is_available_without_a_rollout_flag(
     )
 
     assert response.status_code == 201
-    getattr(service, service_method).assert_awaited_once()
+    _service_method(service, service_method).assert_awaited_once()
 
 
 def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
@@ -561,7 +586,7 @@ def test_discord_replacement_is_available_without_a_rollout_flag(
 ) -> None:
     """Discord replacement is available without deployment-scoped feature gates."""
     service = AsyncMock(spec=ExternalChannelManagementService)
-    getattr(service, service_method).return_value = _discord_status()
+    _service_method(service, service_method).return_value = _discord_status()
 
     response = _client(service).put(
         path,
@@ -580,7 +605,7 @@ def test_discord_replacement_is_available_without_a_rollout_flag(
     )
 
     assert response.status_code == 200
-    getattr(service, service_method).assert_awaited_once()
+    _service_method(service, service_method).assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -604,7 +629,7 @@ def test_discord_replacement_returns_redacted_status(
 ) -> None:
     """Successful replacement never echoes the supplied Discord Bot Token."""
     service = AsyncMock(spec=ExternalChannelManagementService)
-    getattr(service, service_method).return_value = _discord_status()
+    _service_method(service, service_method).return_value = _discord_status()
 
     response = _client(service).put(
         path,
@@ -628,7 +653,7 @@ def test_discord_replacement_returns_redacted_status(
         "configured_fields": ["bot_token"],
     }
     assert "discord-bot-token" not in response.text
-    getattr(service, service_method).assert_awaited_once()
+    _service_method(service, service_method).assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -834,7 +859,7 @@ def test_multi_route_growth_is_blocked_before_mode_aware_enablement(
     response = _client(service, multi_app_enabled=False).post(path, json=payload)
 
     assert response.status_code == 503
-    getattr(service, service_method).assert_not_awaited()
+    _service_method(service, service_method).assert_not_awaited()
 
 
 def test_member_cannot_read_workspace_multi_apps() -> None:
@@ -949,9 +974,10 @@ def test_discord_multi_operations_keep_provider_ids_opaque(
 ) -> None:
     """Every Discord management operation passes the provider fence to the service."""
     service = AsyncMock(spec=ExternalChannelManagementService)
-    getattr(service, service_method).side_effect = ExternalChannelManagementNotFound(
-        "connection-1"
-    )
+    _service_method(
+        service,
+        service_method,
+    ).side_effect = ExternalChannelManagementNotFound("connection-1")
 
     response = _client(service, role=WorkspaceUserRole.MANAGER).request(
         method,
@@ -960,9 +986,9 @@ def test_discord_multi_operations_keep_provider_ids_opaque(
     )
 
     assert response.status_code == 404
-    assert getattr(service, service_method).await_args.kwargs["provider"] is (
-        ExternalChannelProvider.DISCORD
-    )
+    await_args = _service_method(service, service_method).await_args
+    assert await_args is not None
+    assert await_args.kwargs["provider"] is ExternalChannelProvider.DISCORD
 
 
 @pytest.mark.parametrize(

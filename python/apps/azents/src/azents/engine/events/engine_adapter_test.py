@@ -584,6 +584,23 @@ class _Execution:
         return AgentRunStatus.COMPLETED
 
 
+def _capture_execution_factory(
+    execution: _Execution,
+) -> RunExecutionFactory:
+    """Capture the typed model-call preparer on a test execution."""
+
+    def factory(
+        *,
+        model_call_preparer: ModelCallPreparer[NativeRequestInspection],
+        **kwargs: object,
+    ) -> _Execution:
+        del kwargs
+        execution.model_call_preparer = model_call_preparer
+        return execution
+
+    return factory
+
+
 class _FailingExecution:
     """Execution that raises user-visible runtime error."""
 
@@ -977,14 +994,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
         model_file_service=_ModelFileService(),
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
 
     emits = [
@@ -1037,14 +1047,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
     execution = _Execution()
     adapter = _agent_engine_adapter(
         tool_working_set_store=store,
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
         session_id="session-1",
@@ -1212,14 +1215,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
     execution = _Execution()
     adapter = _agent_engine_adapter(
         tool_working_set_store=store,
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
         session_id="session-1",
@@ -1339,14 +1335,7 @@ async def _prepare_profiled_model_call(
     """Prepare one call from a normalized selected-model snapshot."""
     execution = _Execution()
     adapter = _agent_engine_adapter(
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
     selection = make_test_model_selection(
         model_identifier=model_identifier,
@@ -1457,14 +1446,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
 
     _ = [
@@ -1551,14 +1533,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
     )
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
         integration_repository=integration_repository,
         xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
     )
@@ -1841,14 +1816,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        ),
+        execution_factory=_capture_execution_factory(execution),
     )
 
     _ = [
@@ -1946,16 +1914,14 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     execution = _Execution()
     captured: dict[str, object] = {}
 
-    def factory(**kwargs: object) -> _Execution:
+    def factory(
+        *,
+        model_call_preparer: ModelCallPreparer[NativeRequestInspection],
+        **kwargs: object,
+    ) -> _Execution:
         captured.update(kwargs)
-        return (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        )
+        execution.model_call_preparer = model_call_preparer
+        return execution
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
@@ -2017,16 +1983,14 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
     execution = _Execution()
     captured: dict[str, object] = {}
 
-    def factory(**kwargs: object) -> _Execution:
+    def factory(
+        *,
+        model_call_preparer: ModelCallPreparer[NativeRequestInspection],
+        **kwargs: object,
+    ) -> _Execution:
         captured.update(kwargs)
-        return (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
-        )
+        execution.model_call_preparer = model_call_preparer
+        return execution
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,

@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -168,6 +169,12 @@ def _external_payload(
     )
 
 
+class _ResponseError(ResponseError):
+    """Response error fixture with an optional transport status code."""
+
+    status_code: int | None = None
+
+
 def _response(*, text: str = "done") -> Response:
     return Response(
         id="resp_synthetic",
@@ -220,10 +227,11 @@ def _failed_event(
     message: str,
     status_code: int | None = None,
 ) -> ResponseFailedEvent:
-    error = ResponseError.model_construct(code=code, message=message)
-    if status_code is not None:
-        # ResponseError has no typed HTTP status field; attach only for extractor tests.
-        object.__setattr__(error, "status_code", status_code)
+    error = _ResponseError.model_construct(
+        code=code,
+        message=message,
+        status_code=status_code,
+    )
     response = _response().model_copy(
         update={
             "error": error,
@@ -2275,9 +2283,11 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     assert completed.usage.raw_hidden_params is None
     minimal_response = captured["completion_response"]
     assert isinstance(minimal_response, ResponsesAPIResponse)
-    assert [getattr(item, "type", None) for item in minimal_response.output] == [
-        "message"
-    ]
+    assert [
+        item.type
+        for item in minimal_response.output
+        if isinstance(item, SimpleNamespace)
+    ] == ["message"]
     assert "done" not in str(minimal_response)
     assert "resp_synthetic" not in str(minimal_response)
 
