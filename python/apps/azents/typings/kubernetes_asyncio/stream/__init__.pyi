@@ -1,6 +1,6 @@
-"""kubernetes_asyncio.stream — WebSocket 기반 exec/attach 스트리밍 API 타입 보강.
+"""kubernetes_asyncio.stream — WebSocket exec/attach streaming type extensions.
 
-WsApiClient는 ApiClient를 상속하며 WebSocket을 통한 exec을 지원한다.
+WsApiClient inherits from ApiClient and supports exec over WebSockets.
 """
 
 from kubernetes_asyncio.client import ApiClient, Configuration

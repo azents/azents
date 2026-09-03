@@ -1,6 +1,6 @@
-"""redis.asyncio stub — async 메서드의 반환 타입을 Awaitable[T] | T에서 T로 교정.
+"""redis.asyncio stub — correct async method return types from Awaitable[T] | T to T.
 
-redis-py가 sync/async 클래스를 앨리어싱하면서 반환 타입이 union으로 선언되는 문제 회피.
+Avoid the union return types declared when redis-py aliases sync and async classes.
 https://github.com/redis/redis-py/issues/3107
 """
 
