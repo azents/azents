@@ -1,7 +1,7 @@
 """Scheduled Task cycle repository tests."""
 
 import datetime
-from typing import Literal, cast
+from typing import Any, Literal
 
 import pytest
 import sqlalchemy as sa
@@ -191,23 +191,38 @@ class _Result:
         return self.scalar
 
 
-class _QuerySession:
+class _QuerySession(AsyncSession):
     """Capture one direct SQL statement."""
 
     def __init__(self, result: _Result) -> None:
+        super().__init__()
         self.result = result
-        self.query: object | None = None
+        self.query: Any = None
 
-    async def execute(self, query: object) -> _Result:
+    async def execute(
+        self,
+        statement: object,
+        params: object | None = None,
+        *,
+        execution_options: object = None,
+        bind_arguments: object | None = None,
+        **kw: object,
+    ) -> Any:  # noqa: ANN401
         """Capture and return the configured SQL result."""
-        self.query = query
+        del params, execution_options, bind_arguments, kw
+        self.query = statement
         return self.result
 
 
-def _sql(statement: object) -> str:
+def _session() -> AsyncSession:
+    """Return an unbound async session for collaborators that ignore it."""
+    return AsyncSession()
+
+
+def _sql(statement: sa.ClauseElement) -> str:
     """Compile one captured SQL statement with literal fixture values."""
     return str(
-        cast(sa.ClauseElement, statement).compile(
+        statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
@@ -219,7 +234,7 @@ async def test_create_admitted_persists_complete_snapshot() -> None:
     repository, state_repository = _repository()
 
     record = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
 
@@ -245,13 +260,13 @@ async def test_start_uses_exact_version_and_records_first_run() -> None:
     """Start performs one CAS transition from admitted to started."""
     repository, state_repository = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     started_at = _now() + datetime.timedelta(minutes=1)
 
     started = await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=started_at,
@@ -270,18 +285,18 @@ async def test_bind_run_preserves_started_snapshot() -> None:
     """Continuation binding changes only the current Run identity."""
     repository, _ = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     started = await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
     )
 
     rebound = await repository.bind_run(
-        cast(AsyncSession, object()),
+        _session(),
         record=started,
         run_id="n" * 32,
     )
@@ -297,18 +312,18 @@ async def test_update_progress_advances_only_scheduled_tracker_revision() -> Non
     """Progress replacement uses the exact cycle version and independent revision."""
     repository, state_repository = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     started = await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
     )
 
     updated = await repository.update_progress(
-        cast(AsyncSession, object()),
+        _session(),
         record=started,
         progress_title="Preparing report…",
         ordered_tasks=["Collect data", "Write summary"],
@@ -325,11 +340,11 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
     """Tracker effects remain cycle/revision fenced and ordinal ordered."""
     repository, state_repository = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
@@ -337,7 +352,7 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
     state_repository.conflicts_remaining = 1
 
     second = await repository.claim_tracker_projection(
-        cast(AsyncSession, object()),
+        _session(),
         agent_id="a" * 32,
         session_id="s" * 32,
         cycle_id="c" * 32,
@@ -345,7 +360,7 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
         part_ordinal=1,
     )
     first = await repository.claim_tracker_projection(
-        cast(AsyncSession, object()),
+        _session(),
         agent_id="a" * 32,
         session_id="s" * 32,
         cycle_id="c" * 32,
@@ -361,7 +376,7 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
     saves_before_duplicate = len(state_repository.saves)
     assert (
         await repository.claim_tracker_projection(
-            cast(AsyncSession, object()),
+            _session(),
             agent_id="a" * 32,
             session_id="s" * 32,
             cycle_id="c" * 32,
@@ -373,7 +388,7 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
     assert len(state_repository.saves) == saves_before_duplicate
     state_repository.conflicts_remaining = 1
     assert await repository.settle_tracker_projection(
-        cast(AsyncSession, object()),
+        _session(),
         agent_id="a" * 32,
         session_id="s" * 32,
         cycle_id="c" * 32,
@@ -398,17 +413,17 @@ async def test_tracker_settlement_rejects_stale_desired_revision() -> None:
     """An old provider result cannot overwrite a newer Scheduled desired state."""
     repository, state_repository = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     started = await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
     )
     await repository.update_progress(
-        cast(AsyncSession, object()),
+        _session(),
         record=started,
         progress_title="Preparing report…",
         ordered_tasks=["Collect data"],
@@ -416,7 +431,7 @@ async def test_tracker_settlement_rejects_stale_desired_revision() -> None:
     saves_before = len(state_repository.saves)
 
     assert not await repository.settle_tracker_projection(
-        cast(AsyncSession, object()),
+        _session(),
         agent_id="a" * 32,
         session_id="s" * 32,
         cycle_id="c" * 32,
@@ -453,25 +468,25 @@ async def test_invalid_phase_transitions_are_rejected() -> None:
     """Start and continuation binding reject the opposite lifecycle phase."""
     repository, _ = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
     with pytest.raises(ValueError, match="not started"):
         await repository.bind_run(
-            cast(AsyncSession, object()),
+            _session(),
             record=admitted,
             run_id="n" * 32,
         )
 
     started = await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
     )
     with pytest.raises(ValueError, match="not admitted"):
         await repository.start(
-            cast(AsyncSession, object()),
+            _session(),
             record=started,
             run_id="n" * 32,
             started_at=_now(),
@@ -482,13 +497,13 @@ async def test_get_started_filters_admitted_state() -> None:
     """Started lookup hides admitted or missing cycle state."""
     repository, _ = _repository()
     admitted = await repository.create_admitted(
-        cast(AsyncSession, object()),
+        _session(),
         _snapshot(),
     )
 
     assert (
         await repository.get_started(
-            cast(AsyncSession, object()),
+            _session(),
             agent_id=admitted.state.agent_id,
             session_id=admitted.state.session_id,
             cycle_id=admitted.state.cycle_id,
@@ -497,13 +512,13 @@ async def test_get_started_filters_admitted_state() -> None:
     )
 
     await repository.start(
-        cast(AsyncSession, object()),
+        _session(),
         record=admitted,
         run_id="r" * 32,
         started_at=_now(),
     )
     started = await repository.get_started(
-        cast(AsyncSession, object()),
+        _session(),
         agent_id=admitted.state.agent_id,
         session_id=admitted.state.session_id,
         cycle_id=admitted.state.cycle_id,
@@ -572,7 +587,7 @@ async def test_list_started_filters_and_orders_current_cycle_rows() -> None:
     )
 
     records = await repository.list_started(
-        cast(AsyncSession, session),
+        session,
         agent_id="a" * 32,
         session_id="s" * 32,
     )
@@ -605,7 +620,7 @@ async def test_delete_started_uses_exact_row_version_fence() -> None:
     )
 
     assert await repository.delete_started(
-        cast(AsyncSession, session),
+        session,
         record=record,
     )
 
@@ -631,6 +646,6 @@ async def test_delete_started_rejects_admitted_cycle() -> None:
 
     with pytest.raises(ValueError, match="not started"):
         await repository.delete_started(
-            cast(AsyncSession, object()),
+            _session(),
             record=record,
         )

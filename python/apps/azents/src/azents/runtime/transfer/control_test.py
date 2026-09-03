@@ -2,7 +2,6 @@
 
 import inspect
 from datetime import datetime, timezone
-from typing import cast
 
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
@@ -34,9 +33,14 @@ def _clock() -> datetime:
     return datetime(2026, 7, 25, tzinfo=timezone.utc)
 
 
+def _redis() -> Redis:
+    """Return an unconnected Redis client for composition-only assertions."""
+    return Redis.from_url("redis://localhost")
+
+
 def test_default_runtime_control_transfer_state_is_redis() -> None:
     """Runtime Control defaults to Redis Transfer State composition."""
-    redis = cast(Redis, object())
+    redis = _redis()
     store = create_runtime_control_transfer_state_store(
         settings=_settings(),
         redis=redis,
@@ -63,7 +67,7 @@ def test_memory_transfer_state_is_explicit_and_process_local() -> None:
             "runtime_control_transfer_list_page_size": 9,
         }
     )
-    redis = cast(Redis, object())
+    redis = _redis()
     first = create_runtime_control_transfer_state_store(
         settings=settings,
         redis=redis,
@@ -98,7 +102,7 @@ def test_redis_transfer_namespace_and_config_propagate() -> None:
             "runtime_control_transfer_list_page_size": 5,
         }
     )
-    redis = cast(Redis, object())
+    redis = _redis()
     store = create_runtime_control_transfer_state_store(
         settings=settings,
         redis=redis,
@@ -114,7 +118,7 @@ def test_transfer_and_coordination_stores_share_client_without_composition_leak(
     None
 ):
     """Transfer composition coexists with separately constructed coordination."""
-    redis = cast(Redis, object())
+    redis = _redis()
     transfer = create_runtime_control_transfer_state_store(
         settings=_settings(),
         redis=redis,
