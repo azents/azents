@@ -774,9 +774,13 @@ def _make_exec_tool(
                 )
                 if isinstance(response, str):
                     output = response
+                elif isinstance(response, WsResponse):
+                    data = response.data
+                    output = (
+                        data.decode("utf-8") if isinstance(data, bytes) else str(data)
+                    )
                 else:
-                    data = getattr(response, "data", "")
-                    output = data if isinstance(data, str) else str(data)
+                    output = str(response)
                 if not output:
                     return "Command completed with no output."
                 return output

@@ -1,7 +1,7 @@
 """Kimi OAuth runtime token refresh support."""
 
 import datetime
-from typing import cast
+from typing import NamedTuple
 
 import httpx
 from azcommon.result import Failure, Result, Success
@@ -18,6 +18,13 @@ from .client import KimiOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
 
 _REFRESH_WINDOW = datetime.timedelta(minutes=5)
+
+
+class KimiOAuthCredentials(NamedTuple):
+    """Typed Kimi OAuth credentials extracted from an integration."""
+
+    secrets: KimiOAuthSecrets
+    config: KimiOAuthConfig
 
 
 async def ensure_runtime_tokens(
@@ -103,8 +110,10 @@ async def _persist_refresh_success(
     ProviderRejected | ProviderUnavailable,
 ]:
     """Store refresh success and return the latest integration."""
-    config = cast(KimiOAuthConfig, integration.config)
-    secrets = cast(KimiOAuthSecrets, integration.secrets)
+    credentials = _credentials(integration)
+    if credentials is None:
+        return Failure(ProviderRejected(reason="Kimi OAuth integration is invalid"))
+    secrets, config = credentials
     async with session_manager() as session:
         latest = await integration_repository.get_by_id_with_secrets_for_update(
             session, integration.id
@@ -155,7 +164,10 @@ async def _persist_refresh_failure(
     error: ProviderRejected | ProviderUnavailable,
 ) -> LLMProviderIntegrationWithSecrets | None:
     """Store a refresh failure unless a concurrent refresh already won."""
-    config = cast(KimiOAuthConfig, integration.config)
+    credentials = _credentials(integration)
+    if credentials is None:
+        return None
+    _, config = credentials
     status = (
         KimiOAuthConnectionStatus.REFRESH_REQUIRED
         if isinstance(error, ProviderRejected)
@@ -197,10 +209,10 @@ def _credentials_changed(
 
 def _credentials(
     integration: LLMProviderIntegrationWithSecrets,
-) -> tuple[KimiOAuthSecrets, KimiOAuthConfig] | None:
+) -> KimiOAuthCredentials | None:
     """Return typed Kimi credentials from one integration."""
     if not isinstance(integration.secrets, KimiOAuthSecrets) or not isinstance(
         integration.config, KimiOAuthConfig
     ):
         return None
-    return integration.secrets, integration.config
+    return KimiOAuthCredentials(integration.secrets, integration.config)

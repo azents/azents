@@ -703,8 +703,7 @@ class Config(BaseModel):
         default, but pydantic-settings injects values from environment variables
         such as AZ_RDB_HOST at runtime, so Settings() works without arguments.
 
-        Static type checkers do not understand this runtime behavior and report
-        missing required arguments. Suppress the error only in this wrapper
-        function.
+        Static type checkers may not understand this runtime behavior, but the
+        settings object is populated from environment variables at runtime.
         """
-        return cls.from_settings(Settings())  # type: ignore[call-arg]
+        return cls.from_settings(Settings())

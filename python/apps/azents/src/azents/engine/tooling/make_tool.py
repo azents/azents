@@ -9,6 +9,7 @@ handler that wraps JSON parsing and validation.
 import asyncio
 import inspect
 import json
+import types
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -105,7 +106,12 @@ def make_tool(
     :return: FunctionTool instance
     :raises ValueError: When description cannot be determined
     """
-    tool_name = name or getattr(fn, "__name__", None)
+    tool_name = name
+    if tool_name is None and isinstance(
+        fn,
+        types.FunctionType | types.BuiltinFunctionType | types.MethodType,
+    ):
+        tool_name = fn.__name__
     if not tool_name:
         raise ValueError("Tool name is required when callable has no __name__")
 

@@ -10,9 +10,15 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import AsyncContextManager, Protocol, TypeGuard, cast
+from typing import (
+    Any,
+    Awaitable,
+    NamedTuple,
+    Protocol,
+    TypeGuard,
+    runtime_checkable,
+)
 
-from redis.asyncio import Redis
 from redis.exceptions import WatchError
 
 from azents.runtime.transfer.data import (
@@ -55,6 +61,7 @@ return 0
 """
 
 
+@runtime_checkable
 class _RedisTransferPipeline(Protocol):
     """Redis pipeline methods used by the transfer adapter."""
 
@@ -92,39 +99,63 @@ class _RedisTransferPipeline(Protocol):
     async def execute(self) -> object: ...
 
 
+class _RedisPipelineContext(Protocol):
+    """Async context manager returned by Redis pipeline creation."""
+
+    async def __aenter__(self) -> object: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> bool | None: ...
+
+
 class _RedisTransferClient(Protocol):
     """Redis commands used by the transfer adapter."""
 
-    async def set(
+    def set(
         self,
         name: str,
         value: str | bytes,
         *,
         nx: bool,
         px: int,
-    ) -> bool | None: ...
+    ) -> Awaitable[bool | str | bytes | None]: ...
 
-    async def get(self, name: str) -> object: ...
+    def get(self, name: str) -> Awaitable[bytes | str | None]: ...
 
-    async def mget(self, keys: list[str]) -> list[object]: ...
+    def mget(self, keys: list[str]) -> Awaitable[list[bytes | str | None]]: ...
 
-    async def zrange(self, name: str, start: int, end: int) -> list[object]: ...
+    def zrange(
+        self,
+        name: str,
+        start: int,
+        end: int,
+    ) -> Awaitable[
+        list[bytes | str] | list[tuple[bytes | str, Any]] | list[list[Any]]
+    ]: ...
 
-    async def zrangebylex(
+    def zrangebylex(
         self,
         name: str,
         minimum: str,
         maximum: str,
+        /,
         *,
         start: int,
         num: int,
-    ) -> list[object]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    async def eval(self, script: str, numkeys: int, *keys_and_args: str) -> object: ...
+    def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: str,
+    ) -> Awaitable[object]: ...
 
-    def pipeline(
-        self, *, transaction: bool
-    ) -> AsyncContextManager[_RedisTransferPipeline]: ...
+    def pipeline(self, *, transaction: bool) -> _RedisPipelineContext: ...
 
 
 _ENVELOPE_FIELDS = frozenset({"version", "record", "private"})
@@ -294,6 +325,20 @@ class _RedisTransferRecordEnvelope:
 
     record: RuntimeTransferRecord
     admission_released: bool
+
+
+class _RedisExactEntry(NamedTuple):
+    """Exact Redis transfer entry lookup result."""
+
+    key: str
+    envelope: _RedisTransferRecordEnvelope | None
+
+
+class _RedisCurrentEntry(NamedTuple):
+    """Current Redis transfer entry lookup result."""
+
+    key: str
+    envelope: _RedisTransferRecordEnvelope
 
 
 @dataclass(frozen=True)
@@ -787,13 +832,13 @@ class RedisRuntimeTransferStateStore:
     def __init__(
         self,
         *,
-        redis: Redis,
+        redis: _RedisTransferClient,
         config: RuntimeTransferConfig,
         clock: Callable[[], datetime],
         namespace: str = _DEFAULT_NAMESPACE,
     ) -> None:
         """Initialize transfer state dependencies."""
-        self.redis = cast(_RedisTransferClient, redis)
+        self.redis = redis
         self.config = config
         self.clock = clock
         self.keys = _RedisTransferKeys(namespace)
@@ -2905,17 +2950,17 @@ class RedisRuntimeTransferStateStore:
         transfer_id: str,
         attempt_id: str,
         now: datetime,
-    ) -> tuple[str | None, _RedisTransferRecordEnvelope | None]:
+    ) -> _RedisExactEntry:
         """Load one exact attempt and add it to the mutation state."""
         key = self.keys.record(transfer_id, attempt_id)
-        return key, await self._load_entry(entries, key, now)
+        return _RedisExactEntry(key, await self._load_entry(entries, key, now))
 
     async def _load_current_entry(
         self,
         entries: dict[str, _RedisTransferRecordEnvelope],
         transfer_id: str,
         now: datetime,
-    ) -> tuple[str, _RedisTransferRecordEnvelope] | None:
+    ) -> _RedisCurrentEntry | None:
         """Load one current pointer target and add it to mutation state."""
         key = await self._current_key(transfer_id)
         if key is None:
@@ -2923,7 +2968,7 @@ class RedisRuntimeTransferStateStore:
         envelope = await self._load_entry(entries, key, now)
         if envelope is None:
             return None
-        return key, envelope
+        return _RedisCurrentEntry(key, envelope)
 
     async def _current_key(self, transfer_id: str) -> str | None:
         """Return one validated current record key."""
@@ -3240,6 +3285,8 @@ class RedisRuntimeTransferStateStore:
     ) -> None:
         """Execute queued writes only while the mutation lock token is owned."""
         async with self.redis.pipeline(transaction=True) as pipeline:
+            if not isinstance(pipeline, _RedisTransferPipeline):
+                raise RuntimeError("Redis pipeline does not expose transfer operations")
             await pipeline.watch(self.keys.mutation_lock())
             owner = await pipeline.get(self.keys.mutation_lock())
             if owner is None or _decode_redis_text(owner) != token:

@@ -82,7 +82,7 @@ class KubernetesApiTokenReviewer:
             raise RuntimeProviderCredentialUnavailable(
                 "workload_identity_unavailable"
             ) from exc
-        status = getattr(result, "status", None)
+        status = result.status
         if status is None:
             return KubernetesServiceAccountTokenReview(
                 authenticated=False,
@@ -94,7 +94,7 @@ class KubernetesApiTokenReviewer:
         username = None
         audiences = frozenset()
         if authenticated:
-            user = getattr(status, "user", None)
+            user = status.user
             username = user.username if user is not None else None
             audiences = frozenset(status.audiences or ())
         evidence_expires_at = _jwt_expiry(token) if authenticated else None

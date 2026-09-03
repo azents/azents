@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import grpc
 from azcommon.infra.s3.service import (
@@ -1916,11 +1916,19 @@ def _cleanup_status(
     return RuntimeTransferCleanupStatus.COMPLETE
 
 
+@runtime_checkable
+class _AbortStatusException(Protocol):
+    """Exception carrying a status selected by a gRPC context."""
+
+    code: grpc.StatusCode
+
+
 def _is_abort_exception(exc: Exception) -> bool:
     """Return whether a gRPC context already selected an explicit status."""
-    if isinstance(exc, grpc.aio.AbortError):
-        return True
-    return isinstance(getattr(exc, "code", None), grpc.StatusCode)
+    return isinstance(
+        exc,
+        grpc.aio.AbortError | grpc.aio.AioRpcError | _AbortStatusException,
+    )
 
 
 def _valid_identity(identity: pb.TransferIdentity) -> bool:

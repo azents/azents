@@ -1,7 +1,5 @@
 """EmailVerification repository."""
 
-from typing import Any, cast
-
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
@@ -119,7 +117,9 @@ class EmailVerificationRepository:
                 ),
             )
         )
-        cursor = cast(CursorResult[Any], result)
+        if not isinstance(result, CursorResult):
+            raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
+        cursor = result
         return cursor.rowcount or 0
 
     async def list_all(
