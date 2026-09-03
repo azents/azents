@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,6 +24,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
 )
@@ -32,6 +33,7 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
     RuntimeConfigurationState,
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
@@ -217,7 +219,18 @@ def _resolver(
     )
     profile_repository.get_configuration_state.return_value = RuntimeConfigurationState(
         runtime_id=runtime.id,
-        desired=cast(Any, SimpleNamespace()),
+        desired=RuntimeConfigurationSlot(
+            sequence=1,
+            status=RuntimeConfigurationStateStatus.READY,
+            target_generation=runtime.desired_generation,
+            digest="d" * 64,
+            document=None,
+            reason_code=None,
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runner_observed_at=None,
+        ),
         applied=applied,
         created_at=_NOW,
         updated_at=_NOW,
@@ -237,21 +250,18 @@ def _resolver(
         yield SimpleNamespace()
 
     resolver = DatabaseRuntimeTerminalAuthorityResolver(
-        session_manager=cast(Any, session_manager),
-        user_repository=cast(Any, user_repository),
-        authentication_session_repository=cast(
-            Any,
-            authentication_session_repository,
-        ),
-        workspace_repository=cast(Any, workspace_repository),
-        workspace_user_repository=cast(Any, workspace_user_repository),
-        agent_repository=cast(Any, agent_repository),
-        agent_admin_repository=cast(Any, agent_admin_repository),
-        agent_session_repository=cast(Any, agent_session_repository),
-        runtime_repository=cast(Any, runtime_repository),
-        profile_repository=cast(Any, profile_repository),
+        session_manager=session_manager,
+        user_repository=user_repository,
+        authentication_session_repository=authentication_session_repository,
+        workspace_repository=workspace_repository,
+        workspace_user_repository=workspace_user_repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+        agent_session_repository=agent_session_repository,
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
         runtime_coordination=runtime_coordination,
-        working_folder_service=cast(Any, working_folder),
+        working_folder_service=working_folder,
         policy_resolver=TerminalPolicyResolver(),
     )
     return resolver, runtime_coordination, working_folder
