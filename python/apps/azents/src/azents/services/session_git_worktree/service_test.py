@@ -6,7 +6,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Literal, cast
+from typing import Literal
 
 import pytest
 import sqlalchemy as sa
@@ -140,7 +140,7 @@ _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
 @asynccontextmanager
 async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    yield cast(AsyncSession, object())
+    yield AsyncSession()
 
 
 class _ReadonlyAgentSessionRepository(AgentSessionRepository):
@@ -182,27 +182,26 @@ class _ReadonlyAgentSessionRepository(AgentSessionRepository):
 def _readonly_service() -> SessionGitWorktreeService:
     """Build a service that can test read-only checks without DB fixtures."""
     return SessionGitWorktreeService(
-        agent_repository=cast(AgentRepository, object()),
+        agent_repository=AgentRepository(),
         agent_session_repository=_ReadonlyAgentSessionRepository(),
-        workspace_user_repository=cast(WorkspaceUserRepository, object()),
-        agent_runtime_repository=cast(AgentRuntimeRepository, object()),
-        session_git_worktree_repository=cast(SessionGitWorktreeRepository, object()),
-        session_workspace_project_repository=cast(
-            SessionWorkspaceProjectRepository,
-            object(),
+        workspace_user_repository=WorkspaceUserRepository(),
+        agent_runtime_repository=AgentRuntimeRepository(),
+        session_git_worktree_repository=SessionGitWorktreeRepository(),
+        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        agent_project_catalog_repository=AgentProjectCatalogRepository(),
+        agent_project_catalog_service=_CatalogRefreshService(
+            AgentProjectCatalogStatus.AVAILABLE
         ),
-        agent_project_catalog_repository=cast(AgentProjectCatalogRepository, object()),
-        agent_project_catalog_service=cast(AgentProjectCatalogService, object()),
-        action_execution_repository=cast(ActionExecutionRepository, object()),
-        mailbox_item_repository=cast(MailboxRepository, object()),
-        event_transcript_repository=cast(EventTranscriptRepository, object()),
+        action_execution_repository=ActionExecutionRepository(),
+        mailbox_item_repository=MailboxRepository(),
+        event_transcript_repository=EventTranscriptRepository(),
         session_manager=_session_manager_double,
-        runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
-        session_working_folder_binding_service=cast(
-            SessionWorkingFolderBindingService,
-            object(),
+        runtime_target_resolver=_RuntimeTargetResolver(
+            _session_manager_double,
+            AgentRuntimeRepository(),
         ),
-        runner_operations=cast(RuntimeRunnerOperationClient, object()),
+        session_working_folder_binding_service=_BindingServiceDouble(),
+        runner_operations=_RunnerOperations(),
     )
 
 
@@ -769,6 +768,20 @@ class _ExchangeFileService(ExchangeFileService):
         """Bypass base dataclass initialization."""
 
 
+class _ModelFileServiceDouble(ModelFileService):
+    """ModelFileService test double for unrelated Mailbox dependencies."""
+
+    def __init__(self) -> None:
+        """Bypass base dataclass initialization."""
+
+
+class _BindingServiceDouble(SessionWorkingFolderBindingService):
+    """Session working-folder binding test double for unrelated checks."""
+
+    def __init__(self) -> None:
+        """Bypass base dataclass initialization."""
+
+
 async def _create_agent_context(
     session: AsyncSession, slug: str
 ) -> tuple[str, str, str]:
@@ -902,7 +915,7 @@ def _input_service(
             session_manager=session_manager,
             mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
-            model_file_service=cast(ModelFileService, object()),
+            model_file_service=_ModelFileServiceDouble(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
@@ -928,7 +941,7 @@ def _mailbox_service(
         session_manager=session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=cast(ModelFileService, object()),
+        model_file_service=_ModelFileServiceDouble(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
@@ -989,7 +1002,7 @@ async def _execute_first_setup_action(
         session_manager=rdb_session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=cast(ModelFileService, object()),
+        model_file_service=_ModelFileServiceDouble(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
@@ -1037,7 +1050,7 @@ async def _execute_first_setup_action(
         session_manager=rdb_session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=cast(ModelFileService, object()),
+        model_file_service=_ModelFileServiceDouble(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
@@ -4364,10 +4377,8 @@ class TestSessionGitWorktreeService:
             runner=runner,
         )
         runner.calls.clear()
-        runtime_target_resolver = cast(
-            _RuntimeTargetResolver,
-            worktree_service.runtime_target_resolver,
-        )
+        runtime_target_resolver = worktree_service.runtime_target_resolver
+        assert isinstance(runtime_target_resolver, _RuntimeTargetResolver)
         runtime_resolution_count = len(runtime_target_resolver.calls)
         async with rdb_session_manager() as session:
             root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
@@ -4418,10 +4429,8 @@ class TestSessionGitWorktreeService:
             slug="legacy-parent-cleanup",
             runner=runner,
         )
-        runtime_target_resolver = cast(
-            _RuntimeTargetResolver,
-            worktree_service.runtime_target_resolver,
-        )
+        runtime_target_resolver = worktree_service.runtime_target_resolver
+        assert isinstance(runtime_target_resolver, _RuntimeTargetResolver)
         runtime_resolution_count = len(runtime_target_resolver.calls)
         async with rdb_session_manager() as session:
             allocation_repository = SessionGitWorktreeRepository()
