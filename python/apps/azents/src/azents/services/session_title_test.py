@@ -4,9 +4,11 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Literal, cast
+from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.session_title as session_title_module
 from azents.core.agent import (
@@ -52,6 +54,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.services.external_channel.thread_title import (
+    ExternalChannelThreadTitleService,
+)
 from azents.services.session_title import (
     SessionTitleService,
     TitleOutputContractError,
@@ -592,16 +597,10 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
-            agent_repository=cast(AgentRepository, _AgentRepository()),
-            agent_session_repository=cast(
-                AgentSessionRepository,
-                _AgentSessionRepository(),
-            ),
-            integration_repository=cast(
-                LLMProviderIntegrationRepository,
-                _IntegrationRepository(),
-            ),
-            session_manager=cast(Any, _session_manager),
+            agent_repository=_AgentRepository(),
+            agent_session_repository=_AgentSessionRepository(),
+            integration_repository=_IntegrationRepository(),
+            session_manager=_session_manager,
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -609,7 +608,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
-            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
+            external_channel_thread_title_service=_ThreadTitleService(),
         )
 
         failure = model_provider_failure(
@@ -685,16 +684,10 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
-            agent_repository=cast(AgentRepository, _AgentRepository()),
-            agent_session_repository=cast(
-                AgentSessionRepository,
-                _AgentSessionRepository(),
-            ),
-            integration_repository=cast(
-                LLMProviderIntegrationRepository,
-                _IntegrationRepository(),
-            ),
-            session_manager=cast(Any, _session_manager),
+            agent_repository=_AgentRepository(),
+            agent_session_repository=_AgentSessionRepository(),
+            integration_repository=_IntegrationRepository(),
+            session_manager=_session_manager,
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -702,7 +695,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
-            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
+            external_channel_thread_title_service=_ThreadTitleService(),
         )
         attempts: list[int] = []
 
@@ -756,21 +749,18 @@ class TestSessionTitleHelpers:
 
             async def get_by_id(
                 self,
-                session: object,
-                session_id: str,
+                session: AsyncSession,
+                agent_session_id: str,
             ) -> AgentSession:
-                current = await super().get_by_id(session, session_id)
+                current = await super().get_by_id(session, agent_session_id)
                 return current.model_copy(update={"title_source": self.source})
 
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
-            agent_repository=cast(AgentRepository, _AgentRepository()),
-            agent_session_repository=cast(AgentSessionRepository, title_repository),
-            integration_repository=cast(
-                LLMProviderIntegrationRepository,
-                _IntegrationRepository(),
-            ),
-            session_manager=cast(Any, _session_manager),
+            agent_repository=_AgentRepository(),
+            agent_session_repository=title_repository,
+            integration_repository=_IntegrationRepository(),
+            session_manager=_session_manager,
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -778,7 +768,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
-            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
+            external_channel_thread_title_service=_ThreadTitleService(),
         )
         failure = model_provider_failure(
             operation="session_title",
@@ -828,7 +818,7 @@ class TestSessionTitleHelpers:
         class WinningRepository(_AgentSessionRepository):
             async def replace_initial_auto_title(
                 self,
-                session: object,
+                session: AsyncSession,
                 *,
                 session_id: str,
                 title: str,
@@ -844,7 +834,7 @@ class TestSessionTitleHelpers:
                     }
                 )
 
-        class RecordingSession:
+        class RecordingSession(AsyncSession):
             async def commit(self) -> None:
                 calls.append("commit")
 
@@ -852,21 +842,25 @@ class TestSessionTitleHelpers:
         async def session_manager() -> AsyncIterator[RecordingSession]:
             yield RecordingSession()
 
-        class RecordingThreadTitleService:
-            async def project_generated_title(self, **kwargs: object) -> None:
+        class RecordingThreadTitleService(_ThreadTitleService):
+            async def project_generated_title(
+                self,
+                *,
+                session_id: str,
+                event: Event,
+                title: str,
+            ) -> None:
+                del session_id, event
                 assert calls[-1] == "commit"
-                assert kwargs["title"] == "Incident response"
+                assert title == "Incident response"
                 calls.append("project")
 
         repository = WinningRepository()
         service = SessionTitleService(
-            agent_repository=cast(AgentRepository, _AgentRepository()),
-            agent_session_repository=cast(AgentSessionRepository, repository),
-            integration_repository=cast(
-                LLMProviderIntegrationRepository,
-                _IntegrationRepository(),
-            ),
-            session_manager=cast(Any, session_manager),
+            agent_repository=_AgentRepository(),
+            agent_session_repository=repository,
+            integration_repository=_IntegrationRepository(),
+            session_manager=session_manager,
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -874,10 +868,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
-            external_channel_thread_title_service=cast(
-                Any,
-                RecordingThreadTitleService(),
-            ),
+            external_channel_thread_title_service=RecordingThreadTitleService(),
         )
 
         async def generate_title(**kwargs: object) -> str:
@@ -1020,11 +1011,11 @@ def _model_selection(
     )
 
 
-class _AgentRepository:
+class _AgentRepository(AgentRepository):
     def __init__(self, strict_json_schema: bool | None = None) -> None:
         self.strict_json_schema = strict_json_schema
 
-    async def get_by_id(self, session: object, agent_id: str) -> Agent:
+    async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
         del session, agent_id
         now = datetime.datetime.now(datetime.UTC)
         selection = _model_selection(self.strict_json_schema)
@@ -1059,10 +1050,13 @@ class _AgentRepository:
         )
 
 
-class _IntegrationRepository:
+class _IntegrationRepository(LLMProviderIntegrationRepository):
+    def __init__(self) -> None:
+        """Create a test repository without a credential cipher."""
+
     async def get_by_id_with_secrets(
         self,
-        session: object,
+        session: AsyncSession,
         integration_id: str,
     ) -> LLMProviderIntegrationWithSecrets:
         del session, integration_id
@@ -1079,9 +1073,18 @@ class _IntegrationRepository:
         )
 
 
-class _ThreadTitleService:
-    async def project_generated_title(self, **kwargs: object) -> None:
-        del kwargs
+class _ThreadTitleService(ExternalChannelThreadTitleService):
+    def __init__(self) -> None:
+        """Create a no-op title projection service for tests."""
+
+    async def project_generated_title(
+        self,
+        *,
+        session_id: str,
+        event: Event,
+        title: str,
+    ) -> None:
+        del session_id, event, title
 
 
 def _title_service(
@@ -1090,19 +1093,10 @@ def _title_service(
     max_retries: int = 0,
 ) -> SessionTitleService:
     return SessionTitleService(
-        agent_repository=cast(
-            AgentRepository,
-            _AgentRepository(strict_json_schema),
-        ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            _AgentSessionRepository(),
-        ),
-        integration_repository=cast(
-            LLMProviderIntegrationRepository,
-            _IntegrationRepository(),
-        ),
-        session_manager=cast(Any, _session_manager),
+        agent_repository=_AgentRepository(strict_json_schema),
+        agent_session_repository=_AgentSessionRepository(),
+        integration_repository=_IntegrationRepository(),
+        session_manager=_session_manager,
         model_stream_watchdog=make_test_model_stream_watchdog(),
         retry_policy=FailedRunRetryPolicy(
             max_retries=max_retries,
@@ -1110,18 +1104,23 @@ def _title_service(
             backoff_multiplier=1,
             max_backoff_seconds=0,
         ),
-        external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
+        external_channel_thread_title_service=_ThreadTitleService(),
     )
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[object]:
-    yield object()
+async def _session_manager() -> AsyncIterator[AsyncSession]:
+    session: AsyncSession = AsyncMock(spec=AsyncSession)
+    yield session
 
 
-class _AgentSessionRepository:
-    async def get_by_id(self, session: object, session_id: str) -> AgentSession:
-        del session, session_id
+class _AgentSessionRepository(AgentSessionRepository):
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        del session, agent_session_id
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
@@ -1150,7 +1149,7 @@ class _AgentSessionRepository:
 
     async def replace_initial_auto_title(
         self,
-        session: object,
+        session: AsyncSession,
         *,
         session_id: str,
         title: str,
