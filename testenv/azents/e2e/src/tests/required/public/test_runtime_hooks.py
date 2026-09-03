@@ -12,6 +12,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 )
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.configuration import Configuration
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
@@ -56,9 +57,9 @@ _OBJECT_LIST_ADAPTER: TypeAdapter[list[object]] = TypeAdapter(list[object])
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
     """Generated client t API host stringt t."""
     configuration = vars(public_api_client).get("configuration")
-    if configuration is None:
+    if not isinstance(configuration, Configuration):
         raise AssertionError("public API client omitted configuration")
-    host = vars(configuration).get("host")
+    host = configuration.host
     if not isinstance(host, str):
         raise AssertionError("public API client configuration omitted host")
     return host
