@@ -432,11 +432,19 @@ const meta = {
   ],
   args: {
     metricsState: { type: "LOADING" },
+    activeTab: "workspace",
+    restartConfirmOpen: false,
+    resetConfirmOpen: false,
+    onSetActiveTab: noop,
+    onOpenRestartConfirm: noop,
+    onCloseRestartConfirm: noop,
+    onConfirmRestart: noop,
+    onOpenResetConfirm: noop,
+    onCloseResetConfirm: noop,
+    onConfirmReset: noop,
     runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
     onStartRuntime: noop,
     onStopRuntime: noop,
-    onRestartRuntime: noop,
-    onResetRuntime: noop,
     onOpenDirectory: noop,
     onOpenFile: noop,
     onShowInfo: noop,
@@ -569,7 +577,7 @@ export const ProjectsWithWorktree = {
 export const Settings = {
   args: {
     state: readyState,
-    defaultTab: "settings",
+    activeTab: "settings",
   },
 } satisfies Story;
 
@@ -585,7 +593,7 @@ export const SettingsMobile = {
         },
       },
     },
-    defaultTab: "settings",
+    activeTab: "settings",
   },
   decorators: [
     (Story) => (
@@ -600,7 +608,7 @@ export const Metrics = {
   args: {
     state: readyState,
     metricsState: freshMetricsState,
-    defaultTab: "metrics",
+    activeTab: "metrics",
   },
 } satisfies Story;
 
@@ -608,7 +616,7 @@ export const MetricsMobile = {
   args: {
     state: readyState,
     metricsState: freshMetricsState,
-    defaultTab: "metrics",
+    activeTab: "metrics",
   },
   decorators: [
     (Story) => (
@@ -653,7 +661,7 @@ export const SettingsRuntimeInactive = {
       selectedEntry: null,
       inspectorState: { type: "IDLE" },
     },
-    defaultTab: "settings",
+    activeTab: "settings",
   },
 } satisfies Story;
 

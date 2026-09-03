@@ -12,186 +12,38 @@ import {
   Textarea,
   TextInput,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import {
   policySchemaVersionForInfrastructure,
   proxyDomainModeForInfrastructure,
 } from "../runtimeProfilePolicy";
-import { runtimeProfileFormSchema } from "../schemas";
 import type { RuntimeProfileFormValues } from "../schemas";
 import type {
   RuntimeProfileEditorState,
   RuntimeProfileMutationState,
 } from "../types";
 import type { SelectableInfrastructureProfileResponse } from "@azents/public-client";
+import type { UseFormReturnType } from "@mantine/form";
 
 interface RuntimeProfileFormModalProps {
   editorState: RuntimeProfileEditorState;
   mutationState: RuntimeProfileMutationState;
+  form: UseFormReturnType<RuntimeProfileFormValues>;
   infrastructureProfiles: SelectableInfrastructureProfileResponse[];
   onClose: () => void;
   onSubmit: (values: RuntimeProfileFormValues) => void;
 }
 
-function cidrsToText(cidrs?: string[]): string {
-  return cidrs?.join("\n") ?? "";
-}
-
-function networkModeForProfile(
-  editorState: RuntimeProfileEditorState,
-): RuntimeProfileFormValues["networkMode"] {
-  if (editorState.type !== "EDIT") {
-    return "inherit";
-  }
-  const policy = editorState.profile.policy;
-  if (policy.schema_version === 1) {
-    return policy.network_restriction === null ? "inherit" : "direct";
-  }
-  return policy.network_restriction.mode;
-}
-
-function networkFieldsForProfile(
-  editorState: RuntimeProfileEditorState,
-): Pick<
-  RuntimeProfileFormValues,
-  | "allowedCidrs"
-  | "deniedCidrs"
-  | "proxyDomainMode"
-  | "allowedDomains"
-  | "deniedDomains"
-> {
-  if (editorState.type !== "EDIT") {
-    return {
-      allowedCidrs: "",
-      deniedCidrs: "",
-      proxyDomainMode: "unrestricted",
-      allowedDomains: "",
-      deniedDomains: "",
-    };
-  }
-  const restriction = editorState.profile.policy.network_restriction;
-  if (
-    restriction === null ||
-    ("mode" in restriction &&
-      (restriction.mode === "inherit" || restriction.mode === "no_network"))
-  ) {
-    return {
-      allowedCidrs: "",
-      deniedCidrs: "",
-      proxyDomainMode: "unrestricted",
-      allowedDomains: "",
-      deniedDomains: "",
-    };
-  }
-  return {
-    allowedCidrs: cidrsToText(restriction.allowed_cidrs),
-    deniedCidrs: cidrsToText(restriction.denied_cidrs),
-    proxyDomainMode:
-      "domain_policy" in restriction
-        ? restriction.domain_policy.mode
-        : "unrestricted",
-    allowedDomains:
-      "domain_policy" in restriction
-        ? cidrsToText(restriction.domain_policy.allowed_domains)
-        : "",
-    deniedDomains:
-      "domain_policy" in restriction
-        ? cidrsToText(restriction.domain_policy.denied_domains)
-        : "",
-  };
-}
-
 export function RuntimeProfileFormModal({
   editorState,
   mutationState,
+  form,
   infrastructureProfiles,
   onClose,
   onSubmit,
 }: RuntimeProfileFormModalProps): React.ReactElement {
   const t = useTranslations("workspace.runtimeProfiles");
-  const form = useForm<RuntimeProfileFormValues>({
-    mode: "controlled",
-    initialValues: {
-      displayName: "",
-      description: "",
-      infrastructureProfileId: "",
-      lifecycle: "active",
-      terminalEnabled: true,
-      policySchemaVersion: 2,
-      networkMode: "inherit",
-      allowedCidrs: "",
-      deniedCidrs: "",
-      proxyDomainMode: "unrestricted",
-      allowedDomains: "",
-      deniedDomains: "",
-    },
-    validate: (values) => {
-      const result = runtimeProfileFormSchema.safeParse(values);
-      if (result.success) {
-        return {};
-      }
-      return Object.fromEntries(
-        result.error.issues.map((issue) => [
-          issue.path.join("."),
-          issue.message,
-        ]),
-      );
-    },
-  });
-
-  useEffect(() => {
-    if (editorState.type === "EDIT") {
-      const selectedInfrastructure = infrastructureProfiles.find(
-        (profile) =>
-          profile.id === editorState.profile.infrastructure_profile_id,
-      );
-      const infrastructureNetwork =
-        selectedInfrastructure?.infrastructure_network ??
-        editorState.profile.infrastructure_network;
-      const networkFields = networkFieldsForProfile(editorState);
-      form.setValues({
-        displayName: editorState.profile.display_name,
-        description: editorState.profile.description,
-        infrastructureProfileId: editorState.profile.infrastructure_profile_id,
-        lifecycle: editorState.profile.lifecycle,
-        terminalEnabled: editorState.profile.terminal_enabled,
-        policySchemaVersion: editorState.profile.policy.schema_version,
-        networkMode: networkModeForProfile(editorState),
-        ...networkFields,
-        proxyDomainMode:
-          infrastructureNetwork?.domain_mode === "allowlist"
-            ? "allowlist"
-            : networkFields.proxyDomainMode,
-      });
-      form.resetDirty();
-      return;
-    }
-    if (editorState.type === "CREATE") {
-      const initialInfrastructure = infrastructureProfiles[0];
-      form.setValues({
-        displayName: "",
-        description: "",
-        infrastructureProfileId: initialInfrastructure?.id ?? "",
-        lifecycle: "active",
-        terminalEnabled: true,
-        policySchemaVersion: initialInfrastructure
-          ? policySchemaVersionForInfrastructure(initialInfrastructure)
-          : 2,
-        networkMode: "inherit",
-        allowedCidrs: "",
-        deniedCidrs: "",
-        proxyDomainMode: proxyDomainModeForInfrastructure(
-          initialInfrastructure?.infrastructure_network ?? null,
-        ),
-        allowedDomains: "",
-        deniedDomains: "",
-      });
-      form.resetDirty();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the editor target changes.
-  }, [editorState]);
 
   const infrastructureOptions = useMemo(() => {
     const options = infrastructureProfiles.map((profile) => ({

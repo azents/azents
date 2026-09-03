@@ -38,6 +38,8 @@ function DirectoryBrowser({
   >({});
   const [loadState, setLoadState] =
     useState<WorkspaceDirectoryLoadState>(initialLoadState);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const onOpenDirectory = useCallback(
     (path: string): void => {
       if (path !== directoryPath || !resolveChildren) {
@@ -84,6 +86,10 @@ function DirectoryBrowser({
         onRefresh={fn()}
         onSetBrowserMode={fn()}
         onAddProject={fn()}
+        query={query}
+        expanded={expanded}
+        onQueryChange={setQuery}
+        onExpandedChange={setExpanded}
       />
     </Box>
   );

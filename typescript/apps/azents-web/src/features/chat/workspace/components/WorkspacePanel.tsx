@@ -32,7 +32,6 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowser } from "./FileBrowser";
@@ -47,6 +46,7 @@ import type {
   WorkspaceBrowserMode,
   WorkspaceEntry,
   WorkspacePanelState,
+  WorkspacePanelTab,
   WorkspaceProjectPanelState,
 } from "../types";
 import type {
@@ -54,8 +54,6 @@ import type {
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
-
-type WorkspacePanelTab = "workspace" | "metrics" | "settings";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",
@@ -66,11 +64,25 @@ interface WorkspacePanelProps {
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
   defaultTab?: WorkspacePanelTab;
+  activeTab?: WorkspacePanelTab;
+  restartConfirmOpen?: boolean;
+  resetConfirmOpen?: boolean;
+  onSetActiveTab?: (tab: WorkspacePanelTab) => void;
+  onOpenRestartConfirm?: () => void;
+  onCloseRestartConfirm?: () => void;
+  onConfirmRestart?: () => void;
+  onOpenResetConfirm?: () => void;
+  onCloseResetConfirm?: () => void;
+  onConfirmReset?: () => void;
+  fileBrowserQuery?: string;
+  expandedFileNodeIds?: Set<string>;
+  onSetFileBrowserQuery?: (query: string) => void;
+  onSetExpandedFileNodeIds?: (nodeIds: Set<string>) => void;
   runtimeSettingsHref: string;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
-  onRestartRuntime: () => void;
-  onResetRuntime: () => void;
+  onRestartRuntime?: () => void;
+  onResetRuntime?: () => void;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
   onShowInfo: (path: string) => void;
@@ -108,11 +120,23 @@ export function WorkspacePanel({
   projectState,
   metricsState,
   defaultTab = "workspace",
+  activeTab = defaultTab,
+  restartConfirmOpen = false,
+  resetConfirmOpen = false,
+  onSetActiveTab = (): void => {},
+  onOpenRestartConfirm = (): void => {},
+  onCloseRestartConfirm = (): void => {},
+  onConfirmRestart = (): void => {},
+  onOpenResetConfirm = (): void => {},
+  onCloseResetConfirm = (): void => {},
+  onConfirmReset = (): void => {},
+  fileBrowserQuery = "",
+  expandedFileNodeIds = new Set<string>(),
+  onSetFileBrowserQuery = (): void => {},
+  onSetExpandedFileNodeIds = (): void => {},
   runtimeSettingsHref,
   onStartRuntime,
   onStopRuntime,
-  onRestartRuntime,
-  onResetRuntime,
   onOpenDirectory,
   onOpenFile,
   onShowInfo,
@@ -148,24 +172,8 @@ export function WorkspacePanel({
   const modals = useModals();
   const metricsTabAvailable =
     state.type === "SERVER" || state.type === "REMOVING";
-  const [activeTab, setActiveTab] = useState<WorkspacePanelTab>(() =>
-    defaultTab === "metrics" && !metricsTabAvailable ? "workspace" : defaultTab,
-  );
-  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  useEffect(() => {
-    if (activeTab === "metrics" && !metricsTabAvailable) {
-      setActiveTab("workspace");
-    }
-  }, [activeTab, metricsTabAvailable]);
-  const handleConfirmRestart = (): void => {
-    setRestartConfirmOpen(false);
-    onRestartRuntime();
-  };
-  const handleConfirmReset = (): void => {
-    setResetConfirmOpen(false);
-    onResetRuntime();
-  };
+  const resolvedActiveTab =
+    activeTab === "metrics" && !metricsTabAvailable ? "workspace" : activeTab;
   const registrationDialog =
     projectState.type === "READY"
       ? projectState.registrationDialog
@@ -394,7 +402,7 @@ export function WorkspacePanel({
                         state.isStopping ||
                         state.isResetting
                       }
-                      onClick={() => setRestartConfirmOpen(true)}
+                      onClick={onOpenRestartConfirm}
                     >
                       {t("restartRuntime")}
                     </Button>
@@ -434,7 +442,7 @@ export function WorkspacePanel({
                   variant="subtle"
                   loading={state.isResetting}
                   disabled={state.isStarting || state.isStopping}
-                  onClick={() => setResetConfirmOpen(true)}
+                  onClick={onOpenResetConfirm}
                 >
                   {t("resetRuntime")}
                 </Button>
@@ -549,7 +557,7 @@ export function WorkspacePanel({
                   </Button>
                   {actions.restart && (
                     <Button
-                      onClick={() => setRestartConfirmOpen(true)}
+                      onClick={onOpenRestartConfirm}
                       loading={state.isStarting}
                       disabled={
                         state.isRefreshing ||
@@ -579,7 +587,7 @@ export function WorkspacePanel({
                     c="dimmed"
                     size="xs"
                     variant="transparent"
-                    onClick={() => setResetConfirmOpen(true)}
+                    onClick={onOpenResetConfirm}
                     loading={state.isResetting}
                     disabled={state.isRefreshing || state.isStopping}
                   >
@@ -612,9 +620,7 @@ export function WorkspacePanel({
                   {actions.restart || actions.start ? (
                     <Button
                       onClick={
-                        actions.restart
-                          ? () => setRestartConfirmOpen(true)
-                          : onStartRuntime
+                        actions.restart ? onOpenRestartConfirm : onStartRuntime
                       }
                       loading={state.isStarting}
                       disabled={state.isStarting || state.isResetting}
@@ -629,7 +635,7 @@ export function WorkspacePanel({
                       c="dimmed"
                       size="xs"
                       variant="transparent"
-                      onClick={() => setResetConfirmOpen(true)}
+                      onClick={onOpenResetConfirm}
                       loading={state.isResetting}
                       disabled={state.isStarting || state.isResetting}
                     >
@@ -654,9 +660,7 @@ export function WorkspacePanel({
               {(actions.restart || actions.start) && (
                 <Button
                   onClick={
-                    actions.restart
-                      ? () => setRestartConfirmOpen(true)
-                      : onStartRuntime
+                    actions.restart ? onOpenRestartConfirm : onStartRuntime
                   }
                   loading={state.isStarting}
                   disabled={state.isStarting || state.isResetting}
@@ -761,6 +765,10 @@ export function WorkspacePanel({
                       ]
                     }
                     projectEmptyState={state.projectEmptyState ?? null}
+                    query={fileBrowserQuery}
+                    expanded={expandedFileNodeIds}
+                    onQueryChange={onSetFileBrowserQuery}
+                    onExpandedChange={onSetExpandedFileNodeIds}
                     getDownloadHref={getDownloadHref}
                     onOpenDirectory={onOpenDirectory}
                     onOpenFile={onOpenFile}
@@ -827,7 +835,7 @@ export function WorkspacePanel({
   return (
     <>
       <Tabs
-        value={activeTab}
+        value={resolvedActiveTab}
         keepMounted={false}
         h="100%"
         style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
@@ -837,7 +845,7 @@ export function WorkspacePanel({
             value === "metrics" ||
             value === "settings"
           ) {
-            setActiveTab(value);
+            onSetActiveTab(value);
           }
         }}
       >
@@ -916,21 +924,16 @@ export function WorkspacePanel({
         centered
         opened={restartConfirmOpen}
         title={t("restartConfirmTitle")}
-        onClose={() => setRestartConfirmOpen(false)}
+        onClose={() => onCloseRestartConfirm()}
       >
         <Stack gap="md">
           <Text size="sm">{t("restartConfirmDescription")}</Text>
           <Alert color="blue">{t("restartPreservationNotice")}</Alert>
           <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => setRestartConfirmOpen(false)}
-            >
+            <Button variant="default" onClick={() => onCloseRestartConfirm()}>
               {t("cancel")}
             </Button>
-            <Button onClick={handleConfirmRestart}>
-              {t("confirmRestart")}
-            </Button>
+            <Button onClick={onConfirmRestart}>{t("confirmRestart")}</Button>
           </Group>
         </Stack>
       </Modal>
@@ -938,20 +941,17 @@ export function WorkspacePanel({
         centered
         opened={resetConfirmOpen}
         title={t("resetRuntime")}
-        onClose={() => setResetConfirmOpen(false)}
+        onClose={() => onCloseResetConfirm()}
       >
         <Stack gap="md">
           <Text size="sm">{t("resetRuntimeConfirm")}</Text>
           <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => setResetConfirmOpen(false)}
-            >
+            <Button variant="default" onClick={() => onCloseResetConfirm()}>
               {t("cancel")}
             </Button>
             <Button
               color="red"
-              onClick={handleConfirmReset}
+              onClick={onConfirmReset}
               loading={state.type === "SERVER" && state.isResetting}
             >
               {t("resetRuntime")}

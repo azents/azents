@@ -7,13 +7,15 @@ import type { ChatSessionViewContainerOutput } from "../containers/useChatSessio
 import type { SubagentNavigationLinks } from "../subagentNavigation";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type { ComposerSubscriptionUsagePresentationProps } from "./ComposerSubscriptionUsage";
-import type { RuntimeTerminalContainerOutput } from "@/features/runtime-terminal/containers/useRuntimeTerminalContainer";
 import type {
   AgentModelSelection,
   AgentResponse,
   AgentSessionResponse,
 } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+type RuntimeTerminalContainerOutput =
+  ChatSessionViewContainerOutput["terminal"];
 
 const noop = (): void => {};
 const sendMessage = (): Promise<boolean> => Promise.resolve(true);
@@ -124,6 +126,16 @@ const subscriptionUsage: ComposerSubscriptionUsagePresentationProps = {
 const workspacePanel: WorkspacePanelContainerOutput = {
   state: { type: "LOADING" },
   metricsState: { type: "LOADING" },
+  activeTab: "workspace",
+  restartConfirmOpen: false,
+  resetConfirmOpen: false,
+  onSetActiveTab: noop,
+  onOpenRestartConfirm: noop,
+  onCloseRestartConfirm: noop,
+  onConfirmRestart: noop,
+  onOpenResetConfirm: noop,
+  onCloseResetConfirm: noop,
+  onConfirmReset: noop,
   projectState: {
     type: "READY",
     projects: [],

@@ -95,6 +95,7 @@ export function RuntimeProfiles(
     state,
     editorState,
     mutationState,
+    form,
     operationState,
     deletionState,
     deletionFeedbackState,
@@ -485,13 +486,16 @@ export function RuntimeProfiles(
           )}
       </Stack>
 
-      <RuntimeProfileFormModal
-        editorState={editorState}
-        mutationState={mutationState}
-        infrastructureProfiles={state.infrastructureProfiles}
-        onClose={onCloseEditor}
-        onSubmit={onSubmit}
-      />
+      {form ? (
+        <RuntimeProfileFormModal
+          editorState={editorState}
+          mutationState={mutationState}
+          form={form}
+          infrastructureProfiles={state.infrastructureProfiles}
+          onClose={onCloseEditor}
+          onSubmit={onSubmit}
+        />
+      ) : null}
       <RuntimeProfileDeleteModal
         state={deletionState}
         onClose={onCloseDelete}
