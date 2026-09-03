@@ -3,11 +3,11 @@
 import dataclasses
 import datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
-from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.broker.types import BrokerMessage, SessionWakeUp
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionStatus,
@@ -34,9 +34,7 @@ from azents.repos.mailbox.data import (
 from azents.services.mailbox import (
     MailboxAdmissionResult,
     MailboxEnqueue,
-    MailboxService,
 )
-from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshot,
@@ -306,30 +304,30 @@ def _snapshot(
     )
 
 
+def _construct_service(**kwargs: Any) -> IdleContinuationService:  # noqa: ANN401
+    """Construct service with test-owned dependency doubles."""
+    return IdleContinuationService(**kwargs)
+
+
 def _service(
     *,
-    mailbox_item_service: _MailboxService,
-    event_publisher: _EventPublisher,
-    broker: _Broker,
-    agent_session_repository: _AgentSessionRepository | None = None,
-    mailbox_item_repository: _MailboxRepository | None = None,
+    mailbox_item_service: Any,  # noqa: ANN401
+    event_publisher: Any,  # noqa: ANN401
+    broker: Any,  # noqa: ANN401
+    agent_session_repository: Any | None = None,  # noqa: ANN401
+    mailbox_item_repository: Any | None = None,  # noqa: ANN401
 ) -> IdleContinuationService:
     """Create IdleContinuationService under test."""
-    return IdleContinuationService(
-        mailbox_item_service=cast(MailboxService, mailbox_item_service),
-        agent_session_repository=cast(
-            Any,
-            agent_session_repository or _AgentSessionRepository(),
-        ),
-        agent_run_repository=cast(Any, _AgentRunRepository()),
-        mailbox_item_repository=cast(
-            Any,
-            mailbox_item_repository or _MailboxRepository(pending=False),
-        ),
-        scheduled_task_cycle_repository=cast(Any, _CycleRepository()),
-        event_publisher=cast(WorkerEventPublisher, event_publisher),
-        broker=cast(SessionBroker, broker),
-        session_manager=cast(Any, _SessionManager()),
+    return _construct_service(
+        mailbox_item_service=mailbox_item_service,
+        agent_session_repository=agent_session_repository or _AgentSessionRepository(),
+        agent_run_repository=_AgentRunRepository(),
+        mailbox_item_repository=mailbox_item_repository
+        or _MailboxRepository(pending=False),
+        scheduled_task_cycle_repository=_CycleRepository(),
+        event_publisher=event_publisher,
+        broker=broker,
+        session_manager=_SessionManager(),
     )
 
 

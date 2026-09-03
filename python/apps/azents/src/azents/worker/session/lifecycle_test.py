@@ -3,12 +3,11 @@
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import cast
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -17,17 +16,11 @@ from azents.core.enums import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import AgentRunState
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
-from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
-class _Session:
+class _Session(AsyncSession):
     """Minimal async DB session test double."""
 
     def __init__(self, order: list[str] | None = None) -> None:
@@ -47,7 +40,7 @@ class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
 
     async def __aenter__(self) -> AsyncSession:
         """Return test session."""
-        return cast(AsyncSession, self.session)
+        return self.session
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -127,23 +120,18 @@ class _AgentSessionRepository:
         self,
         session: AsyncSession,
         agent_session_id: str,
-    ) -> AgentSession:
+    ) -> Any:  # noqa: ANN401
         """Return an existing locked Session marker."""
         del session, agent_session_id
-        return cast(
-            AgentSession,
-            SimpleNamespace(
-                owner_generation=self.owner_generation,
-                stop_requested_at=self.stop_requested_at,
-                pending_command_id=self.pending_command_id,
-                pending_command_name="compact" if self.pending_command_id else None,
-                pending_command_payload={} if self.pending_command_id else None,
-                pending_command_requester_user_id=None,
-                pending_command_created_at=(
-                    datetime(2026, 7, 24, tzinfo=UTC)
-                    if self.pending_command_id
-                    else None
-                ),
+        return SimpleNamespace(
+            owner_generation=self.owner_generation,
+            stop_requested_at=self.stop_requested_at,
+            pending_command_id=self.pending_command_id,
+            pending_command_name="compact" if self.pending_command_id else None,
+            pending_command_payload={} if self.pending_command_id else None,
+            pending_command_requester_user_id=None,
+            pending_command_created_at=(
+                datetime(2026, 7, 24, tzinfo=UTC) if self.pending_command_id else None
             ),
         )
 
@@ -393,6 +381,11 @@ def _running_run() -> AgentRunState:
     )
 
 
+def _construct_service(**kwargs: Any) -> SessionLifecycleService:  # noqa: ANN401
+    """Construct lifecycle service with test-owned dependency doubles."""
+    return SessionLifecycleService(**kwargs)
+
+
 def _service(
     *,
     agent_run_repository: _AgentRunRepository,
@@ -400,22 +393,13 @@ def _service(
     pending_scheduling_modes: set[MailboxSchedulingMode],
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
-    return SessionLifecycleService(
-        broker=cast(SessionBroker, _Broker()),
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        agent_run_repository=cast(AgentRunRepository, agent_run_repository),
-        mailbox_item_repository=cast(
-            MailboxRepository,
-            _MailboxRepository(pending_scheduling_modes),
-        ),
-        terminal_finalization_coordinator=cast(
-            TerminalRunFinalizationCoordinator,
-            _TerminalFinalizationCoordinator(),
-        ),
+    return _construct_service(
+        broker=_Broker(),
+        session_manager=_SessionManager(),
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=agent_run_repository,
+        mailbox_item_repository=_MailboxRepository(pending_scheduling_modes),
+        terminal_finalization_coordinator=_TerminalFinalizationCoordinator(),
     )
 
 
@@ -424,22 +408,13 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
     """Active Run heartbeat renews DB state and the atomic Redis owner lease."""
     broker = _Broker()
     agent_session_repository = _AgentSessionRepository()
-    service = SessionLifecycleService(
-        broker=cast(SessionBroker, broker),
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        agent_run_repository=cast(AgentRunRepository, _AgentRunRepository(None)),
-        mailbox_item_repository=cast(
-            MailboxRepository,
-            _MailboxRepository(set()),
-        ),
-        terminal_finalization_coordinator=cast(
-            TerminalRunFinalizationCoordinator,
-            _TerminalFinalizationCoordinator(),
-        ),
+    service = _construct_service(
+        broker=broker,
+        session_manager=_SessionManager(),
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=_AgentRunRepository(None),
+        mailbox_item_repository=_MailboxRepository(set()),
+        terminal_finalization_coordinator=_TerminalFinalizationCoordinator(),
     )
 
     await service.heartbeat_session("session-001", owner_generation=0)
@@ -594,28 +569,13 @@ async def test_complete_bridge_predecessor_suppresses_parent_result_atomically(
     run = _running_run().model_copy(update={"status": run_status})
     agent_run_repository = _AgentRunRepository(run, order=order)
     coordinator = _TerminalFinalizationCoordinator()
-    service = SessionLifecycleService(
-        broker=cast(SessionBroker, _Broker()),
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(order),
-        ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            _AgentSessionRepository(),
-        ),
-        agent_run_repository=cast(
-            AgentRunRepository,
-            agent_run_repository,
-        ),
-        mailbox_item_repository=cast(
-            MailboxRepository,
-            _MailboxRepository(set()),
-        ),
-        terminal_finalization_coordinator=cast(
-            TerminalRunFinalizationCoordinator,
-            coordinator,
-        ),
+    service = _construct_service(
+        broker=_Broker(),
+        session_manager=_SessionManager(order),
+        agent_session_repository=_AgentSessionRepository(),
+        agent_run_repository=agent_run_repository,
+        mailbox_item_repository=_MailboxRepository(set()),
+        terminal_finalization_coordinator=coordinator,
     )
 
     terminal_status = await service.complete_bridge_predecessor_run(
@@ -648,7 +608,7 @@ async def test_failed_run_finalization_yields_to_locked_stop_request() -> None:
     )
 
     claimed = await service.claim_failed_run_finalization(
-        cast(AsyncSession, _Session()),
+        _Session(),
         session_id="session-001",
         owner_generation=0,
     )
