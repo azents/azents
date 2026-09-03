@@ -1,7 +1,5 @@
 """Scheduled Task ORM model tests."""
 
-from typing import cast
-
 import pytest
 import sqlalchemy as sa
 from sqlalchemy import create_engine, text
@@ -29,7 +27,8 @@ class TestRDBScheduledTask:
 
     def test_m1_columns_and_foreign_keys_are_present(self) -> None:
         """The model exposes the exact Task ownership and cursor columns."""
-        table = cast(sa.Table, RDBScheduledTask.__table__)
+        table = RDBScheduledTask.__table__
+        assert isinstance(table, sa.Table)
         columns = table.c
 
         assert set(columns.keys()) == {
@@ -78,7 +77,8 @@ class TestRDBScheduledTask:
 
     def test_named_m1_constraints_and_indexes_are_registered(self) -> None:
         """Schedule, cycle, pending, and bounded-scan contracts are named."""
-        table = cast(sa.Table, RDBScheduledTask.__table__)
+        table = RDBScheduledTask.__table__
+        assert isinstance(table, sa.Table)
         constraints = {constraint.name for constraint in table.constraints}
         assert {
             "ck_scheduled_tasks_schedule_shape",
