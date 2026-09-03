@@ -4,8 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +20,6 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelInteraction,
@@ -50,6 +48,18 @@ from azents.testing.external_channel import make_provider_effect_plan
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 _THREAD_INTERACTION_ID = "01a03c28f6137b60b35e68ba50ce5319"
 _THREAD_BINDING_ID = "01a03bfcc50a7891a94d3328bdbd88bf"
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _object_dict_list(value: object) -> list[dict[str, object]]:
+    assert isinstance(value, list)
+    return [_object_dict(item) for item in value]
+
+
 _CONTEXT = DiscordSettingsContext(
     connection_id="connection-1",
     guild_id="guild-1",
@@ -61,7 +71,7 @@ _CONTEXT = DiscordSettingsContext(
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
-    yield cast(AsyncSession, object())
+    yield MagicMock(spec=AsyncSession)
 
 
 def _origin(
@@ -163,16 +173,16 @@ def _service(
 ) -> tuple[DiscordSettingsResponseService, AsyncMock]:
     repository = AsyncMock(spec=ExternalChannelRepository)
     repository.lock_interaction.return_value = origin
+    config = MagicMock(spec=Config)
+    config.auth = SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
     service = DiscordSettingsResponseService(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        repository=cast(ExternalChannelRepository, repository),
-        participation_service=cast(ExternalChannelParticipationService, participation),
-        config=cast(
-            Config,
-            SimpleNamespace(
-                auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
-            ),
+        session_manager=_session_manager,
+        repository=repository,
+        participation_service=MagicMock(
+            spec=ExternalChannelParticipationService,
+            wraps=participation,
         ),
+        config=config,
     )
     return service, repository
 
@@ -468,10 +478,11 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
         now=_NOW,
     )
 
-    data = cast(dict[str, object], opened.response["data"])
-    rows = cast(list[dict[str, object]], data["components"])
-    response_buttons = cast(list[dict[str, object]], rows[1]["components"])
-    all_messages_custom_id = cast(str, response_buttons[1]["custom_id"])
+    data = _object_dict(opened.response["data"])
+    rows = _object_dict_list(data["components"])
+    response_buttons = _object_dict_list(rows[1]["components"])
+    all_messages_custom_id = response_buttons[1]["custom_id"]
+    assert isinstance(all_messages_custom_id, str)
     mutation_scope = parse_discord_settings_custom_id(
         custom_id=all_messages_custom_id,
         secret="settings-secret",
@@ -531,11 +542,12 @@ async def test_binding_open_renders_bounded_thread_controls() -> None:
         now=_NOW,
     )
 
-    data = cast(dict[str, object], opened.response["data"])
-    rows = cast(list[dict[str, object]], data["components"])
-    response_buttons = cast(list[dict[str, object]], rows[0]["components"])
+    data = _object_dict(opened.response["data"])
+    rows = _object_dict_list(data["components"])
+    response_buttons = _object_dict_list(rows[0]["components"])
     for button in response_buttons:
-        custom_id = cast(str, button["custom_id"])
+        custom_id = button["custom_id"]
+        assert isinstance(custom_id, str)
         scope = parse_discord_settings_custom_id(
             custom_id=custom_id,
             secret="settings-secret",

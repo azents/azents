@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -17,7 +17,6 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
@@ -41,6 +40,7 @@ from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 
@@ -248,13 +248,15 @@ def _service(
 ) -> ExternalChannelConnectionService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+        yield require_instance(
+            MagicMock(spec=AsyncSession, wraps=session), AsyncSession
+        )
 
     return ExternalChannelConnectionService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
+        session_manager=session_manager,
+        repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
         credentials_codec=codec,
-        slack_client=cast(SlackWebAPIClient, slack_client),
+        slack_client=MagicMock(spec=SlackWebAPIClient, wraps=slack_client),
     )
 
 

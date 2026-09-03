@@ -2,7 +2,6 @@
 
 import datetime
 import json
-from typing import cast
 
 import pytest
 
@@ -110,11 +109,12 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
 def test_projects_invalid_attachment_size_as_advisory_metadata() -> None:
     """Discord attachment identity remains usable when event size is malformed."""
     gateway_event = _event()
-    attachments = cast(dict[str, object], gateway_event.message["attachments"])
+    attachments = gateway_event.message["attachments"]
+    assert isinstance(attachments, dict)
     files = attachments.get("files")
     assert isinstance(files, list)
     assert isinstance(files[0], dict)
-    cast(dict[str, object], files[0])["declared_size"] = None
+    files[0]["declared_size"] = None
 
     event = project_discord_gateway_event(
         connection_id="connection-1",
@@ -504,14 +504,14 @@ def test_normalizes_only_message_create_events() -> None:
 
 def test_rejects_wrong_guild_and_non_snowflake_message_identity() -> None:
     """A projection cannot cross connection authority or use unordered message IDs."""
-    wrong_guild = {
+    wrong_guild: dict[str, object] = {
         "message": {
             "id": "100",
             "channel_id": "200",
             "guild_id": "guild-2",
         }
     }
-    malformed_id = {
+    malformed_id: dict[str, object] = {
         "message": {
             "id": "not-a-snowflake",
             "channel_id": "200",
@@ -525,14 +525,14 @@ def test_rejects_wrong_guild_and_non_snowflake_message_identity() -> None:
             event_type="discord_message_create",
             tenant_id="guild-1",
             connected_bot_user_id=None,
-            envelope=cast(dict[str, object], wrong_guild),
+            envelope=wrong_guild,
         )
     with pytest.raises(DiscordEventNormalizationError, match="message ID"):
         normalize_projected_discord_event(
             event_type="discord_message_create",
             tenant_id="guild-1",
             connected_bot_user_id=None,
-            envelope=cast(dict[str, object], malformed_id),
+            envelope=malformed_id,
         )
 
 

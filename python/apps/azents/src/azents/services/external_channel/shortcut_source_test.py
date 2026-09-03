@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,10 +18,13 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    ExternalChannelConversationPositionCreate,
     ExternalChannelInteraction,
+    ExternalChannelInteractionCreate,
+    ExternalChannelResourceCreate,
     ExternalChannelSetupClaim,
+    ExternalChannelSetupClaimCreate,
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -51,8 +54,8 @@ class _Repository:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.provider = ExternalChannelProvider.SLACK
-        self.resource_creates: list[object] = []
-        self.position_creates: list[object] = []
+        self.resource_creates: list[ExternalChannelResourceCreate] = []
+        self.position_creates: list[ExternalChannelConversationPositionCreate] = []
         self.resource_status = ExternalChannelResourceStatus.ACTIVE
         self.setup_claim: ExternalChannelSetupClaim | None = None
         self.selector_interaction: ExternalChannelInteraction | None = None
@@ -70,7 +73,7 @@ class _Repository:
     async def create_conversation_position_idempotent(
         self,
         session: object,
-        create: object,
+        create: ExternalChannelConversationPositionCreate,
     ) -> object:
         del session
         self.calls.append("position")
@@ -108,7 +111,7 @@ class _Repository:
     async def create_resource_idempotent(
         self,
         session: object,
-        create: object,
+        create: ExternalChannelResourceCreate,
     ) -> object:
         del session
         self.calls.append("resource_create")
@@ -190,13 +193,13 @@ class _Repository:
     async def create_setup_claim(
         self,
         session: object,
-        create: object,
+        create: ExternalChannelSetupClaimCreate,
     ) -> ExternalChannelSetupClaim:
         del session
         self.calls.append("setup_claim_create")
         self.setup_claim = ExternalChannelSetupClaim.model_construct(
             id="claim-1",
-            **cast(Any, create).model_dump(),
+            **create.model_dump(),
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -216,14 +219,14 @@ class _Repository:
     async def admit_interaction(
         self,
         session: object,
-        create: object,
+        create: ExternalChannelInteractionCreate,
     ) -> object:
         del session
         self.calls.append("selector_create")
         self.admitted_interactions.append(create)
         selector = ExternalChannelInteraction.model_construct(
             id="selector-1",
-            **cast(Any, create).model_dump(),
+            **create.model_dump(),
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -286,11 +289,11 @@ def _service(
 ) -> ExternalChannelShortcutSourceService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+        yield MagicMock(spec=AsyncSession, wraps=session)
 
     return ExternalChannelShortcutSourceService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
+        session_manager=session_manager,
+        repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
     )
 
 
@@ -319,7 +322,8 @@ async def test_shortcut_source_commits_content_free_selector_state() -> None:
     assert (
         repository.setup_claim.status is ExternalChannelSetupClaimStatus.PENDING_AGENT
     )
-    create = cast(Any, repository.resource_creates[0])
+    create = repository.resource_creates[0]
+    assert create.labels is not None
     assert create.labels["provider_event_type"] == "app_mention"
     assert session.commit_count == 1
     assert repository.calls == [
@@ -442,7 +446,7 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
     )
 
     assert result.selector_interaction is not None
-    create = cast(Any, repository.resource_creates[0])
+    create = repository.resource_creates[0]
     assert create.provider_resource_key == "discord:guild-1:100"
     assert create.labels == {
         "provider": "discord",
@@ -454,7 +458,7 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
         "parent_channel_id": "channel-1",
         "root_message_id": "100",
     }
-    position = cast(Any, repository.position_creates[0])
+    position = repository.position_creates[0]
     assert position.provider_channel_id == "channel-1"
     assert position.provider_thread_key is None
     state = selector_state_from_interaction(result.selector_interaction)

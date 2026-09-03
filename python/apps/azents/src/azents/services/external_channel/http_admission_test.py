@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlencode
 
@@ -23,9 +23,9 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
+    ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
@@ -51,9 +51,6 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
-)
-from azents.services.external_channel.shortcut_source import (
-    ExternalChannelShortcutSourceService,
 )
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
 from azents.services.external_channel.slack_http import (
@@ -197,12 +194,11 @@ class _AdmissionDouble:
         self.interactions.append((create, principal))
         if self.fail:
             raise RuntimeError("database unavailable")
-        return cast(
-            ExternalChannelInteractionAdmission,
-            SimpleNamespace(
-                interaction=SimpleNamespace(id="interaction-row-1"),
-                created=True,
+        return ExternalChannelInteractionAdmission(
+            interaction=ExternalChannelInteraction.model_construct(
+                id="interaction-row-1"
             ),
+            created=True,
         )
 
     async def begin_interaction_provider_mutation(
@@ -288,36 +284,45 @@ def _service(
 ) -> tuple[SlackHTTPAdmissionService, _RepositoryDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, object())
+        yield MagicMock(spec=AsyncSession)
 
     repository = _RepositoryDouble(configuration)
+    admission_service = MagicMock(
+        spec=ExternalChannelAdmissionService,
+        wraps=admission,
+    )
+    transport_ingestion_service = MagicMock(
+        spec=ExternalChannelTransportIngestionService,
+        wraps=admission,
+    )
+    revocation_service = MagicMock(
+        spec=ExternalChannelConnectionRevocationService,
+        wraps=admission,
+    )
     return (
         SlackHTTPAdmissionService(
-            session_manager=cast(SessionManager[AsyncSession], session_manager),
-            repository=cast(ExternalChannelRepository, repository),
+            session_manager=session_manager,
+            repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
             credentials_codec=codec,
-            admission_service=cast(ExternalChannelAdmissionService, admission),
+            admission_service=admission_service,
             interaction_processor=(
-                cast(ExternalChannelInteractionProcessor, AsyncMock())
-                if interaction_processor is None
-                else interaction_processor
+                AsyncMock() if interaction_processor is None else interaction_processor
             ),
-            shortcut_source_service=cast(
-                ExternalChannelShortcutSourceService,
-                AsyncMock(),
-            ),
-            transport_ingestion_service=cast(
-                ExternalChannelTransportIngestionService,
-                admission,
-            ),
-            revocation_service=cast(
-                ExternalChannelConnectionRevocationService,
-                admission,
-            ),
+            shortcut_source_service=AsyncMock(),
+            transport_ingestion_service=transport_ingestion_service,
+            revocation_service=revocation_service,
             config=config,
         ),
         repository,
     )
+
+
+def _shortcut_source_ensure(service: SlackHTTPAdmissionService) -> AsyncMock:
+    value = service.__dict__["shortcut_source_service"]
+    assert isinstance(value, AsyncMock)
+    ensure = value.ensure
+    assert isinstance(ensure, AsyncMock)
+    return ensure
 
 
 def _signed(body: bytes) -> tuple[str, str]:
@@ -661,10 +666,7 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     )
     body = _interaction_body(interaction_type=interaction_type)
     timestamp, signature = _signed(body)
-    shortcut_source_ensure = cast(
-        AsyncMock,
-        service.shortcut_source_service.ensure,
-    )
+    shortcut_source_ensure = _shortcut_source_ensure(service)
 
     result = await service.handle(
         raw_body=body,
@@ -762,7 +764,7 @@ async def test_single_shortcut_is_durably_rejected_without_selector_source() -> 
         ("interaction-row-1", "rejected", "interaction_unsupported")
     ]
     assert len(admission.interactions) == 1
-    cast(AsyncMock, service.shortcut_source_service.ensure).assert_not_awaited()
+    _shortcut_source_ensure(service).assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -808,7 +810,7 @@ async def test_provider_processor_runs_only_after_http_admission_returns(
         ),
         codec=codec,
         admission=admission,
-        interaction_processor=cast(ExternalChannelInteractionProcessor, processor),
+        interaction_processor=processor,
     )
     body = _interaction_body()
     timestamp, signature = _signed(body)

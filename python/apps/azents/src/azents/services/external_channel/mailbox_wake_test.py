@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,16 +73,15 @@ async def test_dispatch_sends_routing_only_wake_after_mailbox_commit() -> None:
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+        yield MagicMock(spec=AsyncSession, wraps=session)
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
         session_manager=session_manager,
-        mailbox_service=cast(
-            MailboxService,
-            _MailboxService(calls, _mailbox_item()),
+        mailbox_service=MagicMock(
+            spec=MailboxService, wraps=_MailboxService(calls, _mailbox_item())
         ),
-        broker=cast(SessionBroker, broker),
+        broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=ExternalChannelIngressTestControl(),
     )
 
@@ -107,13 +106,15 @@ async def test_missing_mailbox_item_does_not_send_duplicate_wake() -> None:
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+        yield MagicMock(spec=AsyncSession, wraps=session)
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
         session_manager=session_manager,
-        mailbox_service=cast(MailboxService, _MailboxService(calls, None)),
-        broker=cast(SessionBroker, broker),
+        mailbox_service=MagicMock(
+            spec=MailboxService, wraps=_MailboxService(calls, None)
+        ),
+        broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=ExternalChannelIngressTestControl(),
     )
 
@@ -138,18 +139,17 @@ async def test_injected_wake_failure_is_one_shot_and_precedes_broker_io() -> Non
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+        yield MagicMock(spec=AsyncSession, wraps=session)
 
     control = ExternalChannelIngressTestControl()
     control.fail_next_wake(session_id="session-1")
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
         session_manager=session_manager,
-        mailbox_service=cast(
-            MailboxService,
-            _MailboxService(calls, _mailbox_item()),
+        mailbox_service=MagicMock(
+            spec=MailboxService, wraps=_MailboxService(calls, _mailbox_item())
         ),
-        broker=cast(SessionBroker, broker),
+        broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=control,
     )
 
