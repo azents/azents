@@ -4,7 +4,6 @@ import contextlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import cast
 
 import httpx
 import pytest
@@ -17,6 +16,9 @@ from azents.services.external_channel.discord_delivery import (
     DiscordOutboundFileContentError,
 )
 from azents.services.external_channel.discord_sdk import (
+    DiscordSDKApplication,
+    DiscordSDKAttachment,
+    DiscordSDKCommand,
     DiscordSDKMessage,
     DiscordSDKPermissionDenied,
     DiscordSDKSession,
@@ -39,6 +41,27 @@ class _SDKSession:
     create_thread_error: Exception | None = None
     forward_message_error: Exception | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
+
+    async def fetch_application(self) -> DiscordSDKApplication:
+        raise AssertionError("application lookup is outside this test double")
+
+    def current_bot_user_id(self) -> str:
+        return "900"
+
+    async def list_guild_commands(
+        self,
+        **values: object,
+    ) -> tuple[DiscordSDKCommand, ...]:
+        raise AssertionError(f"command listing is outside this test double: {values}")
+
+    async def update_guild_command(
+        self,
+        **values: object,
+    ) -> DiscordSDKCommand:
+        raise AssertionError(f"command update is outside this test double: {values}")
+
+    async def delete_guild_command(self, **values: object) -> None:
+        raise AssertionError(f"command deletion is outside this test double: {values}")
 
     async def fetch_root_thread(self, **values: object) -> DiscordSDKThread | None:
         self.calls.append(("fetch_root_thread", values))
@@ -86,6 +109,20 @@ class _SDKSession:
     async def delete_message(self, **values: object) -> None:
         self.calls.append(("delete_message", values))
 
+    async def fetch_attachment(self, **values: object) -> DiscordSDKAttachment:
+        raise AssertionError(f"attachment lookup is outside this test double: {values}")
+
+    async def fetch_message_projection(self, **values: object) -> dict[str, object]:
+        raise AssertionError(
+            f"message projection is outside this test double: {values}"
+        )
+
+    async def fetch_history_projections(
+        self,
+        **values: object,
+    ) -> tuple[dict[str, object], ...]:
+        raise AssertionError(f"history lookup is outside this test double: {values}")
+
 
 @dataclass
 class _SDKFactory:
@@ -96,7 +133,7 @@ class _SDKFactory:
     async def open(self, *, bot_token: str) -> AsyncIterator[DiscordSDKSession]:
         assert bot_token == "discord-secret"
         self.opens += 1
-        yield cast(DiscordSDKSession, self.session)
+        yield self.session
 
 
 @dataclass
