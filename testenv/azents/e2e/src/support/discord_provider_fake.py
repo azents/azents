@@ -123,6 +123,11 @@ class _ChannelMessageIds(NamedTuple):
     message_id: str | None
 
 
+class _TransientComponent(NamedTuple):
+    custom_id: str
+    channel_id: str | None
+
+
 class FakeState:
     """Thread-safe Discord scenarios and sanitized provider evidence."""
 
@@ -150,10 +155,12 @@ class FakeState:
             self.requests: list[dict[str, object]] = []
             self.interaction_configurations: list[dict[str, object]] = []
             self.interactions: list[dict[str, object]] = []
-            self._interaction_tokens: dict[str, str] = {}
+            self._interaction_tokens: dict[str, tuple[str, str | None]] = {}
             self._interaction_completions: dict[str, dict[str, object]] = {}
             self._interaction_endpoint_url: str | None = None
-            self._transient_component_custom_ids: dict[str, list[str]] = {
+            self._transient_component_custom_ids: dict[
+                str, list[_TransientComponent]
+            ] = {
                 "selector": [],
                 "settings": [],
             }
@@ -551,12 +558,18 @@ class FakeState:
         interaction_id = payload.get("id")
         interaction_type = payload.get("type")
         interaction_token = payload.get("token")
+        channel_id = payload.get("channel_id")
         if not isinstance(interaction_id, str) or not isinstance(interaction_type, int):
             raise ValueError("Interaction requires an ID and integer type.")
+        if channel_id is not None and not isinstance(channel_id, str):
+            raise ValueError("Interaction channel identity must be a string.")
         with self.lock:
             endpoint_url = self._interaction_endpoint_url
             if isinstance(interaction_token, str) and interaction_token:
-                self._interaction_tokens[interaction_token] = interaction_id
+                self._interaction_tokens[interaction_token] = (
+                    interaction_id,
+                    channel_id,
+                )
         if endpoint_url is None:
             raise ValueError("Discord interaction endpoint is not configured.")
         raw_body = json.dumps(payload, separators=(",", ":")).encode()
@@ -582,7 +595,10 @@ class FakeState:
             response_status = 0
             response_payload = None
         with self.lock:
-            self._capture_transient_component_custom_ids(response_payload)
+            self._capture_transient_component_custom_ids(
+                response_payload,
+                channel_id=channel_id,
+            )
             evidence: dict[str, object] = {
                 "interaction_id": interaction_id,
                 "interaction_type": interaction_type,
@@ -622,10 +638,17 @@ class FakeState:
         with self.lock:
             if application_id != self.application_id:
                 raise ValueError("Discord interaction Application identity mismatch.")
-            interaction_id = self._interaction_tokens.pop(interaction_token, None)
-            if interaction_id is None:
+            interaction_context = self._interaction_tokens.pop(
+                interaction_token,
+                None,
+            )
+            if interaction_context is None:
                 raise ValueError("Discord interaction token is unavailable.")
-            self._capture_transient_component_custom_ids(response)
+            interaction_id, channel_id = interaction_context
+            self._capture_transient_component_custom_ids(
+                response,
+                channel_id=channel_id,
+            )
             completion: dict[str, object] = {}
             response_type = response.get("type")
             if isinstance(response_type, int):
@@ -645,33 +668,66 @@ class FakeState:
                     return
             self._interaction_completions[interaction_id] = completion
 
-    def consume_transient_component_custom_id(self, scope: str) -> str | None:
+    def consume_transient_component_custom_id(
+        self,
+        scope: str,
+        *,
+        channel_id: str | None,
+    ) -> str | None:
         """Consume one request-local component ID without adding it to evidence."""
         with self.lock:
-            custom_ids = self._transient_component_custom_ids.get(scope)
-            if not custom_ids:
+            components = self._transient_component_custom_ids.get(scope)
+            if not components:
                 return None
-            return custom_ids.pop(0)
+            if channel_id is None:
+                return components.pop(0).custom_id
+            for index, component in enumerate(components):
+                if component.channel_id == channel_id:
+                    return components.pop(index).custom_id
+            return None
 
-    def capture_transient_component_custom_ids(self, value: object) -> None:
+    def capture_transient_component_custom_ids(
+        self,
+        value: object,
+        *,
+        channel_id: str | None,
+    ) -> None:
         """Capture signed component IDs from one delivered provider body."""
         with self.lock:
-            self._capture_transient_component_custom_ids(value)
+            self._capture_transient_component_custom_ids(
+                value,
+                channel_id=channel_id,
+            )
 
-    def _capture_transient_component_custom_ids(self, value: object) -> None:
+    def _capture_transient_component_custom_ids(
+        self,
+        value: object,
+        *,
+        channel_id: str | None,
+    ) -> None:
         """Retain typed component IDs only transiently for the next interaction."""
         if isinstance(value, dict):
             for key, nested in value.items():
                 if key == "custom_id" and isinstance(nested, str):
                     if nested.startswith("azents-selector:"):
-                        self._transient_component_custom_ids["selector"].append(nested)
+                        self._transient_component_custom_ids["selector"].append(
+                            _TransientComponent(nested, channel_id)
+                        )
                     elif nested.startswith("a:"):
-                        self._transient_component_custom_ids["settings"].append(nested)
+                        self._transient_component_custom_ids["settings"].append(
+                            _TransientComponent(nested, channel_id)
+                        )
                 else:
-                    self._capture_transient_component_custom_ids(nested)
+                    self._capture_transient_component_custom_ids(
+                        nested,
+                        channel_id=channel_id,
+                    )
         elif isinstance(value, list):
             for nested in value:
-                self._capture_transient_component_custom_ids(nested)
+                self._capture_transient_component_custom_ids(
+                    nested,
+                    channel_id=channel_id,
+                )
 
     def create_message(
         self,
@@ -1008,16 +1064,25 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "custom_id": self.state.consume_transient_component_custom_id(
-                        "selector"
+                        "selector",
+                        channel_id=None,
                     )
                 },
             )
             return
         if parsed.path == "/__testenv/transient-component":
-            scope = parse_qs(parsed.query).get("scope", [""])[0]
+            query = parse_qs(parsed.query)
+            scope = query.get("scope", [""])[0]
+            channel_ids = query.get("channel_id")
+            channel_id = channel_ids[0] if channel_ids else None
             self._json_response(
                 200,
-                {"custom_id": self.state.consume_transient_component_custom_id(scope)},
+                {
+                    "custom_id": self.state.consume_transient_component_custom_id(
+                        scope,
+                        channel_id=channel_id,
+                    )
+                },
             )
             return
         if parsed.path == "/__testenv/command-id":
@@ -1285,7 +1350,10 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             response_channel_id = (
                 "0" if scenario == "response_channel_mismatch" else channel_id
             )
-            self.state.capture_transient_component_custom_ids(body)
+            self.state.capture_transient_component_custom_ids(
+                body,
+                channel_id=channel_id,
+            )
             self.state.record_delivery(
                 operation="create_message",
                 channel_id=channel_id,
@@ -1661,7 +1729,10 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 message_id=message_id,
             )
         else:
-            self.state.capture_transient_component_custom_ids(arguments)
+            self.state.capture_transient_component_custom_ids(
+                arguments,
+                channel_id=channel_id,
+            )
         self.state.record_delivery(
             operation=operation,
             channel_id=channel_id,

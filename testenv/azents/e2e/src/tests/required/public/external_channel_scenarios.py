@@ -561,12 +561,13 @@ def _discord_settings_component_id(
     discord_provider_fake_url: str,
     *,
     action_code: str,
+    channel_id: str,
 ) -> str | None:
-    """Consume transient settings controls until one requested action is found."""
+    """Consume one channel-correlated settings control by requested action."""
     for _ in range(10):
         response = requests.get(
             f"{discord_provider_fake_url}/__testenv/transient-component",
-            params={"scope": "settings"},
+            params={"scope": "settings", "channel_id": channel_id},
             timeout=5,
         )
         response.raise_for_status()
@@ -4519,6 +4520,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 lambda: _discord_settings_component_id(
                     discord_provider_fake_url,
                     action_code="st",
+                    channel_id=channel_id,
                 ),
                 timeout=30,
                 interval=0.2,
@@ -5080,6 +5082,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 lambda: _discord_settings_component_id(
                     discord_provider_fake_url,
                     action_code="sc",
+                    channel_id=channel_id,
                 ),
                 timeout=30,
                 interval=0.2,
@@ -5958,10 +5961,11 @@ def test_discord_configured_message_durably_provisions_conversation(
         for setup_action_code, _, _, suffix in scenarios:
             setup_custom_id = _string(
                 wait_until(
-                    lambda action_code=setup_action_code: (
+                    lambda action_code=setup_action_code, suffix=suffix: (
                         _discord_settings_component_id(
                             discord_provider_fake_url,
                             action_code=action_code,
+                            channel_id=channel_id(suffix),
                         )
                     ),
                     timeout=30,
@@ -6364,6 +6368,7 @@ def test_discord_message_command_selector_and_component_journey(
             lambda: _discord_settings_component_id(
                 discord_provider_fake_url,
                 action_code="st",
+                channel_id=_DISCORD_CHANNEL_ID,
             ),
             timeout=15,
             interval=0.2,
