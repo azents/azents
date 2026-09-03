@@ -2,7 +2,6 @@
 
 import datetime
 import uuid
-from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,7 +16,6 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
-from azents.rdb.session import SessionManager
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
@@ -150,8 +148,8 @@ class TestEnsureRuntimeTokens:
         ensure_succeeds: bool,
     ) -> None:
         """Preserve validation behavior in normal and forced refresh entry points."""
-        repository = cast(LLMProviderIntegrationRepository, AsyncMock())
-        session_manager = cast(SessionManager[AsyncSession], AsyncMock())
+        repository = AsyncMock()
+        session_manager = AsyncMock()
 
         ensured = await ensure_runtime_tokens(
             integration=integration,
@@ -188,9 +186,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -230,9 +226,7 @@ class TestEnsureRuntimeTokens:
         result = await refresh_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -273,9 +267,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -308,9 +300,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -345,9 +335,7 @@ class TestEnsureRuntimeTokens:
         first = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -378,9 +366,7 @@ class TestEnsureRuntimeTokens:
         second = await ensure_runtime_tokens(
             integration=after_failure,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(second, Success)
@@ -401,6 +387,7 @@ class TestEnsureRuntimeTokens:
         )
         assert stale_integration is not None
 
+        assert isinstance(stale_integration.config, ChatGPTOAuthConfig)
         update = await repo.update_by_id(
             rdb_session,
             integration_id,
@@ -414,9 +401,7 @@ class TestEnsureRuntimeTokens:
                 "config": ChatGPTOAuthConfig(
                     connection_method=ChatGPTOAuthConnectionMethod.CALLBACK.value,
                     status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
-                    connected_at=cast(
-                        ChatGPTOAuthConfig, stale_integration.config
-                    ).connected_at,
+                    connected_at=stale_integration.config.connected_at,
                     last_refreshed_at=datetime.datetime.now(datetime.UTC),
                 ),
             },
@@ -437,9 +422,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=stale_integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)

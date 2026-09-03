@@ -1,11 +1,9 @@
 """Workspace Runtime Provider discovery tests."""
 
 import datetime
-from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -14,7 +12,6 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProvider
 
 from .service import RuntimeProviderPublicService
@@ -57,11 +54,11 @@ def _provider(
 
 def _service(providers: list[RuntimeProvider]) -> RuntimeProviderPublicService:
     """Build the discovery service with repository mocks."""
-    repository = cast(Any, Mock())
+    repository = Mock()
     repository.list_available = AsyncMock(return_value=providers)
     repository.is_available_to_workspace = AsyncMock(return_value=True)
     return RuntimeProviderPublicService(
-        session_manager=cast(SessionManager[AsyncSession], Mock()),
+        session_manager=Mock(),
         repository=repository,
     )
 
@@ -86,7 +83,7 @@ async def test_discovery_excludes_non_active_lifecycle_states() -> None:
     context = Mock()
     context.__aenter__ = AsyncMock(return_value=session)
     context.__aexit__ = AsyncMock(return_value=None)
-    service.session_manager = cast(Any, Mock(return_value=context))
+    service.session_manager = Mock(return_value=context)
 
     providers = await service.list_for_workspace("workspace-1")
 
@@ -112,7 +109,7 @@ async def test_discovery_applies_selected_workspace_allow_list() -> None:
     context = Mock()
     context.__aenter__ = AsyncMock(return_value=session)
     context.__aexit__ = AsyncMock(return_value=None)
-    service.session_manager = cast(Any, Mock(return_value=context))
+    service.session_manager = Mock(return_value=context)
 
     providers = await service.list_for_workspace("workspace-1")
 
