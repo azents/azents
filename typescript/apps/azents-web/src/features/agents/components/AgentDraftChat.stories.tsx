@@ -2,7 +2,6 @@ import { Box, rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentDraftChat } from "./AgentDraftChat";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
-import type { ComposerSubscriptionUsagePresentationProps } from "@/features/chat/components/ComposerSubscriptionUsage";
 import type { AgentModelSelection, AgentResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -82,7 +81,9 @@ const agent: AgentResponse = {
   updated_at: "2026-08-20T09:00:00Z",
 };
 
-const subscriptionUsage: ComposerSubscriptionUsagePresentationProps = {
+const subscriptionUsage: NonNullable<
+  AgentDraftChatContainerOutput["subscriptionUsage"]
+> = {
   resetKey: "integration-openrouter",
   onRefresh: async (): Promise<void> => {},
   state: {

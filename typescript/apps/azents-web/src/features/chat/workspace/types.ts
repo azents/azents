@@ -67,6 +67,8 @@ export type WorkspaceManifest = {
 
 export type WorkspaceBrowserMode = "projects" | "all_files";
 
+export type WorkspacePanelTab = "workspace" | "metrics" | "settings";
+
 export type WorkspaceProjectBrowserManifest = {
   root: string;
   activeMode: WorkspaceBrowserMode;

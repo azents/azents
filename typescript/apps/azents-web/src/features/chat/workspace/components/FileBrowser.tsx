@@ -43,7 +43,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { chatChevronTransition } from "../../components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
 import type {
@@ -82,6 +82,10 @@ interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
+  query?: string;
+  expanded?: Set<string>;
+  onQueryChange?: (query: string) => void;
+  onExpandedChange?: (expanded: Set<string>) => void;
 }
 
 function getRelativePath(path: string, root: string): string {
@@ -643,14 +647,16 @@ export function FileBrowser({
   onRefresh,
   onSetBrowserMode,
   onAddProject,
+  query = "",
+  expanded = new Set<string>(),
+  onQueryChange = (): void => {},
+  onExpandedChange = (): void => {},
 }: FileBrowserProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
-  const [query, setQuery] = useState("");
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
   );
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const selectedPathSet = useMemo(
     () => new Set(selectedPaths),
     [selectedPaths],
@@ -665,25 +671,26 @@ export function FileBrowser({
   }, [query, tree]);
   const effectiveExpanded = query.trim() ? searchExpanded : expanded;
 
-  const handleToggle = useCallback((nodeId: string): void => {
-    setExpanded((previous) => {
-      const next = new Set(previous);
+  const handleToggle = useCallback(
+    (nodeId: string): void => {
+      const next = new Set(expanded);
       if (next.has(nodeId)) {
         next.delete(nodeId);
       } else {
         next.add(nodeId);
       }
-      return next;
-    });
-  }, []);
+      onExpandedChange(next);
+    },
+    [expanded, onExpandedChange],
+  );
 
   const handleExpandAll = useCallback((): void => {
-    setExpanded(collectDirectoryNodeIds(tree));
-  }, [tree]);
+    onExpandedChange(collectDirectoryNodeIds(tree));
+  }, [onExpandedChange, tree]);
 
   const handleCollapseAll = useCallback((): void => {
-    setExpanded(new Set());
-  }, []);
+    onExpandedChange(new Set());
+  }, [onExpandedChange]);
 
   const activePath = selectedFilePath ?? path;
   const handleModeChange = useCallback(
@@ -719,7 +726,7 @@ export function FileBrowser({
           miw={0}
           size="xs"
           value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
           placeholder={t("searchFiles")}
           leftSection={<IconSearch size="0.8125rem" />}
           rightSection={
@@ -727,7 +734,7 @@ export function FileBrowser({
               <ActionIcon
                 size="xs"
                 variant="subtle"
-                onClick={() => setQuery("")}
+                onClick={() => onQueryChange("")}
               >
                 <IconX size="0.6875rem" />
               </ActionIcon>

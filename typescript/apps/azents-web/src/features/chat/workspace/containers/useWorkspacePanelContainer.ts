@@ -20,6 +20,7 @@ import {
   type WorkspaceDirectoryLoadState,
   type WorkspaceEntry,
   type WorkspacePanelState,
+  type WorkspacePanelTab,
   type WorkspaceProjectPanelState,
 } from "../types";
 import { resolveWorkspaceDirectory } from "../workspaceDirectory";
@@ -44,6 +45,20 @@ export interface WorkspacePanelContainerOutput {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
+  fileBrowserQuery?: string;
+  expandedFileNodeIds?: Set<string>;
+  onSetFileBrowserQuery?: (query: string) => void;
+  onSetExpandedFileNodeIds?: (nodeIds: Set<string>) => void;
+  activeTab?: WorkspacePanelTab;
+  restartConfirmOpen?: boolean;
+  resetConfirmOpen?: boolean;
+  onSetActiveTab?: (tab: WorkspacePanelTab) => void;
+  onOpenRestartConfirm?: () => void;
+  onCloseRestartConfirm?: () => void;
+  onConfirmRestart?: () => void;
+  onOpenResetConfirm?: () => void;
+  onCloseResetConfirm?: () => void;
+  onConfirmReset?: () => void;
   runtimeSettingsHref: string;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
@@ -132,6 +147,13 @@ export function useWorkspacePanelContainer({
   >(null);
   const [browserMode, setBrowserMode] =
     useState<WorkspaceBrowserMode>("projects");
+  const [activeTab, setActiveTab] = useState<WorkspacePanelTab>("workspace");
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [fileBrowserQuery, setFileBrowserQuery] = useState("");
+  const [expandedFileNodeIds, setExpandedFileNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [workspaceView, setWorkspaceView] = useState<
     "browser" | "preview" | "info"
   >("browser");
@@ -1200,6 +1222,45 @@ export function useWorkspacePanelContainer({
     workspaceView,
   ]);
 
+  const metricsTabAvailable =
+    state.type === "SERVER" || state.type === "REMOVING";
+
+  useEffect(() => {
+    if (activeTab === "metrics" && !metricsTabAvailable) {
+      setActiveTab("workspace");
+    }
+  }, [activeTab, metricsTabAvailable]);
+
+  const onSetActiveTab = useCallback((tab: WorkspacePanelTab): void => {
+    setActiveTab(tab);
+  }, []);
+  const onOpenRestartConfirm = useCallback((): void => {
+    setRestartConfirmOpen(true);
+  }, []);
+  const onCloseRestartConfirm = useCallback((): void => {
+    setRestartConfirmOpen(false);
+  }, []);
+  const onConfirmRestart = useCallback((): void => {
+    setRestartConfirmOpen(false);
+    restartRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, restartRuntimeMutation]);
+  const onOpenResetConfirm = useCallback((): void => {
+    setResetConfirmOpen(true);
+  }, []);
+  const onCloseResetConfirm = useCallback((): void => {
+    setResetConfirmOpen(false);
+  }, []);
+  const onConfirmReset = useCallback((): void => {
+    setResetConfirmOpen(false);
+    resetRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, resetRuntimeMutation]);
+  const onSetFileBrowserQuery = useCallback((query: string): void => {
+    setFileBrowserQuery(query);
+  }, []);
+  const onSetExpandedFileNodeIds = useCallback((nodeIds: Set<string>): void => {
+    setExpandedFileNodeIds(nodeIds);
+  }, []);
+
   const gitRefPreviewState = useMemo<ProjectGitRefPreviewState>(() => {
     if (
       registrationMode !== "git_worktree" ||
@@ -1291,6 +1352,20 @@ export function useWorkspacePanelContainer({
     state,
     projectState,
     metricsState: metrics.state,
+    fileBrowserQuery,
+    expandedFileNodeIds,
+    onSetFileBrowserQuery,
+    onSetExpandedFileNodeIds,
+    activeTab,
+    restartConfirmOpen,
+    resetConfirmOpen,
+    onSetActiveTab,
+    onOpenRestartConfirm,
+    onCloseRestartConfirm,
+    onConfirmRestart,
+    onOpenResetConfirm,
+    onCloseResetConfirm,
+    onConfirmReset,
     runtimeSettingsHref: `/w/${handle}/agents/${agentId}/settings/runtime`,
     onStartRuntime,
     onStopRuntime,

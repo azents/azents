@@ -1,8 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useForm, type UseFormReturnType } from "@mantine/form";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
-import { runtimeProfileMutationPolicy } from "../runtimeProfilePolicy";
+import {
+  policySchemaVersionForInfrastructure,
+  proxyDomainModeForInfrastructure,
+  runtimeProfileMutationPolicy,
+} from "../runtimeProfilePolicy";
+import { runtimeProfileFormSchema } from "../schemas";
 import type { RuntimeProfileFormValues } from "../schemas";
 import type {
   RuntimeProfileDeletionErrorKind,
@@ -24,6 +30,7 @@ export interface RuntimeProfilesContainerOutput {
   state: RuntimeProfilesState;
   editorState: RuntimeProfileEditorState;
   mutationState: RuntimeProfileMutationState;
+  form?: UseFormReturnType<RuntimeProfileFormValues>;
   operationState: RuntimeProfileOperationState;
   deletionState: RuntimeProfileDeletionState;
   deletionFeedbackState: RuntimeProfileDeletionFeedbackState;
@@ -70,6 +77,74 @@ function deletionErrorKind(error: unknown): RuntimeProfileDeletionErrorKind {
   return "UNKNOWN";
 }
 
+function cidrsToText(cidrs?: string[]): string {
+  return cidrs?.join("\n") ?? "";
+}
+
+function networkModeForProfile(
+  editorState: RuntimeProfileEditorState,
+): RuntimeProfileFormValues["networkMode"] {
+  if (editorState.type !== "EDIT") {
+    return "inherit";
+  }
+  const policy = editorState.profile.policy;
+  if (policy.schema_version === 1) {
+    return policy.network_restriction === null ? "inherit" : "direct";
+  }
+  return policy.network_restriction.mode;
+}
+
+function networkFieldsForProfile(
+  editorState: RuntimeProfileEditorState,
+): Pick<
+  RuntimeProfileFormValues,
+  | "allowedCidrs"
+  | "deniedCidrs"
+  | "proxyDomainMode"
+  | "allowedDomains"
+  | "deniedDomains"
+> {
+  if (editorState.type !== "EDIT") {
+    return {
+      allowedCidrs: "",
+      deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
+    };
+  }
+  const restriction = editorState.profile.policy.network_restriction;
+  if (
+    restriction === null ||
+    ("mode" in restriction &&
+      (restriction.mode === "inherit" || restriction.mode === "no_network"))
+  ) {
+    return {
+      allowedCidrs: "",
+      deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
+    };
+  }
+  return {
+    allowedCidrs: cidrsToText(restriction.allowed_cidrs),
+    deniedCidrs: cidrsToText(restriction.denied_cidrs),
+    proxyDomainMode:
+      "domain_policy" in restriction
+        ? restriction.domain_policy.mode
+        : "unrestricted",
+    allowedDomains:
+      "domain_policy" in restriction
+        ? cidrsToText(restriction.domain_policy.allowed_domains)
+        : "",
+    deniedDomains:
+      "domain_policy" in restriction
+        ? cidrsToText(restriction.domain_policy.denied_domains)
+        : "",
+  };
+}
+
 export function useRuntimeProfilesContainer(
   props: RuntimeProfilesContainerProps,
 ): RuntimeProfilesContainerOutput {
@@ -90,6 +165,35 @@ export function useRuntimeProfilesContainer(
   const [deletionFeedbackState, setDeletionFeedbackState] =
     useState<RuntimeProfileDeletionFeedbackState>({ type: "NONE" });
   const [operationId, setOperationId] = useState<string | null>(null);
+  const form = useForm<RuntimeProfileFormValues>({
+    mode: "controlled",
+    initialValues: {
+      displayName: "",
+      description: "",
+      infrastructureProfileId: "",
+      lifecycle: "active",
+      terminalEnabled: true,
+      policySchemaVersion: 2,
+      networkMode: "inherit",
+      allowedCidrs: "",
+      deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
+    },
+    validate: (values) => {
+      const result = runtimeProfileFormSchema.safeParse(values);
+      if (result.success) {
+        return {};
+      }
+      return Object.fromEntries(
+        result.error.issues.map((issue) => [
+          issue.path.join("."),
+          issue.message,
+        ]),
+      );
+    },
+  });
 
   const memberQuery = trpc.workspaceMember.me.useQuery({ handle });
   const profilesQuery = trpc.runtimeProfile.list.useQuery({
@@ -173,6 +277,59 @@ export function useRuntimeProfilesContainer(
           : operationQuery.data
             ? { type: "LOADED", operation: operationQuery.data }
             : { type: "LOADING" };
+
+  useEffect(() => {
+    if (editorState.type === "EDIT") {
+      const selectedInfrastructure =
+        infrastructureProfilesQuery.data?.items.find(
+          (profile) =>
+            profile.id === editorState.profile.infrastructure_profile_id,
+        );
+      const infrastructureNetwork =
+        selectedInfrastructure?.infrastructure_network ??
+        editorState.profile.infrastructure_network;
+      const networkFields = networkFieldsForProfile(editorState);
+      form.setValues({
+        displayName: editorState.profile.display_name,
+        description: editorState.profile.description,
+        infrastructureProfileId: editorState.profile.infrastructure_profile_id,
+        lifecycle: editorState.profile.lifecycle,
+        terminalEnabled: editorState.profile.terminal_enabled,
+        policySchemaVersion: editorState.profile.policy.schema_version,
+        networkMode: networkModeForProfile(editorState),
+        ...networkFields,
+        proxyDomainMode:
+          infrastructureNetwork?.domain_mode === "allowlist"
+            ? "allowlist"
+            : networkFields.proxyDomainMode,
+      });
+      form.resetDirty();
+      return;
+    }
+    if (editorState.type === "CREATE") {
+      const initialInfrastructure = infrastructureProfilesQuery.data?.items[0];
+      form.setValues({
+        displayName: "",
+        description: "",
+        infrastructureProfileId: initialInfrastructure?.id ?? "",
+        lifecycle: "active",
+        terminalEnabled: true,
+        policySchemaVersion: initialInfrastructure
+          ? policySchemaVersionForInfrastructure(initialInfrastructure)
+          : 2,
+        networkMode: "inherit",
+        allowedCidrs: "",
+        deniedCidrs: "",
+        proxyDomainMode: proxyDomainModeForInfrastructure(
+          initialInfrastructure?.infrastructure_network ?? null,
+        ),
+        allowedDomains: "",
+        deniedDomains: "",
+      });
+      form.resetDirty();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the editor target changes.
+  }, [editorState]);
 
   const invalidateProfiles = useCallback(async (): Promise<void> => {
     await Promise.all([
@@ -363,6 +520,7 @@ export function useRuntimeProfilesContainer(
     state,
     editorState,
     mutationState,
+    form,
     operationState,
     deletionState,
     deletionFeedbackState,
