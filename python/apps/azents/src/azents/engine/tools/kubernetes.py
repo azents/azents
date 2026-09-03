@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from textwrap import dedent
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 from urllib.parse import urlencode
 
 import aiohttp
@@ -58,7 +58,16 @@ logger = logging.getLogger(__name__)
 
 # Error types caused by user settings/infra issues (warning level)
 _CLIENT_ERRORS = (ConnectionError, TimeoutError, OSError, ApiException, BotoClientError)
-KubernetesClusterClients = tuple[AsyncClient, ApiClient, ResourceDiscoveryCache]
+
+
+class KubernetesClusterClients(NamedTuple):
+    """Initialized clients and discovery cache for one Kubernetes cluster."""
+
+    resource_client: AsyncClient
+    exec_client: ApiClient
+    discovery_cache: ResourceDiscoveryCache
+
+
 KubernetesClientResolver = Callable[[str], Awaitable[KubernetesClusterClients]]
 
 
@@ -396,13 +405,16 @@ def _make_list_tool(
 
     async def k8s_list(args: K8sListInput) -> str:
         """List Kubernetes resources by kind. Supports label and field selectors."""
-        client, _, cache = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         check_access(config, args.kind, ns)
 
         try:
-            res_class = cache.get_resource_class(args.api_version, args.kind)
+            res_class = clients.discovery_cache.get_resource_class(
+                args.api_version,
+                args.kind,
+            )
             labels = (
                 _parse_selector(args.label_selector) if args.label_selector else None
             )
@@ -413,7 +425,7 @@ def _make_list_tool(
             skipped = 0
             end = args.offset + args.limit
             has_more = False
-            async for item in client.list(
+            async for item in clients.resource_client.list(
                 res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 namespace=ns,
                 labels=labels,
@@ -471,14 +483,17 @@ def _make_get_tool(
 
     async def k8s_get(args: K8sGetInput) -> str:
         """Get a specific Kubernetes resource by name."""
-        client, _, cache = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         check_access(config, args.kind, ns)
 
         try:
-            res_class = cache.get_resource_class(args.api_version, args.kind)
-            result = await client.get(
+            res_class = clients.discovery_cache.get_resource_class(
+                args.api_version,
+                args.kind,
+            )
+            result = await clients.resource_client.get(
                 res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 name=args.name,
                 namespace=ns,
@@ -514,7 +529,7 @@ def _make_logs_tool(
 
     async def k8s_logs(args: K8sLogsInput) -> str:
         """Get logs from a Kubernetes pod."""
-        client, _, _ = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         check_access(config, "Pod", ns)
@@ -527,7 +542,7 @@ def _make_logs_tool(
                 kwargs["since"] = args.since_seconds
 
             lines: list[str] = []
-            async for line in client.log(
+            async for line in clients.resource_client.log(
                 args.pod,
                 namespace=ns,
                 tail_lines=args.tail_lines,
@@ -564,7 +579,7 @@ def _make_events_tool(
 
     async def k8s_events(args: K8sEventsInput) -> str:
         """Get Kubernetes events, optionally filtered by involved object."""
-        client, _, _ = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         if args.kind:
@@ -580,7 +595,7 @@ def _make_events_tool(
                 fields["involvedObject.name"] = args.name
 
             items: list[dict[str, Any]] = []
-            async for event in client.list(
+            async for event in clients.resource_client.list(
                 Event,
                 namespace=ns,
                 fields=fields if fields else None,
@@ -614,9 +629,9 @@ def _make_api_resources_tool(
 
     async def k8s_api_resources(args: K8sApiResourcesInput) -> str:
         """List available API resource types in the cluster."""
-        _, _, cache = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
 
-        resources = cache.list_all()
+        resources = clients.discovery_cache.list_all()
         lines: list[str] = []
         for r in resources:
             if r.group:
@@ -646,7 +661,7 @@ def _make_apply_tool(
 
     async def k8s_apply(args: K8sApplyInput) -> str:
         """Apply a YAML manifest to the cluster using server-side apply."""
-        client, _, cache = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
 
         try:
@@ -680,9 +695,15 @@ def _make_apply_tool(
             check_access(config, kind, namespace)
 
             try:
-                res_class = cache.get_resource_class(api_version, kind)
+                res_class = clients.discovery_cache.get_resource_class(
+                    api_version,
+                    kind,
+                )
                 obj = res_class(doc)
-                await client.apply(obj, field_manager="azents-toolkit")
+                await clients.resource_client.apply(
+                    obj,
+                    field_manager="azents-toolkit",
+                )
                 results.append(f"{kind}/{name} applied in namespace {namespace}")
             except KeyError as exc:
                 raise FunctionToolError(str(exc)) from None
@@ -704,14 +725,17 @@ def _make_delete_tool(
 
     async def k8s_delete(args: K8sDeleteInput) -> str:
         """Delete a Kubernetes resource by name."""
-        client, _, cache = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         check_access(config, args.kind, ns)
 
         try:
-            res_class = cache.get_resource_class(args.api_version, args.kind)
-            await client.delete(
+            res_class = clients.discovery_cache.get_resource_class(
+                args.api_version,
+                args.kind,
+            )
+            await clients.resource_client.delete(
                 res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 name=args.name,
                 namespace=ns,
@@ -748,13 +772,15 @@ def _make_exec_tool(
 
     async def k8s_exec(args: K8sExecInput) -> str:
         """Execute a command in a Kubernetes pod."""
-        _, api_client, _ = await client_resolver(args.cluster)
+        clients = await client_resolver(args.cluster)
         cluster_config = _get_cluster_config(config, args.cluster)
         ns = resolve_namespace(cluster_config, args.namespace)
         check_access(config, "Pod", ns)
 
         try:
-            ws_client = _ConfiguredWsApiClient(configuration=api_client.configuration)
+            ws_client = _ConfiguredWsApiClient(
+                configuration=clients.exec_client.configuration
+            )
             try:
                 core_v1 = CoreV1Api(ws_client)
                 kwargs: dict[str, Any] = {
@@ -873,14 +899,22 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
         exec_client = self._exec_clients.get(cluster)
         cache = self._discovery_caches.get(cluster)
         if client is not None and exec_client is not None and cache is not None:
-            return client, exec_client, cache
+            return KubernetesClusterClients(
+                resource_client=client,
+                exec_client=exec_client,
+                discovery_cache=cache,
+            )
 
         async with self._get_cluster_lock(cluster):
             client = self._clients.get(cluster)
             exec_client = self._exec_clients.get(cluster)
             cache = self._discovery_caches.get(cluster)
             if client is not None and exec_client is not None and cache is not None:
-                return client, exec_client, cache
+                return KubernetesClusterClients(
+                    resource_client=client,
+                    exec_client=exec_client,
+                    discovery_cache=cache,
+                )
 
             cluster_config = _get_cluster_config(self._config, cluster)
             if self._credentials is None:
@@ -928,7 +962,11 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
             self._clients[cluster] = new_client
             self._exec_clients[cluster] = new_exec_client
             self._discovery_caches[cluster] = new_cache
-            return new_client, new_exec_client, new_cache
+            return KubernetesClusterClients(
+                resource_client=new_client,
+                exec_client=new_exec_client,
+                discovery_cache=new_cache,
+            )
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return tool list and prompt according to settings.
