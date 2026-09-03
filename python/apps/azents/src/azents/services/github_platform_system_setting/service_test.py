@@ -1,7 +1,6 @@
 """Platform GitHub App System Settings domain service tests."""
 
-from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
@@ -31,6 +30,7 @@ from azents.services.system_setting.service import (
     SystemSettingsService,
     get_system_setting_registry,
 )
+from azents.testing.types import require_instance
 
 from .binding import PlatformGitHubAppBindingService
 from .client import (
@@ -99,7 +99,7 @@ async def test_valid_candidate_without_impact_auto_activates(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """A first valid App with no existing bindings activates immediately."""
-    client = cast(Any, Mock())
+    client = MagicMock(spec=PlatformGitHubAppValidationClient)
     client.validate = AsyncMock(
         return_value=PlatformGitHubAppExternalValidation(
             status=SystemSettingValidationStatus.VALID,
@@ -111,7 +111,7 @@ async def test_valid_candidate_without_impact_auto_activates(
     )
     service = _service(
         rdb_session_manager,
-        cast(PlatformGitHubAppValidationClient, client),
+        require_instance(client, PlatformGitHubAppValidationClient),
     )
 
     result = await service.patch(_mutation(_private_key()))
@@ -127,11 +127,11 @@ async def test_invalid_private_key_never_calls_github(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """Local validation persists a sanitized invalid candidate without egress."""
-    client = cast(Any, Mock())
+    client = MagicMock(spec=PlatformGitHubAppValidationClient)
     client.validate = AsyncMock()
     service = _service(
         rdb_session_manager,
-        cast(PlatformGitHubAppValidationClient, client),
+        require_instance(client, PlatformGitHubAppValidationClient),
     )
 
     result = await service.patch(_mutation("not-a-private-key"))

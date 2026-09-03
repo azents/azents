@@ -4,8 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -32,10 +31,14 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfileUsage,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
 from azents.repos.workspace.data import Workspace
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
 )
+from azents.testing.types import require_instance
 
 from .service import (
     RuntimeProfileAdminService,
@@ -142,7 +145,10 @@ def _service() -> tuple[
         session_manager=session_manager,
         profile_repository=profile_repository,
         provider_repository=provider_repository,
-        policy_repository=cast(Any, AsyncMock()),
+        policy_repository=require_instance(
+            MagicMock(spec=RuntimeProviderPolicyRepository),
+            RuntimeProviderPolicyRepository,
+        ),
         workspace_repository=workspace_repository,
         terminal_policy_invalidation_publisher=(
             NoopTerminalPolicyInvalidationPublisher()

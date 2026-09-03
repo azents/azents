@@ -4,7 +4,6 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -38,6 +37,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
 )
+from azents.testing.types import require_instance
 
 from ..runtime_profile_workspace.service import RuntimeProfileWorkspaceUnavailable
 from . import AgentService, _terminal_denied_scope
@@ -199,7 +199,7 @@ def _make_service() -> AgentService:
 async def test_terminal_policy_invalidation_publishes_only_after_commit() -> None:
     """A committed Agent policy change invalidates after its DB transaction."""
     service = _make_service()
-    repository = cast(Any, service.repository)
+    repository = require_instance(service.repository, AsyncMock)
     existing = _make_agent()
     updated = existing.model_copy(update={"terminal_enabled": False})
     repository.get_by_id.return_value = existing
@@ -245,7 +245,7 @@ async def test_terminal_policy_invalidation_publishes_only_after_commit() -> Non
 async def test_terminal_policy_invalidation_is_not_published_on_rollback() -> None:
     """A failed Agent policy write never publishes volatile invalidation."""
     service = _make_service()
-    repository = cast(Any, service.repository)
+    repository = require_instance(service.repository, AsyncMock)
     existing = _make_agent()
     repository.get_by_id.return_value = existing
     repository.update_by_id.side_effect = RuntimeError("write failed")
@@ -284,7 +284,9 @@ class TestAgentServiceModelSelection:
         settings.default_selectable_model_options = None
         settings.default_main_model_label = None
         settings.default_lightweight_model_label = None
-        settings_repo = cast(Any, service.workspace_model_settings_repository)
+        settings_repo = require_instance(
+            service.workspace_model_settings_repository, AsyncMock
+        )
         settings_repo.get_or_create.return_value = settings
 
         result = await service.create(
@@ -305,10 +307,14 @@ class TestAgentServiceModelSelection:
         settings.default_selectable_model_options = None
         settings.default_main_model_label = None
         settings.default_lightweight_model_label = None
-        settings_repo = cast(Any, service.workspace_model_settings_repository)
-        catalog_read_service = cast(Any, service.model_catalog_read_service)
-        agent_repo = cast(Any, service.repository)
-        admin_repo = cast(Any, service.admin_repository)
+        settings_repo = require_instance(
+            service.workspace_model_settings_repository, AsyncMock
+        )
+        catalog_read_service = require_instance(
+            service.model_catalog_read_service, AsyncMock
+        )
+        agent_repo = require_instance(service.repository, AsyncMock)
+        admin_repo = require_instance(service.admin_repository, AsyncMock)
         settings_repo.get_or_create.return_value = settings
         catalog_read_service.resolve_agent_model_selection.return_value = Success(
             selection
@@ -338,9 +344,13 @@ class TestAgentServiceModelSelection:
         assert result.value.runtime_profile_configuration_status == "not_applicable"
         assert result.value.runtime_add_available is True
         assert result.value.runtime_remove_available is False
-        runtime_profile_service = cast(Any, service.runtime_profile_service)
+        runtime_profile_service = require_instance(
+            service.runtime_profile_service, AsyncMock
+        )
         runtime_profile_service.require_available_agent_profile.assert_not_awaited()
-        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        runtime_profile_repository = require_instance(
+            service.runtime_profile_repository, AsyncMock
+        )
         runtime_profile_repository.enqueue_reconcile_task.assert_not_awaited()
 
     async def test_create_with_explicit_runtime_profile_is_managed(self) -> None:
@@ -353,12 +363,20 @@ class TestAgentServiceModelSelection:
         settings.default_selectable_model_options = None
         settings.default_main_model_label = None
         settings.default_lightweight_model_label = None
-        settings_repo = cast(Any, service.workspace_model_settings_repository)
-        catalog_read_service = cast(Any, service.model_catalog_read_service)
-        agent_repo = cast(Any, service.repository)
-        admin_repo = cast(Any, service.admin_repository)
-        runtime_profile_service = cast(Any, service.runtime_profile_service)
-        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        settings_repo = require_instance(
+            service.workspace_model_settings_repository, AsyncMock
+        )
+        catalog_read_service = require_instance(
+            service.model_catalog_read_service, AsyncMock
+        )
+        agent_repo = require_instance(service.repository, AsyncMock)
+        admin_repo = require_instance(service.admin_repository, AsyncMock)
+        runtime_profile_service = require_instance(
+            service.runtime_profile_service, AsyncMock
+        )
+        runtime_profile_repository = require_instance(
+            service.runtime_profile_repository, AsyncMock
+        )
         settings_repo.get_or_create.return_value = settings
         catalog_read_service.resolve_agent_model_selection.return_value = Success(
             selection
@@ -414,10 +432,16 @@ class TestAgentServiceModelSelection:
         settings.default_selectable_model_options = None
         settings.default_main_model_label = None
         settings.default_lightweight_model_label = None
-        settings_repo = cast(Any, service.workspace_model_settings_repository)
-        catalog_read_service = cast(Any, service.model_catalog_read_service)
-        agent_repo = cast(Any, service.repository)
-        runtime_profile_service = cast(Any, service.runtime_profile_service)
+        settings_repo = require_instance(
+            service.workspace_model_settings_repository, AsyncMock
+        )
+        catalog_read_service = require_instance(
+            service.model_catalog_read_service, AsyncMock
+        )
+        agent_repo = require_instance(service.repository, AsyncMock)
+        runtime_profile_service = require_instance(
+            service.runtime_profile_service, AsyncMock
+        )
         settings_repo.get_or_create.return_value = settings
         catalog_read_service.resolve_agent_model_selection.return_value = Success(
             selection
@@ -457,10 +481,14 @@ class TestAgentServiceModelSelection:
         settings.default_selectable_model_options = None
         settings.default_main_model_label = None
         settings.default_lightweight_model_label = None
-        settings_repo = cast(Any, service.workspace_model_settings_repository)
-        catalog_read_service = cast(Any, service.model_catalog_read_service)
-        agent_repo = cast(Any, service.repository)
-        admin_repo = cast(Any, service.admin_repository)
+        settings_repo = require_instance(
+            service.workspace_model_settings_repository, AsyncMock
+        )
+        catalog_read_service = require_instance(
+            service.model_catalog_read_service, AsyncMock
+        )
+        agent_repo = require_instance(service.repository, AsyncMock)
+        admin_repo = require_instance(service.admin_repository, AsyncMock)
         settings_repo.get_or_create.return_value = settings
         catalog_read_service.resolve_agent_model_selection.return_value = Success(
             selection
@@ -488,7 +516,7 @@ class TestAgentServiceModelSelection:
     async def test_runtime_free_update_cannot_select_runtime_profile(self) -> None:
         """Runtime-free Agents require the dedicated add transition."""
         service = _make_service()
-        repository = cast(Any, service.repository)
+        repository = require_instance(service.repository, AsyncMock)
         repository.get_by_id.return_value = _make_agent()
 
         result = await service.update_by_id(
@@ -510,7 +538,7 @@ class TestAgentServiceModelSelection:
     async def test_runtime_profile_update_rechecks_capability_under_lock(self) -> None:
         """A concurrent removal fence blocks stale Runtime Profile updates."""
         service = _make_service()
-        repository = cast(Any, service.repository)
+        repository = require_instance(service.repository, AsyncMock)
         repository.get_by_id.return_value = _make_agent(
             runtime_profile_id="profile-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
@@ -542,7 +570,7 @@ class TestAgentServiceModelSelection:
     ) -> None:
         """Explicit null clears selection through the atomic Runtime transition."""
         service = _make_service()
-        repository = cast(Any, service.repository)
+        repository = require_instance(service.repository, AsyncMock)
         selected_agent = _make_agent(
             runtime_profile_id="profile-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
@@ -556,7 +584,9 @@ class TestAgentServiceModelSelection:
         repository.get_by_id.return_value = selected_agent
         repository.lock_by_id.return_value = selected_agent
         repository.update_by_id.return_value = Success(cleared_agent)
-        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        runtime_profile_repository = require_instance(
+            service.runtime_profile_repository, AsyncMock
+        )
         clear_selection = (
             runtime_profile_repository.clear_agent_runtime_profile_selection
         )
@@ -596,7 +626,7 @@ class TestAgentServiceAvatarMutation:
         """Finalization persists the replacement without direct blob deletion."""
         service = _make_service()
         service.avatar_cdn_base_url = "https://cdn.example.test"
-        repository = cast(Any, service.repository)
+        repository = require_instance(service.repository, AsyncMock)
         old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
         new_avatar = _avatar("public/avatar/agent-1/large/new.webp")
         repository.get_by_id.return_value = _make_agent().model_copy(
@@ -605,7 +635,7 @@ class TestAgentServiceAvatarMutation:
         repository.update_avatar.return_value = Success(
             _make_agent().model_copy(update={"avatar": new_avatar})
         )
-        upload_service = cast(Any, service.upload_service)
+        upload_service = require_instance(service.upload_service, AsyncMock)
         upload_service.finalize.return_value = new_avatar
 
         result = await service.finalize_avatar(
@@ -619,7 +649,7 @@ class TestAgentServiceAvatarMutation:
 
         assert isinstance(result, Success)
         repository.update_avatar.assert_awaited_once()
-        s3_service = cast(Any, service.s3_service)
+        s3_service = require_instance(service.s3_service, AsyncMock)
         s3_service.delete.assert_not_awaited()
 
     async def test_remove_avatar_leaves_old_blob_deletion_to_durable_cleanup(
@@ -627,7 +657,7 @@ class TestAgentServiceAvatarMutation:
     ) -> None:
         """Removal persists null avatar without direct blob deletion."""
         service = _make_service()
-        repository = cast(Any, service.repository)
+        repository = require_instance(service.repository, AsyncMock)
         repository.get_by_id.return_value = _make_agent().model_copy(
             update={"avatar": _avatar("public/avatar/agent-1/large/old.webp")}
         )
@@ -642,5 +672,5 @@ class TestAgentServiceAvatarMutation:
 
         assert isinstance(result, Success)
         repository.update_avatar.assert_awaited_once()
-        s3_service = cast(Any, service.s3_service)
+        s3_service = require_instance(service.s3_service, AsyncMock)
         s3_service.delete.assert_not_awaited()

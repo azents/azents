@@ -3,11 +3,16 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
-from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
+from azents.core.tools import (
+    ResolveContext,
+    Toolkit,
+    ToolkitExecutionMode,
+    ToolkitProvider,
+)
 from azents.core.vfs import (
     VfsProjection,
     make_vfs_projection,
@@ -205,11 +210,20 @@ class _UnusedToolkitRepository:
         raise AssertionError("Toolkit repository is not used for no attachments")
 
 
-class _ScheduledReleaseProvider:
+class _ScheduledReleaseProvider(ToolkitProvider[Any]):
     """Required provider source without a ToolkitConfig attachment."""
 
     slug = "scheduled"
     vfs_resource_root = "resources/vfs/toolkits/scheduled"
+
+    async def resolve(
+        self,
+        config: object,
+        context: ResolveContext,
+    ) -> Toolkit[Any]:
+        """Reject unused runtime Toolkit resolution in release-source tests."""
+        del config, context
+        raise AssertionError("Scheduled Toolkit resolution is not used by VFS tests.")
 
 
 @asynccontextmanager
@@ -266,7 +280,7 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
 
 async def test_preview_includes_required_scheduled_skill_without_attachment() -> None:
     """Root preview projects the required Scheduled release source."""
-    provider = cast(ToolkitProvider[Any], _ScheduledReleaseProvider())
+    provider = _ScheduledReleaseProvider()
     service = VfsProjectionService(
         session_manager=_session_manager,
         toolkit_registry={},
@@ -302,7 +316,7 @@ async def test_run_projection_scopes_required_source_to_root_execution(
     included: bool,
 ) -> None:
     """Persisted root projections include Scheduled while subagents exclude it."""
-    provider = cast(ToolkitProvider[Any], _ScheduledReleaseProvider())
+    provider = _ScheduledReleaseProvider()
     service = VfsProjectionService(
         session_manager=_session_manager,
         toolkit_registry={},

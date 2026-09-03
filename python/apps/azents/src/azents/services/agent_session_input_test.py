@@ -4,9 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -14,6 +12,7 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent import DEFAULT_MAIN_MODEL_OPTION_LABEL, SelectableModelOption
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -90,8 +89,13 @@ from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_selection_dict,
+    make_test_model_settings,
+)
 from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.types import require_instance
 
 from .agent_session_input import (
     AgentSessionInputError,
@@ -117,7 +121,7 @@ _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
 @asynccontextmanager
 async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    yield cast(AsyncSession, object())
+    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
 
 class _RuntimeRepositoryDouble(AgentRuntimeRepository):
@@ -157,14 +161,23 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
     ) -> Agent | None:
         """Return a minimal active Agent projection."""
         del session, agent_id
-        return cast(
-            Agent,
-            SimpleNamespace(
-                id="agent-1",
-                lifecycle_status=AgentLifecycleStatus.ACTIVE,
-                workspace_id="workspace-1",
-                runtime_capability=AgentRuntimeCapability.MANAGED,
-            ),
+        selection = make_test_model_selection()
+        return Agent.model_construct(
+            id="agent-1",
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
+            workspace_id="workspace-1",
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            model_selection=selection,
+            lightweight_model_selection=selection,
+            selectable_model_options=[
+                SelectableModelOption(
+                    label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                    model_selection=selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+            lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         )
 
 
@@ -180,7 +193,7 @@ class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
     ) -> WorkspaceUser:
         """Return a locked admitted membership marker."""
         del session, workspace_id, user_id
-        return cast(WorkspaceUser, object())
+        return WorkspaceUser.model_construct()
 
 
 class _AgentSessionRepositoryDouble(AgentSessionRepository):
@@ -397,7 +410,10 @@ def _mailbox_item_service(
         session_manager=rdb_session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=cast(ModelFileService, object()),
+        model_file_service=require_instance(
+            MagicMock(spec=ModelFileService),
+            ModelFileService,
+        ),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
