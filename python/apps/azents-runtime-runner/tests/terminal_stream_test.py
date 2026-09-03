@@ -5,6 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from azents_runtime_control.grpc_runner_terminal_client import (
@@ -34,6 +35,13 @@ from azents_runtime_runner.terminal import (
 from azents_runtime_runner.terminal_stream import RunnerTerminalStreamManager
 
 _NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+
+
+class _TerminalStreamComponents(NamedTuple):
+    """Constructed Terminal stream manager and registry."""
+
+    manager: RunnerTerminalStreamManager
+    registry: RunnerTerminalRegistry
 
 
 class _Process:
@@ -513,7 +521,7 @@ def _manager(
     accepted_generation: Callable[[], int | None] = lambda: 3,
     stream_grace_seconds: float = 120,
     clock: Callable[[], float] = lambda: 0.0,
-) -> tuple[RunnerTerminalStreamManager, RunnerTerminalRegistry]:
+) -> _TerminalStreamComponents:
     registry = RunnerTerminalRegistry(
         backend=backend,
         limits=TerminalLimits(
@@ -529,8 +537,8 @@ def _manager(
         clock=clock,
         utc_clock=lambda: _NOW,
     )
-    return (
-        RunnerTerminalStreamManager(
+    return _TerminalStreamComponents(
+        manager=RunnerTerminalStreamManager(
             registry=registry,
             runtime_id="runtime-1",
             workspace_root=Path("/workspace"),
@@ -538,7 +546,7 @@ def _manager(
             accepted_generation=accepted_generation,
             client_factory=client_factory,
         ),
-        registry,
+        registry=registry,
     )
 
 

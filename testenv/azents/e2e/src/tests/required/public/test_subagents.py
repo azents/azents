@@ -3,7 +3,7 @@
 import json
 import time
 from dataclasses import dataclass, replace
-from typing import cast
+from typing import NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -156,6 +156,13 @@ class _TreeNode:
     terminal_result_event_id: str | None
     terminal_result_message: str | None
     children: list["_TreeNode"]
+
+
+class _ChildNodeObservation(NamedTuple):
+    """Observed Subagent tree and the matching child node."""
+
+    tree: dict[str, object]
+    child: _TreeNode
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -845,7 +852,7 @@ def _wait_for_child_node(
     expected_unread: bool | None,
     expected_latest_run_status: str | None = None,
     timeout: float = 120,
-) -> tuple[dict[str, object], _TreeNode]:
+) -> _ChildNodeObservation:
     """Wait until a named child appears with the expected projected state."""
     deadline = time.monotonic() + timeout
     last_tree: dict[str, object] | None = None
@@ -868,7 +875,7 @@ def _wait_for_child_node(
                 or child.latest_run_status == expected_latest_run_status
             )
             if status_ok and unread_ok and latest_run_status_ok:
-                return tree, child
+                return _ChildNodeObservation(tree=tree, child=child)
         time.sleep(0.5)
     raise TimeoutError(f"child node state was not observed: {last_tree!r}")
 

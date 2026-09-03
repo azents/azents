@@ -263,6 +263,7 @@ class _TranscriptRepo:
         self.events: list[Event] = []
         self.head_event_ids: list[str | None] = []
         self.append_sessions: list[AsyncSession] = []
+        self.client_tool_result_ready = asyncio.Event()
 
     async def list_for_model_input(
         self,
@@ -328,6 +329,8 @@ class _TranscriptRepo:
             created_at=datetime.datetime.now(datetime.UTC),
         )
         self.events.append(event)
+        if create.kind is EventKind.CLIENT_TOOL_RESULT:
+            self.client_tool_result_ready.set()
         return event
 
 
@@ -2350,11 +2353,7 @@ async def test_parallel_calls_finalize_independently() -> None:
     await asyncio.wait_for(tool_executor.blocked_started.wait(), timeout=1)
 
     async def wait_for_first_result() -> None:
-        while not any(
-            event.kind == EventKind.CLIENT_TOOL_RESULT
-            for event in transcript_repo.events
-        ):
-            await asyncio.sleep(0)
+        await transcript_repo.client_tool_result_ready.wait()
 
     await asyncio.wait_for(wait_for_first_result(), timeout=1)
     assert [call.call_id for call in run_repo.active_tool_calls] == ["call-2"]

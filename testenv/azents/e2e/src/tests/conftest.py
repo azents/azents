@@ -18,7 +18,7 @@ from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -109,6 +109,22 @@ _JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 _IMAGE_BUILD_OBSERVABILITY_LOCK = threading.Lock()
+
+
+class _S3Credentials(NamedTuple):
+    """Credentials shared by the E2E RustFS fixture."""
+
+    access_key: str
+    secret_key: str
+
+
+class _E2EImageCacheOptions(NamedTuple):
+    """Resolved image cache import/export settings."""
+
+    cache_from: list[dict[str, str]]
+    cache_to: dict[str, str] | None
+    cache_backend: str
+    cache_scope: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -327,8 +343,11 @@ def postgres_container(
 
 
 @pytest.fixture(scope="session")
-def s3_credentials() -> tuple[str, str]:
-    return random_secret(16), random_secret(32)
+def s3_credentials() -> _S3Credentials:
+    return _S3Credentials(
+        access_key=random_secret(16),
+        secret_key=random_secret(32),
+    )
 
 
 def _wait_for_fixture_health(
@@ -422,11 +441,12 @@ def _start_tracked_prerequisite_container(
 @pytest.fixture(scope="session")
 def core_prerequisites(
     container_network: Network,
-    s3_credentials: tuple[str, str],
+    s3_credentials: _S3Credentials,
 ) -> Generator[_CorePrerequisites, None, None]:
     """Prepare independent images and infrastructure services concurrently."""
     _initialize_testcontainers_reaper()
-    access_key, secret_key = s3_credentials
+    access_key = s3_credentials.access_key
+    secret_key = s3_credentials.secret_key
     python_image = "python:3.14-alpine"
     postgres = (
         PostgresContainer(
@@ -765,15 +785,15 @@ def discord_provider_fake_url(
 
 
 @pytest.fixture(scope="session")
-def rustfs_access_key(s3_credentials: tuple[str, str]) -> str:
+def rustfs_access_key(s3_credentials: _S3Credentials) -> str:
     """RustFS access key."""
-    return s3_credentials[0]
+    return s3_credentials.access_key
 
 
 @pytest.fixture(scope="session")
-def rustfs_secret_key(s3_credentials: tuple[str, str]) -> str:
+def rustfs_secret_key(s3_credentials: _S3Credentials) -> str:
     """RustFS secret key."""
-    return s3_credentials[1]
+    return s3_credentials.secret_key
 
 
 # =============================================================================
@@ -938,9 +958,7 @@ def _build_e2e_image(
     build_contexts: dict[str, str] | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
-    cache_from, cache_to, cache_backend, cache_scope = _get_e2e_image_cache_options(
-        cache_repository
-    )
+    cache_options = _get_e2e_image_cache_options(cache_repository)
     builder = os.environ.get(_DOCKER_BUILDER_ENV)
     started_at = time.monotonic()
     completed = False
@@ -951,8 +969,8 @@ def _build_e2e_image(
             file=str(dockerfile),
             tags=[image_tag],
             builder=builder,
-            cache_from=cache_from or None,
-            cache_to=cache_to,
+            cache_from=cache_options.cache_from or None,
+            cache_to=cache_options.cache_to,
             build_contexts=cast(Any, build_contexts or {}),
             load=True,
         )
@@ -960,9 +978,9 @@ def _build_e2e_image(
     finally:
         _write_e2e_image_build_observability(
             cache_repository=cache_repository,
-            cache_backend=cache_backend,
-            cache_scope=cache_scope,
-            cache_export_enabled=cache_to is not None,
+            cache_backend=cache_options.cache_backend,
+            cache_scope=cache_options.cache_scope,
+            cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,
             duration_seconds=time.monotonic() - started_at,
         )
@@ -970,7 +988,7 @@ def _build_e2e_image(
 
 def _get_e2e_image_cache_options(
     cache_repository: str,
-) -> tuple[list[dict[str, str]], dict[str, str] | None, str, str | None]:
+) -> _E2EImageCacheOptions:
     """Return cache import/export settings for one E2E product image."""
     builder = os.environ.get(_DOCKER_BUILDER_ENV)
     gha_scope_prefix = os.environ.get(_GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV)
@@ -999,7 +1017,12 @@ def _get_e2e_image_cache_options(
             if cache_repository in write_repositories
             else None
         )
-        return cache_from, cache_to, "gha", cache_scope
+        return _E2EImageCacheOptions(
+            cache_from=cache_from,
+            cache_to=cache_to,
+            cache_backend="gha",
+            cache_scope=cache_scope,
+        )
 
     cache_from: list[dict[str, str]] = []
     cache_to: dict[str, str] | None = None
@@ -1020,7 +1043,12 @@ def _get_e2e_image_cache_options(
                 "mode": "min",
             }
 
-    return cache_from, cache_to, "local" if cache_from or cache_to else "none", None
+    return _E2EImageCacheOptions(
+        cache_from=cache_from,
+        cache_to=cache_to,
+        cache_backend="local" if cache_from or cache_to else "none",
+        cache_scope=None,
+    )
 
 
 def _write_e2e_image_build_observability(

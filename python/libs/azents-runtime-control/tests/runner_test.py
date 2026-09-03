@@ -5,6 +5,7 @@ import dataclasses
 import json
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import TypedDict
 
@@ -42,6 +43,18 @@ from azents_runtime_control.system_metrics import (
     RunnerSystemMetricsScope,
 )
 
+_OPERATION_STATE_CHANGED: ContextVar[asyncio.Event | None] = ContextVar(
+    "operation_state_changed",
+    default=None,
+)
+
+
+def _signal_operation_state_change() -> None:
+    """Wake predicates waiting for a BlockingOperations state transition."""
+    event = _OPERATION_STATE_CHANGED.get()
+    if event is not None:
+        event.set()
+
 
 class FakeRunnerControlClient(RunnerControlClient):
     """In-memory Control client for Runner loop tests."""
@@ -74,6 +87,7 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.heartbeat_runtime_configuration: RuntimeConfigurationEvidence | None = None
         self.transfer_results: list[RunnerTransferResult] = []
         self.system_metrics_reports: list[tuple[RunnerSystemMetricsReport, int]] = []
+        self.claim_started = asyncio.Event()
 
     def set_operation_handler(
         self,
@@ -171,6 +185,7 @@ class FakeRunnerControlClient(RunnerControlClient):
         block_ms: int,
     ) -> RunnerOperationEnvelope | None:
         """Return the next queued operation."""
+        self.claim_started.set()
         del runtime_id, generation, consumer_id, block_ms
         if not self.operations:
             return None
@@ -207,16 +222,23 @@ class BlockingOperations(RuntimeRunnerOperations):
     canceled_while_active: list[str] = dataclasses.field(default_factory=list)
     _release_events: dict[str, asyncio.Event] = dataclasses.field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Create a state event bound to the current test loop."""
+        _OPERATION_STATE_CHANGED.set(asyncio.Event())
+
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Record start and wait for release or active cancellation."""
         self.started.append(operation.request_id)
+        _signal_operation_state_change()
         event = self._release_events.setdefault(operation.request_id, asyncio.Event())
         try:
             await event.wait()
         except asyncio.CancelledError:
             self.canceled_while_active.append(operation.request_id)
+            _signal_operation_state_change()
             return
         self.finished.append(operation.request_id)
+        _signal_operation_state_change()
 
     async def cancel(self, operation: RunnerOperationEnvelope) -> None:
         """Record cancellation of work that has not started."""
@@ -383,7 +405,7 @@ async def test_default_limits_allow_five_sessions_to_fill_runtime_capacity() -> 
     )
     assert active_by_owner == {f"session-{index}": 10 for index in range(1, 6)}
     assert client.reports[-1].diagnostic["runtime_active_operations"] == "50"
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 @pytest.mark.asyncio
@@ -416,7 +438,7 @@ async def test_session_limit_does_not_block_another_session() -> None:
     operations.release("a-2")
     operations.release("a-3")
     operations.release("b-1")
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 @pytest.mark.asyncio
@@ -500,7 +522,7 @@ async def test_system_operations_use_independent_limit() -> None:
 
     await _run(loop, 3)
     await _wait_for(lambda: operations.started == ["system-1", "session-1"])
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 @pytest.mark.asyncio
@@ -527,7 +549,7 @@ async def test_rejects_operation_when_owner_pending_queue_is_full() -> None:
     assert client.events[0].event_type == RuntimeRunnerEventType.FINAL_ERROR
     assert client.events[0].payload["error_code"] == "operation_queue_full"
     assert client.reports[-1].diagnostic["queue_rejection_count"] == "1"
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 @pytest.mark.asyncio
@@ -630,7 +652,7 @@ async def test_state_reports_expose_per_owner_and_runtime_counts() -> None:
     assert isinstance(session_active, str)
     assert json.loads(session_active) == {"session-a": 1}
     assert active.diagnostic["system_active_operations"] == "1"
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 @pytest.mark.asyncio
@@ -733,8 +755,9 @@ async def test_run_loop_shutdown_discards_pending_generation_work() -> None:
     await loop.run_once(block_ms=0)
     await _wait_for(lambda: operations.started == ["active"])
 
+    client.claim_started.clear()
     task = asyncio.create_task(loop.run_forever(block_ms=0))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(client.claim_started.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -768,7 +791,7 @@ async def test_control_operation_runs_while_ordinary_capacity_is_full() -> None:
 
     await _run(loop, 2)
     await _wait_for(lambda: operations.started == ["ordinary", "terminate"])
-    await _cancel_loop_work(loop)
+    await _cancel_loop_work(loop, client)
 
 
 class _RunnerLimitOverrides(TypedDict, total=False):
@@ -890,20 +913,34 @@ def _operation(
 async def _run(loop: RunnerRunLoop, count: int) -> None:
     for _ in range(count):
         await loop.run_once(block_ms=0)
-        await asyncio.sleep(0)
 
 
-async def _cancel_loop_work(loop: RunnerRunLoop) -> None:
+async def _cancel_loop_work(
+    loop: RunnerRunLoop,
+    client: FakeRunnerControlClient,
+) -> None:
+    client.claim_started.clear()
     task = asyncio.create_task(loop.run_forever(block_ms=0))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(client.claim_started.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
 
 async def _wait_for(predicate: Callable[[], bool]) -> None:
-    for _ in range(100):
-        if predicate():
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("condition was not met")
+    state_changed = _OPERATION_STATE_CHANGED.get()
+    assert state_changed is not None
+
+    async def wait_for_state_change() -> None:
+        while True:
+            if predicate():
+                return
+            state_changed.clear()
+            if predicate():
+                return
+            await state_changed.wait()
+
+    try:
+        await asyncio.wait_for(wait_for_state_change(), timeout=1)
+    except TimeoutError as exc:
+        raise AssertionError("condition was not met") from exc
