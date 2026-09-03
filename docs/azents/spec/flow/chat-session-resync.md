@@ -18,9 +18,11 @@ code_paths:
   - python/apps/azents/src/azents/worker/live/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/agent-session/**
+  - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-26
-spec_version: 42
+last_verified_at: 2026-09-04
+spec_version: 43
 ---
 
 # Chat Session Resync
@@ -478,6 +480,9 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-04** — v43. Mapped the shared Agent-session header/navigation and
+  Subagent Tree query-state modules that retain current resync and refetch
+  behavior.
 - **2026-07-22** — v41. Added External Channel source-item rendering, safe permalink behavior, and stable live/durable resync identity.
 
 - **2026-07-19** — v36. Defined terminal `agent_result` timeline reuse, promotion-time unread clearing, and tree invalidation after observation cursor advancement.

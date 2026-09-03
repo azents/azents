@@ -73,6 +73,9 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/agent-session/**
+  - typescript/apps/azents-web/src/shared/subagent-tree/**
+  - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - python/apps/azents/src/azents/engine/tools/todo.py
@@ -115,8 +118,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-03
-spec_version: 160
+last_verified_at: 2026-09-04
+spec_version: 161
 ---
 
 # Conversation & Events
@@ -1285,6 +1288,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-04** — v161. Mapped the shared Agent-session navigation, Subagent
+  Tree state, and subscription-usage presentation modules after their frontend
+  boundary relocations.
 - **2026-09-03** — v160. Added the exact interactive Terminal projection,
   one-time ticket admission, quotas, frame/buffer/replay bounds, and idle,
   maximum-lifetime, and reconnection limits.

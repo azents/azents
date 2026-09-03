@@ -42,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/present_file.py
   - python/apps/azents/src/azents/engine/tools/read_image.py
   - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
+  - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentMarkdownPreview.tsx
@@ -51,8 +52,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-03
-spec_version: 43
+last_verified_at: 2026-09-04
+spec_version: 44
 ---
 
 # File Exchange Storage
@@ -257,8 +258,12 @@ later `import_file` must explicitly copy them into the new Runtime.
 - User upload, agent-presented file, and internal artifact must pass session/workspace ownership verification.
 - ExchangeFile, Artifact, and ModelFile creation preallocates the entity ID and storage key. It
   validates ownership in a short DB session, closes that session before object-storage upload, and
-  revalidates ownership while atomically persisting metadata afterward. If revalidation or commit
-  fails, the preuploaded object is compensation-deleted; no DB transaction spans object-storage I/O.
+  revalidates ownership while atomically persisting metadata afterward. A failed ordinary upload
+  compensation-deletes its preuploaded objects. A verified-object publication with an uncertain
+  metadata commit first checks its preallocated publication ID: confirmed absence permits cleanup of
+  unowned prepared objects, while a verification query failure or any existing committed identity
+  retains the uploaded objects to avoid deleting data that may already be durable. No DB transaction
+  spans object-storage I/O.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.
 
@@ -294,6 +299,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-04** — v44. Mapped the Composer attachment preview container and
+  documented data-loss-safe object retention when verified publication commit
+  outcome cannot be disproven.
 - **2026-09-03** — v43. Kept failed Composer attachments removable while
   presenting their localized reason and available detail inline in a wrapping error
   tile.

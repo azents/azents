@@ -60,8 +60,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-01
-spec_version: 104
+last_verified_at: 2026-09-04
+spec_version: 105
 ---
 
 # Toolkit
@@ -298,6 +298,13 @@ GitHub multi-installation bindings must expose cached installation MCP tools eve
 Snapshot-backed GitHub tool handlers resolve installation authorization at execution time. They call the installation token provider only when the model calls a tool, and they preserve the same auth-failure retry path as live MCP-backed tools. This keeps first-turn provider-facing schemas stable when an installation snapshot exists, while avoiding token issuance work during normal run preparation.
 
 ### Model-Visible Tool Exposure and Search
+
+Kubernetes `k8s_exec` normalizes the WebSocket client result before exposing it
+to the model. A native string is returned unchanged, `WsResponse.data` bytes are
+decoded as UTF-8, non-byte `WsResponse.data` and other response objects are
+stringified, and an empty normalized value returns
+`Command completed with no output.`. Command output therefore does not expose a
+Python bytes representation.
 
 Each Agent stores a persisted `tool_search_enabled` setting that defaults to `true` when a new Agent is created and is managed from the Agent Capabilities API/UI. Existing Agents retain their stored value; setting the field to `false` is an explicit opt-out. When disabled, the complete executable client-tool catalog remains model-visible in canonical final-name order. The engine does not inject `tool_search`, defer attached service operations, apply compatibility-budget projection, or update Tool Search working-set recency.
 
@@ -886,6 +893,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-04** (spec_version 105) — Documented Kubernetes exec response
+  normalization for native strings, WebSocket payload bytes, other response
+  objects, and empty successful output.
 - **2026-09-01 (spec_version=104)** — Made managed Runtime capability plus version
   the complete Runtime Toolkit gate and removed the obsolete Agent Shell gate;
   browser Terminal policy remains independent.

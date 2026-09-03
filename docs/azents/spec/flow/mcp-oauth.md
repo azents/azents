@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-08-27
-spec_version: 4
+last_verified_at: 2026-09-04
+spec_version: 5
 ---
 
 # MCP OAuth Flow
@@ -52,6 +52,22 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 - Either an existing OAuth connection/client registration exists, manager-provided OAuth client credentials exist in `ToolkitConfig.encrypted_credentials`, or the authorization server supports DCR.
 - `AZ_CREDENTIAL_ENCRYPTION_KEY` is configured.
 - Frontend callback URL is `web_url + "/oauth/mcp/callback?handle={handle}&toolkit_config_id={toolkit_id}"` for the active connection flow.
+
+## Discovery and Registration Validation
+
+Discovery and Dynamic Client Registration decode provider JSON into typed
+payloads before using it. Protected-resource metadata requires a non-empty
+`authorization_servers` list whose entries are strings. Authorization-server
+metadata requires non-empty string authorization and token endpoints; optional
+registration endpoint and issuer values must be strings, and every advertised
+scope must be a string. A DCR response requires a non-empty string `client_id`
+and permits only a string or null `client_secret`.
+
+Malformed response shapes fail the corresponding parse instead of coercing
+arbitrary JSON primitives into OAuth metadata or client credentials. An invalid
+protected-resource payload is not used and follows the existing server-URL
+fallback; invalid authorization-server metadata or DCR credentials fail the
+connection step.
 
 ## Data Model
 
@@ -235,5 +251,8 @@ The UI does not display account identity and does not add warning copy.
 
 ## Changelog
 
+- **2026-09-04** (spec_version 5) — Documented fail-closed typed validation for
+  protected-resource metadata, authorization-server metadata, and DCR response
+  payloads.
 - **2026-06-23** (spec_version 3) — Replaced per-user OAuth spec with toolkit-level OAuth connections. Current code: `mcp_oauth_connections`, connect/exchange/disconnect APIs, toolkit response summary, lazy row-locked refresh, Notion/Sentry `auth_type=oauth2`, and per-user table/API/runtime removal.
 - **2026-04-20** (spec_version 1) — Initial per-user OAuth spec.

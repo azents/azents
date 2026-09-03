@@ -69,6 +69,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
+  - typescript/apps/azents-web/src/shared/agent-session/AgentAvatar.tsx
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
@@ -98,8 +99,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-03
-spec_version: 70
+last_verified_at: 2026-09-04
+spec_version: 71
 ---
 
 # Agent Domain Spec
@@ -602,6 +603,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-04** (spec_version 71) — Mapped the shared Agent avatar component
+  after its frontend boundary relocation.
 - **2026-09-01** (spec_version 70) — Added independent Agent interactive-Terminal
   policy and effective denial projections, and removed the obsolete Shell setting
   while preserving managed Runtime as the sole Runtime Toolkit authority.
