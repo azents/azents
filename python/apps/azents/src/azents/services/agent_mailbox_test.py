@@ -1,7 +1,8 @@
 """Typed agent mailbox service tests."""
 
 import datetime
-from typing import Any, cast
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +17,7 @@ from azents.core.enums import (
 )
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import SessionAgent
+from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import (
@@ -24,6 +25,7 @@ from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)
 _RUN_ID = "run-1".rjust(32, "0")
@@ -84,7 +86,7 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
     )
 
 
-class _MailboxService:
+class _MailboxService(MailboxService):
     def __init__(self) -> None:
         self.inputs: list[MailboxEnqueue] = []
 
@@ -118,18 +120,7 @@ class _MailboxService:
         )
 
 
-class _LockedAgentSession:
-    def __init__(
-        self,
-        status: AgentSessionStatus,
-        *,
-        stop_requested_at: datetime.datetime | None,
-    ) -> None:
-        self.status = status
-        self.stop_requested_at = stop_requested_at
-
-
-class _AgentSessionRepository:
+class _AgentSessionRepository(AgentSessionRepository):
     def __init__(
         self,
         *,
@@ -162,11 +153,12 @@ class _AgentSessionRepository:
         self,
         session: AsyncSession,
         agent_session_id: str,
-    ) -> _LockedAgentSession:
+    ) -> AgentSession:
         del session
         self.locked_session_ids.append(agent_session_id)
-        return _LockedAgentSession(
-            self.target_status,
+        return AgentSession.model_construct(
+            id=agent_session_id,
+            status=self.target_status,
             stop_requested_at=_NOW if self.target_stopping else None,
         )
 
@@ -204,11 +196,8 @@ def _service(
     )
     return (
         AgentMailboxService(
-            mailbox_item_service=cast(MailboxService, mailbox_item_service),
-            agent_session_repository=cast(
-                AgentSessionRepository,
-                agent_session_repository,
-            ),
+            mailbox_item_service=mailbox_item_service,
+            agent_session_repository=agent_session_repository,
         ),
         mailbox_item_service,
         agent_session_repository,
@@ -250,7 +239,7 @@ async def test_instruction_operations_own_scheduling_intent(
     }
 
     await methods[operation](
-        cast(AsyncSession, object()),
+        require_instance(MagicMock(spec=AsyncSession), AsyncSession),
         source=source,
         target=target,
         content="Do the work.",
@@ -295,7 +284,7 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
     )
 
     result = await service.enqueue_terminal_result(
-        cast(AsyncSession, object()),
+        require_instance(MagicMock(spec=AsyncSession), AsyncSession),
         source=source,
         target=parent,
         run=_terminal_run(status),
@@ -342,7 +331,7 @@ async def test_terminal_result_requires_direct_parent() -> None:
 
     with pytest.raises(ValueError, match="direct parent"):
         await service.enqueue_terminal_result(
-            cast(AsyncSession, object()),
+            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=wrong_target,
             run=_terminal_run(AgentRunStatus.COMPLETED),
@@ -375,7 +364,7 @@ async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
 
     with pytest.raises(ValueError, match="Target AgentSession is not active"):
         await service.enqueue_followup_task(
-            cast(AsyncSession, object()),
+            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=target,
             content="Resume work.",
@@ -406,7 +395,7 @@ async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
 
     with pytest.raises(ValueError, match="Target AgentSession is stopping"):
         await service.enqueue_followup_task(
-            cast(AsyncSession, object()),
+            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=target,
             content="Resume work.",

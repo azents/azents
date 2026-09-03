@@ -4,8 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -18,9 +17,18 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
+)
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
+from azents.repos.workspace import WorkspaceRepository
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
 )
+from azents.testing.types import require_instance
 
 from .service import (
     RuntimeProfileWorkspaceService,
@@ -84,10 +92,22 @@ def _service(
     service = RuntimeProfileWorkspaceService(
         session_manager=session_manager,
         profile_repository=profile_repository,
-        provider_repository=cast(Any, AsyncMock()),
-        policy_repository=cast(Any, AsyncMock()),
-        control_repository=cast(Any, AsyncMock()),
-        workspace_repository=cast(Any, AsyncMock()),
+        provider_repository=require_instance(
+            MagicMock(spec=RuntimeProviderRepository),
+            RuntimeProviderRepository,
+        ),
+        policy_repository=require_instance(
+            MagicMock(spec=RuntimeProviderPolicyRepository),
+            RuntimeProviderPolicyRepository,
+        ),
+        control_repository=require_instance(
+            MagicMock(spec=RuntimeProviderControlRepository),
+            RuntimeProviderControlRepository,
+        ),
+        workspace_repository=require_instance(
+            MagicMock(spec=WorkspaceRepository),
+            WorkspaceRepository,
+        ),
         terminal_policy_invalidation_publisher=(
             NoopTerminalPolicyInvalidationPublisher()
         ),

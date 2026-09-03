@@ -5,7 +5,6 @@ import datetime
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import cast
 
 import pytest
 from azcommon.result import Failure, Success
@@ -444,7 +443,7 @@ class _FakeRunnerOperations:
 
 
 @dataclass
-class _FakeRuntimeWorkspaceDownloadService:
+class _FakeRuntimeWorkspaceDownloadService(RuntimeWorkspaceDownloadService):
     """Record authorized Workspace download transfer requests."""
 
     body: bytes = b"workspace download"
@@ -776,10 +775,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
-        runtime_workspace_download_service=cast(
-            RuntimeWorkspaceDownloadService,
-            transfer,
-        ),
+        runtime_workspace_download_service=transfer,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
 

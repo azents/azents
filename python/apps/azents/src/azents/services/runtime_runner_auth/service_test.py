@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -14,15 +14,15 @@ from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredentialInvalid,
     RuntimeRunnerCredentialVerifier,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.services.runtime_runner_auth.service import (
     RuntimeRunnerAuthenticationService,
 )
+from azents.testing.types import require_instance
 
 
-class _FakeRuntimeRepository:
+class _FakeRuntimeRepository(AgentRuntimeRepository):
     def __init__(self, runtime: AgentRuntime | None) -> None:
         self.runtime = runtime
 
@@ -53,14 +53,11 @@ def _runtime(*, desired_generation: int) -> AgentRuntime:
 def _service(runtime: AgentRuntime | None) -> RuntimeRunnerAuthenticationService:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, object())
+        yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
     return RuntimeRunnerAuthenticationService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        runtime_repository=cast(
-            AgentRuntimeRepository,
-            _FakeRuntimeRepository(runtime),
-        ),
+        session_manager=session_manager,
+        runtime_repository=_FakeRuntimeRepository(runtime),
         verifier=RuntimeRunnerCredentialVerifier(Fernet.generate_key().decode()),
     )
 
