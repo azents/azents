@@ -23,9 +23,10 @@ code_paths:
   - python/apps/azents/src/azents/services/session_title.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
+  - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-08-01
-spec_version: 18
+last_verified_at: 2026-09-04
+spec_version: 19
 ---
 
 # ChatGPT OAuth Flow
@@ -306,6 +307,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-04 | 19 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-21 | 18 | Ensured subscription-usage response timestamps are timezone-aware before public serialization, preserving supplied offsets | Ensure browser clients receive an explicit offset and localize reset and freshness timestamps correctly |
 | 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-288) and validated subscription usage implementation |
 | 2026-07-19 | 16 | Added one bounded Exchange attachment context item after same-native generated-image replay | Preserve local attachment discoverability without duplicating rich image input |

@@ -21,10 +21,11 @@ code_paths:
   - python/apps/azents/src/azents/engine/model_stream.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-08-13
-spec_version: 3
+last_verified_at: 2026-09-04
+spec_version: 4
 ---
 
 # OpenRouter API Key Provider Flow
@@ -157,6 +158,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |
 | 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |
 | 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-290) and the verified OpenRouter implementation |

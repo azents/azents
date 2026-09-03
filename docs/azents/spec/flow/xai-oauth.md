@@ -24,9 +24,10 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/engine/events/**
   - typescript/apps/azents-web/src/features/llm-settings/**
+  - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-08-18
-spec_version: 7
+last_verified_at: 2026-09-04
+spec_version: 8
 ---
 
 # xAI OAuth Flow
@@ -273,6 +274,7 @@ The returned account-visible models are authoritative for existence and may diff
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-04 | 8 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-08-18 | 7 | Replaced global OAuth model visibility with refreshed account-specific integration discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
 | 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-291) and validated subscription usage implementation |
 | 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |

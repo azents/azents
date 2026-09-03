@@ -62,6 +62,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/workspace-settings/**
   - typescript/apps/azents-web/src/features/llm-settings/**
+  - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
@@ -115,8 +116,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-03
-spec_version: 78
+last_verified_at: 2026-09-04
+spec_version: 79
 ---
 
 # Workspace & Membership
@@ -826,6 +827,8 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-04 (spec_version=79)** — Mapped the shared subscription-usage state
+  and container modules used by Workspace LLM Settings.
 - **2026-09-03 (spec_version=78)** — Added current Profile-chain and
   Session working-folder authority to interactive Terminal admission and mapped the
   Terminal policy and folder-binding services.
