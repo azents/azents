@@ -16,9 +16,7 @@ import {
   Stack,
   Text,
   TextInput,
-  useMantineTheme,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import {
   IconAlertCircle,
   IconArrowRight,
@@ -42,17 +40,17 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
 import { useCallback, useMemo } from "react";
 import { chatChevronTransition } from "../../components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
+import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   WorkspaceBrowserMode,
   WorkspaceDirectoryLoadState,
   WorkspaceEntry,
 } from "../types";
 
-interface FileBrowserProps {
+export interface FileBrowserProps {
   root: string;
   cwd: string;
   path: string;
@@ -86,6 +84,11 @@ interface FileBrowserProps {
   expanded?: Set<string>;
   onQueryChange?: (query: string) => void;
   onExpandedChange?: (expanded: Set<string>) => void;
+}
+
+interface FileBrowserViewProps extends FileBrowserProps {
+  compact: boolean;
+  t: WorkspacePanelTranslator;
 }
 
 function getRelativePath(path: string, root: string): string {
@@ -247,12 +250,14 @@ function getStatusColor(status: WorkspaceEntry["status"]): string {
 }
 
 interface TreeNodeProps {
+  compact: boolean;
   node: FileTreeNode;
   depth: number;
   root: string;
   expanded: Set<string>;
   activePath: string | null;
   selectedPaths: Set<string>;
+  t: WorkspacePanelTranslator;
   directoryLoadStatesByPath: Record<string, WorkspaceDirectoryLoadState>;
   getDownloadHref: (path: string) => string;
   onToggle: (nodeId: string) => void;
@@ -269,12 +274,14 @@ interface TreeNodeProps {
 }
 
 function TreeNode({
+  compact,
   node,
   depth,
   root,
   expanded,
   activePath,
   selectedPaths,
+  t,
   directoryLoadStatesByPath,
   getDownloadHref,
   onToggle,
@@ -289,9 +296,6 @@ function TreeNode({
   onRemoveProject,
   onDeleteWorktreeProject,
 }: TreeNodeProps): React.ReactElement {
-  const t = useTranslations("chat.workspacePanel");
-  const theme = useMantineTheme();
-  const compact = useMediaQuery(`(min-width: ${theme.breakpoints.lg})`);
   const open = expanded.has(node.nodeId);
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
@@ -561,12 +565,14 @@ function TreeNode({
           node.children.map((child) => (
             <TreeNode
               key={child.nodeId}
+              compact={compact}
               node={child}
               depth={depth + 1}
               root={root}
               expanded={expanded}
               activePath={activePath}
               selectedPaths={selectedPaths}
+              t={t}
               directoryLoadStatesByPath={directoryLoadStatesByPath}
               getDownloadHref={getDownloadHref}
               onToggle={onToggle}
@@ -618,6 +624,7 @@ function TreeNode({
 }
 
 export function FileBrowser({
+  compact,
   root,
   cwd,
   path,
@@ -629,6 +636,7 @@ export function FileBrowser({
   directoryLoadStatesByPath,
   selectedFilePath,
   selectedPaths,
+  t,
   isRefreshing,
   getDownloadHref,
   onOpenDirectory,
@@ -651,8 +659,7 @@ export function FileBrowser({
   expanded = new Set<string>(),
   onQueryChange = (): void => {},
   onExpandedChange = (): void => {},
-}: FileBrowserProps): React.ReactElement {
-  const t = useTranslations("chat.workspacePanel");
+}: FileBrowserViewProps): React.ReactElement {
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
@@ -661,7 +668,6 @@ export function FileBrowser({
     () => new Set(selectedPaths),
     [selectedPaths],
   );
-
   const { displayTree, searchExpanded } = useMemo(() => {
     const expandedMatches = new Set<string>();
     return {
@@ -877,12 +883,14 @@ export function FileBrowser({
               {displayTree.map((node) => (
                 <TreeNode
                   key={node.nodeId}
+                  compact={compact}
                   node={node}
                   depth={0}
                   root={root}
                   expanded={effectiveExpanded}
                   activePath={activePath}
                   selectedPaths={selectedPathSet}
+                  t={t}
                   directoryLoadStatesByPath={directoryLoadStatesByPath}
                   getDownloadHref={getDownloadHref}
                   onToggle={handleToggle}

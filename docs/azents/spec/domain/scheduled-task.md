@@ -21,7 +21,7 @@ code_paths:
   - python/libs/azents-public-client/src/azentspublicclient/models/scheduled_task_*.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/features/scheduled-tasks/**
-  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
+  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/trpc/routers/scheduledTask.ts
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/(agent)/agents/[agentId]/sessions/[sessionId]/**
   - testenv/azents/e2e/src/tests/required/public/test_scheduled_tasks.py
@@ -29,7 +29,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-09-02
+last_verified_at: 2026-09-03
 spec_version: 9
 ---
 

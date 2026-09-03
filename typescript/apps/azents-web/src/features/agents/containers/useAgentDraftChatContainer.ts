@@ -10,8 +10,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
-import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
 import { trpc } from "@/trpc/client";
 import type { ComposerSubscriptionUsagePresentationProps } from "@/features/chat/components/ComposerSubscriptionUsage";
 import type {

@@ -1,11 +1,6 @@
 "use client";
 
-/**
- * attachment file preview bar.
- *
- * input area above to pending attachment files display.
- * each file: image thumbnail preview, filetext, status badge, remove button.
- */
+/** Pure attachment file preview bar. */
 
 import {
   ActionIcon,
@@ -19,11 +14,10 @@ import {
   Text,
 } from "@mantine/core";
 import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo } from "react";
 import type { PendingFile, UploadErrorReason } from "../hooks/useFileUpload";
+import type { RefObject } from "react";
 
-/** file icon/thumbnail container common style */
 const iconBoxStyle: React.CSSProperties = {
   width: rem(40),
   height: rem(40),
@@ -33,17 +27,25 @@ const iconBoxStyle: React.CSSProperties = {
   justifyContent: "center",
 };
 
-interface AttachmentPreviewBarProps {
+export interface AttachmentPreviewBarLabels {
+  removeFile: string;
+  statuses: Record<PendingFile["status"], string>;
+  errors: Record<Exclude<UploadErrorReason, null>, string>;
+}
+
+export interface AttachmentPreviewBarProps {
+  labels: AttachmentPreviewBarLabels;
+  maskImage: string;
   pendingFiles: PendingFile[];
+  previewUrls: ReadonlyMap<string, string>;
+  scrollerRef: RefObject<HTMLDivElement | null>;
   onRemove: (id: string) => void;
 }
 
-/** file imagewhether determine */
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
 
-/** status to text badge colorabove */
 function getStatusColor(status: PendingFile["status"]): string {
   switch (status) {
     case "pending":
@@ -59,44 +61,33 @@ function getStatusColor(status: PendingFile["status"]): string {
 
 function getErrorReasonLabel(
   reason: UploadErrorReason | null,
-  t: ReturnType<typeof useTranslations>,
+  labels: AttachmentPreviewBarLabels["errors"],
 ): string {
   switch (reason) {
     case "fileTooLarge":
-      return t("errorReason.fileTooLarge");
+      return labels.fileTooLarge;
     case "invalidRequest":
-      return t("errorReason.invalidRequest");
+      return labels.invalidRequest;
     case "unauthorized":
-      return t("errorReason.unauthorized");
+      return labels.unauthorized;
     case "forbidden":
-      return t("errorReason.forbidden");
+      return labels.forbidden;
     case "unsupportedType":
-      return t("errorReason.unsupportedType");
+      return labels.unsupportedType;
     case "serverError":
-      return t("errorReason.serverError");
+      return labels.serverError;
     case "networkError":
-      return t("errorReason.networkError");
+      return labels.networkError;
     case "invalidResponse":
-      return t("errorReason.invalidResponse");
+      return labels.invalidResponse;
     case "unknown":
     case null:
-      return t("errorReason.unknown");
+      return labels.unknown;
   }
 }
 
-/** image file thumbnail preview */
-function ImagePreview({ file }: { file: File }): React.ReactElement {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    const url = URL.createObjectURL(file);
-    setSrc(url);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [file]);
-
-  if (!src) {
+function ImagePreview({ src }: { src: string | null }): React.ReactElement {
+  if (src === null) {
     return (
       <Box style={iconBoxStyle} bg="var(--mantine-color-default)">
         <IconPhoto size={20} color="var(--mantine-color-dimmed)" />
@@ -105,7 +96,7 @@ function ImagePreview({ file }: { file: File }): React.ReactElement {
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- blob URL previewso with next/image not possible
+    // eslint-disable-next-line @next/next/no-img-element -- blob URLs cannot use next/image
     <img
       src={src}
       alt=""
@@ -120,69 +111,13 @@ function ImagePreview({ file }: { file: File }): React.ReactElement {
 }
 
 export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
+  labels,
+  maskImage,
   pendingFiles,
+  previewUrls,
+  scrollerRef,
   onRemove,
 }: AttachmentPreviewBarProps): React.ReactElement | null {
-  const t = useTranslations("chat.attachment");
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const [overflowEdges, setOverflowEdges] = useState({
-    left: false,
-    right: false,
-  });
-  const updateOverflowEdges = useCallback((): void => {
-    const element = scrollerRef.current;
-    if (element === null) {
-      return;
-    }
-    const maxScrollLeft = Math.max(
-      0,
-      element.scrollWidth - element.clientWidth,
-    );
-    setOverflowEdges({
-      left: element.scrollLeft > 1,
-      right: element.scrollLeft < maxScrollLeft - 1,
-    });
-  }, []);
-
-  useEffect(() => {
-    const element = scrollerRef.current;
-    if (element === null) {
-      return;
-    }
-    updateOverflowEdges();
-    const observer = new ResizeObserver(updateOverflowEdges);
-    observer.observe(element);
-    for (const child of element.children) {
-      observer.observe(child);
-    }
-    element.addEventListener("scroll", updateOverflowEdges, { passive: true });
-    return () => {
-      observer.disconnect();
-      element.removeEventListener("scroll", updateOverflowEdges);
-    };
-  }, [pendingFiles.length, updateOverflowEdges]);
-
-  const fadeWidth = rem(40);
-  let maskImage = "none";
-  if (overflowEdges.left && overflowEdges.right) {
-    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
-  } else if (overflowEdges.left) {
-    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) 100%)`;
-  } else if (overflowEdges.right) {
-    maskImage = `linear-gradient(to right, var(--mantine-color-black) 0, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
-  }
-
-  // status translation key mapping
-  const statusLabels: Record<PendingFile["status"], string> = useMemo(
-    () => ({
-      pending: t("attach"),
-      uploading: t("uploading"),
-      done: t("download"),
-      error: t("uploadError"),
-    }),
-    [t],
-  );
-
   if (pendingFiles.length === 0) {
     return null;
   }
@@ -201,56 +136,60 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
         WebkitMaskImage: maskImage,
       }}
     >
-      {pendingFiles.map((pf) => {
+      {pendingFiles.map((pendingFile) => {
         const errorReason =
-          pf.status === "error"
-            ? getErrorReasonLabel(pf.errorReason ?? null, t)
+          pendingFile.status === "error"
+            ? getErrorReasonLabel(
+                pendingFile.errorReason ?? null,
+                labels.errors,
+              )
             : null;
-        const errorMessage = pf.errorDetail
-          ? `${errorReason ?? statusLabels[pf.status]}: ${pf.errorDetail}`
+        const errorMessage = pendingFile.errorDetail
+          ? `${errorReason ?? labels.statuses[pendingFile.status]}: ${pendingFile.errorDetail}`
           : errorReason;
 
         return (
           <Paper
-            key={pf.id}
+            key={pendingFile.id}
             p="xs"
             radius="sm"
             shadow="xs"
             style={{
               display: "flex",
-              alignItems: pf.status === "error" ? "flex-start" : "center",
+              alignItems:
+                pendingFile.status === "error" ? "flex-start" : "center",
               gap: "var(--mantine-spacing-xs)",
               width:
-                pf.status === "error" ? `min(100%, ${rem(320)})` : rem(200),
+                pendingFile.status === "error"
+                  ? `min(100%, ${rem(320)})`
+                  : rem(200),
               flex: "0 0 auto",
             }}
           >
-            {/* thumbnail or file icon */}
-            {isImageFile(pf.file) ? (
-              <ImagePreview file={pf.file} />
+            {isImageFile(pendingFile.file) ? (
+              <ImagePreview src={previewUrls.get(pendingFile.id) ?? null} />
             ) : (
               <Box style={iconBoxStyle} bg="var(--mantine-color-default)">
                 <IconFile size={20} color="var(--mantine-color-dimmed)" />
               </Box>
             )}
 
-            {/* file name + status */}
             <Box style={{ flex: 1, minWidth: 0 }}>
-              {pf.status === "error" ? (
+              {pendingFile.status === "error" ? (
                 <Stack gap={rem(4)}>
                   <Group gap="xs" justify="space-between" wrap="nowrap">
                     <Text
                       size="xs"
                       style={{ minWidth: 0, overflowWrap: "anywhere" }}
                     >
-                      {pf.file.name}
+                      {pendingFile.file.name}
                     </Text>
                     <ActionIcon
                       variant="subtle"
                       color="gray"
                       size="sm"
-                      onClick={() => onRemove(pf.id)}
-                      aria-label={t("removeFile")}
+                      onClick={() => onRemove(pendingFile.id)}
+                      aria-label={labels.removeFile}
                       style={{ flexShrink: 0 }}
                     >
                       <IconX size={14} />
@@ -265,7 +204,7 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
                     }}
                   >
                     <Text size="xs" fw={700} c="red">
-                      {statusLabels.error}
+                      {labels.statuses.error}
                     </Text>
                     {errorMessage ? (
                       <Text
@@ -281,28 +220,28 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
               ) : (
                 <>
                   <Text size="xs" truncate>
-                    {pf.file.name}
+                    {pendingFile.file.name}
                   </Text>
                   <Group gap={rem(4)} wrap="nowrap">
-                    {pf.status === "uploading" && <Loader size={10} />}
+                    {pendingFile.status === "uploading" && <Loader size={10} />}
                     <Badge
                       size="xs"
                       variant="light"
-                      color={getStatusColor(pf.status)}
+                      color={getStatusColor(pendingFile.status)}
                     >
-                      {statusLabels[pf.status]}
+                      {labels.statuses[pendingFile.status]}
                     </Badge>
                   </Group>
                 </>
               )}
             </Box>
-            {pf.status !== "error" ? (
+            {pendingFile.status !== "error" ? (
               <ActionIcon
                 variant="subtle"
                 color="gray"
                 size="sm"
-                onClick={() => onRemove(pf.id)}
-                aria-label={t("removeFile")}
+                onClick={() => onRemove(pendingFile.id)}
+                aria-label={labels.removeFile}
               >
                 <IconX size={14} />
               </ActionIcon>

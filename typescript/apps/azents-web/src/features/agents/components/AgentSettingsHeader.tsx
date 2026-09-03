@@ -6,9 +6,9 @@ import { ActionIcon, Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { IconMenu2 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { type ReactNode } from "react";
+import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { useAgentFocusedShellMobileNav } from "@/shared/agent-session/AgentFocusedShellMobileNav";
 import { formatModelSelectionSummary } from "../model-selection";
-import { AgentAvatar } from "./AgentAvatar";
-import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHeaderProps {

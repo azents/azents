@@ -26,24 +26,13 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
 import { IconArrowLeft } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import {
-  normalizeReasoningEffort,
-  reasoningEffortLevels,
-} from "@/shared/lib/reasoning-effort";
-import {
-  findSelectableModelOptionByLabel,
-  selectableModelOptionFormValuesFromStoredOptions,
-} from "../model-selection";
-import { agentFormSchema } from "../schemas";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type { MemberItem } from "../containers/useAgentFormContainer";
+import type { AgentFormTranslator } from "../containers/useAgentFormTranslations";
 import type {
   ModelCatalogState,
   ModelSelectionOption,
@@ -53,9 +42,11 @@ import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type {
   AgentAdminResponse,
+  ModelReasoningEffort,
   WorkspaceModelSettingsResponse,
   WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
+import type { UseFormReturnType } from "@mantine/form";
 
 export type AgentFormSection =
   "all" | "profile" | "model" | "capabilities" | "subagents" | "admins";
@@ -92,7 +83,7 @@ function runtimeProfileAvailabilityReason(
   }
 }
 
-interface AgentFormProps {
+export interface AgentFormProps {
   handle: string;
   formState: AgentFormState;
   mutationState: MutationState;
@@ -118,7 +109,20 @@ interface AgentFormProps {
   cancelHref?: string;
 }
 
+interface AgentFormViewProps extends AgentFormProps {
+  form: UseFormReturnType<AgentFormValues>;
+  hasSubmitAttempted: boolean;
+  onSubmitAttempted: () => void;
+  selectedModelEffortLevels: ModelReasoningEffort[];
+  t: AgentFormTranslator;
+}
+
 export function AgentForm({
+  t,
+  form,
+  hasSubmitAttempted,
+  onSubmitAttempted,
+  selectedModelEffortLevels,
   handle,
   formState,
   mutationState,
@@ -126,7 +130,6 @@ export function AgentForm({
   modelsLoading,
   members,
   providerOptions,
-  workspaceModelSettings,
   runtimeProfiles,
   runtimeProfilesLoading,
   onSyncCatalog,
@@ -136,167 +139,26 @@ export function AgentForm({
   mode = "fullpage",
   section = "all",
   cancelHref,
-}: AgentFormProps): React.ReactElement {
-  const t = useTranslations("workspace.agents");
-  const [hasSubmitAttempted, setHasSubmitAttempted] = useState(false);
-
+}: AgentFormViewProps): React.ReactElement {
   const isEdit = formState.type === "EDIT";
   const backPath = cancelHref ?? `/w/${handle}/agents`;
-
-  const form = useForm<AgentFormValues>({
-    mode: "controlled",
-    initialValues: {
-      name: "",
-      description: "",
-      selectable_model_options: [],
-      main_model_label: null,
-      lightweight_model_label: null,
-      system_prompt: "",
-      runtime_profile_id: null,
-      type: "public",
-      enabled: true,
-      reasoning_effort: null,
-      terminal_enabled: true,
-      memory_enabled: true,
-      tool_search_enabled: true,
-      max_turns: null,
-      auto_archive_ttl_days: 30,
-      subagent_max_subagents: 3,
-      subagent_max_depth: 1,
-    },
-    validate: (values) => {
-      const result = agentFormSchema.safeParse(values);
-      if (result.success) {
-        return {};
-      }
-      const errors: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        const path = issue.path.join(".");
-        if (path && !errors[path]) {
-          errors[path] = issue.message;
-        }
-      }
-      return errors;
-    },
-  });
-
-  const enabledProviderOptions = useMemo(
-    () => providerOptions.filter((option) => !option.disabled),
-    [providerOptions],
-  );
-
-  useEffect(() => {
-    if (formState.type === "EDIT") {
-      const agent = formState.agent;
-      const mainOption = agent.selectable_model_options.find(
-        (option) => option.label === agent.main_model_label,
-      );
-      const defaultReasoningEffort = normalizeReasoningEffort(
-        agent.model_parameters?.reasoning_effort ?? null,
-        reasoningEffortLevels(
-          mainOption?.model_selection.normalized_capabilities,
-        ),
-      );
-      form.setValues({
-        name: agent.name,
-        description: agent.description ?? "",
-        selectable_model_options:
-          selectableModelOptionFormValuesFromStoredOptions(
-            agent.selectable_model_options,
-          ),
-        main_model_label: agent.main_model_label,
-        lightweight_model_label: agent.lightweight_model_label,
-        system_prompt: agent.system_prompt ?? "",
-        runtime_profile_id: agent.runtime_profile_id,
-        type: agent.type,
-        enabled: agent.enabled,
-        reasoning_effort: defaultReasoningEffort,
-        terminal_enabled: agent.terminal_enabled,
-        memory_enabled: agent.memory_enabled,
-        tool_search_enabled: agent.tool_search_enabled,
-        max_turns: agent.max_turns ?? null,
-        auto_archive_ttl_days: agent.auto_archive_ttl_days,
-        subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
-        subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
-      });
-      form.resetDirty();
-      setHasSubmitAttempted(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run only on initial load
-  }, [formState.type]);
-
-  useEffect(() => {
-    if (formState.type !== "CREATE" || workspaceModelSettings == null) {
-      return;
-    }
-    if (form.isDirty()) {
-      return;
-    }
-    const selectableModelOptions =
-      selectableModelOptionFormValuesFromStoredOptions(
-        workspaceModelSettings.default_selectable_model_options ?? [],
-      );
-    const mainModelLabel =
-      workspaceModelSettings.default_main_model_label ?? null;
-    const mainOption = findSelectableModelOptionByLabel(
-      selectableModelOptions,
-      mainModelLabel,
-    );
-    form.setValues({
-      selectable_model_options: selectableModelOptions,
-      main_model_label: mainModelLabel,
-      lightweight_model_label:
-        workspaceModelSettings.default_lightweight_model_label ?? null,
-      reasoning_effort: normalizeReasoningEffort(
-        null,
-        reasoningEffortLevels(mainOption?.normalized_capabilities),
-      ),
-    });
-    form.resetDirty();
-    setHasSubmitAttempted(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize create defaults before user edits.
-  }, [formState.type, workspaceModelSettings]);
-
-  const selectedMainModelOption = findSelectableModelOptionByLabel(
-    form.values.selectable_model_options,
-    form.values.main_model_label,
-  );
-  const selectedModelCapabilities =
-    selectedMainModelOption?.normalized_capabilities ?? null;
-
-  const selectedModelEffortLevels = useMemo(
-    () => reasoningEffortLevels(selectedModelCapabilities),
-    [selectedModelCapabilities],
+  const enabledProviderOptions = providerOptions.filter(
+    (option) => !option.disabled,
   );
   const selectedModelSupportsReasoning = selectedModelEffortLevels.length > 0;
-
-  const reasoningEffortOptions = useMemo(
-    () => selectedModelEffortLevels.map((value) => ({ value, label: value })),
-    [selectedModelEffortLevels],
-  );
-  const runtimeProfileOptions = useMemo(
-    () =>
-      runtimeProfiles.map((profile) => ({
-        value: profile.id,
-        label: profile.display_name,
-        disabled: !profile.available || profile.lifecycle === "disabled",
-      })),
-    [runtimeProfiles],
-  );
+  const reasoningEffortOptions = selectedModelEffortLevels.map((value) => ({
+    value,
+    label: value,
+  }));
+  const runtimeProfileOptions = runtimeProfiles.map((profile) => ({
+    value: profile.id,
+    label: profile.display_name,
+    disabled: !profile.available || profile.lifecycle === "disabled",
+  }));
   const selectedRuntimeProfile =
     runtimeProfiles.find(
       (profile) => profile.id === form.values.runtime_profile_id,
     ) ?? null;
-
-  useEffect(() => {
-    const normalizedEffort = normalizeReasoningEffort(
-      form.values.reasoning_effort ?? null,
-      selectedModelEffortLevels,
-    );
-    if (form.values.reasoning_effort !== normalizedEffort) {
-      form.setFieldValue("reasoning_effort", normalizedEffort);
-    }
-  }, [form, form.values.reasoning_effort, selectedModelEffortLevels]);
 
   if (formState.type === "LOADING") {
     return (
@@ -316,13 +178,10 @@ export function AgentForm({
     );
   }
 
-  const handleSubmit = form.onSubmit(
-    (values) => {
-      setHasSubmitAttempted(true);
-      onSubmit(values);
-    },
-    () => setHasSubmitAttempted(true),
-  );
+  const handleSubmit = form.onSubmit((values) => {
+    onSubmitAttempted();
+    onSubmit(values);
+  }, onSubmitAttempted);
 
   const fullpageChrome = mode === "fullpage";
   const showProfile = section === "all" || section === "profile";

@@ -1,7 +1,7 @@
 "use client";
 
 import { Box } from "@mantine/core";
-import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
+import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { SessionChannels } from "./components/SessionChannels";
 import { useSessionChannelsContainer } from "./containers/useSessionChannelsContainer";

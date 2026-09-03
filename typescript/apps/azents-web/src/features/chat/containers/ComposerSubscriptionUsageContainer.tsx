@@ -1,6 +1,6 @@
 "use client";
 
-import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
+import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "../components/ComposerSubscriptionUsage";
 
 interface ComposerSubscriptionUsagePopoverContainerProps {

@@ -8,9 +8,9 @@
  */
 
 import { Divider, rem, Stack } from "@mantine/core";
+import { AgentFormContainer } from "../containers/AgentFormContainer";
 import { AgentAvatarSection } from "./AgentAvatarSection";
 import { AgentDangerSection } from "./AgentDangerSection";
-import { AgentForm } from "./AgentForm";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type {
   ModelCatalogState,
@@ -77,7 +77,7 @@ export function AgentSettings(props: AgentSettingsProps): React.ReactElement {
             <Divider />
           </>
         )}
-        <AgentForm
+        <AgentFormContainer
           handle={handle}
           mode="embedded"
           section={section}

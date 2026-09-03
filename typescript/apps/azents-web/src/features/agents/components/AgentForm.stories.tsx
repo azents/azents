@@ -1,6 +1,6 @@
 import { rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { AgentForm } from "./AgentForm";
+import { AgentFormContainer } from "../containers/AgentFormContainer";
 import type {
   ModelSelectionOption,
   ProviderIntegrationOption,
@@ -196,7 +196,7 @@ function noopSubmit(values: AgentFormValues): void {
 }
 
 const meta = {
-  component: AgentForm,
+  component: AgentFormContainer,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(760)}>
@@ -223,7 +223,7 @@ const meta = {
     onRemoveAdmin: () => {},
     mode: "embedded",
   },
-} satisfies Meta<typeof AgentForm>;
+} satisfies Meta<typeof AgentFormContainer>;
 
 export default meta;
 

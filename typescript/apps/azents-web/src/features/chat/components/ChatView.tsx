@@ -23,7 +23,7 @@ import {
   isBoundaryMessage,
   useChatViewContainer,
 } from "../containers/useChatViewContainer";
-import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
+import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import {
   chatScrollOverscrollBehavior,
@@ -577,7 +577,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           minWidth: rem(320),
         }}
       >
-        <WorkspacePanel {...workspacePanel} />
+        <WorkspacePanelContainer {...workspacePanel} />
       </Box>
     </Group>
   );

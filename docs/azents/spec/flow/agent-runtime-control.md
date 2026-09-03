@@ -53,7 +53,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
-  - typescript/apps/azents-web/src/features/runtime-terminal/**
+  - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - testenv/azents/e2e/src/support/runtime_profiles.py
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py

@@ -2,7 +2,7 @@ import { rem } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ComposerSubscriptionUsagePopover } from "./ComposerSubscriptionUsage";
-import type { SubscriptionUsageState } from "@/features/llm-settings/subscriptionUsage";
+import type { SubscriptionUsageState } from "@/shared/subscription-usage/subscriptionUsage";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const availableSnapshot = {

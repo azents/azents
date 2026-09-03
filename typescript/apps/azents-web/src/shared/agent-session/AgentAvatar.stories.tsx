@@ -1,6 +1,6 @@
 import { Group, rem, Stack, Text } from "@mantine/core";
+import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { AgentAvatar } from "./AgentAvatar";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {

@@ -11,8 +11,8 @@
 import { Alert, Button, Group, Stack, Text, Title } from "@mantine/core";
 import { IconTrash, IconUpload } from "@tabler/icons-react";
 import { useCallback, useRef } from "react";
+import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { useAgentAvatarContainer } from "../containers/useAgentAvatarContainer";
-import { AgentAvatar } from "./AgentAvatar";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentAvatarSectionProps {

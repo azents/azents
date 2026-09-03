@@ -1,9 +1,16 @@
 "use client";
 
+import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useConfig } from "@/config/client";
 import { trpc } from "@/trpc/client";
-import { InfrastructureProfilesSection } from "../components/InfrastructureProfilesSection";
+import {
+  blankValues,
+  InfrastructureProfilesSection,
+  resourceUnitsForValues,
+  valuesFromProfile,
+} from "../components/InfrastructureProfilesSection";
 import {
   infrastructureProfileDeletionConfirmationEnabled,
   infrastructureProfileDeletionFailureMessage,
@@ -11,6 +18,10 @@ import {
   previousDeletionReferenceOffset,
 } from "../infrastructureProfileDeletion";
 import { infrastructureProfileKindForProvider } from "../runtimeProviderPresentation";
+import type {
+  InfrastructureProfileFormUnits,
+  InfrastructureProfileFormValues,
+} from "../components/InfrastructureProfilesSection";
 import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
   RuntimeInfrastructureProfileDeletionImpactResponse,
@@ -109,6 +120,7 @@ export function InfrastructureProfilesSectionContainer({
   providerVersion,
 }: InfrastructureProfilesSectionContainerProps): React.ReactElement {
   const profileKind = infrastructureProfileKindForProvider(providerKind);
+  const { publicBaseUrl } = useConfig();
   const utils = trpc.useUtils();
   const [editorState, setEditorState] =
     useState<InfrastructureProfileEditorState>({ type: "CLOSED" });
@@ -122,6 +134,51 @@ export function InfrastructureProfilesSectionContainer({
     useState(0);
   const [deletionImpactRefreshPending, setDeletionImpactRefreshPending] =
     useState(false);
+  const editorForm = useForm<InfrastructureProfileFormValues>({
+    mode: "controlled",
+    initialValues: blankValues(profileKind ?? "kubernetes_pod"),
+    validate: {
+      displayName: (value) => (value.trim() ? null : "Name is required."),
+      storageClassName: (value) =>
+        profileKind === "kubernetes_pod" && !value.trim()
+          ? "Storage class is required."
+          : null,
+      nodeSelector: (value) =>
+        value
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .some((line) => !line.includes("="))
+          ? "Use one key=value selector per line."
+          : null,
+      tolerations: (value) =>
+        value
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .some((line) => line.split("|").length < 2)
+          ? "Use key|operator|value|effect|seconds."
+          : null,
+    },
+  });
+  const [editorUnits, setEditorUnits] =
+    useState<InfrastructureProfileFormUnits>(() =>
+      resourceUnitsForValues(blankValues(profileKind ?? "kubernetes_pod")),
+    );
+
+  useEffect(() => {
+    if (profileKind === null) {
+      return;
+    }
+    const nextValues =
+      editorState.type === "EDIT"
+        ? valuesFromProfile(editorState.profile)
+        : blankValues(profileKind);
+    editorForm.setValues(nextValues);
+    setEditorUnits(resourceUnitsForValues(nextValues));
+    editorForm.resetDirty();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when the selected editor target or Provider kind changes.
+  }, [editorState, profileKind]);
 
   const profilesQuery =
     trpc.runtimeProvider.listInfrastructureProfiles.useQuery(
@@ -483,12 +540,27 @@ export function InfrastructureProfilesSectionContainer({
     providerId,
     selectedDeletionProfile,
   ]);
+  const onSetEditorNumber = (
+    field: keyof InfrastructureProfileFormValues,
+    value: number | null,
+  ): void => {
+    editorForm.setFieldValue(field, value);
+  };
+  const onSetEditorUnit = (
+    field: keyof InfrastructureProfileFormUnits,
+    unit: string,
+  ): void => {
+    setEditorUnits((currentUnits) => ({ ...currentUnits, [field]: unit }));
+  };
 
   return (
     <InfrastructureProfilesSection
       profileKind={profileKind}
       state={state}
       editorState={editorState}
+      editorForm={editorForm}
+      editorUnits={editorUnits}
+      publicBaseUrl={publicBaseUrl}
       operationState={operationState}
       deletionState={deletionState}
       submitting={
@@ -511,6 +583,8 @@ export function InfrastructureProfilesSectionContainer({
       onPreviousDeletionReferences={onPreviousDeletionReferences}
       onNextDeletionReferences={onNextDeletionReferences}
       onConfirmDeletion={onConfirmDeletion}
+      onSetEditorNumber={onSetEditorNumber}
+      onSetEditorUnit={onSetEditorUnit}
     />
   );
 }

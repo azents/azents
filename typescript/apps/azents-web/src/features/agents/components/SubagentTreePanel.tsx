@@ -26,15 +26,8 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import type {
-  SubagentTreeNodeResponse,
-  SubagentTreeResponse,
-} from "@azents/public-client";
-
-export type SubagentTreePanelState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | { type: "LOADED"; tree: SubagentTreeResponse };
+import type { SubagentTreePanelState } from "@/shared/subagent-tree/types";
+import type { SubagentTreeNodeResponse } from "@azents/public-client";
 
 interface SubagentTreePanelProps {
   handle: string;

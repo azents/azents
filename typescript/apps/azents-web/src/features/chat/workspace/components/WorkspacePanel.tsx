@@ -18,7 +18,6 @@ import {
   Text,
   ThemeIcon,
 } from "@mantine/core";
-import { useModals } from "@mantine/modals";
 import {
   IconAlertCircle,
   IconBrandGit,
@@ -30,16 +29,16 @@ import {
   IconSettings,
   IconTerminal2,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
-import { FileBrowser } from "./FileBrowser";
+import { FileBrowserContainer } from "../containers/FileBrowserContainer";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
+import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   ProjectRegistrationDialogState,
   ProjectRegistrationMode,
@@ -59,7 +58,7 @@ const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",
 };
 
-interface WorkspacePanelProps {
+export interface WorkspacePanelProps {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
@@ -115,7 +114,20 @@ interface WorkspacePanelProps {
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
 
+interface WorkspacePanelViewProps extends WorkspacePanelProps {
+  t: WorkspacePanelTranslator;
+  onRequestBulkDelete: (count: number) => void;
+  onRequestBulkMove: (basePath: string) => void;
+  onRequestCreateDirectory: (basePath: string) => void;
+  onRequestDeletePath: (entry: WorkspaceEntry) => void;
+  onRequestDeleteWorktreeProject: (entry: WorkspaceEntry) => void;
+  onRequestMovePath: (entry: WorkspaceEntry) => void;
+  onRequestRemoveProject: (entry: WorkspaceEntry) => void;
+  onRequestRenamePath: (entry: WorkspaceEntry) => void;
+}
+
 export function WorkspacePanel({
+  t,
   state,
   projectState,
   metricsState,
@@ -144,12 +156,6 @@ export function WorkspacePanel({
   onToggleSelectedPath,
   onClearSelection,
   onRefresh,
-  onCreateDirectory,
-  onRenamePath,
-  onMovePath,
-  onDeletePath,
-  onBulkMovePaths,
-  onBulkDeletePaths,
   getDownloadHref,
   projectPickerState,
   isProjectPickerOpen,
@@ -164,12 +170,16 @@ export function WorkspacePanel({
   onSetProjectRegistrationMode,
   onSetProjectRegistrationStartingRef,
   onSubmitProjectRegistration,
-  onRemoveProjectEntry,
-  onDeleteWorktreeProjectEntry,
   onSetBrowserMode,
-}: WorkspacePanelProps): React.ReactElement {
-  const t = useTranslations("chat.workspacePanel");
-  const modals = useModals();
+  onRequestBulkDelete,
+  onRequestBulkMove,
+  onRequestCreateDirectory,
+  onRequestDeletePath,
+  onRequestDeleteWorktreeProject,
+  onRequestMovePath,
+  onRequestRemoveProject,
+  onRequestRenamePath,
+}: WorkspacePanelViewProps): React.ReactElement {
   const metricsTabAvailable =
     state.type === "SERVER" || state.type === "REMOVING";
   const resolvedActiveTab =
@@ -195,61 +205,6 @@ export function WorkspacePanel({
     registrationDialog.mode === "git_worktree" &&
     (registrationDialog.gitRefPreview.type !== "READY" ||
       registrationDialog.startingRef === null);
-
-  const openDeleteConfirm = (path: string, onConfirm: () => void): void => {
-    modals.openConfirmModal({
-      title: t("deleteConfirmTitle"),
-      children: <Text size="sm">{t("deleteConfirm", { path })}</Text>,
-      labels: { confirm: t("delete"), cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm,
-    });
-  };
-
-  const openRemoveProjectConfirm = (entry: WorkspaceEntry): void => {
-    modals.openConfirmModal({
-      title: t("deleteProjectConfirmTitle"),
-      children: (
-        <Text size="sm">
-          {t("deleteProjectConfirmDescription", { path: entry.path })}
-        </Text>
-      ),
-      labels: { confirm: t("deleteProject"), cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm: () => onRemoveProjectEntry(entry),
-    });
-  };
-
-  const openDeleteWorktreeProjectConfirm = (entry: WorkspaceEntry): void => {
-    modals.openConfirmModal({
-      title: t("deleteWorktreeConfirmTitle"),
-      children: (
-        <Text size="sm">
-          {t("deleteWorktreeConfirmDescription", { path: entry.path })}
-        </Text>
-      ),
-      labels: { confirm: t("deleteWorktree"), cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm: () => onDeleteWorktreeProjectEntry(entry),
-    });
-  };
-
-  const openBulkDeleteConfirm = (
-    count: number,
-    onConfirm: () => void,
-  ): void => {
-    modals.openConfirmModal({
-      title: t("bulkDeleteConfirmTitle"),
-      children: <Text size="sm">{t("bulkDeleteConfirm", { count })}</Text>,
-      labels: { confirm: t("delete"), cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm,
-    });
-  };
 
   const renderCapabilityView = (
     capabilityState: Extract<
@@ -712,42 +667,19 @@ export function WorkspacePanel({
                     }
                     getDownloadHref={getDownloadHref}
                     onBack={onBackToBrowser}
-                    onCreateDirectory={() => {
-                      const basePath =
+                    onCreateDirectory={() =>
+                      onRequestCreateDirectory(
                         state.selectedEntry?.kind === "directory"
                           ? state.selectedEntry.path
-                          : state.directory.path;
-                      const name = window.prompt(t("newFolderPrompt"));
-                      if (name?.trim()) {
-                        onCreateDirectory(`${basePath}/${name.trim()}`);
-                      }
-                    }}
-                    onRename={(entry) => {
-                      const name = window.prompt(t("renamePrompt"), entry.name);
-                      if (name?.trim() && name.trim() !== entry.name) {
-                        onRenamePath(entry.path, name.trim());
-                      }
-                    }}
-                    onMove={(entry) => {
-                      const destination = window.prompt(
-                        t("movePrompt"),
-                        entry.path,
-                      );
-                      if (
-                        destination?.trim() &&
-                        destination.trim() !== entry.path
-                      ) {
-                        onMovePath(entry.path, destination.trim());
-                      }
-                    }}
-                    onDelete={(entry) =>
-                      openDeleteConfirm(entry.path, () =>
-                        onDeletePath(entry.path, entry.kind === "directory"),
+                          : state.directory.path,
                       )
                     }
+                    onRename={onRequestRenamePath}
+                    onMove={onRequestMovePath}
+                    onDelete={onRequestDeletePath}
                   />
                 ) : (
-                  <FileBrowser
+                  <FileBrowserContainer
                     root={state.manifest.root}
                     cwd={state.manifest.cwd}
                     path={state.directory.path}
@@ -775,51 +707,16 @@ export function WorkspacePanel({
                     onShowInfo={onShowInfo}
                     onToggleSelectedPath={onToggleSelectedPath}
                     onClearSelection={onClearSelection}
-                    onBulkMove={() => {
-                      const destination = window.prompt(
-                        t("movePrompt"),
-                        state.directory.path,
-                      );
-                      if (destination?.trim()) {
-                        onBulkMovePaths(destination.trim());
-                      }
-                    }}
+                    onBulkMove={() => onRequestBulkMove(state.directory.path)}
                     onBulkDelete={() =>
-                      openBulkDeleteConfirm(state.selectedPaths.length, () =>
-                        onBulkDeletePaths(true),
-                      )
+                      onRequestBulkDelete(state.selectedPaths.length)
                     }
-                    onCreateDirectory={(basePath) => {
-                      const name = window.prompt(t("newFolderPrompt"));
-                      if (name?.trim()) {
-                        onCreateDirectory(`${basePath}/${name.trim()}`);
-                      }
-                    }}
-                    onRenamePath={(entry) => {
-                      const name = window.prompt(t("renamePrompt"), entry.name);
-                      if (name?.trim() && name.trim() !== entry.name) {
-                        onRenamePath(entry.path, name.trim());
-                      }
-                    }}
-                    onMovePath={(entry) => {
-                      const destination = window.prompt(
-                        t("movePrompt"),
-                        entry.path,
-                      );
-                      if (
-                        destination?.trim() &&
-                        destination.trim() !== entry.path
-                      ) {
-                        onMovePath(entry.path, destination.trim());
-                      }
-                    }}
-                    onDeletePath={(entry) =>
-                      openDeleteConfirm(entry.path, () =>
-                        onDeletePath(entry.path, entry.kind === "directory"),
-                      )
-                    }
-                    onRemoveProject={openRemoveProjectConfirm}
-                    onDeleteWorktreeProject={openDeleteWorktreeProjectConfirm}
+                    onCreateDirectory={onRequestCreateDirectory}
+                    onRenamePath={onRequestRenamePath}
+                    onMovePath={onRequestMovePath}
+                    onDeletePath={onRequestDeletePath}
+                    onRemoveProject={onRequestRemoveProject}
+                    onDeleteWorktreeProject={onRequestDeleteWorktreeProject}
                     onRefresh={onRefresh}
                     onSetBrowserMode={onSetBrowserMode}
                     onAddProject={onOpenProjectPicker}

@@ -1,10 +1,10 @@
 "use client";
 
 import { Component } from "react";
+import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
 import { SubscriptionUsageSummary } from "../components/SubscriptionUsageSummary";
-import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
-import type { SubscriptionUsageState } from "../subscriptionUsage";
-import type { SubscriptionUsageContainerProps } from "./useSubscriptionUsageContainer";
+import type { SubscriptionUsageState } from "@/shared/subscription-usage/subscriptionUsage";
+import type { SubscriptionUsageContainerProps } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
 import type { ReactNode } from "react";
 
 interface UsageErrorBoundaryProps {

@@ -69,7 +69,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
-  - typescript/apps/azents-web/src/features/runtime-terminal/**
+  - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
@@ -98,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-01
+last_verified_at: 2026-09-03
 spec_version: 70
 ---
 

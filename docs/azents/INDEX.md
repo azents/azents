@@ -15,14 +15,14 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-01 | 70 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-03 | 70 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-03 | 160 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-01 | 68 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-03 | 68 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
-| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-02 | 9 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-03 | 9 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-01 | 104 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-31 | 17 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-03 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-02 | 43 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |

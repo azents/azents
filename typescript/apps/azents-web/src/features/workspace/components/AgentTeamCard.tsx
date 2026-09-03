@@ -6,7 +6,7 @@ import { Badge, Card, Group, Stack, Text } from "@mantine/core";
 import { IconClock } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { AgentAvatar } from "@/features/agents/components/AgentAvatar";
+import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import styles from "./WorkspaceHome.module.css";

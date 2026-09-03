@@ -23,12 +23,12 @@ import {
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { Component, type ReactNode, useState } from "react";
-import { subscriptionUsageSummaryLimits } from "@/features/llm-settings/subscriptionUsage";
+import { subscriptionUsageSummaryLimits } from "@/shared/subscription-usage/subscriptionUsage";
 import { projectComposerSubscriptionIndicator } from "../composerSubscriptionUsage";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
-} from "@/features/llm-settings/subscriptionUsage";
+} from "@/shared/subscription-usage/subscriptionUsage";
 import type {
   SubscriptionUsageAvailableResponse,
   SubscriptionUsageLimitResponse,
