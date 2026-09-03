@@ -5,8 +5,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azcommon.result import Success
@@ -25,17 +24,36 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
+from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_removal_scope import (
+    AgentRuntimeRemovalScopeRepository,
+)
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationSlot,
     RuntimeConfigurationState,
 )
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.services.agent_runtime_transition.service import (
+    AgentRuntimeTransitionService,
+)
+from azents.services.runtime_profile_resolution.service import (
+    RuntimeProfileResolutionService,
+)
+from azents.services.runtime_profile_workspace.service import (
+    RuntimeProfileWorkspaceService,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
 )
+from azents.testing.types import require_instance
 
 from .service import AgentRuntimeService
 
@@ -148,55 +166,70 @@ def _service(
 ) -> "_ServiceFixture":
     """Create a Runtime service with read-only repository doubles."""
 
+    session = require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, object())
+        yield session
 
     ensure_for_agent = AsyncMock()
     get_impact = AsyncMock(return_value=impact)
     get_profile = AsyncMock(return_value=profile)
+    agent_repository = MagicMock(spec=AgentRepository)
+    agent_repository.get_by_id = AsyncMock(return_value=agent)
+    agent_admin_repository = MagicMock(spec=AgentAdminRepository)
+    agent_admin_repository.is_admin = AsyncMock(return_value=can_manage)
+    runtime_repository = MagicMock(spec=AgentRuntimeRepository)
+    runtime_repository.get_by_agent_id = AsyncMock(return_value=runtime)
+    removal_repository = MagicMock(spec=AgentRuntimeRemovalRepository)
+    removal_repository.get_active_by_agent_id = AsyncMock(return_value=None)
+    removal_repository.get_latest_completed_by_agent_id = AsyncMock(return_value=None)
+    removal_scope_repository = MagicMock(spec=AgentRuntimeRemovalScopeRepository)
+    removal_scope_repository.get_impact = get_impact
+    resolution_service = MagicMock(spec=RuntimeProfileResolutionService)
+    resolution_service.ensure_for_agent = ensure_for_agent
+    workspace_service = MagicMock(spec=RuntimeProfileWorkspaceService)
+    workspace_service.get_profile = get_profile
+    runtime_profile_repository = MagicMock(spec=RuntimeProfileRepository)
+    runtime_profile_repository.get_configuration_state = AsyncMock(
+        return_value=_unconfigured_state() if runtime is not None else None
+    )
+    typed_session_manager: SessionManager[AsyncSession] = session_manager
     service = object.__new__(AgentRuntimeService)
-    service.session_manager = cast(Any, session_manager)
-    service.agent_repository = cast(
-        Any,
-        SimpleNamespace(get_by_id=AsyncMock(return_value=agent)),
+    service.session_manager = typed_session_manager
+    service.agent_repository = require_instance(agent_repository, AgentRepository)
+    service.agent_admin_repository = require_instance(
+        agent_admin_repository,
+        AgentAdminRepository,
     )
-    service.agent_admin_repository = cast(
-        Any,
-        SimpleNamespace(is_admin=AsyncMock(return_value=can_manage)),
+    service.runtime_repository = require_instance(
+        runtime_repository,
+        AgentRuntimeRepository,
     )
-    service.runtime_repository = cast(
-        Any,
-        SimpleNamespace(get_by_agent_id=AsyncMock(return_value=runtime)),
+    service.removal_repository = require_instance(
+        removal_repository,
+        AgentRuntimeRemovalRepository,
     )
-    service.removal_repository = cast(
-        Any,
-        SimpleNamespace(
-            get_active_by_agent_id=AsyncMock(return_value=None),
-            get_latest_completed_by_agent_id=AsyncMock(return_value=None),
-        ),
+    service.removal_scope_repository = require_instance(
+        removal_scope_repository,
+        AgentRuntimeRemovalScopeRepository,
     )
-    service.removal_scope_repository = cast(
-        Any,
-        SimpleNamespace(get_impact=get_impact),
+    service.runtime_profile_resolution_service = require_instance(
+        resolution_service,
+        RuntimeProfileResolutionService,
     )
-    service.runtime_profile_resolution_service = cast(
-        Any,
-        SimpleNamespace(ensure_for_agent=ensure_for_agent),
+    service.runtime_profile_workspace_service = require_instance(
+        workspace_service,
+        RuntimeProfileWorkspaceService,
     )
-    service.runtime_profile_workspace_service = cast(
-        Any,
-        SimpleNamespace(get_profile=get_profile),
+    service.runtime_profile_repository = require_instance(
+        runtime_profile_repository,
+        RuntimeProfileRepository,
     )
-    service.runtime_profile_repository = cast(
-        Any,
-        SimpleNamespace(
-            get_configuration_state=AsyncMock(
-                return_value=_unconfigured_state() if runtime is not None else None
-            )
-        ),
+    service.transition_service = require_instance(
+        MagicMock(spec=AgentRuntimeTransitionService),
+        AgentRuntimeTransitionService,
     )
-    service.transition_service = cast(Any, AsyncMock())
     return _ServiceFixture(
         service=service,
         ensure_for_agent=ensure_for_agent,

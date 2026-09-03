@@ -4,8 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +18,8 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
+from azents.rdb.session import SessionManager
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeLifecycleCommand,
@@ -31,6 +32,7 @@ from azents.services.agent_runtime.lifecycle_data import (
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
 )
+from azents.testing.types import require_instance
 
 from .service import AgentRuntimeService
 
@@ -39,7 +41,7 @@ _NOW = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.UTC)
 
 async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     """RESET publishes Runtime invalidation only after its transaction commits."""
-    service = object.__new__(AgentRuntimeService)
+    service = object.__new__(_ResetLifecycleService)
     before = _runtime(desired_generation=2)
     after = _runtime(
         desired_generation=3,
@@ -58,29 +60,12 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
             applied=None,
         )
     )
-    service.calculate_lifecycle = cast(
-        Any,
-        lambda runtime, *, configuration, removing: (
-            AgentRuntimeLifecyclePresentation.model_construct(
-                target=runtime.desired_state,
-                convergence="resetting",
-                provider=SimpleNamespace(
-                    connection=runtime.provider_connection_state,
-                    resource=runtime.provider_observed_state,
-                ),
-                runner=SimpleNamespace(state=runtime.runner_state),
-                availability="transitioning",
-                reason_code="runtime_resetting",
-                desired_generation=runtime.desired_generation,
-            )
-        ),
-    )
     committed_transactions = 0
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         nonlocal committed_transactions
-        yield cast(AsyncSession, object())
+        yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
         committed_transactions += 1
 
     command = AgentRuntimeLifecycleCommand(
@@ -89,16 +74,16 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
         desired_generation=3,
     )
     set_desired_state = AsyncMock(return_value=command)
-    service.session_manager = cast(Any, session_manager)
-    service.runtime_repository = cast(
-        Any,
-        SimpleNamespace(
-            set_desired_state_if_configuration_current=set_desired_state,
-        ),
+    runtime_repository = MagicMock(spec=AgentRuntimeRepository)
+    runtime_repository.set_desired_state_if_configuration_current = set_desired_state
+    typed_session_manager: SessionManager[AsyncSession] = session_manager
+    service.session_manager = typed_session_manager
+    service.runtime_repository = require_instance(
+        runtime_repository,
+        AgentRuntimeRepository,
     )
-    service.terminal_invalidation_publisher = cast(
-        Any,
-        _CommittedPublisher(lambda: committed_transactions),
+    service.terminal_invalidation_publisher = _CommittedPublisher(
+        lambda: committed_transactions
     )
 
     result = await service.reset(
@@ -113,6 +98,31 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     assert service.terminal_invalidation_publisher.runtime_ids == ["runtime-1"]
 
 
+class _ResetLifecycleService(AgentRuntimeService):
+    """Agent Runtime test double with deterministic RESET presentation."""
+
+    def calculate_lifecycle(
+        self,
+        runtime: AgentRuntime,
+        *,
+        configuration: AgentRuntimeConfigurationStatus | None,
+        removing: bool,
+    ) -> AgentRuntimeLifecyclePresentation:
+        del self, configuration, removing
+        return AgentRuntimeLifecyclePresentation.model_construct(
+            target=runtime.desired_state,
+            convergence="resetting",
+            provider=SimpleNamespace(
+                connection=runtime.provider_connection_state,
+                resource=runtime.provider_observed_state,
+            ),
+            runner=SimpleNamespace(state=runtime.runner_state),
+            availability="transitioning",
+            reason_code="runtime_resetting",
+            desired_generation=runtime.desired_generation,
+        )
+
+
 class _CommittedPublisher:
     """Record invalidation only after the lifecycle transaction exits."""
 
@@ -123,6 +133,21 @@ class _CommittedPublisher:
     async def publish_runtime_terminal_invalidation(self, runtime_id: str) -> None:
         assert self.committed_transactions() == 1
         self.runtime_ids.append(runtime_id)
+
+    async def publish_user_terminal_invalidation(self, user_id: str) -> None:
+        del user_id
+
+    async def publish_authentication_session_terminal_invalidation(
+        self,
+        authentication_session_id: str,
+    ) -> None:
+        del authentication_session_id
+
+    async def publish_agent_session_terminal_invalidation(
+        self,
+        agent_session_id: str,
+    ) -> None:
+        del agent_session_id
 
 
 def _runtime(
