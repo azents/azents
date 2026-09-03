@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+minimumReleaseAge: 0
 allowBuilds:
   "@parcel/watcher": false
   "@sentry/cli": true
