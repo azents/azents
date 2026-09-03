@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from azcommon.result import Failure, Result, Success
 from fastapi import BackgroundTasks, HTTPException, WebSocket
+from fastapi.routing import APIRoute
 from pydantic import TypeAdapter, ValidationError
 
 from azents.api.public.chat.v1 import (
@@ -331,8 +332,9 @@ def _model_file_service() -> AsyncMock:
 def test_public_session_hard_delete_route_is_absent() -> None:
     """Permanent session deletion remains internal to the purge workflow."""
     assert not any(
-        getattr(route, "path", None) == "/sessions/{session_id}"
-        and "DELETE" in (getattr(route, "methods", None) or set())
+        isinstance(route, APIRoute)
+        and route.path == "/sessions/{session_id}"
+        and "DELETE" in (route.methods or set())
         for route in chat_router.routes
     )
 

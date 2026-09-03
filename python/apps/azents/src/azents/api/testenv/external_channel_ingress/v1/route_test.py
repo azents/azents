@@ -4,18 +4,14 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.api.testenv.external_channel_ingress.v1 import mount
 from azents.job_runtime.deps import get_job_runtime
-from azents.job_runtime.types import JobRuntime
 from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
 )
@@ -84,8 +80,8 @@ def _app(
     session = SimpleNamespace(commit=AsyncMock())
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
 
     app = FastAPI()
     mount(as_route_mounter(app))
@@ -93,10 +89,7 @@ def _app(
         service
     )
     app.dependency_overrides[get_job_runtime] = lambda: runtime
-    app.dependency_overrides[get_session_manager] = lambda: cast(
-        SessionManager[AsyncSession],
-        session_manager,
-    )
+    app.dependency_overrides[get_session_manager] = lambda: session_manager
     app.dependency_overrides[ExternalChannelIngressQueueRepository] = lambda: repository
     app.dependency_overrides[get_external_channel_ingress_test_control] = lambda: (
         control
@@ -141,7 +134,7 @@ def test_release_submits_exact_owner_to_real_runtime_contract() -> None:
     )
     app = _app(
         service=SimpleNamespace(),
-        runtime=cast(JobRuntime, runtime),
+        runtime=runtime,
         control=ExternalChannelIngressTestControl(),
         repository=repository,
     )
@@ -167,7 +160,7 @@ def test_release_rejects_missing_active_owner() -> None:
     runtime = SimpleNamespace(submit=AsyncMock())
     app = _app(
         service=SimpleNamespace(),
-        runtime=cast(JobRuntime, runtime),
+        runtime=runtime,
         control=ExternalChannelIngressTestControl(),
         repository=SimpleNamespace(get_active_owner=AsyncMock(return_value=None)),
     )

@@ -4,7 +4,6 @@ Validate ``inject_runtime_environment`` toggle + ``expose_env()`` + TTL cache be
 """
 
 import time
-from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -365,10 +364,7 @@ class TestExposeEnvMultiInstallation:
                     state_name="tool_snapshot:test",
                 ),
             ],
-            selected_installation_store=cast(
-                Any,
-                _FakeSelectedInstallationStore("202"),
-            ),
+            selected_installation_store=_FakeSelectedInstallationStore("202"),
         )
 
         setting = await toolkit.expose_env()
@@ -422,7 +418,7 @@ class TestExposeEnvMultiInstallation:
                     state_name="tool_snapshot:test",
                 ),
             ],
-            selected_installation_store=cast(Any, store),
+            selected_installation_store=store,
         )
         state = await toolkit.update_context(_make_turn_context())
         tool = _find_tool(state.tools, "switch_installation")
@@ -481,7 +477,7 @@ class TestExposeEnvMultiInstallation:
                     state_name="tool_snapshot:test",
                 ),
             ],
-            selected_installation_store=cast(Any, store),
+            selected_installation_store=store,
         )
         state = await toolkit.update_context(_make_turn_context())
         tool = _find_tool(state.tools, "switch_installation")
@@ -535,7 +531,7 @@ class TestExposeEnvMultiInstallation:
                     state_name="tool_snapshot:test",
                 ),
             ],
-            selected_installation_store=cast(Any, _FakeSelectedInstallationStore()),
+            selected_installation_store=_FakeSelectedInstallationStore(),
         )
         state = await toolkit.update_context(_make_turn_context())
         tool = _find_tool(state.tools, "switch_installation")

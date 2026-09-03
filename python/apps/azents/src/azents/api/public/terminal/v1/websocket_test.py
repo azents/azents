@@ -3,8 +3,8 @@
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
-from typing import cast
+from collections.abc import AsyncIterator, MutableMapping
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -59,15 +59,35 @@ class _WebSocket:
         self.bytes.append(data)
 
 
-class _RouteWebSocket(_WebSocket):
+class _RouteWebSocket(WebSocket):
     def __init__(self, *, origin: str) -> None:
-        super().__init__()
-        self.query_params = {"ticket": "secret-ticket"}
-        self.headers = {"origin": origin}
-        self.scope: dict[str, object] = {
-            "query_string": b"ticket=secret-ticket",
-            "subprotocols": [TERMINAL_WEBSOCKET_SUBPROTOCOL],
-        }
+        async def receive() -> dict[str, object]:
+            return {"type": "websocket.connect"}
+
+        async def send(message: MutableMapping[str, Any]) -> None:
+            del message
+
+        super().__init__(
+            {
+                "type": "websocket",
+                "query_string": b"ticket=secret-ticket",
+                "headers": [(b"origin", origin.encode())],
+                "subprotocols": [TERMINAL_WEBSOCKET_SUBPROTOCOL],
+                "scheme": "ws",
+                "path": "/",
+                "raw_path": b"/",
+                "root_path": "",
+                "client": ("test", 1234),
+                "server": ("test", 80),
+                "http_version": "1.1",
+            },
+            receive,
+            send,
+        )
+        self.closed: tuple[int, str | None] | None = None
+
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        self.closed = (code, reason)
 
 
 class _Attachment:
@@ -313,7 +333,7 @@ async def test_websocket_scrubs_query_ticket_before_rejecting_origin() -> None:
     service = AsyncMock()
 
     await terminal_websocket(
-        cast(WebSocket, websocket),
+        websocket,
         handle="workspace",
         agent_id="agent-1",
         session_id="session-1",

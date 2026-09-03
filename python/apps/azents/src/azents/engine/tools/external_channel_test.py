@@ -2,7 +2,6 @@
 
 import json
 import logging
-from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -37,15 +36,14 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
 )
+from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.external_channel.work_data import (
     ChannelActionResult,
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
-)
+from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileDownloadResult,
     ExternalChannelFileTransferExecutionError,
@@ -55,9 +53,9 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.provider_effect import ProviderEffectOutcome
 from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.channel import (
-    ScheduledTaskChannelService,
     ScheduledTaskProgressExecution,
 )
+from azents.testing.types import require_instance
 
 
 def _snapshot(
@@ -84,7 +82,7 @@ def _snapshot(
     )
 
 
-class _ActionService:
+class _ActionService(ExternalChannelActionService):
     def __init__(self, snapshots: list[ChannelWorkSnapshot]) -> None:
         self.snapshots = snapshots
         self.calls: list[dict[str, object]] = []
@@ -121,7 +119,7 @@ class _ActionService:
         )
 
 
-class _FileTransferService:
+class _FileTransferService(ExternalChannelFileTransferService):
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
         self.prepare_calls: list[dict[str, object]] = []
@@ -143,8 +141,8 @@ class _FileTransferService:
         **kwargs: object,
     ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
         self.prepare_calls.append(kwargs)
-        paths = cast(list[str], kwargs["paths"])
-        path = paths[0]
+        paths = require_instance(kwargs["paths"], list)
+        path = require_instance(paths[0], str)
         return (
             ExternalChannelOutboundFileManifest(
                 source=(
@@ -185,9 +183,9 @@ def _toolkit(
         result=None
     )
     toolkit = ExternalChannelToolkit(
-        service=cast(ExternalChannelActionService, service),
-        scheduled_channel_service=cast(ScheduledTaskChannelService, scheduled),
-        file_transfer_service=cast(ExternalChannelFileTransferService, transfer),
+        service=service,
+        scheduled_channel_service=scheduled,
+        file_transfer_service=transfer,
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
@@ -233,9 +231,9 @@ def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
 
 def _channel_action_mode_enum(schema: dict[str, object]) -> list[object]:
     """Return the provider-facing mode enum from one object Tool schema."""
-    properties = cast(dict[str, object], schema["properties"])
-    mode = cast(dict[str, object], properties["mode"])
-    return cast(list[object], mode["enum"])
+    properties = require_instance(schema["properties"], dict)
+    mode = require_instance(properties["mode"], dict)
+    return require_instance(mode["enum"], list)
 
 
 @pytest.mark.asyncio
@@ -305,8 +303,11 @@ async def test_channel_action_schema_names_each_supported_file_path_format() -> 
     toolkit = _toolkit(_ActionService([_snapshot()]))
 
     state = await toolkit.update_context(_turn_context())
-    properties = cast(dict[str, object], state.tools[0].spec.input_schema["properties"])
-    files = cast(dict[str, object], properties["files"])
+    properties = require_instance(
+        state.tools[0].spec.input_schema["properties"],
+        dict,
+    )
+    files = require_instance(properties["files"], dict)
 
     assert files["description"] == (
         "File source paths. Each item must be either an absolute POSIX Runtime path "
@@ -364,7 +365,7 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
     """The root-only file Tool passes one opaque locator to the current Runtime."""
     service = _ActionService([_snapshot()])
     file_transfer_service = _FileTransferService()
-    file_storage = cast(FileStorage, object())
+    file_storage = FakeSharedStorage()
     toolkit = _toolkit(
         service,
         file_transfer_service=file_transfer_service,
@@ -390,7 +391,7 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         )
     )
 
-    assert json.loads(cast(str, output)) == {
+    assert json.loads(require_instance(output, str)) == {
         "bytes": 42,
         "filename": "report.csv",
         "media_type": "text/csv",
@@ -452,7 +453,7 @@ async def test_download_external_file_logs_secret_free_failure_context(
     toolkit = _toolkit(
         _ActionService([_snapshot()]),
         file_transfer_service=transfer,
-        file_storage=cast(FileStorage, object()),
+        file_storage=FakeSharedStorage(),
     )
     state = await toolkit.update_context(_turn_context())
 
@@ -503,7 +504,7 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
     """The Tool commits only manifests produced from the current run source."""
     service = _ActionService([_snapshot()])
     file_transfer_service = _FileTransferService()
-    file_storage = cast(FileStorage, object())
+    file_storage = FakeSharedStorage()
     toolkit = _toolkit(
         service,
         file_transfer_service=file_transfer_service,
@@ -533,10 +534,7 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
             "authority": None,
         }
     ]
-    manifests = cast(
-        tuple[ExternalChannelOutboundFileManifest, ...],
-        service.calls[0]["files"],
-    )
+    manifests = require_instance(service.calls[0]["files"], tuple)
     assert manifests[0].path == "/workspace/agent/report.csv"
     assert service.calls[0]["file_storage"] is file_storage
     assert service.calls[0]["authority"] is None
@@ -576,10 +574,7 @@ async def test_channel_action_preflights_exchange_without_runtime_storage() -> N
             "authority": None,
         }
     ]
-    manifests = cast(
-        tuple[ExternalChannelOutboundFileManifest, ...],
-        service.calls[0]["files"],
-    )
+    manifests = require_instance(service.calls[0]["files"], tuple)
     assert manifests[0].source is ExternalChannelOutboundFileSource.EXCHANGE
     assert manifests[0].path == uri
     assert service.calls[0]["file_storage"] is None
@@ -759,7 +754,7 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     """Direct Channel tools retain their invocation and lifecycle guidance."""
     toolkit = _toolkit(
         _ActionService([_snapshot()]),
-        file_storage=cast(FileStorage, object()),
+        file_storage=FakeSharedStorage(),
     )
     state = await toolkit.update_context(_turn_context())
 

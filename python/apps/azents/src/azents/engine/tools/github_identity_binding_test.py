@@ -1,7 +1,6 @@
 """GitHub Platform Toolkit identity binding tests."""
 
 import json
-from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -11,7 +10,6 @@ import azents.engine.tools.github as github_module
 from azents.core.tools import GitHubToolkitConfig, ResolveContext
 from azents.engine.tools.github import GitHubToolkitProvider
 from azents.services.github_platform_system_setting.runtime import (
-    PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
 
@@ -78,7 +76,7 @@ async def test_platform_credentials_use_server_app_id_for_ownership(
         "GithubUserInstallationRepository",
         InstallationRepository,
     )
-    runtime = cast(Any, Mock())
+    runtime = Mock()
     runtime.resolve = AsyncMock(
         return_value=_resolved(
             app_id="123",
@@ -86,9 +84,7 @@ async def test_platform_credentials_use_server_app_id_for_ownership(
             generation="generation-1",
         )
     )
-    provider = GitHubToolkitProvider(
-        platform_runtime=cast(PlatformGitHubAppRuntimeService, runtime)
-    )
+    provider = GitHubToolkitProvider(platform_runtime=runtime)
     credentials: dict[str, object] = {
         "type": "github_app_platform",
         "app_id": "browser-controlled",
@@ -103,7 +99,7 @@ async def test_platform_credentials_use_server_app_id_for_ownership(
     }
 
     error = await provider.validate_credentials(
-        cast(AsyncSession, object()),
+        AsyncMock(spec=AsyncSession),
         "user-1",
         credentials,
     )
@@ -117,7 +113,7 @@ async def test_platform_token_issuance_rechecks_app_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A changed App ID blocks token exchange for an existing binding."""
-    runtime = cast(Any, Mock())
+    runtime = Mock()
     runtime.resolve = AsyncMock(
         side_effect=[
             _resolved(
@@ -134,9 +130,7 @@ async def test_platform_token_issuance_rechecks_app_identity(
     )
     exchange = AsyncMock(return_value="token")
     monkeypatch.setattr(github_module, "_exchange_app_token", exchange)
-    provider = GitHubToolkitProvider(
-        platform_runtime=cast(PlatformGitHubAppRuntimeService, runtime)
-    )
+    provider = GitHubToolkitProvider(platform_runtime=runtime)
     toolkit = await provider.resolve(
         GitHubToolkitConfig(
             github_auth_type="github_app_platform",
@@ -155,7 +149,7 @@ async def test_platform_token_issuance_uses_rotated_key_for_same_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Same-App private-key rotation preserves the persisted binding."""
-    runtime = cast(Any, Mock())
+    runtime = Mock()
     runtime.resolve = AsyncMock(
         side_effect=[
             _resolved(
@@ -172,9 +166,7 @@ async def test_platform_token_issuance_uses_rotated_key_for_same_app(
     )
     exchange = AsyncMock(return_value="token")
     monkeypatch.setattr(github_module, "_exchange_app_token", exchange)
-    provider = GitHubToolkitProvider(
-        platform_runtime=cast(PlatformGitHubAppRuntimeService, runtime)
-    )
+    provider = GitHubToolkitProvider(platform_runtime=runtime)
     toolkit = await provider.resolve(
         GitHubToolkitConfig(
             github_auth_type="github_app_platform",

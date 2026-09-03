@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from typing import Any, ClassVar, cast
+from typing import ClassVar
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,7 +12,6 @@ from azcommon.result import Failure, Success
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
@@ -57,7 +56,6 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -127,13 +125,13 @@ def _session_manager_for(
 def _make_scheduled_provider() -> ScheduledToolkitProvider:
     """Create a provider whose collaborators are not exercised during resolution."""
     return ScheduledToolkitProvider(
-        session_manager=cast(Any, object()),
-        service=cast(Any, object()),
-        terminal_service=cast(Any, object()),
-        channel_service=cast(Any, object()),
-        file_transfer_service=cast(Any, object()),
-        cycle_repository=cast(Any, object()),
-        run_repository=cast(Any, object()),
+        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+        service=AsyncMock(),
+        terminal_service=AsyncMock(),
+        channel_service=AsyncMock(),
+        file_transfer_service=AsyncMock(),
+        cycle_repository=AsyncMock(),
+        run_repository=AsyncMock(),
     )
 
 
@@ -453,8 +451,8 @@ def _make_subagent_provider() -> SubagentToolkitProvider:
 def _make_dynamic_worktree_provider() -> DynamicWorktreeToolkitProvider:
     """Create DynamicWorktreeToolkitProvider for resolution tests."""
     return DynamicWorktreeToolkitProvider(
-        service=cast(SessionGitWorktreeService, AsyncMock()),
-        broker=cast(SessionBroker, AsyncMock()),
+        service=AsyncMock(),
+        broker=AsyncMock(),
     )
 
 

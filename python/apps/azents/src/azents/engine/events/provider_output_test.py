@@ -4,7 +4,7 @@ import base64
 import datetime
 from contextlib import AbstractAsyncContextManager
 from io import BytesIO
-from typing import IO, cast
+from typing import IO
 
 import pytest
 from azcommon.infra.s3.service import S3Service
@@ -37,7 +37,6 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
-from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -51,6 +50,7 @@ from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import require_instance
 
 _PNG_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
@@ -392,10 +392,7 @@ def _materializer(
     session_repository = _AgentSessionRepository()
     workspace_user_repository = _WorkspaceUserRepository()
     s3_service = s3_service or _S3Service()
-    session_manager = cast(
-        SessionManager[AsyncSession],
-        _SessionManager(),
-    )
+    session_manager = _SessionManager()
     config = Config.model_construct(
         workspace_s3=WorkspaceS3Config(bucket="test-bucket"),
         file_lifecycle=FileLifecycleConfig(),
@@ -659,9 +656,9 @@ async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
 async def test_failed_admission_compensates_every_uploaded_object() -> None:
     """Delete uploaded objects after the metadata transaction rolls back."""
     materializer, exchange_repository, model_repository, s3_service = _materializer()
-    run_repository = cast(
-        _AgentRunRepository,
+    run_repository = require_instance(
         materializer.model_file_service.agent_run_repository,
+        _AgentRunRepository,
     )
     prepared = await materializer.prepare(_normalized_output())
     await prepared.persist(_Session())

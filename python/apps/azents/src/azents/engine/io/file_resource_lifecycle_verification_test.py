@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import IO
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +13,7 @@ from azcommon.infra.s3.service import S3Service
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -41,12 +42,12 @@ from azents.engine.tools.import_file import (
     ImportFileStagingConfiguration,
     make_import_file_tool,
 )
-from azents.engine.tools.runtime_instruction_context import (
-    ServerToRuntimeTransferExecutor,
-)
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
@@ -56,7 +57,7 @@ from azents.testing.types import is_string_object_dict
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
-class _FakeArtifactRepository:
+class _FakeArtifactRepository(ArtifactRepository):
     """Artifact repository for tests."""
 
     def __init__(self) -> None:
@@ -152,17 +153,17 @@ class _FakeArtifactRepository:
         )
 
 
-class _FakeAgentSessionRepository:
+class _FakeAgentSessionRepository(AgentSessionRepository):
     """AgentSession repository for tests."""
 
     async def get_by_id(
         self,
         session: AsyncSession,
-        session_id: str,
+        agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession."""
         del session
-        if session_id != "session-1":
+        if agent_session_id != "session-1":
             return None
         return AgentSession(
             owner_generation=0,
@@ -191,13 +192,12 @@ class _FakeAgentSessionRepository:
         )
 
 
-class _FakeWorkspaceUserRepository:
+class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
     """WorkspaceUser repository for tests."""
 
     async def get_by_workspace_and_user(
         self,
         session: AsyncSession,
-        *,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -216,7 +216,7 @@ class _FakeWorkspaceUserRepository:
         )
 
 
-class _FakeS3Service:
+class _FakeS3Service(S3Service):
     """Object storage for tests."""
 
     def __init__(self) -> None:
@@ -227,12 +227,14 @@ class _FakeS3Service:
         self,
         bucket: str,
         key: str,
-        body: bytes,
+        body: str | bytes | IO[str] | IO[bytes],
         *,
         content_type: str | None = None,
     ) -> None:
         """Store object."""
         del bucket, content_type
+        if not isinstance(body, bytes):
+            raise AssertionError("Lifecycle tests only upload byte payloads")
         self.objects[key] = body
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
@@ -247,23 +249,12 @@ class _FakeS3Service:
         self.objects.pop(key, None)
 
 
-class _WorkspaceS3Config:
-    """Workspace S3 config for tests."""
-
-    bucket = "test-bucket"
-
-
-class _FileLifecycleConfig:
-    """File lifecycle config for tests."""
-
-    artifact_ttl = datetime.timedelta(days=7)
-
-
-class _Config:
-    """Config for tests."""
-
-    workspace_s3 = _WorkspaceS3Config()
-    file_lifecycle = _FileLifecycleConfig()
+def _config() -> Config:
+    """Build the minimal validated configuration used by lifecycle tests."""
+    return Config.model_construct(
+        workspace_s3=WorkspaceS3Config(bucket="test-bucket"),
+        file_lifecycle=FileLifecycleConfig(),
+    )
 
 
 class _StaticModelFileResolver:
@@ -293,7 +284,7 @@ class _AuthorityArtifactService(ArtifactService):
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
     """Session manager for tests."""
-    yield cast(AsyncSession, object())
+    yield AsyncMock(spec=AsyncSession)
 
 
 def _authority() -> SessionResourceAuthority:
@@ -361,13 +352,13 @@ def _artifact_service() -> tuple[
         run_index=1,
     )
     service = _AuthorityArtifactService(
-        artifact_repository=cast(Any, artifact_repo),
-        agent_session_repository=cast(Any, _FakeAgentSessionRepository()),
+        artifact_repository=artifact_repo,
+        agent_session_repository=_FakeAgentSessionRepository(),
         agent_run_repository=agent_run_repository,
-        workspace_user_repository=cast(Any, _FakeWorkspaceUserRepository()),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
         session_manager=_session_manager,
-        s3_service=cast(Any, s3_service),
-        config=cast(Any, _Config()),
+        s3_service=s3_service,
+        config=_config(),
     )
     return service, artifact_repo, s3_service
 
@@ -445,13 +436,10 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
         artifact_service=service,
         vfs_projection_service=None,
         authority=_authority(),
-        transfer_service=cast(
-            ServerToRuntimeTransferExecutor,
-            transfer_service,
-        ),
+        transfer_service=transfer_service,
         resolve_runtime_target=resolve_runtime_target,
         staging_configuration=ImportFileStagingConfiguration(
-            s3_service=cast(S3Service, s3_service),
+            s3_service=s3_service,
             workspace_bucket="test-bucket",
             transfer_object_prefix="runtime-transfer",
             multipart_copy_threshold=5 * 1024 * 1024,
