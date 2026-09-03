@@ -11,8 +11,11 @@ without checking its saved content.
 
 ## Choose the destination
 
-- Use `/workspace/agent/.agents/skills/<skill-name>/SKILL.md` for an Agent-wide
-  Skill unless the user requests a Project-specific location.
+- Resolve the current Runner-reported Agent Workspace path from the active Runtime
+  (`AgentRuntime.workspace_path`) and use
+  `<workspace_path>/.agents/skills/<skill-name>/SKILL.md` for an Agent-wide Skill
+  unless the user requests a Project-specific location. Pass the validated workspace
+  path explicitly into the file operation instead of assuming a fixed root.
 - Use `<project-path>/.agents/skills/<skill-name>/SKILL.md` for a Project Skill.
 - Use `.claude/skills` only when compatibility with that convention is explicitly
   requested.

@@ -1,10 +1,10 @@
-"""aiodocker.containers stub — azents 사용 멤버만."""
+"""aiodocker.containers stub — only members used by azents."""
 
 from types import TracebackType
 from typing import Any
 
 class _ExecMessage:
-    """exec stream 의 한 메시지 — stream id 와 payload."""
+    """One message from an exec stream — stream ID and payload."""
 
     stream: int
     data: bytes
@@ -24,7 +24,7 @@ class _Exec:
     async def inspect(self) -> dict[str, Any]: ...
 
 class DockerContainer:
-    """aiodocker DockerContainer — azents runtime provider 사용 멤버만."""
+    """aiodocker DockerContainer — only members used by the azents Runtime Provider."""
 
     async def show(self) -> dict[str, Any]: ...
     async def start(self) -> None: ...
