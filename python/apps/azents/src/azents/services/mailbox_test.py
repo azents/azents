@@ -6,7 +6,6 @@ import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -83,6 +82,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
     AgentCreateGitWorktreeContinuationResult,
+    ExternalChannelMessageMailboxPayload,
     MailboxItem,
     MailboxItemCreate,
     MailboxPresentationItem,
@@ -139,6 +139,7 @@ from .mailbox import (
     PreparedMailboxFiles,
     TurnEffect,
     _buffer_requires_inference,
+    _PromotedMailboxItem,
     build_external_channel_mailbox_payload,
     fold_turn_eligibility,
 )
@@ -787,9 +788,7 @@ class _ModelFileService(ModelFileService):
         result: Result[ModelFile, ModelFileCreateError] | None = None,
     ) -> None:
         """Store the configured creation result."""
-        self.result = result or Failure(
-            cast(ModelFileCreateError, ModelFileInvalidImage())
-        )
+        self.result = result or Failure[ModelFileCreateError](ModelFileInvalidImage())
         self.create_for_agent_pending_input_called = False
         self.create_for_admitted_input_called = False
         self.discarded_model_file_ids: list[str] = []
@@ -1070,9 +1069,11 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         created_at=tznow(),
     )
     model_file_service = _ModelFileService(Success(model_file))
-    mailbox_item_repository = AsyncMock(spec=MailboxRepository)
+    mailbox_item_repository: MailboxRepository = AsyncMock(spec=MailboxRepository)
     mailbox_item_repository.list_for_flush.return_value = [buffer]
-    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
+    agent_session_repository: AgentSessionRepository = AsyncMock(
+        spec=AgentSessionRepository
+    )
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-001",
         agent_id=agent_id,
@@ -1082,7 +1083,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-001")
     )
-    agent_run_repository = AsyncMock(spec=AgentRunRepository)
+    agent_run_repository: AgentRunRepository = AsyncMock(spec=AgentRunRepository)
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
         id="run-1",
         session_id=session_id,
@@ -1090,40 +1091,22 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         status=AgentRunStatus.RUNNING,
     )
     service = MailboxService(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _unit_session_manager,
-        ),
-        mailbox_item_repository=cast(
-            MailboxRepository,
-            mailbox_item_repository,
-        ),
+        session_manager=_unit_session_manager,
+        mailbox_item_repository=mailbox_item_repository,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        event_transcript_repository=cast(
-            EventTranscriptRepository,
-            AsyncMock(spec=EventTranscriptRepository),
-        ),
-        agent_run_repository=cast(
-            AgentRunRepository,
-            agent_run_repository,
-        ),
+        agent_session_repository=agent_session_repository,
+        event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
+        agent_run_repository=agent_run_repository,
         scheduled_task_repository=ScheduledTaskRepository(),
         scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
-        action_execution_repository=cast(
-            ActionExecutionRepository,
-            AsyncMock(spec=ActionExecutionRepository),
-        ),
-        external_channel_repository=cast(ExternalChannelRepository, object()),
+        action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
-            cast(SessionManager[AsyncSession], _unit_session_manager),
-            cast(AgentSessionRepository, agent_session_repository),
+            _unit_session_manager,
+            agent_session_repository,
         ),
     )
 
@@ -1221,49 +1204,34 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         file_parts=[],
         created_at=tznow(),
     )
-    mailbox_item_repository = AsyncMock(spec=MailboxRepository)
+    mailbox_item_repository: MailboxRepository = AsyncMock(spec=MailboxRepository)
     mailbox_item_repository.list_for_flush.return_value = [buffer]
-    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
+    agent_session_repository: AgentSessionRepository = AsyncMock(
+        spec=AgentSessionRepository
+    )
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         agent_id="agent-001"
     )
     exchange_file_service = _ExchangeFileService()
     model_file_service = _ModelFileService()
+    agent_run_repository: AgentRunRepository = AsyncMock(spec=AgentRunRepository)
     service = MailboxService(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _unit_session_manager,
-        ),
-        mailbox_item_repository=cast(
-            MailboxRepository,
-            mailbox_item_repository,
-        ),
+        session_manager=_unit_session_manager,
+        mailbox_item_repository=mailbox_item_repository,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        event_transcript_repository=cast(
-            EventTranscriptRepository,
-            AsyncMock(spec=EventTranscriptRepository),
-        ),
-        agent_run_repository=cast(
-            AgentRunRepository,
-            AsyncMock(spec=AgentRunRepository),
-        ),
+        agent_session_repository=agent_session_repository,
+        event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
+        agent_run_repository=agent_run_repository,
         scheduled_task_repository=ScheduledTaskRepository(),
         scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
-        action_execution_repository=cast(
-            ActionExecutionRepository,
-            AsyncMock(spec=ActionExecutionRepository),
-        ),
-        external_channel_repository=cast(ExternalChannelRepository, object()),
+        action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
-            cast(SessionManager[AsyncSession], _unit_session_manager),
-            cast(AgentSessionRepository, agent_session_repository),
+            _unit_session_manager,
+            agent_session_repository,
         ),
     )
 
@@ -1286,24 +1254,9 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
 async def test_cancelled_promotion_discards_prepared_model_files() -> None:
     """Cancellation preserves the signal after shielded ModelFile cleanup."""
     model_file_service = _ModelFileService()
-    service = MailboxService(
-        session_manager=cast(SessionManager[AsyncSession], object()),
-        mailbox_item_repository=cast(MailboxRepository, object()),
-        exchange_file_service=cast(ExchangeFileService, object()),
+    service = _mailbox_item_service(
+        _unit_session_manager,
         model_file_service=model_file_service,
-        agent_session_repository=cast(AgentSessionRepository, object()),
-        event_transcript_repository=cast(EventTranscriptRepository, object()),
-        agent_run_repository=cast(AgentRunRepository, object()),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=cast(ActionExecutionRepository, object()),
-        external_channel_repository=cast(ExternalChannelRepository, object()),
-        turn_action_capabilities=_turn_action_capabilities(
-            cast(SessionManager[AsyncSession], object()),
-            cast(AgentSessionRepository, object()),
-        ),
     )
     prepared = PreparedMailboxFiles(
         attachments=[],
@@ -1686,33 +1639,59 @@ class TestMailboxService:
             event_transcript_repository=repository,
         )
         session = AsyncMock(spec=AsyncSession)
+
+        def promoted_buffer(buffer_id: str) -> MailboxItem:
+            return MailboxItem(
+                id=buffer_id,
+                session_id="session-1",
+                kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                order_group="buffer-group",
+                order_sequence=0,
+                content="",
+                idempotency_key=None,
+                metadata={},
+                payload=ExternalChannelMessageMailboxPayload(
+                    type="external_channel_message",
+                    items=[
+                        MailboxPresentationItem(
+                            item_key="external_channel_message:0",
+                            presentation_kind="external_channel_message",
+                        )
+                    ],
+                ),
+                action=None,
+                attachments=[],
+                file_parts=[],
+                created_at=first_at,
+            )
+
         promoted = [
-            SimpleNamespace(
+            _PromotedMailboxItem(
                 external_id="external-1",
                 event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
                 payload={},
                 item_key=None,
-                buffer=SimpleNamespace(
-                    id="buffer-1",
-                    presentation=SimpleNamespace(item_key=None),
-                ),
+                buffer=promoted_buffer("buffer-1"),
+                user_message=None,
             ),
-            SimpleNamespace(
+            _PromotedMailboxItem(
                 external_id="external-2",
                 event_kind=EventKind.USER_MESSAGE,
                 payload={},
                 item_key=None,
-                buffer=SimpleNamespace(
-                    id="buffer-2",
-                    presentation=SimpleNamespace(item_key=None),
-                ),
+                buffer=promoted_buffer("buffer-2"),
+                user_message=None,
             ),
         ]
 
         inserted = await service._append_mailbox_item_events(  # noqa: SLF001
             session,
             "session-1",
-            cast(Any, promoted),
+            promoted,
         )
 
         assert [event.id for event in inserted] == ["event-1", "event-2"]
@@ -1739,22 +1718,48 @@ class TestMailboxService:
         )
         session = AsyncMock(spec=AsyncSession)
         promoted = [
-            SimpleNamespace(
+            _PromotedMailboxItem(
                 external_id="external-1",
                 event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
                 payload={},
                 item_key=None,
-                buffer=SimpleNamespace(
+                buffer=MailboxItem(
                     id="buffer-1",
-                    presentation=SimpleNamespace(item_key=None),
+                    session_id="session-1",
+                    kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    order_group="buffer-group",
+                    order_sequence=0,
+                    content="",
+                    idempotency_key=None,
+                    metadata={},
+                    payload=ExternalChannelMessageMailboxPayload(
+                        type="external_channel_message",
+                        items=[
+                            MailboxPresentationItem(
+                                item_key="external_channel_message:0",
+                                presentation_kind="external_channel_message",
+                            )
+                        ],
+                    ),
+                    action=None,
+                    attachments=[],
+                    file_parts=[],
+                    created_at=datetime.datetime(
+                        2026, 8, 17, 12, 0, tzinfo=datetime.UTC
+                    ),
                 ),
+                user_message=None,
             )
         ]
 
         inserted = await service._append_mailbox_item_events(  # noqa: SLF001
             session,
             "session-1",
-            cast(Any, promoted),
+            promoted,
         )
 
         assert inserted == []
@@ -3669,10 +3674,11 @@ async def test_external_channel_message_projection() -> None:
         )
 
     processor = ExternalChannelMessageMailboxProcessor(
-        cast(MailboxService, SimpleNamespace())
+        _mailbox_item_service(_unit_session_manager)
     )
+    preparation_session: AsyncSession = AsyncMock(spec=AsyncSession)
     preparation_context = MailboxPreparationContext(
-        session=cast(AsyncSession, object()),
+        session=preparation_session,
         session_id="session-1",
         active_run_id=None,
         required_inference_profile=None,
@@ -3696,8 +3702,8 @@ async def test_external_channel_message_projection() -> None:
     context_outcome = await processor.process(preparation_context, context_buffer)
     invocation_outcome = await processor.process(preparation_context, invocation_buffer)
     capabilities = _turn_action_capabilities(
-        cast(SessionManager[AsyncSession], object()),
-        cast(AgentSessionRepository, object()),
+        _unit_session_manager,
+        AgentSessionRepository(),
     )
 
     assert context_outcome.turn_effect is TurnEffect.ELIGIBLE
