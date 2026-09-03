@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypeAlias
+from typing import Literal, NamedTuple, TypeAlias
 
 from azents_runtime_control.apply_patch import (
     MAX_APPLY_PATCH_BASE_PATH_BYTES,
@@ -166,6 +166,21 @@ class _PathFingerprint:
     resolved_path: Path
     stat_signature: tuple[int, int, int, int, int] | None
     content_sha256: str | None
+
+
+class _PatchUpdate(NamedTuple):
+    """Updated file bytes and line-count changes."""
+
+    output: bytes
+    added_lines: int
+    removed_lines: int
+
+
+class _PathObservation(NamedTuple):
+    """Observed target path and its filesystem fingerprint."""
+
+    target_path: Path
+    fingerprint: _PathFingerprint
 
 
 @dataclasses.dataclass(frozen=True)
@@ -713,7 +728,7 @@ def _commit_item(base: Path, item: _PreparedOperation) -> None:
 def _apply_update(
     operation: PatchOperation,
     source: _SourceText,
-) -> tuple[bytes, int, int]:
+) -> _PatchUpdate:
     if not source.lines:
         if len(operation.hunks) != 1:
             raise _update_failure(
@@ -735,14 +750,14 @@ def _apply_update(
                 "Update anchor does not exist in the empty source file",
             )
         output_lines = tuple(line.text for line in hunk.lines if line.kind == "add")
-        return (
-            _encode_source_lines(
+        return _PatchUpdate(
+            output=_encode_source_lines(
                 output_lines,
                 newline=source.newline,
                 final_newline=source.final_newline,
             ),
-            len(output_lines),
-            0,
+            added_lines=len(output_lines),
+            removed_lines=0,
         )
     matches: list[_MatchedHunk] = []
     cursor = 0
@@ -810,14 +825,14 @@ def _apply_update(
     output_lines = list(source.lines)
     for match in reversed(matches):
         output_lines[match.start : match.end] = match.replacement
-    return (
-        _encode_source_lines(
+    return _PatchUpdate(
+        output=_encode_source_lines(
             tuple(output_lines),
             newline=source.newline,
             final_newline=source.final_newline,
         ),
-        added_lines,
-        removed_lines,
+        added_lines=added_lines,
+        removed_lines=removed_lines,
     )
 
 
@@ -898,7 +913,7 @@ def _source_newline(
 def _observe_path(
     base: Path,
     operation: PatchOperation,
-) -> tuple[Path, _PathFingerprint]:
+) -> _PathObservation:
     target_path = base.joinpath(*PurePosixPath(operation.path).parts)
     try:
         stat_result = target_path.lstat()
@@ -910,10 +925,13 @@ def _observe_path(
                 message=f"Patch source does not exist: {operation.path}",
                 failed=operation,
             ) from exc
-        return target_path, _PathFingerprint(
-            _resolved_missing_path(base, target_path),
-            None,
-            None,
+        return _PathObservation(
+            target_path=target_path,
+            fingerprint=_PathFingerprint(
+                _resolved_missing_path(base, target_path),
+                None,
+                None,
+            ),
         )
     except OSError as exc:
         raise _failure(
@@ -938,10 +956,13 @@ def _observe_path(
         )
     resolved_path = target_path.resolve(strict=True)
     _require_below_base(base, resolved_path)
-    return target_path, _PathFingerprint(
-        resolved_path,
-        _stat_signature(stat_result),
-        _sha256(target_path.read_bytes()),
+    return _PathObservation(
+        target_path=target_path,
+        fingerprint=_PathFingerprint(
+            resolved_path,
+            _stat_signature(stat_result),
+            _sha256(target_path.read_bytes()),
+        ),
     )
 
 

@@ -11,7 +11,7 @@ import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from textwrap import dedent
-from typing import Annotated, Literal, NoReturn, assert_never
+from typing import Annotated, Literal, NamedTuple, NoReturn, assert_never
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -3063,7 +3063,15 @@ def _workspace_file_response_from_domain(
 _MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
-async def _read_upload_file(file: UploadFile) -> tuple[bytes, str | None, str]:
+class _UploadFileData(NamedTuple):
+    """Validated upload bytes and inferred file metadata."""
+
+    data: bytes
+    original_filename: str | None
+    media_type: str
+
+
+async def _read_upload_file(file: UploadFile) -> _UploadFileData:
     """Read an upload within size limits and infer media type from filename."""
     if file.size is not None and file.size > _MAX_UPLOAD_SIZE:
         raise HTTPException(
@@ -3078,7 +3086,11 @@ async def _read_upload_file(file: UploadFile) -> tuple[bytes, str | None, str]:
         )
     original_filename = file.filename
     media_type = guess_media_type(original_filename or "upload")
-    return data, original_filename, media_type
+    return _UploadFileData(
+        data=data,
+        original_filename=original_filename,
+        media_type=media_type,
+    )
 
 
 @router.post("/agents/{agent_id}/upload")

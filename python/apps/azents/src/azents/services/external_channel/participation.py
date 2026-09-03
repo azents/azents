@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,6 +85,13 @@ class ExternalChannelParticipationSettings:
     claim: ExternalChannelSetupClaim | None
     resource: ExternalChannelResource | None
     binding: ExternalChannelBinding | None
+
+
+class _AuthorizedSettingsActor(NamedTuple):
+    """Validated route and its owning Agent display name."""
+
+    route: ExternalChannelAgentRoute
+    agent_name: str
 
 
 @dataclass(frozen=True)
@@ -512,7 +519,7 @@ class ExternalChannelParticipationService:
         route_id: str,
         principal_id: str,
         agent_session_id: str | None,
-    ) -> tuple[ExternalChannelAgentRoute, str]:
+    ) -> _AuthorizedSettingsActor:
         """Revalidate one human provider actor against the selected route."""
         connection = await self.repository.get_connection_configuration(
             session,
@@ -565,7 +572,7 @@ class ExternalChannelParticipationService:
             raise ExternalChannelParticipationError(
                 "External Channel settings Agent is unavailable."
             )
-        return route, agent.name
+        return _AuthorizedSettingsActor(route=route, agent_name=agent.name)
 
     async def select_location(
         self,

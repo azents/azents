@@ -14,6 +14,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import uvicorn
 from azcommon import di
@@ -56,23 +57,33 @@ def admin_app() -> FastAPI:
     return create_admin_api_app(config)
 
 
+class _ApiTargets(NamedTuple):
+    """Public and Admin API targets for the development server."""
+
+    public_target: str | FastAPI
+    admin_target: str | FastAPI
+
+
 def _create_api_targets(
     config: Config,
     *,
     appctx: AppContext[Config],
     container: di.Container,
     reload: bool,
-) -> tuple[str | FastAPI, str | FastAPI]:
+) -> _ApiTargets:
     """Create reload factories or shared-context non-reload API apps."""
     if reload:
-        return "devserver:public_app", "devserver:admin_app"
-    return (
-        create_public_api_app(
+        return _ApiTargets(
+            public_target="devserver:public_app",
+            admin_target="devserver:admin_app",
+        )
+    return _ApiTargets(
+        public_target=create_public_api_app(
             config,
             appctx=appctx,
             container=container,
         ),
-        create_admin_api_app(
+        admin_target=create_admin_api_app(
             config,
             appctx=appctx,
             container=container,

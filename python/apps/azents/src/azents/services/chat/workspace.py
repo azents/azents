@@ -5,7 +5,7 @@ import mimetypes
 import posixpath
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, Protocol, TypeVar, assert_never
+from typing import Literal, NamedTuple, Protocol, TypeVar, assert_never
 
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
@@ -334,6 +334,22 @@ class AgentWorkspaceBulkMoveResult:
     """Agent Workspace bulk move result."""
 
     entries: list[AgentWorkspaceMoveResult]
+
+
+class _WorkspaceFileDownload(NamedTuple):
+    """Downloaded file bytes and their workspace metadata."""
+
+    path: PurePosixPath
+    data: bytes
+    media_type: str
+
+
+class _WorkspacePathPreparation(NamedTuple):
+    """Authorized Runtime target and normalized workspace paths."""
+
+    runtime: RuntimeOperationTarget
+    path: PurePosixPath
+    workspace_root: PurePosixPath
 
 
 AgentWorkspaceFileResult = AgentWorkspaceDirectory | AgentWorkspaceFile
@@ -1253,7 +1269,7 @@ class AgentWorkspaceFileService:
         agent_id: str,
         user_id: str,
         raw_path: str,
-    ) -> Result[tuple[PurePosixPath, bytes, str], AgentWorkspaceError]:
+    ) -> Result[_WorkspaceFileDownload, AgentWorkspaceError]:
         """Return Agent Workspace file download data."""
         access = await self._ensure_active_runtime(agent_id, user_id)
         match access:
@@ -1313,17 +1329,20 @@ class AgentWorkspaceFileService:
             )
         except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
-        return Success((path, data, _guess_media_type(path)))
+        return Success(
+            _WorkspaceFileDownload(
+                path=path,
+                data=data,
+                media_type=_guess_media_type(path),
+            )
+        )
 
     async def _prepare_workspace_path(
         self,
         agent_id: str,
         user_id: str,
         raw_path: str | None,
-    ) -> Result[
-        tuple[RuntimeOperationTarget, PurePosixPath, PurePosixPath],
-        AgentWorkspaceError,
-    ]:
+    ) -> Result[_WorkspacePathPreparation, AgentWorkspaceError]:
         """Verify active Runtime and normalize an Agent Workspace path."""
         access = await self._ensure_active_runtime(agent_id, user_id)
         match access:
@@ -1343,7 +1362,13 @@ class AgentWorkspaceFileService:
             )
         except AgentWorkspacePathDenied as error:
             return Failure(error)
-        return Success((runtime, path, workspace_root))
+        return Success(
+            _WorkspacePathPreparation(
+                runtime=runtime,
+                path=path,
+                workspace_root=workspace_root,
+            )
+        )
 
     async def _ready_access(
         self,

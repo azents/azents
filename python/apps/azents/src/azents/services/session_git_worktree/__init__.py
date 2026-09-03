@@ -8,7 +8,7 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, assert_never
+from typing import Annotated, Literal, NamedTuple, assert_never
 
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
@@ -114,6 +114,20 @@ _AGENT_WORKTREE_BRIDGE_ACTION_TYPES = frozenset(
     {"agent_create_git_worktree", "agent_remove_git_worktree"}
 )
 _MAX_CONTINUATION_SUMMARY_LENGTH = 1000
+
+
+class _WorktreeTargets(NamedTuple):
+    """Generated worktree path and branch name."""
+
+    worktree_path: str
+    branch_name: str
+
+
+class _CleanupClassification(NamedTuple):
+    """Cleanup classification and optional ownership error."""
+
+    classification: Literal["legacy", "canonical"] | None
+    ownership_error: str | None
 
 
 def _is_agent_worktree_bridge_action(action_type: str) -> bool:
@@ -5564,16 +5578,16 @@ def _target_names(
     source_project_path: str,
     path_suffix: int,
     branch_suffix: int,
-) -> tuple[str, str]:
+) -> _WorktreeTargets:
     repo_leaf = _repo_leaf(source_project_path)
     path_leaf = repo_leaf if path_suffix == 1 else f"{repo_leaf}-{path_suffix}"
     branch_base = f"azents/{session_handle}"
     branch_name = (
         branch_base if branch_suffix == 1 else f"{branch_base}-{branch_suffix}"
     )
-    return (
-        (PurePosixPath(worktree_parent_path) / path_leaf).as_posix(),
-        branch_name,
+    return _WorktreeTargets(
+        worktree_path=(PurePosixPath(worktree_parent_path) / path_leaf).as_posix(),
+        branch_name=branch_name,
     )
 
 
@@ -5646,39 +5660,63 @@ def _cleanup_classification(
     session_id: str,
     workspace_root: str,
     working_folder_path: str | None,
-) -> tuple[Literal["legacy", "canonical"] | None, str | None]:
+) -> _CleanupClassification:
     """Classify a recorded allocation or return its cleanup safety error."""
     if allocation.session_id != session_id:
-        return None, "Cleanup request does not match the owning session."
+        return _CleanupClassification(
+            classification=None,
+            ownership_error="Cleanup request does not match the owning session.",
+        )
     worktree_path = PurePosixPath(allocation.worktree_path)
     legacy_worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     try:
         worktree_path.relative_to(legacy_worktree_root)
     except ValueError:
         if working_folder_path is None:
-            return None, "Session working-folder context is missing."
+            return _CleanupClassification(
+                classification=None,
+                ownership_error="Session working-folder context is missing.",
+            )
         try:
             canonical_working_folder_path = validate_session_working_folder_path(
                 working_folder_path,
                 workspace_root=workspace_root,
             )
         except ValueError:
-            return None, "Session working-folder path is invalid."
+            return _CleanupClassification(
+                classification=None,
+                ownership_error="Session working-folder path is invalid.",
+            )
         canonical_parent = PurePosixPath(canonical_working_folder_path) / "worktrees"
         try:
             relative_worktree_path = worktree_path.relative_to(canonical_parent)
         except ValueError:
-            return None, "Recorded worktree path is outside the managed roots."
+            return _CleanupClassification(
+                classification=None,
+                ownership_error="Recorded worktree path is outside the managed roots.",
+            )
         if not relative_worktree_path.parts:
-            return None, "Recorded worktree path is not a worktree child."
+            return _CleanupClassification(
+                classification=None,
+                ownership_error="Recorded worktree path is not a worktree child.",
+            )
         classification: Literal["legacy", "canonical"] = "canonical"
     else:
         classification = "legacy"
     if not allocation.branch_name:
-        return None, "Recorded Git branch name is missing."
+        return _CleanupClassification(
+            classification=None,
+            ownership_error="Recorded Git branch name is missing.",
+        )
     if allocation.branch_created_by is not SessionGitWorktreeBranchCreatedBy.AZENTS:
-        return None, "Recorded Git branch is not Azents-created."
-    return classification, None
+        return _CleanupClassification(
+            classification=None,
+            ownership_error="Recorded Git branch is not Azents-created.",
+        )
+    return _CleanupClassification(
+        classification=classification,
+        ownership_error=None,
+    )
 
 
 def _log_archive_cleanup_failure(
