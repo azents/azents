@@ -11,10 +11,10 @@ References:
 
 import dataclasses
 import logging
-from typing import cast
 from urllib.parse import urlparse
 
 import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,29 @@ class DcrRegistrationResult:
 
     client_id: str
     client_secret: str | None
+
+
+class _DcrRegistrationPayload(BaseModel):
+    """Validated Dynamic Client Registration response payload."""
+
+    client_id: str = Field(min_length=1)
+    client_secret: str | None = None
+
+
+class _ProtectedResourceMetadataPayload(BaseModel):
+    """Validated Protected Resource Metadata response payload."""
+
+    authorization_servers: list[str] = Field(min_length=1)
+
+
+class _AuthorizationServerMetadataPayload(BaseModel):
+    """Validated Authorization Server Metadata response payload."""
+
+    authorization_endpoint: str = Field(min_length=1)
+    token_endpoint: str = Field(min_length=1)
+    registration_endpoint: str | None = None
+    scopes_supported: list[str] = Field(default_factory=list)
+    issuer: str | None = None
 
 
 class DiscoveryError(Exception):
@@ -144,16 +167,15 @@ async def register_client(
     except httpx.HTTPError as exc:
         raise DcrError(f"DCR registration failed: {exc}") from exc
 
-    data = response.json()
-    client_id = data.get("client_id")
-    client_secret = data.get("client_secret")
+    try:
+        data = _DcrRegistrationPayload.model_validate(response.json())
+    except ValidationError as exc:
+        raise DcrError("DCR response missing valid client credentials") from exc
 
-    if not isinstance(client_id, str) or not client_id:
-        raise DcrError("DCR response missing client_id")
-    if not isinstance(client_secret, str) or not client_secret:
-        client_secret = None
-
-    return DcrRegistrationResult(client_id=client_id, client_secret=client_secret)
+    return DcrRegistrationResult(
+        client_id=data.client_id,
+        client_secret=data.client_secret or None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -248,23 +270,14 @@ async def _discover_authorization_server(
     if response is None:
         raise last_error or DiscoveryError("Protected resource metadata request failed")
 
-    data = cast(dict[str, object], response.json())
-    servers_raw = data.get("authorization_servers")
-    if not isinstance(servers_raw, list):
+    try:
+        data = _ProtectedResourceMetadataPayload.model_validate(response.json())
+    except ValidationError as exc:
         raise DiscoveryError(
-            "Protected resource metadata missing authorization_servers"
-        )
-    servers = cast(list[object], servers_raw)
-    if len(servers) == 0:
-        raise DiscoveryError(
-            "Protected resource metadata has empty authorization_servers"
-        )
+            "Protected resource metadata missing valid authorization_servers"
+        ) from exc
 
-    issuer = servers[0]
-    if not isinstance(issuer, str) or not issuer:
-        raise DiscoveryError("Invalid authorization_servers entry")
-
-    return _ensure_absolute_url(issuer, server_url)
+    return _ensure_absolute_url(data.authorization_servers[0], server_url)
 
 
 async def _fetch_as_metadata(
@@ -304,35 +317,15 @@ async def _fetch_as_metadata(
     if response is None:
         raise last_error or DiscoveryError("AS metadata request failed")
 
-    data = cast(dict[str, object], response.json())
-
-    authorization_endpoint = data.get("authorization_endpoint")
-    token_endpoint = data.get("token_endpoint")
-
-    if not isinstance(authorization_endpoint, str) or not authorization_endpoint:
-        raise DiscoveryError("AS metadata missing authorization_endpoint")
-    if not isinstance(token_endpoint, str) or not token_endpoint:
-        raise DiscoveryError("AS metadata missing token_endpoint")
-
-    registration_endpoint = data.get("registration_endpoint")
-    if not isinstance(registration_endpoint, str):
-        registration_endpoint = None
-
-    scopes_raw = data.get("scopes_supported")
-    if isinstance(scopes_raw, list):
-        scopes_list = cast(list[object], scopes_raw)
-        scopes: list[str] = [str(s) for s in scopes_list]
-    else:
-        scopes = []
-
-    issuer = data.get("issuer")
-    if not isinstance(issuer, str):
-        issuer = None
+    try:
+        data = _AuthorizationServerMetadataPayload.model_validate(response.json())
+    except ValidationError as exc:
+        raise DiscoveryError("AS metadata has invalid response shape") from exc
 
     return OAuthServerMetadata(
-        authorization_endpoint=authorization_endpoint,
-        token_endpoint=token_endpoint,
-        registration_endpoint=registration_endpoint,
-        scopes_supported=scopes,
-        issuer=issuer,
+        authorization_endpoint=data.authorization_endpoint,
+        token_endpoint=data.token_endpoint,
+        registration_endpoint=data.registration_endpoint,
+        scopes_supported=data.scopes_supported,
+        issuer=data.issuer,
     )

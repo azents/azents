@@ -5,7 +5,7 @@ import dataclasses
 import logging
 import math
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
-from typing import Annotated, Literal, Protocol, TypeVar
+from typing import Annotated, Literal, Protocol, TypeVar, runtime_checkable
 
 import httpx
 from fastapi import Depends
@@ -38,6 +38,24 @@ ModelStreamSupportTaskKind = Literal[
 ]
 
 T = TypeVar("T")
+
+
+@runtime_checkable
+class _AsyncCloseable(Protocol):
+    """Resource exposing an asynchronous close operation."""
+
+    def aclose(self) -> Awaitable[object]:
+        """Close the resource asynchronously."""
+        ...
+
+
+@runtime_checkable
+class _SyncCloseable(Protocol):
+    """Resource exposing a synchronous close operation."""
+
+    def close(self) -> object:
+        """Close the resource synchronously."""
+        ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -848,10 +866,12 @@ async def close_stream_response(response: object | None) -> None:
     """Close a watched response wrapper after its consumer exits."""
     if response is None:
         return
-    close = getattr(response, "aclose", None) or getattr(response, "close", None)
-    if not callable(close):
+    if isinstance(response, _AsyncCloseable):
+        await response.aclose()
         return
-    result = close()
+    if not isinstance(response, _SyncCloseable):
+        return
+    result = response.close()
     if isinstance(result, Awaitable):
         await result
 

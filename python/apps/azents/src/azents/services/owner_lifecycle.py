@@ -7,7 +7,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Sequence
-from typing import Annotated, AsyncContextManager, Protocol
+from typing import Annotated, AsyncContextManager, NamedTuple, Protocol
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
@@ -32,6 +32,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.external_channel.data import ExternalChannelArchiveTermination
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
@@ -40,6 +41,7 @@ from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleCleanup
 from azents.repos.user import UserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -51,6 +53,13 @@ _JOB_LIMIT = 100
 _DEADLINE_SAFETY_MARGIN = datetime.timedelta(seconds=30)
 
 logger = logging.getLogger(__name__)
+
+
+class OwnerLifecycleAdvanceResult(NamedTuple):
+    """Outcome flags returned after advancing one lifecycle job."""
+
+    completed: bool
+    waiting_purge: bool
 
 
 class OwnerLifecycleSessionManager(Protocol):
@@ -280,11 +289,14 @@ class OwnerLifecycleExternalChannelLifecycleProtocol(Protocol):
         session: AsyncSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
-    ) -> object | None:
+    ) -> ExternalChannelArchiveTermination | None:
         """Apply External Channel archive participant work."""
         ...
 
-    async def consume_archive_cleanup(self, plans: object) -> None:
+    async def consume_archive_cleanup(
+        self,
+        plans: tuple[ProviderEffectPlan, ...],
+    ) -> None:
         """Consume post-commit archive cleanup plans."""
         ...
 
@@ -535,7 +547,7 @@ class OwnerLifecycleService:
         *,
         job: OwnerLifecycleJob,
         lease_owner: str,
-    ) -> tuple[bool, bool]:
+    ) -> OwnerLifecycleAdvanceResult:
         """Advance one owned owner-lifecycle job."""
         if job.kind is OwnerLifecycleKind.MEMBERSHIP_ARCHIVE:
             return await self._advance_membership_archive(
@@ -554,7 +566,7 @@ class OwnerLifecycleService:
         *,
         job: OwnerLifecycleJob,
         lease_owner: str,
-    ) -> tuple[bool, bool]:
+    ) -> OwnerLifecycleAdvanceResult:
         """Archive active User roots after membership loss."""
         if job.workspace_id is None:
             raise RuntimeError("Membership archive job is missing workspace_id")
@@ -597,14 +609,14 @@ class OwnerLifecycleService:
             )
         if not completed:
             raise RuntimeError("Owner lifecycle lease was lost before completion")
-        return True, False
+        return OwnerLifecycleAdvanceResult(completed=True, waiting_purge=False)
 
     async def _advance_account_purge(
         self,
         *,
         job: OwnerLifecycleJob,
         lease_owner: str,
-    ) -> tuple[bool, bool]:
+    ) -> OwnerLifecycleAdvanceResult:
         """Purge all User Sessions and finalize account deletion."""
         async with self.session_manager() as session:
             roots = await self.agent_session_repository.list_user_roots_by_user(
@@ -651,7 +663,7 @@ class OwnerLifecycleService:
                 error_summary="Owned User Session rows remain pending purge",
                 delay=datetime.timedelta(minutes=1),
             )
-            return False, True
+            return OwnerLifecycleAdvanceResult(completed=False, waiting_purge=True)
 
         await self._set_status(
             job_id=job.id,
@@ -684,7 +696,7 @@ class OwnerLifecycleService:
                 "target_user_id": job.user_id,
             },
         )
-        return True, False
+        return OwnerLifecycleAdvanceResult(completed=True, waiting_purge=False)
 
     async def _retire_root_tree(
         self,
@@ -698,7 +710,7 @@ class OwnerLifecycleService:
         stop_session_ids: list[str] = []
         active = False
         archived = False
-        archive_cleanup_plans = ()
+        archive_cleanup_plans: tuple[ProviderEffectPlan, ...] = ()
         async with self.session_manager() as session:
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
@@ -822,11 +834,7 @@ class OwnerLifecycleService:
                         )
                     )
                     if external_result is not None:
-                        archive_cleanup_plans += getattr(
-                            external_result,
-                            "cleanup_plans",
-                            (),
-                        )
+                        archive_cleanup_plans += external_result.cleanup_plans
 
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(

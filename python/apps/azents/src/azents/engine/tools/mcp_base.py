@@ -593,12 +593,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._bg_error = None
         self._artifact_sink = None
         self._entered = False
-        self._agent_id = getattr(self, "_agent_id", "")
-        self._session_id = getattr(self, "_session_id", "")
-        self.session_manager = getattr(self, "session_manager", None)
-        self.on_auth_failure = getattr(self, "on_auth_failure", None)
-        self._state_namespace = getattr(self, "_state_namespace", "mcp")
-        self._state_name = getattr(self, "_state_name", MCP_TOOL_SNAPSHOT_STATE_NAME)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent ID for Toolkit State identity."""

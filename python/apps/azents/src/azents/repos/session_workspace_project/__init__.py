@@ -3,7 +3,7 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Any, Literal, cast
+from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
@@ -656,16 +656,14 @@ class SessionWorkspaceProjectRepository:
             session,
             session_id=session_id,
         )
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
-                sa.delete(RDBSessionAgentContextProject).where(
-                    RDBSessionAgentContextProject.id == project_id,
-                    RDBSessionAgentContextProject.session_agent_context_id
-                    == context_id,
-                )
-            ),
+        result = await session.execute(
+            sa.delete(RDBSessionAgentContextProject).where(
+                RDBSessionAgentContextProject.id == project_id,
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
+            )
         )
+        if not isinstance(result, CursorResult):
+            raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
         await session.flush()
         return result.rowcount > 0
 

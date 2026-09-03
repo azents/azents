@@ -1,6 +1,6 @@
 """Memory repository."""
 
-from typing import Any, List, cast
+from typing import List
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
@@ -311,12 +311,11 @@ class MemoryRepository:
         :param memory_id: Memory ID
         :return: Deletion flag (True=existed, False=absent)
         """
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
-                sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
-            ),
+        result = await session.execute(
+            sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
         )
+        if not isinstance(result, CursorResult):
+            raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
         return result.rowcount > 0
 
     async def list_summaries(
@@ -477,7 +476,9 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = cast(CursorResult[Any], await session.execute(stmt))
+        result = await session.execute(stmt)
+        if not isinstance(result, CursorResult):
+            raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
         return result.rowcount > 0
 
     async def count(
@@ -521,12 +522,11 @@ class MemoryRepository:
         :param user_id: Associated User ID
         :return: Deleted row count
         """
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
-                sa.delete(RDBAgentMemory).where(RDBAgentMemory.user_id == user_id)
-            ),
+        result = await session.execute(
+            sa.delete(RDBAgentMemory).where(RDBAgentMemory.user_id == user_id)
         )
+        if not isinstance(result, CursorResult):
+            raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
         return int(result.rowcount or 0)
 
     # ------------------------------------------------------------------

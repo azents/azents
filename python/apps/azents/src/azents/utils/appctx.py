@@ -15,7 +15,6 @@ from typing import (
     Protocol,
     Self,
     TypeVar,
-    cast,
 )
 
 from azcommon.sync import KeyLock
@@ -69,7 +68,7 @@ class AppContext(Generic[C]):
                         self._variables[key] = await self._stack.enter_async_context(
                             cm()
                         )
-            return cast(T_co, self._variables[key])
+            return self._variables[key]
         finally:
             async with self._variable_condition:
                 self._active_variable_operations -= 1

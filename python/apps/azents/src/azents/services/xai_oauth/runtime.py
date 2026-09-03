@@ -1,7 +1,6 @@
 """xAI OAuth runtime token refresh support."""
 
 import datetime
-from typing import cast
 
 import httpx
 from azcommon.result import Failure, Result, Success
@@ -118,7 +117,9 @@ async def _persist_refresh_success(
     tokens: TokenSet,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected]:
     """Store refresh success result and return latest integration."""
-    config = cast(XaiOAuthConfig, integration.config)
+    if not isinstance(integration.config, XaiOAuthConfig):
+        return Failure(ProviderRejected(reason="xAI OAuth integration is invalid"))
+    config = integration.config
     async with session_manager() as session:
         update = await integration_repository.update_by_id(
             session,
@@ -160,8 +161,12 @@ async def _persist_refresh_failure(
     error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
 ) -> LLMProviderIntegrationWithSecrets | None:
     """Store refresh failure state or return concurrent refresh success result."""
-    config = cast(XaiOAuthConfig, integration.config)
-    original_secrets = cast(XaiOAuthSecrets, integration.secrets)
+    if not isinstance(integration.config, XaiOAuthConfig) or not isinstance(
+        integration.secrets, XaiOAuthSecrets
+    ):
+        return None
+    config = integration.config
+    original_secrets = integration.secrets
     async with session_manager() as session:
         latest = await integration_repository.get_by_id_with_secrets(
             session, integration.id

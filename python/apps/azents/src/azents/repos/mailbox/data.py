@@ -1,7 +1,7 @@
 """MailboxItem repository data models."""
 
 import datetime
-from typing import Annotated, Literal, TypeAlias, cast
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -210,7 +210,7 @@ def mailbox_payload_from_fields(
         item_key=f"{kind.value}:0",
         presentation_kind=kind.value,
         content=content,
-        metadata=cast(dict[str, JSONValue], metadata),
+        metadata={key: value for key, value in metadata.items()},
         action=action,
         attachments=attachments,
         file_parts=file_parts,
