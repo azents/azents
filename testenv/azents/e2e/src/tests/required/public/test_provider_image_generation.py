@@ -5,7 +5,6 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import cast
 
 import azentsadminclient
 import azentspublicclient
@@ -159,10 +158,10 @@ def _last_user_text(request: dict[str, object]) -> str | None:
         return input_value
     if not isinstance(input_value, list):
         return None
-    for raw_item in reversed(cast(list[object], input_value)):
+    for raw_item in reversed(input_value):
         if not isinstance(raw_item, dict):
             continue
-        item = cast(dict[str, object], raw_item)
+        item = json_object_payload(raw_item, label="Responses input item")
         if item.get("role") != "user":
             continue
         content = item.get("content")
@@ -171,10 +170,10 @@ def _last_user_text(request: dict[str, object]) -> str | None:
         if not isinstance(content, list):
             return None
         text_parts: list[str] = []
-        for raw_part in cast(list[object], content):
+        for raw_part in content:
             if not isinstance(raw_part, dict):
                 continue
-            part = cast(dict[str, object], raw_part)
+            part = json_object_payload(raw_part, label="Responses input content")
             text = part.get("text")
             if part.get("type") == "input_text" and isinstance(text, str):
                 text_parts.append(text)
@@ -198,26 +197,20 @@ def _count_string_occurrences(value: object, needle: str) -> int:
     if isinstance(value, str):
         return value.count(needle)
     if isinstance(value, list):
-        items = cast(list[object], value)
-        return sum(_count_string_occurrences(item, needle) for item in items)
+        return sum(_count_string_occurrences(item, needle) for item in value)
     if isinstance(value, dict):
-        mapping = cast(dict[object, object], value)
-        return sum(_count_string_occurrences(item, needle) for item in mapping.values())
+        return sum(_count_string_occurrences(item, needle) for item in value.values())
     return 0
 
 
 def _count_typed_items(value: object, item_type: str) -> int:
     """Count nested request objects with one exact Responses item type."""
     if isinstance(value, list):
-        items = cast(list[object], value)
-        return sum(_count_typed_items(item, item_type) for item in items)
+        return sum(_count_typed_items(item, item_type) for item in value)
     if not isinstance(value, dict):
         return 0
-    mapping = cast(dict[object, object], value)
-    current = 1 if mapping.get("type") == item_type else 0
-    return current + sum(
-        _count_typed_items(item, item_type) for item in mapping.values()
-    )
+    current = 1 if value.get("type") == item_type else 0
+    return current + sum(_count_typed_items(item, item_type) for item in value.values())
 
 
 class TestProviderImageGeneration:
@@ -350,8 +343,9 @@ class TestProviderImageGeneration:
         assert attachment.get("availability") == "available"
         assert attachment.get("media_type") == "image/png"
         assert attachment.get("size") == len(_IMAGE_BYTES)
-        assert isinstance(attachment.get("uri"), str)
-        assert cast(str, attachment["uri"]).startswith("exchange://")
+        attachment_uri = attachment.get("uri")
+        assert isinstance(attachment_uri, str)
+        assert attachment_uri.startswith("exchange://")
         attachment_id = attachment.get("attachment_id")
         assert isinstance(attachment_id, str)
 
@@ -407,7 +401,7 @@ class TestProviderImageGeneration:
             item for item in input_items if item.get("type") == "image_generation_call"
         ]
         assert len(image_items) == 1
-        assert _count_string_occurrences(input_items, cast(str, attachment["uri"])) == 1
+        assert _count_string_occurrences(input_items, attachment_uri) == 1
         assert _count_typed_items(input_items, "input_image") == 0
         replayed_result = image_items[0].get("result")
         assert isinstance(replayed_result, str)

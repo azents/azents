@@ -3,7 +3,7 @@
 import json
 import time
 from dataclasses import dataclass, replace
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -571,10 +571,10 @@ def _tool_result_output_text(event: dict[str, object]) -> str | None:
         return output
     if isinstance(output, list):
         texts: list[str] = []
-        for part in cast("list[object]", output):
+        for part in output:
             if not isinstance(part, dict):
                 continue
-            part_dict = cast("dict[str, object]", part)
+            part_dict = _json_object_payload(part, label="tool result output part")
             text = part_dict.get("text")
             if isinstance(text, str):
                 texts.append(text)
@@ -649,7 +649,7 @@ def _wait_for_tool_result_outcome(
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict):
-                parsed_dict = cast(dict[str, object], parsed)
+                parsed_dict = _json_object_payload(parsed, label="tool result outcome")
                 if all(
                     parsed_dict.get(key) == value for key, value in expected.items()
                 ):
