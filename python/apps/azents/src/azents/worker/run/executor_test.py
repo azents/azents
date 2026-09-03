@@ -8,7 +8,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypedDict, Unpack
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,8 +16,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
-from azents.broker.broadcast import WebSocketBroadcast
-from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
+from azents.broker.types import PublishedEvent, SessionWakeUp
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -52,7 +51,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
-from azents.core.tools import ToolkitContext, ToolkitExecutionMode, ToolkitProvider
+from azents.core.tools import ToolkitContext, ToolkitExecutionMode
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -78,7 +77,6 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.events.user_messages import make_run_user_message
-from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import (
     AgentEngineProtocol,
     RunContext,
@@ -114,36 +112,19 @@ from azents.engine.run.types import (
     PollMessages,
     PollMessagesResult,
 )
-from azents.engine.tools.builtin import BuiltinToolkitProvider
-from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkit,
-    DynamicWorktreeToolkitProvider,
 )
-from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
-from azents.engine.tools.goal import GoalToolkitProvider
-from azents.engine.tools.scheduled import ScheduledToolkitProvider
-from azents.engine.tools.skill import SkillToolkitProvider
-from azents.engine.tools.subagent import SubagentToolkitProvider
-from azents.engine.tools.todo import TodoToolkitProvider
-from azents.rdb.session import SessionManager
 from azents.repos.action_execution.data import ActionExecution
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.mailbox.data import MailboxItem
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
-from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
     MailboxPreparationContext,
-    MailboxService,
     PendingInputInferenceProfile,
     PreparedMailboxFiles,
     PromotedMailboxItems,
@@ -151,14 +132,10 @@ from azents.services.mailbox import (
     TurnEffect,
     build_external_channel_mailbox_payload,
 )
-from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
-    SessionGitWorktreeService,
 )
-from azents.services.session_title import SessionTitleService
 from azents.services.turn_action import TurnActionCapabilityRegistry
-from azents.services.vfs import VfsProjectionService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -167,7 +144,6 @@ from azents.testing.model_selection import (
 from azents.testing.types import is_string_object_dict
 from azents.transport.chat import chat_live_run_updated_dump
 from azents.worker.config import AgentWorkerConfig
-from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import (
     OperationActionProcessResult,
     RunExecutor,
@@ -183,13 +159,64 @@ from azents.worker.session.execution_snapshot import (
     CanonicalExecutionWorkDriftError,
     PendingCommandSnapshot,
 )
-from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.supervisor import ToolAdmissionBarrier
-from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
-class _DBSession:
+class _ProfileFailureKwargs(TypedDict):
+    """Typed profile-resolution callback payload."""
+
+    run_id: str
+    failure_code: InferenceProfileFailureCode
+    failure_message: str
+
+
+class _CommandKwargs(TypedDict):
+    """Typed pending-command callback payload."""
+
+    command_id: str
+
+
+class _CapabilityKwargs(TypedDict):
+    """Typed toolkit capability callback payload."""
+
+    runtime_capability_resolver: RuntimeCapabilityResolver
+
+
+class _PendingInputKwargs(TypedDict):
+    """Typed pending-input callback payload."""
+
+    pending: PendingInputInferenceProfile
+
+
+class _ActionabilityKwargs(TypedDict):
+    """Typed actionability callback payload."""
+
+    process_actions: bool
+
+
+class _TurnEligibilityKwargs(TypedDict):
+    """Typed turn-eligibility callback payload."""
+
+    initial_turn_eligible: bool
+
+
+class _ResolvedSelectionKwargs(TypedDict):
+    """Typed recovered-run resolution callback payload."""
+
+    resolved_model_selection: AgentModelSelection
+
+
+class _OperationActionKwargs(TypedDict):
+    """Typed operation-action callback payload."""
+
+    operation_action: object | None
+
+
+class _DBSession(AsyncSession):
     """Minimal DB session test double."""
+
+    def __init__(self) -> None:
+        """Avoid opening a real database session."""
 
     async def commit(self) -> None:
         """Accept transaction commits."""
@@ -200,7 +227,7 @@ class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
 
     async def __aenter__(self) -> AsyncSession:
         """Return a dummy DB session."""
-        return cast(AsyncSession, _DBSession())
+        return _DBSession()
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -268,6 +295,15 @@ class _PendingRun:
     model_call_started_at: datetime.datetime | None = None
     active_tool_calls: list[ActiveToolCall] = dataclasses.field(default_factory=list)
     retry_state: FailedRunRetryState | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class _SessionAgentStub:
+    """Minimal typed SessionAgent projection used by executor tests."""
+
+    id: str
+    root_session_agent_id: str = ""
+    agent_session_id: str = ""
 
 
 class _SessionLifecycle:
@@ -354,11 +390,11 @@ class _SessionLifecycle:
         *,
         owner_generation: int,
         run_id: str,
-        status: object,
+        status: AgentRunStatus,
     ) -> None:
         """Record terminal run updates."""
         del session_id, owner_generation
-        self.terminal_runs.append((run_id, cast(AgentRunStatus, status)))
+        self.terminal_runs.append((run_id, status))
 
     async def update_agent_run_retry_state(
         self,
@@ -504,15 +540,15 @@ class _SessionLifecycle:
     async def fail_pending_agent_run_profile(
         self,
         session_id: str,
-        **kwargs: object,
+        **kwargs: Unpack[_ProfileFailureKwargs],
     ) -> _PendingRun:
         """Accept terminal profile failure persistence."""
         del session_id
         self.pending_profile_failures.append(
             (
-                cast(str, kwargs["run_id"]),
-                cast(InferenceProfileFailureCode, kwargs["failure_code"]),
-                cast(str, kwargs["failure_message"]),
+                kwargs["run_id"],
+                kwargs["failure_code"],
+                kwargs["failure_message"],
             )
         )
         return _PendingRun()
@@ -536,10 +572,10 @@ class _SessionLifecycle:
     async def clear_pending_command(
         self,
         session_id: str,
-        **kwargs: object,
+        **kwargs: Unpack[_CommandKwargs],
     ) -> None:
         """Accept fenced pending-command cleanup."""
-        self.cleared_commands.append((session_id, cast(str, kwargs["command_id"])))
+        self.cleared_commands.append((session_id, kwargs["command_id"]))
 
     async def set_inference_state(
         self,
@@ -664,8 +700,8 @@ class _AgentSessionRepository:
         self,
         *,
         inference_state: SessionInferenceState | None = None,
-        current_session_agent: object | None = None,
-        tree_session_agents: list[object] | None = None,
+        current_session_agent: _SessionAgentStub | None = None,
+        tree_session_agents: list[_SessionAgentStub] | None = None,
         owner_generation: int = 1,
     ) -> None:
         self.inference_state = inference_state
@@ -718,7 +754,7 @@ class _AgentSessionRepository:
         session: AsyncSession,
         *,
         root_session_agent_id: str,
-    ) -> list[object]:
+    ) -> list[_SessionAgentStub]:
         """Return the configured SessionAgent tree."""
         del session, root_session_agent_id
         return self.tree_session_agents
@@ -727,7 +763,7 @@ class _AgentSessionRepository:
         self,
         session: AsyncSession,
         session_id: str,
-    ) -> object | None:
+    ) -> _SessionAgentStub | None:
         """Return the configured current SessionAgent."""
         del session, session_id
         return self.current_session_agent
@@ -736,7 +772,7 @@ class _AgentSessionRepository:
         self,
         session: AsyncSession,
         session_agent_id: str,
-    ) -> object | None:
+    ) -> _SessionAgentStub | None:
         """Return a configured SessionAgent by ID."""
         del session
         candidates = [self.current_session_agent, *self.tree_session_agents]
@@ -744,8 +780,8 @@ class _AgentSessionRepository:
             (
                 candidate
                 for candidate in candidates
-                if candidate is not None
-                and getattr(candidate, "id", None) == session_agent_id
+                if isinstance(candidate, _SessionAgentStub)
+                and candidate.id == session_agent_id
             ),
             None,
         )
@@ -898,7 +934,7 @@ class _Engine:
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Emit RunComplete immediately."""
@@ -923,7 +959,7 @@ class _RecordingEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Record the request before completing the run."""
@@ -948,7 +984,7 @@ class _BoundarySwitchEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Poll the first boundary, then complete the rebuilt request."""
@@ -958,8 +994,8 @@ class _BoundarySwitchEngine(_Engine):
 
         async def iterator() -> AsyncIterator[Emit]:
             if len(self.requests) == 1:
-                poll = cast(PollMessages, poll_messages)
-                poll_result = await poll()
+                assert callable(poll_messages)
+                poll_result = await poll_messages()
                 assert poll_result.context_invalidated is True
                 return
             yield ephemeral(RunComplete(run_id=context.run_id))
@@ -979,7 +1015,7 @@ class _FlakyEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt and complete the second."""
@@ -1042,7 +1078,7 @@ class _RetryAcrossTurnsEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Recover turn one, cross its output boundary, then fail turn two."""
@@ -1072,7 +1108,7 @@ class _InternalFlakyEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt with a generic exception and complete the second."""
@@ -1112,7 +1148,7 @@ class _AlwaysFailingEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Always fail the attempt."""
@@ -1138,7 +1174,7 @@ class _AlwaysProviderFailingEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Raise the configured provider failure for every attempt."""
@@ -1164,7 +1200,7 @@ class _ProviderFailThenStopEngine(_Engine):
         request: RunRequest,
         context: object,
         *,
-        poll_messages: object = None,
+        poll_messages: PollMessages | None = None,
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt and stop the next attempt."""
@@ -1385,26 +1421,31 @@ class _UserStopFinalizer:
         self.interrupted_runs.append((session_id, run_id))
 
 
+def _run_executor(**kwargs: Any) -> RunExecutor:  # noqa: ANN401
+    """Construct a RunExecutor from test-owned dependency doubles."""
+    return RunExecutor(**kwargs)
+
+
 def _executor(
-    session_lifecycle: _SessionLifecycle | None = None,
+    session_lifecycle: Any | None = None,  # noqa: ANN401
     *,
-    engine: AgentEngineProtocol | None = None,
-    agent: object | None = None,
-    failed_run_finalizer: object | None = None,
-    user_stop_finalizer: _UserStopFinalizer | None = None,
-    command_registry: dict[str, CommandHandler] | None = None,
-    agent_session_repository: _AgentSessionRepository | None = None,
-    live_event_projector: _LiveEventProjector | None = None,
-    mailbox_item_service: _MailboxService | None = None,
-    session_git_worktree_service: _SessionGitWorktreeService | None = None,
-    vfs_projection_service: _VfsProjectionService | None = None,
+    engine: Any | None = None,  # noqa: ANN401
+    agent: Any | None = None,  # noqa: ANN401
+    failed_run_finalizer: Any | None = None,  # noqa: ANN401
+    user_stop_finalizer: Any | None = None,  # noqa: ANN401
+    command_registry: Any | None = None,  # noqa: ANN401
+    agent_session_repository: Any | None = None,  # noqa: ANN401
+    live_event_projector: Any | None = None,  # noqa: ANN401
+    mailbox_item_service: Any | None = None,  # noqa: ANN401
+    session_git_worktree_service: Any | None = None,  # noqa: ANN401
+    vfs_projection_service: Any | None = None,  # noqa: ANN401
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
     if session_lifecycle is None:
         session_lifecycle = _SessionLifecycle()
     if engine is None:
-        engine = cast(AgentEngineProtocol, _Engine())
+        engine = _Engine()
     if failed_run_finalizer is None:
         failed_run_finalizer = _FailedRunFinalizer()
     if user_stop_finalizer is None:
@@ -1449,27 +1490,31 @@ def _executor(
         session_git_worktree_service = _SessionGitWorktreeService()
     if vfs_projection_service is None:
         vfs_projection_service = _VfsProjectionService()
-    return RunExecutor(
-        broker=cast(SessionBroker, object()),
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+    capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
+        "agent_session_repository": agent_session_repository,
+        "goal_store": object(),
+        "skill_store": object(),
+        "vfs_projection_service": None,
+    }
+    operation_executor_kwargs: dict[str, Any] = {  # noqa: ANN401
+        "capabilities": TurnActionCapabilityRegistry(**capability_registry_kwargs),
+        "session_git_worktree_service": session_git_worktree_service,
+    }
+    return _run_executor(
+        broker=object(),
+        session_manager=_SessionManager(),
         engine=engine,
-        agent_repository=cast(AgentRepository, _AgentRepository(agent)),
+        agent_repository=_AgentRepository(agent),
         command_registry=command_registry,
-        integration_repository=cast(LLMProviderIntegrationRepository, object()),
-        toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
-        vfs_projection_service=cast(
-            VfsProjectionService[AsyncSession],
-            vfs_projection_service,
-        ),
-        agent_toolkit_repository=cast(AgentToolkitRepository, object()),
-        toolkit_repository=cast(ToolkitRepository, object()),
-        agent_runtime_repository=cast(AgentRuntimeRepository, object()),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        event_transcript_repository=cast(Any, object()),
-        session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
+        integration_repository=object(),
+        toolkit_registry={},
+        vfs_projection_service=vfs_projection_service,
+        agent_toolkit_repository=object(),
+        toolkit_repository=object(),
+        agent_runtime_repository=object(),
+        agent_session_repository=agent_session_repository,
+        event_transcript_repository=object(),
+        session_lifecycle=session_lifecycle,
         worker_config=AgentWorkerConfig(
             web_url="http://localhost:3000",
             oauth_secret_key="test-secret",
@@ -1482,55 +1527,31 @@ def _executor(
                 max_backoff_seconds=60,
             ),
         ),
-        exchange_file_service=cast(ExchangeFileService, object()),
-        model_file_service=cast(ModelFileService, object()),
-        mailbox_item_service=cast(MailboxService, mailbox_item_service),
-        session_git_worktree_service=cast(
-            SessionGitWorktreeService,
-            session_git_worktree_service,
-        ),
+        exchange_file_service=object(),
+        model_file_service=object(),
+        mailbox_item_service=mailbox_item_service,
+        session_git_worktree_service=session_git_worktree_service,
         operation_action_executor=OperationActionExecutorRegistry(
-            capabilities=TurnActionCapabilityRegistry(
-                agent_session_repository=cast(
-                    AgentSessionRepository,
-                    agent_session_repository,
-                ),
-                goal_store=cast(Any, object()),
-                skill_store=cast(Any, object()),
-                vfs_projection_service=None,
-            ),
-            session_git_worktree_service=cast(
-                SessionGitWorktreeService,
-                session_git_worktree_service,
-            ),
+            **operation_executor_kwargs
         ),
-        session_title_service=cast(SessionTitleService, _SessionTitleService()),
-        live_event_projector=cast(LiveEventProjector, live_event_projector),
-        user_stop_finalizer=cast(UserStopFinalizer, user_stop_finalizer),
-        failed_run_finalizer=cast(Any, failed_run_finalizer),
-        builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
-        claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
-        todo_toolkit_provider=cast(TodoToolkitProvider, object()),
-        goal_toolkit_provider=cast(GoalToolkitProvider, object()),
-        scheduled_toolkit_provider=cast(
-            ScheduledToolkitProvider,
-            SimpleNamespace(
-                channel_service=SimpleNamespace(
-                    create_initial_tracker=AsyncMock(return_value=None)
-                )
-            ),
+        session_title_service=_SessionTitleService(),
+        live_event_projector=live_event_projector,
+        user_stop_finalizer=user_stop_finalizer,
+        failed_run_finalizer=failed_run_finalizer,
+        builtin_toolkit_provider=object(),
+        claude_rules_toolkit_provider=object(),
+        todo_toolkit_provider=object(),
+        goal_toolkit_provider=object(),
+        scheduled_toolkit_provider=SimpleNamespace(
+            channel_service=SimpleNamespace(
+                create_initial_tracker=AsyncMock(return_value=None)
+            )
         ),
-        external_channel_toolkit_provider=cast(
-            ExternalChannelToolkitProvider,
-            object(),
-        ),
-        skill_toolkit_provider=cast(SkillToolkitProvider, object()),
-        subagent_toolkit_provider=cast(SubagentToolkitProvider, object()),
-        dynamic_worktree_toolkit_provider=cast(
-            DynamicWorktreeToolkitProvider,
-            object(),
-        ),
-        broadcast=cast(WebSocketBroadcast, object()),
+        external_channel_toolkit_provider=object(),
+        skill_toolkit_provider=object(),
+        subagent_toolkit_provider=object(),
+        dynamic_worktree_toolkit_provider=object(),
+        broadcast=object(),
     )
 
 
@@ -1545,7 +1566,7 @@ async def test_idle_continuation_toolkits_use_persisted_session_workspace(
     async def resolve_tools(
         agent_id: str,
         context: ToolkitContext,
-        **kwargs: object,
+        **kwargs: Unpack[_CapabilityKwargs],
     ) -> list[ToolkitBinding]:
         """Capture the toolkit resolution context."""
         del agent_id, kwargs
@@ -1574,7 +1595,7 @@ def _runtime_agent(
     *,
     state: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
     version: int = 1,
-) -> SimpleNamespace:
+) -> Any:  # noqa: ANN401
     """Create Runtime capability fields used by Worker resolution tests."""
     return SimpleNamespace(
         memory_enabled=True,
@@ -1599,13 +1620,11 @@ async def test_idle_continuation_projects_runtime_tools_from_capability_snapshot
     async def resolve_tools(
         agent_id: str,
         context: ToolkitContext,
-        **kwargs: object,
+        **kwargs: Unpack[_CapabilityKwargs],
     ) -> list[ToolkitBinding]:
         """Capture the idle continuation resolver."""
         del agent_id, context
-        captured.append(
-            cast(RuntimeCapabilityResolver, kwargs["runtime_capability_resolver"])
-        )
+        captured.append(kwargs["runtime_capability_resolver"])
         return []
 
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
@@ -1641,7 +1660,7 @@ async def test_runtime_capability_resolver_fails_closed() -> None:
     executor = _executor(agent=agent)
     resolver = executor._runtime_capability_resolver(
         agent_id="agent-001",
-        agent=cast(Agent, agent),
+        agent=agent,
     )
 
     assert not resolver.project((RuntimeCapability.WORKSPACE,))
@@ -1655,11 +1674,8 @@ async def test_runtime_capability_resolver_fails_closed() -> None:
     assert decision.expected_version == 3
     assert decision.actual_version == 4
 
-    missing_executor = _executor()
-    missing_executor.agent_repository = cast(
-        AgentRepository,
-        _AgentRepository(default_if_none=False),
-    )
+    missing_executor: Any = _executor()
+    missing_executor.agent_repository = _AgentRepository(default_if_none=False)
     missing_resolver = missing_executor._runtime_capability_resolver(
         agent_id="missing-agent",
         agent=None,
@@ -2261,7 +2277,7 @@ async def test_execute_reports_resolve_failure(
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
-        shutdown_event=cast(asyncio.Event, object()),
+        shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
@@ -2332,12 +2348,12 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         ),
     ]
 
-    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+    async def resolve_recovered(
+        *args: object,
+        **kwargs: Unpack[_ResolvedSelectionKwargs],
+    ) -> object:
         del args
-        resolved_selection = cast(
-            AgentModelSelection,
-            kwargs["resolved_model_selection"],
-        )
+        resolved_selection = kwargs["resolved_model_selection"]
         recovered_snapshots.append(resolved_selection)
         return Success(
             RunRequest(
@@ -2363,13 +2379,11 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     async def resolve_tools(
         agent_id: str,
         context: ToolkitContext,
-        **kwargs: object,
+        **kwargs: Unpack[_CapabilityKwargs],
     ) -> list[ToolkitBinding]:
         """Capture the active Run capability resolver."""
         del agent_id, context
-        captured_resolvers.append(
-            cast(RuntimeCapabilityResolver, kwargs["runtime_capability_resolver"])
-        )
+        captured_resolvers.append(kwargs["runtime_capability_resolver"])
         return []
 
     async def peek_pending_input(
@@ -2380,10 +2394,10 @@ async def test_execute_recovers_activated_run_before_flushing_input(
 
     async def promote_pending_input(
         *args: object,
-        **kwargs: object,
+        **kwargs: Unpack[_PendingInputKwargs],
     ) -> PromotedMailboxItems:
         del args
-        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        pending = kwargs["pending"]
         assert pending.requested_inference_profile == pending_profile
         order.append("input")
         return PromotedMailboxItems(
@@ -2554,10 +2568,13 @@ async def test_execute_recovers_activated_command_run(
     command_handler = _CommandHandler([])
     executor = _executor(
         session_lifecycle=lifecycle,
-        command_registry={"compact": cast(CommandHandler, command_handler)},
+        command_registry={"compact": command_handler},
     )
 
-    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+    async def resolve_recovered(
+        *args: object,
+        **kwargs: Unpack[_ResolvedSelectionKwargs],
+    ) -> object:
         del args, kwargs
         return Success(
             RunRequest(
@@ -2662,7 +2679,10 @@ async def test_execute_recovers_durable_retry_budget(
             has_actionable_work=False,
         )
 
-    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+    async def resolve_recovered(
+        *args: object,
+        **kwargs: Unpack[_ResolvedSelectionKwargs],
+    ) -> object:
         del args, kwargs
         return Success(
             RunRequest(
@@ -3009,11 +3029,11 @@ async def test_prepare_fresh_turn_fails_closed_when_agent_is_missing(
     """Missing canonical Agent rows do not resolve, dispatch, or commit."""
     agent_repository = _AgentRepository(default_if_none=False)
     session_repository = _AgentSessionRepository()
-    executor = _executor(
-        agent=cast(object, None),
+    executor: Any = _executor(
+        agent=None,
         agent_session_repository=session_repository,
     )
-    executor.agent_repository = cast(AgentRepository, agent_repository)
+    executor.agent_repository = agent_repository
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3295,7 +3315,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
-        shutdown_event=cast(asyncio.Event, object()),
+        shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
@@ -3308,9 +3328,11 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
 
 def test_dynamic_worktree_binding_receives_current_run_boundary() -> None:
     """The reconciled Toolkit receives the private boundary for this exact Run."""
+    worktree_service: Any = object()
+    broker: Any = object()
     toolkit = DynamicWorktreeToolkit(
-        service=cast(SessionGitWorktreeService, object()),
-        broker=cast(SessionBroker, object()),
+        service=worktree_service,
+        broker=broker,
         agent_id="agent-001",
         session_id="session-001",
     )
@@ -3465,9 +3487,12 @@ async def test_boundary_poll_processes_turn_actions(
     message = _message()
     process_actions_values: list[bool] = []
 
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+    async def poll_run_inputs(
+        *args: object,
+        **kwargs: Unpack[_ActionabilityKwargs],
+    ) -> RunInputPollResult:
         del args
-        process_actions_values.append(cast(bool, kwargs["process_actions"]))
+        process_actions_values.append(kwargs["process_actions"])
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
@@ -3537,7 +3562,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     monkeypatch.setattr(
         executor,
         "mailbox_item_service",
-        cast(MailboxService, PendingMailboxService()),
+        PendingMailboxService(),
     )
 
     context_invalidated = False
@@ -3668,11 +3693,11 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
             requested_inference_profile=None,
         ),
     ]
-    processor = ExternalChannelMessageMailboxProcessor(
-        cast(MailboxService, SimpleNamespace())
-    )
+    processor_service: Any = SimpleNamespace()
+    processor = ExternalChannelMessageMailboxProcessor(processor_service)
+    db_session: Any = object()
     preparation_context = MailboxPreparationContext(
-        session=cast(AsyncSession, object()),
+        session=db_session,
         session_id="session-1",
         active_run_id=None,
         required_inference_profile=None,
@@ -3690,9 +3715,12 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
         assert session_id == "session-1"
         return profiles.pop(0)
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args
-        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        pending = kwargs["pending"]
         assert pending.mailbox_item_id is not None
         buffer = buffers[pending.mailbox_item_id]
         outcome = await processor.process(preparation_context, buffer)
@@ -3803,9 +3831,12 @@ async def test_poll_run_inputs_defers_append_after_empty_read_to_next_wake(
         assert session_id == "session-1"
         return profiles.pop(0)
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args
-        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        pending = kwargs["pending"]
         assert pending.mailbox_item_id is not None
         promoted_buffer_ids.append(pending.mailbox_item_id)
         return PromotedMailboxItems(
@@ -3945,13 +3976,16 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     ]
     processed_operation_actions: list[object | None] = []
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
     async def process_operation_actions(
         *args: object,
-        **kwargs: object,
+        **kwargs: Unpack[_OperationActionKwargs],
     ) -> OperationActionProcessResult:
         del args
         processed_operation_actions.append(kwargs["operation_action"])
@@ -4024,7 +4058,10 @@ async def test_poll_run_inputs_stops_fifo_after_bridge_action_completion(
     process_calls = 0
     queued_poll_calls = 0
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -4113,7 +4150,10 @@ async def test_poll_run_inputs_completes_predecessor_without_promoting_continuat
     ]
     queued_poll_calls = 0
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -4223,7 +4263,10 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
         assert session_id == "session-1"
         return profiles.pop(0)
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -4266,12 +4309,12 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Committed cursor changes notify viewers without failing on one error."""
-    root_agent = SimpleNamespace(
+    root_agent = _SessionAgentStub(
         id="root-agent",
         root_session_agent_id="root-agent",
         agent_session_id="root-session",
     )
-    child_agent = SimpleNamespace(
+    child_agent = _SessionAgentStub(
         id="child-agent",
         root_session_agent_id="root-agent",
         agent_session_id="child-session",
@@ -4315,7 +4358,10 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         ),
     ]
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         result = promoted_batches.pop(0)
         order.append("promotion_committed")
@@ -4400,7 +4446,10 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         ),
     ]
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+    async def promote(
+        *args: object,
+        **kwargs: Unpack[_PendingInputKwargs],
+    ) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -4614,9 +4663,12 @@ async def test_execute_preserves_actionable_transcript_eligibility(
         assert session_id == "session-001"
         return True
 
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+    async def poll_run_inputs(
+        *args: object,
+        **kwargs: Unpack[_TurnEligibilityKwargs],
+    ) -> RunInputPollResult:
         del args
-        initial_turn_eligibility.append(cast(bool, kwargs["initial_turn_eligible"]))
+        initial_turn_eligibility.append(kwargs["initial_turn_eligible"])
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
@@ -4704,7 +4756,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
-        shutdown_event=cast(asyncio.Event, object()),
+        shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
@@ -4742,7 +4794,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
     )
     executor = _executor(
         lifecycle,
-        command_registry={"compact": cast(CommandHandler, handler)},
+        command_registry={"compact": handler},
         agent_session_repository=session_repository,
         live_event_projector=live_event_projector,
     )
@@ -4843,7 +4895,7 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         lifecycle,
-        command_registry={"compact": cast(CommandHandler, _FailingCommandHandler())},
+        command_registry={"compact": _FailingCommandHandler()},
         agent_session_repository=session_repository,
         failed_run_finalizer=finalizer,
         failed_run_max_retries=1,
@@ -4889,7 +4941,7 @@ async def test_execute_stop_wins_race_with_terminal_command_failure(
     user_stop_finalizer = _UserStopFinalizer()
     executor = _executor(
         lifecycle,
-        command_registry={"compact": cast(CommandHandler, _FailingCommandHandler())},
+        command_registry={"compact": _FailingCommandHandler()},
         failed_run_finalizer=finalizer,
         user_stop_finalizer=user_stop_finalizer,
         failed_run_max_retries=1,
@@ -4930,9 +4982,8 @@ async def test_execute_preserves_compaction_timeout_failure_code(
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         command_registry={
-            "compact": cast(
-                CommandHandler,
-                _FailingCommandHandler(CompactionModelStreamTimeoutError(timeout)),
+            "compact": _FailingCommandHandler(
+                CompactionModelStreamTimeoutError(timeout)
             )
         },
         failed_run_finalizer=finalizer,
@@ -4969,14 +5020,14 @@ async def test_execute_clears_live_projection_after_run_complete(
     dispatched: list[tuple[str, PublishedEvent]] = []
     live_event_projector = _LiveEventProjector()
     session_repository = _AgentSessionRepository(
-        current_session_agent=SimpleNamespace(
+        current_session_agent=_SessionAgentStub(
             id="child-session-agent",
             root_session_agent_id="root-session-agent",
         ),
         tree_session_agents=[
-            SimpleNamespace(agent_session_id="session-001"),
-            SimpleNamespace(agent_session_id="parent-session"),
-            SimpleNamespace(agent_session_id="root-session"),
+            _SessionAgentStub(id="session-agent-1", agent_session_id="session-001"),
+            _SessionAgentStub(id="parent-agent", agent_session_id="parent-session"),
+            _SessionAgentStub(id="root-agent", agent_session_id="root-session"),
         ],
     )
     executor = _executor(
@@ -5269,7 +5320,7 @@ async def test_execute_retries_failed_run_without_durable_error(
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
         live_event_projector=live_event_projector,
     )
@@ -5360,7 +5411,7 @@ async def test_execute_resets_retry_budget_after_successful_model_turn(
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         live_event_projector=live_event_projector,
     )
 
@@ -5437,7 +5488,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         live_event_projector=live_event_projector,
     )
 
@@ -5647,7 +5698,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
         user_stop_finalizer=user_stop_finalizer,
         live_event_projector=live_event_projector,
@@ -5732,7 +5783,7 @@ async def test_execute_clears_retry_state_when_retry_emits_run_stopped(
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
         live_event_projector=live_event_projector,
     )
@@ -5791,7 +5842,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
         failed_run_max_retries=max_retries,
     )
@@ -5861,7 +5912,7 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
         failed_run_max_retries=2,
     )
@@ -5924,7 +5975,7 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         failed_run_finalizer=finalizer,
     )
 

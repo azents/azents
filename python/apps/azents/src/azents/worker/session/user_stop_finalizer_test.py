@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,18 +22,24 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.emit import PublishedEvent
 from azents.repos.agent_execution.data import EventCreate
-from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
+class _DBSession(AsyncSession):
+    """Minimal AsyncSession test double."""
+
+    def __init__(self) -> None:
+        """Avoid opening a real database session."""
+
+
 class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
     """DB session context for tests."""
 
     def __init__(self) -> None:
-        self.session = cast(AsyncSession, object())
+        self.session = _DBSession()
 
     async def __aenter__(self) -> AsyncSession:
         """Return test session."""
@@ -283,13 +289,13 @@ class _SessionLifecycle:
         """Delegate terminal persistence through the lifecycle boundary."""
         self._assert_owner_generation(owner_generation)
         run = await self.run_repository.get_by_id(
-            cast(AsyncSession, object()),
+            _DBSession(),
             run_id,
         )
         if run is not None and run.session_id != session_id:
             raise ValueError("AgentRun session mismatch")
         await self.run_repository.mark_terminal_if_running(
-            cast(AsyncSession, object()),
+            _DBSession(),
             run_id,
             status,
             ended_at=datetime.now(UTC),
@@ -305,13 +311,13 @@ class _SessionLifecycle:
         """Delegate User Stop convergence through the lifecycle boundary."""
         self._assert_owner_generation(owner_generation)
         run = await self.run_repository.get_by_id(
-            cast(AsyncSession, object()),
+            _DBSession(),
             run_id,
         )
         if run is not None and run.session_id != session_id:
             raise ValueError("AgentRun session mismatch")
         await self.run_repository.mark_stopped_for_user_stop(
-            cast(AsyncSession, object()),
+            _DBSession(),
             run_id,
             ended_at=datetime.now(UTC),
         )
@@ -450,12 +456,17 @@ def _running_run(session_id: str) -> AgentRunState:
     )
 
 
+def _construct_finalizer(**kwargs: Any) -> UserStopFinalizer:  # noqa: ANN401
+    """Construct finalizer with test-owned dependency doubles."""
+    return UserStopFinalizer(**kwargs)
+
+
 def _finalizer(
     *,
     running_run: AgentRunState | None,
     live_events: Sequence[Event],
 ) -> tuple[
-    UserStopFinalizer,
+    Any,
     _AgentRunRepository,
     _AgentSessionRepository,
     _EventTranscriptRepository,
@@ -470,15 +481,15 @@ def _finalizer(
     projector = _LiveEventProjector()
     broker = _Broker()
     event_publisher = _EventPublisher()
-    finalizer = UserStopFinalizer(
+    finalizer = _construct_finalizer(
         session_manager=_SessionManager(),
-        agent_run_repository=cast(Any, run_repository),
-        agent_session_repository=cast(Any, session_repository),
-        event_transcript_repository=cast(Any, transcript_repository),
-        live_event_store=cast(Any, _LiveEventStore(live_events)),
-        live_event_projector=cast(Any, projector),
-        event_publisher=cast(WorkerEventPublisher, event_publisher),
-        session_lifecycle=cast(Any, _SessionLifecycle(run_repository)),
+        agent_run_repository=run_repository,
+        agent_session_repository=session_repository,
+        event_transcript_repository=transcript_repository,
+        live_event_store=_LiveEventStore(live_events),
+        live_event_projector=projector,
+        event_publisher=event_publisher,
+        session_lifecycle=_SessionLifecycle(run_repository),
     )
     return (
         finalizer,
@@ -613,12 +624,7 @@ async def test_record_interrupted_run_publishes_durable_history_before_stop() ->
         run_id="22222222222222222222222222222222",
     )
 
-    assert (
-        cast(
-            _SessionLifecycle, finalizer.session_lifecycle
-        ).parent_result_activity_run_ids
-        == []
-    )
+    assert finalizer.session_lifecycle.parent_result_activity_run_ids == []
     assert [event.external_id for event in transcripts.appended] == [
         "interrupted:22222222222222222222222222222222:user_requested",
         "run-marker:22222222222222222222222222222222:interrupted",
