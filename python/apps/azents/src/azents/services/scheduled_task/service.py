@@ -6,7 +6,7 @@ import datetime
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -60,6 +60,14 @@ from azents.services.scheduled_task.rendering import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _CronScheduleValues(NamedTuple):
+    """Validated cron expression and timezone."""
+
+    cron_expression: str
+    timezone: str
+
 
 _DEFAULT_BATCH_SIZE = 50
 _DEFAULT_LEASE = datetime.timedelta(seconds=60)
@@ -875,10 +883,13 @@ def _lease_token(task: ScheduledTask) -> datetime.datetime:
     return task.lease_until
 
 
-def _cron_values(task: ScheduledTask) -> tuple[str, str]:
+def _cron_values(task: ScheduledTask) -> _CronScheduleValues:
     if task.cron_expression is None or task.timezone is None:
         raise InvalidScheduledTaskSchedule("Persisted cron schedule is incomplete.")
-    return task.cron_expression, task.timezone
+    return _CronScheduleValues(
+        cron_expression=task.cron_expression,
+        timezone=task.timezone,
+    )
 
 
 def _required_text(value: str, field: str, *, max_length: int | None = None) -> str:

@@ -5,7 +5,7 @@ import datetime
 import json
 import os
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
@@ -91,6 +91,13 @@ SystemSettingConfirmationHandler = Callable[
     [AsyncSession, str, ResolvedSystemSetting, dict[str, Any] | None],
     Awaitable[None],
 ]
+
+
+class _SystemSettingBasePayload(NamedTuple):
+    """Validated base configuration and secret models."""
+
+    config: BaseModel
+    secrets: BaseModel
 
 
 def get_system_setting_registry() -> SystemSettingRegistry:
@@ -910,7 +917,7 @@ class SystemSettingsService:
         *,
         definition: SystemSettingDefinition,
         current: StoredSystemSetting | None,
-    ) -> tuple[BaseModel, BaseModel]:
+    ) -> _SystemSettingBasePayload:
         if current is None:
             config_data: dict[str, Any] = {}
             secret_data: dict[str, Any] = {}
@@ -924,9 +931,9 @@ class SystemSettingsService:
             config=config_data,
             secrets=secret_data,
         )
-        return (
-            definition.config_model.model_validate(config_data),
-            definition.secret_model.model_validate(secret_data),
+        return _SystemSettingBasePayload(
+            config=definition.config_model.model_validate(config_data),
+            secrets=definition.secret_model.model_validate(secret_data),
         )
 
     def _resolve_payload(

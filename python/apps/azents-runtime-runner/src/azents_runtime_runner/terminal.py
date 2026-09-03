@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from azents_runtime_runner.terminal_launcher import set_pty_size
 
@@ -53,6 +53,13 @@ class TerminalDeadline(StrEnum):
     MAXIMUM_LIFETIME = "maximum_lifetime"
     STREAM_GRACE = "stream_grace"
     STREAM_ATTEMPT = "stream_attempt"
+
+
+class _ProcessGroupSession(NamedTuple):
+    """Live process-group and session identifiers."""
+
+    process_group_id: int
+    session_id: int
 
 
 @dataclass(frozen=True)
@@ -1050,7 +1057,7 @@ def _session_process_group_ids(*, session_id: int) -> tuple[int, ...]:
     return tuple(sorted(process_group_ids))
 
 
-def _process_group_and_session(stat: str) -> tuple[int, int] | None:
+def _process_group_and_session(stat: str) -> _ProcessGroupSession | None:
     """Parse Linux proc stat without splitting spaces inside the command name."""
     command_end = stat.rfind(") ")
     if command_end < 0:
@@ -1061,6 +1068,9 @@ def _process_group_and_session(stat: str) -> tuple[int, int] | None:
     if fields[0] == "Z":
         return None
     try:
-        return int(fields[2]), int(fields[3])
+        return _ProcessGroupSession(
+            process_group_id=int(fields[2]),
+            session_id=int(fields[3]),
+        )
     except ValueError:
         return None

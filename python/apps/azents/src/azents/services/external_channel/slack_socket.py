@@ -6,7 +6,7 @@ import datetime
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, NamedTuple, Protocol
 
 import aiohttp
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -70,6 +70,13 @@ class SlackSocketConnectionResult:
     reconnect: bool
     reason: str
     admitted_event_count: int
+
+
+class _SlackEnvelopeAdmission(NamedTuple):
+    """Envelope admission flag and optional interaction handoff."""
+
+    admitted: bool
+    interaction_handoff: ExternalChannelInteractionHandoff | None
 
 
 type SlackSocketEventAdmission = Callable[[ExternalChannelTrigger], Awaitable[object]]
@@ -295,7 +302,7 @@ class SlackSocketModeRunner:
         *,
         connection_id: str,
         envelope: SlackSocketEnvelope,
-    ) -> tuple[bool, ExternalChannelInteractionHandoff | None]:
+    ) -> _SlackEnvelopeAdmission:
         """Durably admit one Slack envelope before acknowledgement."""
         if envelope.envelope_id is None:
             raise SlackSocketInvalidEnvelope(
@@ -328,7 +335,10 @@ class SlackSocketModeRunner:
                 update={"transport_envelope_id": envelope.envelope_id}
             )
             await self.admit_event(event)
-            return True, None
+            return _SlackEnvelopeAdmission(
+                admitted=True,
+                interaction_handoff=None,
+            )
         if isinstance(callback, SlackInteractionCallback):
             if self.admit_interaction is None:
                 raise SlackSocketInvalidEnvelope(
@@ -345,7 +355,10 @@ class SlackSocketModeRunner:
                 else None
             )
             handoff = await self.admit_interaction(callback, shortcut_source_event)
-            return True, handoff
+            return _SlackEnvelopeAdmission(
+                admitted=True,
+                interaction_handoff=handoff,
+            )
         if dataclasses.is_dataclass(callback):
             raise SlackSocketInvalidEnvelope(
                 "Slack Socket envelope callback type is unsupported."

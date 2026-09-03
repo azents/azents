@@ -10,7 +10,7 @@ import tempfile
 import unicodedata
 from codecs import getincrementaldecoder
 from io import BytesIO
-from typing import Annotated, assert_never
+from typing import Annotated, NamedTuple, assert_never
 
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
@@ -21,6 +21,7 @@ from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
@@ -123,6 +124,15 @@ ExchangeFileError = (
 _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 _MAX_TEXT_PREVIEW_CHARS = 2000
+
+
+class _PreviewProgress(NamedTuple):
+    """Updated preview length and truncation state."""
+
+    preview_length: int
+    truncated: bool
+
+
 _TEXT_PREVIEW_MEDIA_TYPES = {
     "application/graphql",
     "application/javascript",
@@ -343,14 +353,20 @@ def _append_preview_text(
     preview_length: int,
     truncated: bool,
     text: str,
-) -> tuple[int, bool]:
+) -> _PreviewProgress:
     """Retain at most the preview character limit while tracking truncation."""
     remaining = _MAX_TEXT_PREVIEW_CHARS - preview_length
     if remaining <= 0:
-        return preview_length, truncated or bool(text)
+        return _PreviewProgress(
+            preview_length=preview_length,
+            truncated=truncated or bool(text),
+        )
     retained = text[:remaining]
     preview_parts.append(retained)
-    return preview_length + len(retained), truncated or len(text) > len(retained)
+    return _PreviewProgress(
+        preview_length=preview_length + len(retained),
+        truncated=truncated or len(text) > len(retained),
+    )
 
 
 def make_exchange_preview_thumbnail(
@@ -1369,7 +1385,17 @@ class ExchangeFileService:
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except SQLAlchemyError as error:
+            logger.warning(
+                (
+                    "Unable to verify persisted Exchange publication; "
+                    "retaining uploaded objects"
+                ),
+                extra={
+                    "publication_id": publication_id,
+                    "reason": type(error).__name__,
+                },
+            )
             return True
         if existing is None:
             return False

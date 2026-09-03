@@ -1,7 +1,7 @@
 """Commit explicit Agent Runtime addition and rearm transitions."""
 
 import dataclasses
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +42,13 @@ from .data import (
     AgentRuntimeAdditionResult,
     AgentRuntimeAdditionUnavailable,
 )
+
+
+class _RuntimePreparation(NamedTuple):
+    """Prepared Runtime and whether it was newly created."""
+
+    runtime: AgentRuntime
+    created: bool
 
 
 @dataclasses.dataclass
@@ -210,7 +217,7 @@ class AgentRuntimeTransitionService:
         *,
         agent: Agent,
         prepared: PreparedRuntimeProfileSelection,
-    ) -> tuple[AgentRuntime, bool]:
+    ) -> _RuntimePreparation:
         """Create the first logical Runtime or rearm exact deleted history."""
         existing = await self.runtime_repository.get_by_agent_id_for_update(
             session,
@@ -234,7 +241,10 @@ class AgentRuntimeTransitionService:
                     configuration_sequence=0,
                 ),
             )
-            return ensured.runtime, ensured.created
+            return _RuntimePreparation(
+                runtime=ensured.runtime,
+                created=ensured.created,
+            )
 
         completed_removal = (
             await self.removal_repository.get_latest_completed_by_agent_id(
@@ -262,7 +272,7 @@ class AgentRuntimeTransitionService:
                 code="runtime_rearm_conflict",
                 message="The historical Runtime changed during re-addition.",
             )
-        return rearmed, False
+        return _RuntimePreparation(runtime=rearmed, created=False)
 
     async def _replay(
         self,

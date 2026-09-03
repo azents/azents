@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from azcommon.datetime import tznow
 from fastapi import Depends
@@ -49,6 +49,13 @@ from azents.services.terminal_policy.invalidation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _CurrentContract(NamedTuple):
+    """Current capability contract and its revision identifier."""
+
+    contract: RuntimeProviderCapabilityContract | None
+    revision_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -559,24 +566,26 @@ class RuntimeProfileAdminService:
         self,
         session: AsyncSession,
         provider: RuntimeProvider,
-    ) -> tuple[RuntimeProviderCapabilityContract | None, str | None]:
+    ) -> _CurrentContract:
         revision_id = provider.current_contract_revision_id
         if revision_id is None:
-            return None, None
+            return _CurrentContract(contract=None, revision_id=None)
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
             for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
-            return None, revision_id
+            return _CurrentContract(contract=None, revision_id=revision_id)
         try:
-            return (
-                RuntimeProviderCapabilityContract.model_validate(revision.contract),
-                revision.id,
+            return _CurrentContract(
+                contract=RuntimeProviderCapabilityContract.model_validate(
+                    revision.contract
+                ),
+                revision_id=revision.id,
             )
         except ValidationError:
-            return None, revision.id
+            return _CurrentContract(contract=None, revision_id=revision.id)
 
     @staticmethod
     def _compatibility(
