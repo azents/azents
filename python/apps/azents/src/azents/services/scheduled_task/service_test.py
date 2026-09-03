@@ -4,19 +4,24 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker, SessionWakeUp
+from azents.broker.types import (
+    BrokerMessage,
+    SessionActivity,
+    SessionWakeUp,
+    WorkerSignal,
+)
 from azents.core.enums import (
+    AgentRunPhase,
     MailboxItemKind,
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
 from azents.engine.events.types import ScheduledTaskTriggerPayload
-from azents.rdb.session import SessionManager
+from azents.engine.run.emit import PublishedEvent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
@@ -24,7 +29,10 @@ from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
+from azents.repos.scheduled_task_cycle.data import (
+    ScheduledTaskCycleRecord,
+    ScheduledTaskCycleSnapshot,
+)
 from azents.services.chat.live_events import mailbox_item_to_live_event
 
 from .service import (
@@ -36,7 +44,7 @@ from .service import (
 _NOW = datetime.datetime(2026, 8, 16, 0, 0, tzinfo=datetime.UTC)
 
 
-class _TransactionSession:
+class _TransactionSession(AsyncSession):
     """Record writes that become visible only when the context commits."""
 
     def __init__(self) -> None:
@@ -53,14 +61,14 @@ class _SessionManager:
     async def __call__(self) -> AsyncIterator[AsyncSession]:
         session = _TransactionSession()
         try:
-            yield cast(AsyncSession, session)
+            yield session
         except Exception:
             raise
         else:
             self.committed.extend(session.staged)
 
 
-class _TaskRepository:
+class _TaskRepository(ScheduledTaskRepository):
     """Deterministic lease-aware dispatcher repository double."""
 
     def __init__(
@@ -140,7 +148,9 @@ class _TaskRepository:
         session_id: str,
         task_id: str,
     ) -> bool:
-        tx = cast(_TransactionSession, session)
+        if not isinstance(session, _TransactionSession):
+            raise AssertionError("Expected transaction session double")
+        tx = session
         tx.staged.append("task_deleted")
         self.delete_calls.append(
             {
@@ -151,7 +161,7 @@ class _TaskRepository:
         return session_id == self.claimed.session_id and task_id == self.claimed.id
 
 
-class _CycleRepository:
+class _CycleRepository(ScheduledTaskCycleRepository):
     """Stage admitted cycle creation inside the fake transaction."""
 
     def __init__(self) -> None:
@@ -161,14 +171,16 @@ class _CycleRepository:
         self,
         session: AsyncSession,
         snapshot: ScheduledTaskCycleSnapshot,
-    ) -> object:
-        tx = cast(_TransactionSession, session)
+    ) -> ScheduledTaskCycleRecord:
+        if not isinstance(session, _TransactionSession):
+            raise AssertionError("Expected transaction session double")
+        tx = session
         tx.staged.append("cycle")
         self.snapshots.append(snapshot)
-        return object()
+        return ScheduledTaskCycleRecord.model_construct()
 
 
-class _MailboxRepository:
+class _MailboxRepository(MailboxRepository):
     """Stage one idempotent trigger inside the fake transaction."""
 
     def __init__(self) -> None:
@@ -180,15 +192,17 @@ class _MailboxRepository:
         create: MailboxItemCreate,
         *,
         idempotency_key: str,
-    ) -> object:
-        tx = cast(_TransactionSession, session)
+    ) -> MailboxItem:
+        if not isinstance(session, _TransactionSession):
+            raise AssertionError("Expected transaction session double")
+        tx = session
         tx.staged.append("mailbox")
         assert create.idempotency_key == idempotency_key
         self.creates.append(create)
-        return object()
+        return MailboxItem.model_construct()
 
 
-class _AgentSessionRepository:
+class _AgentSessionRepository(AgentSessionRepository):
     """Stage or reject a durable running transition in the fake transaction."""
 
     def __init__(self, *, reject: bool = False) -> None:
@@ -202,12 +216,14 @@ class _AgentSessionRepository:
     ) -> None:
         if self.reject:
             raise ValueError("Active AgentSession not found")
-        tx = cast(_TransactionSession, session)
+        if not isinstance(session, _TransactionSession):
+            raise AssertionError("Expected transaction session double")
+        tx = session
         tx.staged.append("running")
         self.running_session_ids.append(session_id)
 
 
-class _AuthorityValidator:
+class _AuthorityValidator(RDBScheduledTaskAuthorityValidator):
     """Accept or reject one test Task authority target."""
 
     def __init__(self, error: InvalidScheduledTaskSchedule | None) -> None:
@@ -223,7 +239,7 @@ class _AuthorityValidator:
             raise self.error
 
 
-class _SelectiveAuthorityValidator:
+class _SelectiveAuthorityValidator(RDBScheduledTaskAuthorityValidator):
     """Reject one exact Task while accepting later work in the same pass."""
 
     def __init__(self, invalid_task_id: str) -> None:
@@ -298,7 +314,9 @@ class _SequentialTaskRepository(_TaskRepository):
         session_id: str,
         task_id: str,
     ) -> bool:
-        tx = cast(_TransactionSession, session)
+        if not isinstance(session, _TransactionSession):
+            raise AssertionError("Expected transaction session double")
+        tx = session
         tx.staged.append("task_deleted")
         self.delete_calls.append(
             {
@@ -316,12 +334,71 @@ class _Broker:
 
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
-        self.messages: list[SessionWakeUp] = []
+        self.messages: list[BrokerMessage] = []
 
-    async def send_message(self, message: SessionWakeUp) -> None:
+    async def send_message(self, message: BrokerMessage) -> None:
         self.messages.append(message)
         if self.fail:
             raise RuntimeError("wake unavailable")
+
+    async def receive_messages(self) -> list[WorkerSignal]:
+        return []
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        del session_id
+
+    async def publish_event(self, session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    async def renew_session_ttl(self, session_id: str) -> None:
+        del session_id
+
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
+        del session_id
+
+    async def release_session_lock(self, session_id: str) -> None:
+        del session_id
+
+    async def set_session_activity(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        phase: AgentRunPhase | None = None,
+    ) -> None:
+        del session_id, run_id, phase
+
+    async def clear_session_activity(self, session_id: str) -> None:
+        del session_id
+
+    async def get_session_activity(self, session_id: str) -> SessionActivity | None:
+        del session_id
+        return None
+
+    async def purge_session_state(self, session_id: str) -> None:
+        del session_id
+
+    async def acquire_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+    ) -> str:
+        del session_ids
+        return "test-token"
+
+    async def release_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> None:
+        del session_ids, token
+
+    async def renew_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> bool:
+        del session_ids, token
+        return True
 
 
 def _task(
@@ -362,7 +439,7 @@ def _clock(*values: datetime.datetime) -> Callable[[], datetime.datetime]:
     return lambda: next(iterator)
 
 
-class _ProviderMutationTaskRepository:
+class _ProviderMutationTaskRepository(ScheduledTaskRepository):
     """Record the shared provider mutation target lookup order."""
 
     def __init__(
@@ -422,19 +499,13 @@ def _dispatcher(
 ) -> ScheduledTaskDispatcher:
     """Compose a dispatcher from deterministic fakes."""
     return ScheduledTaskDispatcher(
-        session_manager=cast(SessionManager[AsyncSession], manager),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository or _AgentSessionRepository(),
-        ),
-        cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
-        mailbox_repository=cast(MailboxRepository, mailbox_repository),
-        broker=cast(SessionBroker, broker),
-        authority_validator=cast(
-            RDBScheduledTaskAuthorityValidator,
-            authority_validator,
-        ),
-        task_repository=cast(ScheduledTaskRepository, repository),
+        session_manager=manager,
+        agent_session_repository=agent_session_repository or _AgentSessionRepository(),
+        cycle_repository=cycle_repository,
+        mailbox_repository=mailbox_repository,
+        broker=broker,
+        authority_validator=authority_validator,
+        task_repository=repository,
         clock=clock,
         batch_size=batch_size,
         lease_duration=datetime.timedelta(minutes=1),
@@ -457,14 +528,14 @@ async def test_provider_mutation_uses_shared_lock_order_and_fences_binding() -> 
         locked=locked,
     )
     service = ScheduledTaskService(
-        repository=cast(ScheduledTaskRepository, repository),
-        cycle_repository=cast(ScheduledTaskCycleRepository, object()),
-        mailbox_repository=cast(MailboxRepository, object()),
-        authority_validator=cast(RDBScheduledTaskAuthorityValidator, object()),
+        repository=repository,
+        cycle_repository=_CycleRepository(),
+        mailbox_repository=_MailboxRepository(),
+        authority_validator=_AuthorityValidator(None),
     )
 
     target = await service.lock_provider_mutation_target(
-        cast(AsyncSession, object()),
+        _TransactionSession(),
         task_id=candidate.id,
         expected_binding_id="binding-before-lock",
     )
@@ -642,10 +713,9 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert summary.admitted == 1
     assert summary.wake_failed == 1
     assert manager.committed == ["cycle", "mailbox", "running"]
-    assert cast(
-        _AgentSessionRepository,
-        dispatcher.agent_session_repository,
-    ).running_session_ids == [task.session_id]
+    agent_session_repository = dispatcher.agent_session_repository
+    assert isinstance(agent_session_repository, _AgentSessionRepository)
+    assert agent_session_repository.running_session_ids == [task.session_id]
     assert len(cycle_repository.snapshots) == 1
     trigger = mailbox_repository.creates[0]
     assert trigger.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER
