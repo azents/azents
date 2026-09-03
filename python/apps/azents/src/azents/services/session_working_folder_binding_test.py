@@ -3,8 +3,6 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -25,6 +23,7 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
 )
+from azents.testing.types import require_instance
 
 
 def _context(
@@ -70,13 +69,10 @@ def _target() -> RuntimeOperationTarget:
 def _service() -> SessionWorkingFolderBindingService:
     """Create a service with deterministic repository doubles."""
     agent_repository = AsyncMock()
-    agent_repository.lock_by_id.return_value = cast(
-        Agent,
-        SimpleNamespace(
-            id="agent-1",
-            runtime_capability=AgentRuntimeCapability.MANAGED,
-            runtime_capability_version=4,
-        ),
+    agent_repository.lock_by_id.return_value = Agent.model_construct(
+        id="agent-1",
+        runtime_capability=AgentRuntimeCapability.MANAGED,
+        runtime_capability_version=4,
     )
     agent_session_repository = AsyncMock()
 
@@ -95,7 +91,7 @@ def _service() -> SessionWorkingFolderBindingService:
 async def test_pending_context_binds_from_current_runner_workspace() -> None:
     """Current Runtime evidence performs the one allowed pending bind."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
     pending = _context(SessionWorkingFolderBindingState.PENDING)
     expected_path = "/workspace/agent/.azents/sessions/root-handle"
     repository.lock_working_folder_binding_by_session_id.return_value = (
@@ -135,7 +131,7 @@ async def test_pending_context_binds_from_current_runner_workspace() -> None:
 async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
     """Final write fencing retains the caller transaction's Agent/context locks."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
     expected_path = "/workspace/agent/.azents/sessions/root-handle"
     repository.lock_working_folder_binding_by_session_id.return_value = (
         LockedSessionWorkingFolderBinding(
@@ -156,10 +152,8 @@ async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
     )
 
     assert authority.working_folder_path == expected_path
-    cast(Any, service.agent_repository).lock_by_id.assert_awaited_once_with(
-        transaction,
-        "agent-1",
-    )
+    agent_repository = require_instance(service.agent_repository, AsyncMock)
+    agent_repository.lock_by_id.assert_awaited_once_with(transaction, "agent-1")
     repository.lock_working_folder_binding_by_session_id.assert_awaited_once_with(
         transaction,
         session_id="session-1",
@@ -170,7 +164,7 @@ async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
 async def test_stale_capability_fails_before_context_lock() -> None:
     """A changed Agent capability version cannot bind or reuse a path."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
 
     with pytest.raises(
         SessionWorkingFolderBindingError,
@@ -204,7 +198,7 @@ async def test_terminal_unbound_contexts_never_gain_authority(
 ) -> None:
     """Runtime-free and invalidated contexts cannot bind after Runtime evidence."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
     repository.lock_working_folder_binding_by_session_id.return_value = (
         LockedSessionWorkingFolderBinding(
             context=_context(
@@ -248,7 +242,7 @@ async def test_terminal_states_fail_preflight_before_runtime_resolution(
 ) -> None:
     """Terminal contexts are rejected by the Runtime-I/O-free preflight."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
     repository.lock_working_folder_binding_by_session_id.return_value = (
         LockedSessionWorkingFolderBinding(
             context=_context(
@@ -277,7 +271,7 @@ async def test_terminal_states_fail_preflight_before_runtime_resolution(
 async def test_pending_context_fails_bound_only_preflight() -> None:
     """Read-only and cleanup surfaces cannot start Runtime for pending contexts."""
     service = _service()
-    repository = cast(Any, service.agent_session_repository)
+    repository = require_instance(service.agent_session_repository, AsyncMock)
     repository.lock_working_folder_binding_by_session_id.return_value = (
         LockedSessionWorkingFolderBinding(
             context=_context(SessionWorkingFolderBindingState.PENDING),
