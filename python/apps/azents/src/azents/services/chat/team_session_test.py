@@ -2,7 +2,7 @@
 
 import datetime
 import logging
-from typing import Literal, cast
+from typing import Any, Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -82,9 +82,6 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
 )
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
-)
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
@@ -93,10 +90,8 @@ from azents.services.root_agent_session_creation import (
 )
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
-    RuntimeTerminalInvalidationPublisher,
 )
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -398,15 +393,15 @@ def _service(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
-    session_git_worktree_service: SessionGitWorktreeService | None = None,
-    agent_runtime_repository: AgentRuntimeRepository | None = None,
+    session_git_worktree_service: Any | None = None,  # noqa: ANN401
+    agent_runtime_repository: Any | None = None,  # noqa: ANN401
     runner_operations: RuntimeRunnerOperationClient | None = None,
-    runtime_target_resolver: RuntimeOperationTargetResolver | None = None,
+    runtime_target_resolver: Any | None = None,  # noqa: ANN401
     binding_preflight_error: SessionWorkingFolderBindingError | None = None,
-    terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisher | None = None,
+    terminal_invalidation_publisher: Any | None = None,  # noqa: ANN401
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
-    return ChatSessionService(
+    return _make_chat_service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -429,11 +424,11 @@ def _service(
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        mailbox_item_service=MailboxService(
+        mailbox_item_service=_make_mailbox_service(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
-            model_file_service=cast(ModelFileService, object()),
+            model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
@@ -448,16 +443,12 @@ def _service(
             external_channel_repository=ExternalChannelRepository(),
         ),
         session_git_worktree_service=(
-            session_git_worktree_service
-            or cast(
-                SessionGitWorktreeService,
-                _ArchiveCleanupService(rdb_session_manager),
-            )
+            session_git_worktree_service or _ArchiveCleanupService(rdb_session_manager)
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
-        external_channel_lifecycle_service=ExternalChannelLifecycleService(
+        external_channel_lifecycle_service=_make_external_lifecycle(
             repository=ExternalChannelLifecycleRepository(),
-            action_service=cast(ExternalChannelActionService, _ChannelActionService()),
+            action_service=_ChannelActionService(),
         ),
         scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
             ScheduledTaskLifecycleRepository()
@@ -483,6 +474,28 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _ModelFileService(ModelFileService):
+    """ModelFileService test double."""
+
+    def __init__(self) -> None:
+        """Bypass storage initialization."""
+
+
+def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
+    """Construct MailboxService with test-owned dependencies."""
+    return MailboxService(**kwargs)
+
+
+def _make_external_lifecycle(**kwargs: Any) -> ExternalChannelLifecycleService:  # noqa: ANN401
+    """Construct external-channel lifecycle service with test doubles."""
+    return ExternalChannelLifecycleService(**kwargs)
+
+
+def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
+    """Construct ChatSessionService with test-owned dependencies."""
+    return ChatSessionService(**kwargs)
 
 
 class _ChannelActionService:
@@ -1567,10 +1580,7 @@ class TestChatSessionTeamSessions:
             rdb_session_manager,
             agent_runtime_repository=_ReadyRuntimeRepository(),
             runner_operations=folder_delete_runner,
-            terminal_invalidation_publisher=cast(
-                RuntimeTerminalInvalidationPublisher,
-                terminal_invalidation_publisher,
-            ),
+            terminal_invalidation_publisher=terminal_invalidation_publisher,
         ).archive_agent_session(
             agent_id=agent_id,
             session_id=create_result.value.id,
@@ -1726,10 +1736,7 @@ class TestChatSessionTeamSessions:
         ):
             archive_result = await _service(
                 rdb_session_manager,
-                session_git_worktree_service=cast(
-                    SessionGitWorktreeService,
-                    cleanup_service,
-                ),
+                session_git_worktree_service=cleanup_service,
                 agent_runtime_repository=_ReadyRuntimeRepository(),
                 runner_operations=folder_delete_runner,
             ).archive_agent_session(
