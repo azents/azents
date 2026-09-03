@@ -52,10 +52,10 @@
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.7.2",
     "@next/eslint-plugin-next": "^16.3.1",
-    "@storybook/addon-a11y": "^10.5.8",
-    "@storybook/addon-docs": "^10.5.8",
-    "@storybook/addon-themes": "^10.5.8",
-    "@storybook/nextjs-vite": "^10.5.8",
+    "@storybook/addon-a11y": "^10.6.0",
+    "@storybook/addon-docs": "^10.6.0",
+    "@storybook/addon-themes": "^10.6.0",
+    "@storybook/nextjs-vite": "^10.6.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -70,7 +70,7 @@
     "postcss": "^8.5.26",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
-    "storybook": "^10.5.8",
+    "storybook": "^10.6.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0"
   }
