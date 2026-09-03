@@ -1,7 +1,7 @@
 """ChatSessionService Subagent Tree projection tests."""
 
 import datetime
-from typing import cast
+from typing import Any
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,9 +39,6 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
-from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -49,12 +46,8 @@ from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
-)
-from azents.services.session_working_folder_binding import (
-    SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -163,9 +156,14 @@ def _tree_node(
     )
 
 
+def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
+    """Construct ChatSessionService with test-owned dependencies."""
+    return ChatSessionService(**kwargs)
+
+
 def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionService:
     """Create ChatSessionService for tests."""
-    return ChatSessionService(
+    return _make_chat_service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -186,23 +184,17 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        mailbox_item_service=cast(MailboxService, object()),
-        session_git_worktree_service=cast(SessionGitWorktreeService, object()),
+        mailbox_item_service=object(),
+        session_git_worktree_service=object(),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
-        external_channel_lifecycle_service=cast(
-            ExternalChannelLifecycleService,
-            object(),
-        ),
+        external_channel_lifecycle_service=object(),
         scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
             ScheduledTaskLifecycleRepository()
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         session_manager=rdb_session_manager,
-        runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
-        session_working_folder_binding_service=cast(
-            SessionWorkingFolderBindingService,
-            object(),
-        ),
+        runtime_target_resolver=object(),
+        session_working_folder_binding_service=object(),
     )
 
 

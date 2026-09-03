@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Any
 from unittest.mock import patch
 
 import sqlalchemy as sa
@@ -60,10 +60,8 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.chat.data import PendingMailboxUserMessagePresentation
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
@@ -73,12 +71,8 @@ from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
-)
-from azents.services.session_working_folder_binding import (
-    SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -89,7 +83,6 @@ from azents.testing.turn_action import make_test_turn_action_capabilities
 
 from . import ChatSessionService
 from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
-from .live_events import LiveEventStore
 
 
 class _TrackingSessionManager:
@@ -197,11 +190,11 @@ def _service(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
-    mailbox_item_service = MailboxService(
+    mailbox_item_service = _make_mailbox_service(
         session_manager=rdb_session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=cast(ModelFileService, object()),
+        model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
@@ -215,7 +208,7 @@ def _service(
         ),
         external_channel_repository=ExternalChannelRepository(),
     )
-    return ChatSessionService(
+    return _make_chat_service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -237,22 +230,16 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         mailbox_item_service=mailbox_item_service,
-        session_git_worktree_service=cast(SessionGitWorktreeService, object()),
+        session_git_worktree_service=object(),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
-        external_channel_lifecycle_service=cast(
-            ExternalChannelLifecycleService,
-            object(),
-        ),
+        external_channel_lifecycle_service=object(),
         scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
             ScheduledTaskLifecycleRepository()
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         session_manager=rdb_session_manager,
-        runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
-        session_working_folder_binding_service=cast(
-            SessionWorkingFolderBindingService,
-            object(),
-        ),
+        runtime_target_resolver=object(),
+        session_working_folder_binding_service=object(),
     )
 
 
@@ -261,6 +248,23 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _ModelFileService(ModelFileService):
+    """ModelFileService test double."""
+
+    def __init__(self) -> None:
+        """Bypass storage initialization."""
+
+
+def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
+    """Construct MailboxService with test-owned dependencies."""
+    return MailboxService(**kwargs)
+
+
+def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
+    """Construct ChatSessionService with test-owned dependencies."""
+    return ChatSessionService(**kwargs)
 
 
 async def _create_session_with_buffer(
@@ -359,15 +363,11 @@ class TestChatSessionMailboxItem:
             )
         tracking_manager = _TrackingSessionManager(rdb_session_manager)
 
-        result = await _service(
-            cast(SessionManager[AsyncSession], tracking_manager)
-        ).list_live_events(
+        live_event_store: Any = _BoundaryCheckingLiveEventStore(tracking_manager)
+        result = await _service(tracking_manager).list_live_events(
             session_id,
             user_id=user_id,
-            live_event_store=cast(
-                LiveEventStore,
-                _BoundaryCheckingLiveEventStore(tracking_manager),
-            ),
+            live_event_store=live_event_store,
         )
 
         assert isinstance(result, Success)
@@ -564,11 +564,11 @@ class TestChatSessionMailboxItem:
                 slug="chat-buffer-flushed-history",
             )
 
-        mailbox_item_service = MailboxService(
+        mailbox_item_service = _make_mailbox_service(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
-            model_file_service=cast(ModelFileService, object()),
+            model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),

@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -412,12 +412,18 @@ class _SessionBoundary:
     def __init__(self) -> None:
         self.active = 0
 
+    class _DBSession(AsyncSession):
+        """Minimal DB session test double."""
+
+        def __init__(self) -> None:
+            """Avoid opening a real database session."""
+
     @asynccontextmanager
     async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
         """Yield a test DB session while tracking its lifetime."""
         self.active += 1
         try:
-            yield cast(AsyncSession, object())
+            yield self._DBSession()
         finally:
             self.active -= 1
 
@@ -515,6 +521,11 @@ def _make_workspace_user() -> WorkspaceUser:
     )
 
 
+def _make_exchange_file_service(**kwargs: Any) -> ExchangeFileService:  # noqa: ANN401
+    """Construct ExchangeFileService with test-owned dependencies."""
+    return ExchangeFileService(**kwargs)
+
+
 def _make_service(
     *,
     workspace_user: WorkspaceUser | None,
@@ -541,15 +552,15 @@ def _make_service(
     exchange_file_repository = _FakeExchangeFileRepository()
     session_boundary = _SessionBoundary()
     s3_service = _FakeS3Service(session_boundary)
-    service = ExchangeFileService(
-        exchange_file_repository=cast(Any, exchange_file_repository),
+    service = _make_exchange_file_service(
+        exchange_file_repository=exchange_file_repository,
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_boundary.session_manager,
-        s3_service=cast(Any, s3_service),
-        config=cast(Any, _Config()),
+        s3_service=s3_service,
+        config=_Config(),
     )
     return service, exchange_file_repository, s3_service
 
@@ -1042,7 +1053,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     assert source.preview_thumbnail_file_id is not None
 
     claim = await service.claim_input_attachments(
-        cast(AsyncSession, object()),
+        _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1057,7 +1068,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     assert claimed_preview.retention_bound_at == claimed_source.retention_bound_at
 
     retry = await service.claim_input_attachments(
-        cast(AsyncSession, object()),
+        _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1065,15 +1076,14 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     )
     assert isinstance(retry, Success)
 
-    root_lookup = cast(
-        Any,
-        service.agent_session_repository,
-    ).get_root_session_agent_by_session_id
+    root_lookup: Any = (
+        service.agent_session_repository.get_root_session_agent_by_session_id
+    )
     root_lookup.return_value = SessionAgent.model_construct(
         agent_session_id="another-root-session"
     )
     conflict = await service.claim_input_attachments(
-        cast(AsyncSession, object()),
+        _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",

@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +18,8 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
 from azents.repos.mailbox.data import MailboxItem
-from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 
 _NOW = datetime.datetime.now(datetime.UTC)
@@ -121,10 +117,10 @@ class _SessionManager:
         self.store = store
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession, None]:
+    async def __call__(self) -> AsyncGenerator[_Transaction, None]:
         transaction = _Transaction()
         try:
-            yield cast(AsyncSession, transaction)
+            yield transaction
         except Exception:
             self.store.rollback_count += 1
             raise
@@ -183,7 +179,7 @@ class _AgentRunRepository:
 
     async def mark_parent_result_enqueued(
         self,
-        session: AsyncSession,
+        session: _Transaction,
         *,
         run_id: str,
         mailbox_item_id: str,
@@ -191,7 +187,7 @@ class _AgentRunRepository:
     ) -> AgentRunState:
         if self.fail_finalize:
             raise RuntimeError("finalization failed")
-        transaction = cast(_Transaction, session)
+        transaction = session
         run = self.store.runs[run_id]
         finalized = run.model_copy(
             update={
@@ -251,14 +247,14 @@ class _AgentMailboxService:
 
     async def enqueue_terminal_result(
         self,
-        session: AsyncSession,
+        session: _Transaction,
         *,
         source: SessionAgent,
         target: SessionAgent,
         run: AgentRunState,
         content: str,
     ) -> MailboxItem:
-        transaction = cast(_Transaction, session)
+        transaction = session
         self.attempts.append((source.id, target.id, run.id, content))
         buffer = MailboxItem(
             id=f"buffer-{len(self.attempts)}",
@@ -280,6 +276,11 @@ class _AgentMailboxService:
         )
         transaction.pending_buffers.append(buffer)
         return buffer
+
+
+def _make_service(**kwargs: Any) -> SubagentTerminalResultService:  # noqa: ANN401
+    """Construct service with test-owned dependency doubles."""
+    return SubagentTerminalResultService(**kwargs)
 
 
 def _service(
@@ -322,14 +323,11 @@ def _service(
         fail_finalize=fail_finalize,
     )
     mailbox_service = _AgentMailboxService()
-    service = SubagentTerminalResultService(
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager(store)),
-        agent_run_repository=cast(AgentRunRepository, run_repository),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            _AgentSessionRepository(store),
-        ),
-        agent_mailbox_service=cast(AgentMailboxService, mailbox_service),
+    service = _make_service(
+        session_manager=_SessionManager(store),
+        agent_run_repository=run_repository,
+        agent_session_repository=_AgentSessionRepository(store),
+        agent_mailbox_service=mailbox_service,
     )
     return service, store, run_repository, mailbox_service
 
