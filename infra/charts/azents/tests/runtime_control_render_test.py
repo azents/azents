@@ -159,6 +159,20 @@ def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> 
     assert 'name: "workspace-s3-credentials"' in runtime_control
     assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID") == 1
     assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY") == 1
+    assert "AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL" not in rendered
+
+
+def test_server_renders_distinct_public_s3_endpoint() -> None:
+    """The browser endpoint is independent from trusted internal S3 traffic."""
+    rendered = _helm_template(
+        "objectStorage.external.endpoint=http://s3.internal",
+        "objectStorage.external.publicEndpoint=https://s3.example.com",
+        "objectStorage.external.bucket=workspace-bucket",
+    )
+
+    assert 'AZ_WORKSPACE_S3_ENDPOINT_URL: "http://s3.internal"' in rendered
+    assert 'AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL: "https://s3.example.com"' in rendered
+    assert rendered.count("AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL") == 1
 
 
 def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:

@@ -158,6 +158,8 @@ required enforcing substrate.
 
 - `external`: use consumer-provided endpoints and Secrets.
 - `objectStorage.external.credentialMode=ambientAws`: do not inject explicit S3 credential env vars. EKS Pod Identity, IAM Roles, or another ambient credential provider must be configured outside this chart.
+- `objectStorage.external.endpoint`: trusted server-side S3 endpoint used for object operations.
+- `objectStorage.external.publicEndpoint`: optional browser-reachable S3 endpoint used only to sign upload and download URLs. When unset, `endpoint` is used for signing too. Configure the object store CORS policy for the Main Web origin when this endpoint differs from the Web origin.
 
 External secret-store delivery remains outside this chart. External Secrets Operator, Infisical, SOPS, Sealed Secrets, cloud secret managers, and manual Secrets must be wired by the consumer-owned deployment layer.
 

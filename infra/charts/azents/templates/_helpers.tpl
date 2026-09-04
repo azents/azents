@@ -267,6 +267,13 @@ Return the object storage endpoint.
 {{- end -}}
 
 {{/*
+Return the browser-visible object storage endpoint used for presigned URLs.
+*/}}
+{{- define "azents.objectStoragePublicEndpoint" -}}
+{{- .Values.objectStorage.external.publicEndpoint -}}
+{{- end -}}
+
+{{/*
 Return the object storage bucket.
 */}}
 {{- define "azents.objectStorageBucket" -}}

@@ -29,6 +29,10 @@ data:
   {{- if $objectStorageEndpoint }}
   AZ_WORKSPACE_S3_ENDPOINT_URL: {{ $objectStorageEndpoint | quote }}
   {{- end }}
+  {{- $objectStoragePublicEndpoint := include "azents.objectStoragePublicEndpoint" . }}
+  {{- if $objectStoragePublicEndpoint }}
+  AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL: {{ $objectStoragePublicEndpoint | quote }}
+  {{- end }}
   {{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
   {{- if $objectStorageBucket }}
   AZ_WORKSPACE_S3_BUCKET: {{ $objectStorageBucket | quote }}

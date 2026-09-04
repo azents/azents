@@ -302,6 +302,7 @@ objectStorage:
   mode: external
   external:
     endpoint: ""
+    publicEndpoint: ""
     bucket: REPLACE_ME
     credentialMode: existingSecret
     accessKeyIdKey: access-key-id

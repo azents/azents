@@ -578,6 +578,9 @@
         "endpoint": {
           "type": "string"
         },
+        "publicEndpoint": {
+          "type": "string"
+        },
         "bucket": {
           "type": "string"
         },

@@ -8,6 +8,8 @@ touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/b6088a911203_add_provider_output_provenance.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/core/config.py
+  - python/apps/azents/src/azents/core/s3/deps.py
   - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/exchange_file/**
@@ -53,7 +55,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-09-04
-spec_version: 44
+spec_version: 45
 ---
 
 # File Exchange Storage
@@ -266,6 +268,11 @@ later `import_file` must explicitly copy them into the new Runtime.
   spans object-storage I/O.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.
+- Trusted object operations use the internal Workspace S3 endpoint. When a separate
+  public endpoint is configured, presigned upload and download URLs are generated
+  with a dedicated S3 client for that browser-reachable endpoint while retaining the
+  same bucket and credentials. Without the optional override, the trusted endpoint
+  client also generates presigned URLs.
 
 ## UI Contract
 
@@ -299,6 +306,8 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-04** — v45. Separated the trusted internal Workspace S3 endpoint from
+  the optional browser-reachable endpoint used to generate presigned URLs.
 - **2026-09-04** — v44. Mapped the Composer attachment preview container and
   documented data-loss-safe object retention when verified publication commit
   outcome cannot be disproven.
