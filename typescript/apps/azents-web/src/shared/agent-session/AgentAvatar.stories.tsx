@@ -1,7 +1,35 @@
 import { Group, rem, Stack, Text } from "@mantine/core";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import type { UploadedImage } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+const responsiveAvatar = {
+  filename: "azents-icon-dark-tile.png",
+  default: {
+    url: "/brand/azents/azents-icon-dark-tile.png#large",
+    width: 512,
+    height: 512,
+  },
+  thumbnails: {
+    small: {
+      url: "/brand/azents/azents-icon-dark-tile.png#small",
+      width: 128,
+      height: 128,
+    },
+    medium: {
+      url: "/brand/azents/azents-icon-dark-tile.png#medium",
+      width: 256,
+      height: 256,
+    },
+    large: {
+      url: "/brand/azents/azents-icon-dark-tile.png#large",
+      width: 512,
+      height: 512,
+    },
+  },
+  uploaded_at: "2026-09-04T00:00:00Z",
+} satisfies UploadedImage;
 
 const meta = {
   component: AgentAvatar,
@@ -42,4 +70,13 @@ export const DeterministicColors = {
       )}
     </Stack>
   ),
+} satisfies Story;
+
+export const ResponsiveImageTiers = {
+  args: {
+    name: "Azents Assistant",
+    avatar: responsiveAvatar,
+    size: 96,
+    radius: "xl",
+  },
 } satisfies Story;

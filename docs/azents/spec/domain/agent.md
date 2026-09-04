@@ -70,6 +70,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentAvatar.tsx
+  - typescript/apps/azents-web/src/shared/agent-session/agentAvatarImageSource.ts
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
@@ -100,7 +101,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-04
-spec_version: 71
+spec_version: 72
 ---
 
 # Agent Domain Spec
@@ -575,6 +576,9 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 - Agent with `memory_enabled=false` does not expose memory prompt/tool.
 - Toolkit CRUD and runtime state follow `spec/domain/toolkit.md`.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
+- Main Web provides available avatar variants as responsive width candidates and
+  declares the rendered CSS width, allowing the browser to select a thumbnail that
+  covers the current display pixel density without always downloading the largest tier.
 - Avatar replacement and removal lock the Agent row, update the current avatar,
   and atomically enqueue an immutable cleanup snapshot for the previous avatar.
   The public API result does not wait for old-blob deletion.
@@ -603,6 +607,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-04** (spec_version 72) — Made shared Agent avatar rendering select
+  responsive thumbnail tiers using CSS display size and device pixel density.
 - **2026-09-04** (spec_version 71) — Mapped the shared Agent avatar component
   after its frontend boundary relocation.
 - **2026-09-01** (spec_version 70) — Added independent Agent interactive-Terminal

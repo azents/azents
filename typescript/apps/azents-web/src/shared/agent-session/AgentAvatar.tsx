@@ -3,11 +3,15 @@
 /**
  * Avatar component for Agent.
  *
- * When `avatar` exists, render real image (thumbnail matching size or fallback to default),
- * otherwise render name hash-based color + initial with Mantine Avatar.
+ * When `avatar` exists, render responsive thumbnail sources matching CSS size and
+ * display density. Otherwise render name hash-based color + initial with Mantine Avatar.
  */
 
 import { Avatar } from "@mantine/core";
+import {
+  type AgentAvatarSize,
+  getAgentAvatarImageSource,
+} from "./agentAvatarImageSource";
 import type { UploadedImage } from "@azents/public-client";
 import type { MantineColor } from "@mantine/core";
 
@@ -36,41 +40,8 @@ function nameToColorIndex(name: string): number {
 interface AgentAvatarProps {
   name: string;
   avatar?: UploadedImage | null;
-  size?: number | "sm" | "md" | "lg";
+  size?: AgentAvatarSize;
   radius?: number | "sm" | "md" | "lg" | "xl";
-}
-
-/**
- * Select thumbnail tier by size: number means pixels, string maps to tier.
- * If tier is null (thumbnail not generated), fallback to default — always non-null.
- */
-function pickThumbnailUrl(
-  avatar: UploadedImage,
-  size: AgentAvatarProps["size"],
-): string {
-  const tiers = avatar.thumbnails;
-  const px = typeof size === "number" ? size : sizeToPx(size ?? "md");
-  if (px <= 128 && tiers.small) {
-    return tiers.small.url;
-  }
-  if (px <= 256 && tiers.medium) {
-    return tiers.medium.url;
-  }
-  if (tiers.large) {
-    return tiers.large.url;
-  }
-  return avatar.default.url;
-}
-
-function sizeToPx(size: "sm" | "md" | "lg"): number {
-  switch (size) {
-    case "sm":
-      return 36;
-    case "md":
-      return 42;
-    case "lg":
-      return 56;
-  }
 }
 
 export function AgentAvatar({
@@ -80,9 +51,18 @@ export function AgentAvatar({
   radius = "md",
 }: AgentAvatarProps): React.ReactElement {
   if (avatar) {
-    const src = pickThumbnailUrl(avatar, size);
+    const imageSource = getAgentAvatarImageSource(avatar, size);
     return (
-      <Avatar src={src} alt={name} radius={radius} size={size}>
+      <Avatar
+        src={imageSource.src}
+        alt={name}
+        radius={radius}
+        size={size}
+        imageProps={{
+          srcSet: imageSource.srcSet,
+          sizes: imageSource.sizes,
+        }}
+      >
         {name.charAt(0).toUpperCase()}
       </Avatar>
     );
