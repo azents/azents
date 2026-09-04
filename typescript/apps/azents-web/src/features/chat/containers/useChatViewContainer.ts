@@ -16,6 +16,11 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type PendingFile,
+  type UploadedFile,
+  useFileUpload,
+} from "@/shared/file-upload/useFileUpload";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { completedCompactionIds } from "../compactionPresentation";
 import {
@@ -23,11 +28,6 @@ import {
   type ChatScrollAnchor,
   restorePrependScrollTop,
 } from "../hooks/chatScrollAnchor";
-import {
-  type PendingFile,
-  type UploadedFile,
-  useFileUpload,
-} from "../hooks/useFileUpload";
 import {
   projectChatPresentationItems,
   type ToolActivityGroup as ToolActivityGroupModel,

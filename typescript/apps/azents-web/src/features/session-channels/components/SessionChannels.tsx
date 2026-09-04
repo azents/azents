@@ -29,6 +29,10 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { SessionChannelsContainerOutput } from "../containers/useSessionChannelsContainer";
+type SessionChannelsProps = Omit<
+  SessionChannelsContainerOutput,
+  "session" | "onUpdateTitle"
+>;
 import type {
   ManagedBinding,
   ManagedGrant,
@@ -421,7 +425,7 @@ export function SessionChannels({
   onDisconnect,
   onResponseModeChange,
   onSaveResponseMode,
-}: SessionChannelsContainerOutput): React.ReactElement {
+}: SessionChannelsProps): React.ReactElement {
   const t = useTranslations("workspace.agents.sessionChannels");
   const modals = useModals();
   const openDisconnectConfirm = (binding: ManagedBinding): void => {

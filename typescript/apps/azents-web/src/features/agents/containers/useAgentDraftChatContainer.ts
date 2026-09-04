@@ -8,21 +8,21 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
-import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
-import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
+import { useFileUpload } from "@/shared/file-upload/useFileUpload";
+import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { trpc } from "@/trpc/client";
-import type { ComposerSubscriptionUsagePresentationProps } from "@/features/chat/components/ComposerSubscriptionUsage";
-import type {
-  PendingFile,
-  UploadedFile,
-} from "@/features/chat/hooks/useFileUpload";
-import type { ChatAction } from "@/features/chat/types";
+import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "@/shared/agent-workspace/types";
+import type { ChatAction } from "@/shared/chat/types";
+import type {
+  PendingFile,
+  UploadedFile,
+} from "@/shared/file-upload/useFileUpload";
+import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import type {
   AgentProjectPresetResponse,
   AgentResponse,

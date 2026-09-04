@@ -40,7 +40,6 @@ import {
 } from "../hooks/toolCallMerge";
 import { shouldRenderIncompleteDurableToolCalls } from "../hooks/toolCallVisibility";
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
-import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
   ActionExecutionProjection,
   AgentRunPhase,
@@ -67,6 +66,7 @@ import type {
   TokenUsageSummary,
   ToolResultStatus,
 } from "../types";
+import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
 import type {
   ActionExecutionProjectionResponse,
   AgentResponse,

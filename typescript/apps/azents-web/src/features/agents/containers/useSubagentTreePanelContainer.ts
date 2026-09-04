@@ -1,5 +1,5 @@
 import { trpc } from "@/trpc/client";
-import type { SubagentTreePanelState } from "./types";
+import type { SubagentTreePanelState } from "@/shared/subagent-tree/types";
 
 interface SubagentTreePanelContainerProps {
   agentId: string;

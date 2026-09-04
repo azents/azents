@@ -1,5 +1,5 @@
-import type { PendingFile } from "./hooks/useFileUpload";
 import type { ActiveToolCall, ChatMessage, FileAttachment } from "./types";
+import type { PendingFile } from "@/shared/file-upload/useFileUpload";
 
 const now = new Date("2026-05-01T10:00:00.000Z").toISOString();
 

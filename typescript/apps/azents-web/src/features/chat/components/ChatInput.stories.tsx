@@ -3,8 +3,8 @@ import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
-import type { UploadedFile } from "../hooks/useFileUpload";
 import type { InputActionDefinition, TodoStateSnapshot } from "../types";
+import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
 import type {
   AgentModelSelection,
   AgentResponse,

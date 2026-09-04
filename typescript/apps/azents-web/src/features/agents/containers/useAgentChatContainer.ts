@@ -19,6 +19,7 @@ export interface AgentChatContainerProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
 }
 
 export type AgentChatSessionState =
@@ -41,17 +42,19 @@ export interface AgentChatContainerOutput {
 export function useAgentChatContainer(
   props: AgentChatContainerProps,
 ): AgentChatContainerOutput {
-  const { handle, agent, sessionId } = props;
-  const sessionQuery = trpc.chat.getAgentSession.useQuery({
-    agentId: agent.id,
-    sessionId,
-  });
+  const { handle, agent, sessionId, session } = props;
+  const sessionQuery = trpc.chat.getAgentSession.useQuery(
+    {
+      agentId: agent.id,
+      sessionId,
+    },
+    { initialData: session },
+  );
 
-  const sessionState: AgentChatSessionState = sessionQuery.isPending
-    ? { type: "LOADING" }
-    : sessionQuery.isError
-      ? { type: "ERROR", message: sessionQuery.error.message }
-      : { type: "LOADED", session: sessionQuery.data };
+  const sessionState: AgentChatSessionState = {
+    type: "LOADED",
+    session: sessionQuery.data,
+  };
 
   const [sessionConnectionStatus, setSessionConnectionStatus] =
     useState<ConnectionStatus>("disconnected");

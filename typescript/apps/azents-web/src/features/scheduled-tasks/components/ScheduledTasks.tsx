@@ -38,6 +38,10 @@ import { useTranslations } from "next-intl";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import type { ScheduledTasksContainerOutput } from "../containers/useScheduledTasksContainer";
+type ScheduledTasksProps = Omit<
+  ScheduledTasksContainerOutput,
+  "session" | "onUpdateTitle"
+>;
 import type { ScheduledTaskDraft } from "../types";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
@@ -551,7 +555,7 @@ export function ScheduledTasks({
   onRequestCancel,
   onCloseCancel,
   onConfirmCancel,
-}: ScheduledTasksContainerOutput): React.ReactElement {
+}: ScheduledTasksProps): React.ReactElement {
   const t = useTranslations("workspace.agents.scheduledTasks");
   const { locale } = useLocale();
 

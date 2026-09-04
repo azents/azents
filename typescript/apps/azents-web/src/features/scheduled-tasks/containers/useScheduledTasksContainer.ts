@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { parseScheduledTaskDraft, toLocalDateTimeInput } from "../schemas";
+import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import type {
   ScheduledTaskActionError,
   ScheduledTaskDetailState,
@@ -12,6 +13,7 @@ import type {
 } from "../types";
 import type {
   AgentResponse,
+  AgentSessionResponse,
   ScheduledTaskResponse,
 } from "@azents/public-client";
 
@@ -19,6 +21,7 @@ export interface ScheduledTasksContainerProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
   initialTaskId: string | null;
   openInitialTaskForEdit: boolean;
 }
@@ -27,6 +30,8 @@ export interface ScheduledTasksContainerOutput {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
+  onUpdateTitle: (title: string | null) => Promise<AgentSessionResponse>;
   state: ScheduledTasksState;
   detail: ScheduledTaskDetailState | null;
   form: ScheduledTaskFormState;
@@ -76,10 +81,12 @@ export function useScheduledTasksContainer({
   handle,
   agent,
   sessionId,
+  session,
   initialTaskId,
   openInitialTaskForEdit,
 }: ScheduledTasksContainerProps): ScheduledTasksContainerOutput {
   const utils = trpc.useUtils();
+  const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
   const [selectedTaskIdOverride, setSelectedTaskId] = useState<string | null>(
     initialTaskId,
   );
@@ -270,6 +277,8 @@ export function useScheduledTasksContainer({
     handle,
     agent,
     sessionId,
+    session,
+    onUpdateTitle,
     state,
     detail,
     form: effectiveForm,

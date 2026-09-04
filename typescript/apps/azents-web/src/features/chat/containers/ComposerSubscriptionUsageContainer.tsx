@@ -1,7 +1,7 @@
 "use client";
 
-import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
-import { ComposerSubscriptionUsagePopoverWithBoundary } from "../components/ComposerSubscriptionUsage";
+import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
+import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
 
 interface ComposerSubscriptionUsagePopoverContainerProps {
   compact: boolean;

@@ -1,25 +1,27 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import {
-  projectSubscriptionUsageState,
-  supportsSubscriptionUsage,
-} from "@/shared/subscription-usage/subscriptionUsage";
-import { trpc } from "@/trpc/client";
+import { useEffect, useMemo, useRef } from "react";
+import { projectSubscriptionUsageState } from "./subscriptionUsage";
 import type {
+  SubscriptionUsageResponse,
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
-} from "@/shared/subscription-usage/subscriptionUsage";
+} from "./subscriptionUsage";
 
-export interface SubscriptionUsageContainerProps {
+export interface SubscriptionUsageProjectionProps {
+  data: SubscriptionUsageResponse | null;
   enabled: boolean;
   handle: string;
   integrationId: string;
+  isError: boolean;
+  isFetching: boolean;
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
   provider: string;
 }
 
-export interface SubscriptionUsageContainerOutput {
+export interface SubscriptionUsageProjectionOutput {
   state: SubscriptionUsageState;
   onRefresh: () => Promise<void>;
 }
@@ -43,48 +45,45 @@ function successfulSnapshotQueryKey(
   return ["subscriptionUsageLastSuccessful", handle, integrationId];
 }
 
-export function useSubscriptionUsageContainer(
-  props: SubscriptionUsageContainerProps,
-): SubscriptionUsageContainerOutput {
-  const { enabled, handle, integrationId, provider } = props;
+export function useSubscriptionUsageProjection(
+  props: SubscriptionUsageProjectionProps,
+): SubscriptionUsageProjectionOutput {
+  const {
+    data,
+    enabled,
+    handle,
+    integrationId,
+    isError,
+    isFetching,
+    isLoading,
+    onRefresh,
+    provider,
+  } = props;
   const queryClient = useQueryClient();
   const snapshotQueryKey = useMemo(
     () => successfulSnapshotQueryKey(handle, integrationId),
     [handle, integrationId],
   );
-  const queryEnabled = enabled && supportsSubscriptionUsage(provider);
-  const query = trpc.llmProviderIntegration.subscriptionUsage.useQuery(
-    { handle, integrationId },
-    {
-      enabled: queryEnabled,
-      refetchOnWindowFocus: true,
-      retry: false,
-      staleTime: 60_000,
-    },
-  );
   const successfulSnapshotCache = useRef<SuccessfulSnapshotCache | null>(null);
 
   useEffect(() => {
-    if (
-      query.data?.type === "unavailable" &&
-      query.data.reason === "no_credit_limit"
-    ) {
+    if (data?.type === "unavailable" && data.reason === "no_credit_limit") {
       successfulSnapshotCache.current = null;
       queryClient.removeQueries({ exact: true, queryKey: snapshotQueryKey });
       return;
     }
-    if (query.data?.type === "available" || query.data?.type === "external") {
+    if (data?.type === "available" || data?.type === "external") {
       successfulSnapshotCache.current = {
         handle,
         integrationId,
-        snapshot: query.data,
+        snapshot: data,
       };
       queryClient.setQueryData<SubscriptionUsageSnapshot>(
         snapshotQueryKey,
-        query.data,
+        data,
       );
     }
-  }, [handle, integrationId, query.data, queryClient, snapshotQueryKey]);
+  }, [data, handle, integrationId, queryClient, snapshotQueryKey]);
 
   const queryCachedSnapshot =
     queryClient.getQueryData<SubscriptionUsageSnapshot>(snapshotQueryKey) ??
@@ -97,27 +96,22 @@ export function useSubscriptionUsageContainer(
   const state = useMemo(
     (): SubscriptionUsageState =>
       projectSubscriptionUsageState(provider, enabled, {
-        data: query.data ?? null,
-        isError: query.isError,
-        isFetching: query.isFetching,
-        isLoading: query.isLoading,
+        data,
+        isError,
+        isFetching,
+        isLoading,
         lastSuccessfulSnapshot,
       }),
     [
+      data,
       enabled,
+      isError,
+      isFetching,
+      isLoading,
       lastSuccessfulSnapshot,
       provider,
-      query.data,
-      query.isError,
-      query.isFetching,
-      query.isLoading,
     ],
   );
-
-  const { refetch } = query;
-  const onRefresh = useCallback(async (): Promise<void> => {
-    await refetch();
-  }, [refetch]);
 
   return { state, onRefresh };
 }

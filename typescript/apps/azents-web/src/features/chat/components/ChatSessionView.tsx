@@ -27,9 +27,9 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
 import { RuntimeTerminalPanel } from "@/shared/runtime-terminal/components/RuntimeTerminalPanel";
+import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
 import { ChatView } from "./ChatView";
-import { ComposerSubscriptionUsagePopoverWithBoundary } from "./ComposerSubscriptionUsage";
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
 
 function sessionHref(
@@ -54,6 +54,7 @@ export function ChatSessionView({
   terminalMobile,
   runtimeDrawerOpened,
   onSessionTitleChange,
+  onUpdateTitle,
   onOpenRuntime,
   onCloseRuntime,
 }: ChatSessionViewContainerOutput): React.ReactElement {
@@ -67,6 +68,7 @@ export function ChatSessionView({
         agent={agent}
         sessionId={sessionId}
         session={headerSession}
+        onUpdateTitle={onUpdateTitle}
         onSessionTitleChange={onSessionTitleChange}
         onOpenRuntime={onOpenRuntime}
         chatControls={

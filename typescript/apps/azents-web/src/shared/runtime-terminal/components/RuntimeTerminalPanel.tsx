@@ -25,7 +25,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import type { RuntimeTerminalContainerOutput } from "../containers/useRuntimeTerminalContainer";
+import type { RuntimeTerminalContainerOutput } from "../types";
 
 interface RuntimeTerminalPanelProps {
   terminal: RuntimeTerminalContainerOutput;
