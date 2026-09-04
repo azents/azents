@@ -15,7 +15,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 71 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-04 | 161 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-03 | 68 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
