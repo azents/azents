@@ -15,12 +15,14 @@ class _PubSub:
 
     def __init__(self) -> None:
         self.confirmation_ready = asyncio.Event()
+        self.subscription_requested = asyncio.Event()
         self.subscribed_channel: str | None = None
         self.closed = False
 
     async def subscribe(self, channel: str) -> None:
         """Record the requested channel without confirming it yet."""
         self.subscribed_channel = channel
+        self.subscription_requested.set()
 
     async def get_message(
         self,
@@ -75,7 +77,7 @@ async def test_subscribe_context_waits_for_redis_confirmation() -> None:
             entered.set()
 
     task = asyncio.create_task(consume())
-    await asyncio.sleep(0)
+    await pubsub.subscription_requested.wait()
     assert not entered.is_set()
 
     pubsub.confirmation_ready.set()

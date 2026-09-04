@@ -8,7 +8,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import Literal, NoReturn
 
 import grpc
 import pytest
@@ -74,6 +74,18 @@ class _Clock:
         return self.now
 
 
+class _ObservableCondition(asyncio.Condition):
+    """Signal when a scheduler participant reaches the blocked wait."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.waiting.set()
+        return await super().wait()
+
+
 class _Abort(RuntimeError):
     def __init__(self, code: grpc.StatusCode) -> None:
         self.code = code
@@ -124,10 +136,12 @@ def _verified_object(
 async def test_round_robin_chunk_scheduler_rotates_waiting_files() -> None:
     """A file returns behind another waiting file before its next chunk turn."""
     scheduler = _RoundRobinChunkScheduler(maximum_in_flight=1)
+    condition = _ObservableCondition()
+    scheduler._condition = condition  # noqa: SLF001  # observe scheduler wait state
 
     await scheduler.acquire("first")
     second_turn = asyncio.create_task(scheduler.acquire("second"))
-    await asyncio.sleep(0)
+    await condition.waiting.wait()
 
     await scheduler.release("first", requeue=True)
     await second_turn
@@ -810,7 +824,7 @@ async def test_stream_lease_backend_failure_fences_and_cancels_owner(
         0,
     )
     monkeypatch.setattr(harness.servicer, "renew_stream_owner", failing_renewal)
-    owner = asyncio.create_task(asyncio.sleep(3600))
+    owner = asyncio.create_task(asyncio.Event().wait())
     keeper = _StreamLeaseKeeper(
         servicer=harness.servicer,
         record=record,

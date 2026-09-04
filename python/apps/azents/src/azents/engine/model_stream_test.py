@@ -14,6 +14,7 @@ from azents.core.enums import LLMProvider
 from azents.core.openrouter import OPENROUTER_RESPONSE_HANDLE_TIMEOUT_SECONDS
 from azents.engine.model_stream import (
     ModelStreamCallContext,
+    ModelStreamCleanupReason,
     ModelStreamCleanupRegistry,
     ModelStreamProviderPolicyOverride,
     ModelStreamSpecificPolicyOverride,
@@ -37,6 +38,7 @@ class ControlledClock:
     def __init__(self) -> None:
         self.now = 0.0
         self._sleepers: list[tuple[float, asyncio.Future[None]]] = []
+        self._changed = asyncio.Event()
 
     def time(self) -> float:
         """Return the controlled monotonic time."""
@@ -49,10 +51,12 @@ class ControlledClock:
         future = asyncio.get_running_loop().create_future()
         sleeper = (self.now + delay, future)
         self._sleepers.append(sleeper)
+        self._changed.set()
         try:
             await future
         finally:
             self._sleepers.remove(sleeper)
+            self._changed.set()
 
     def advance(self, seconds: float) -> None:
         """Advance controlled time and resolve due sleepers."""
@@ -60,6 +64,15 @@ class ControlledClock:
         for deadline, future in tuple(self._sleepers):
             if deadline <= self.now and not future.done():
                 future.set_result(None)
+        self._changed.set()
+
+    async def wait_until(self, check: Callable[[], bool]) -> None:
+        """Wait for an explicit controlled-clock state transition."""
+        while not check():
+            self._changed.clear()
+            if check():
+                return
+            await self._changed.wait()
 
     @property
     def sleeper_count(self) -> int:
@@ -85,6 +98,7 @@ class TimedStream:
         self.event_times = iter(event_times)
         self.index = 0
         self.closed = False
+        self.closed_event = asyncio.Event()
 
     def __aiter__(self) -> AsyncIterator[int]:
         return self
@@ -101,6 +115,7 @@ class TimedStream:
 
     async def aclose(self) -> None:
         self.closed = True
+        self.closed_event.set()
 
 
 class BlockingStream:
@@ -110,6 +125,7 @@ class BlockingStream:
         self.suppress_cancellation = suppress_cancellation
         self.release = asyncio.Event()
         self.closed = False
+        self.closed_event = asyncio.Event()
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self
@@ -125,6 +141,7 @@ class BlockingStream:
 
     async def aclose(self) -> None:
         self.closed = True
+        self.closed_event.set()
 
 
 class CloseableResponse:
@@ -132,6 +149,7 @@ class CloseableResponse:
 
     def __init__(self) -> None:
         self.closed = False
+        self.closed_event = asyncio.Event()
 
     def __aiter__(self) -> AsyncIterator[object]:
         return self
@@ -141,15 +159,39 @@ class CloseableResponse:
 
     async def aclose(self) -> None:
         self.closed = True
+        self.closed_event.set()
 
 
-async def _wait_until(check: Callable[[], bool]) -> None:
-    """Yield until an asynchronous test condition becomes true."""
-    for _ in range(100):
-        if check():
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("condition did not become true")
+class ObservableCleanupRegistry(ModelStreamCleanupRegistry):
+    """Signal when every adopted cleanup task has settled."""
+
+    def __init__(self, *, clock: ControlledClock) -> None:
+        super().__init__(clock=clock)
+        self.settled = asyncio.Event()
+        self.settled.set()
+
+    def adopt(
+        self,
+        task: asyncio.Task[None],
+        *,
+        context: ModelStreamCallContext,
+        reason: ModelStreamCleanupReason,
+    ) -> None:
+        self.settled.clear()
+        super().adopt(task, context=context, reason=reason)
+
+    def _consume_done(self, task: asyncio.Task[None]) -> None:
+        super()._consume_done(task)
+        if self.active_count == 0:
+            self.settled.set()
+
+
+async def _wait_for_registry_cleanup(
+    registry: ModelStreamCleanupRegistry,
+) -> None:
+    """Wait for the observable cleanup registry used by these tests."""
+    assert isinstance(registry, ObservableCleanupRegistry)
+    await registry.settled.wait()
 
 
 def _policy(
@@ -187,7 +229,7 @@ def _watchdog(
     policy: ModelStreamTimeoutPolicy,
     close_grace: float = 2,
 ) -> ModelStreamWatchdog:
-    registry = ModelStreamCleanupRegistry(clock=clock)
+    registry = ObservableCleanupRegistry(clock=clock)
     return ModelStreamWatchdog(
         resolver=ModelStreamTimeoutPolicyResolver(
             default=policy,
@@ -348,7 +390,7 @@ async def test_open_response_enforces_application_connect_deadline() -> None:
             context=_context(),
         )
     )
-    await _wait_until(lambda: clock.sleeper_count == 2)
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
     clock.advance(5)
 
     with pytest.raises(ModelStreamTimeoutError) as captured:
@@ -377,7 +419,7 @@ async def test_parsed_event_idle_timeout_closes_cooperative_iterator() -> None:
         ]
 
     task = asyncio.create_task(consume())
-    await _wait_until(lambda: clock.sleeper_count == 2)
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
     clock.advance(5)
 
     with pytest.raises(ModelStreamTimeoutError) as captured:
@@ -444,7 +486,7 @@ async def test_consumer_close_releases_iterator_between_events() -> None:
     assert await anext(watched) == 0
     await close_stream_response(watched)
 
-    await _wait_until(lambda: stream.closed)
+    await stream.closed_event.wait()
     assert watchdog.cleanup_registry.active_count == 0
 
 
@@ -466,15 +508,15 @@ async def test_user_stop_preempts_simultaneous_idle_timeout() -> None:
             pass
 
     task = asyncio.create_task(consume())
-    await _wait_until(lambda: clock.sleeper_count == 2)
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
     clock.advance(5)
 
     with pytest.raises(asyncio.CancelledError) as captured:
         await task
 
     assert captured.value.args == (USER_STOP_CANCEL_MESSAGE,)
-    await _wait_until(lambda: stream.closed)
-    await _wait_until(lambda: watchdog.cleanup_registry.active_count == 0)
+    await stream.closed_event.wait()
+    await _wait_for_registry_cleanup(watchdog.cleanup_registry)
 
 
 async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -> None:
@@ -499,9 +541,9 @@ async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -
             context=_context(),
         )
     )
-    await _wait_until(lambda: clock.sleeper_count == 2)
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
     clock.advance(5)
-    await _wait_until(lambda: clock.sleeper_deadlines == (7.0,))
+    await clock.wait_until(lambda: clock.sleeper_deadlines == (7.0,))
     clock.advance(2)
 
     with pytest.raises(ModelStreamTimeoutError):
@@ -509,8 +551,8 @@ async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -
 
     assert watchdog.cleanup_registry.active_count == 1
     release.set()
-    await _wait_until(lambda: response.closed)
-    await _wait_until(lambda: watchdog.cleanup_registry.active_count == 0)
+    await response.closed_event.wait()
+    await _wait_for_registry_cleanup(watchdog.cleanup_registry)
 
 
 async def test_timeout_logs_late_operation_failure_without_changing_outcome(
@@ -538,9 +580,9 @@ async def test_timeout_logs_late_operation_failure_without_changing_outcome(
             context=_context(),
         )
     )
-    await _wait_until(lambda: clock.sleeper_count == 2)
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
     clock.advance(5)
-    await _wait_until(lambda: clock.sleeper_deadlines == (7.0,))
+    await clock.wait_until(lambda: clock.sleeper_deadlines == (7.0,))
     clock.advance(2)
 
     with pytest.raises(ModelStreamTimeoutError) as captured:
@@ -549,7 +591,7 @@ async def test_timeout_logs_late_operation_failure_without_changing_outcome(
     assert captured.value.timeout_kind == "connect"
     assert watchdog.cleanup_registry.active_count == 1
     release.set()
-    await _wait_until(lambda: watchdog.cleanup_registry.active_count == 0)
+    await _wait_for_registry_cleanup(watchdog.cleanup_registry)
 
     records = [
         record
@@ -596,7 +638,7 @@ async def test_owned_support_task_failure_is_logged_once(
 
 async def test_cleanup_registry_drain_returns_after_grace_for_stubborn_task() -> None:
     clock = ControlledClock()
-    registry = ModelStreamCleanupRegistry(clock=clock)
+    registry = ObservableCleanupRegistry(clock=clock)
     release = asyncio.Event()
 
     async def stubborn_cleanup() -> None:
@@ -614,10 +656,10 @@ async def test_cleanup_registry_drain_returns_after_grace_for_stubborn_task() ->
         reason="shutdown",
     )
     drain = asyncio.create_task(registry.drain(grace_seconds=2))
-    await _wait_until(lambda: clock.sleeper_count == 1)
+    await clock.wait_until(lambda: clock.sleeper_count == 1)
     clock.advance(2)
 
     assert await drain == 1
     assert registry.active_count == 1
     release.set()
-    await _wait_until(lambda: registry.active_count == 0)
+    await _wait_for_registry_cleanup(registry)

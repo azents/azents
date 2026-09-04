@@ -42,8 +42,13 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.data import (
     JsonValue,
+    RuntimeConnectionKind,
+    RuntimeCoordinationTarget,
+    RuntimeFencedMutationResult,
+    RuntimeOperationMetadata,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
+    RuntimeRequestEnvelope,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
@@ -65,14 +70,7 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "bash"
     assert request.payload["owner_session_id"] == "session-1"
     assert request.payload["payload"] == {
@@ -120,13 +118,7 @@ async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    first_request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
+    first_request = await harness.claim()
     second_task = asyncio.create_task(
         harness.client.run_bash(
             runtime_id="runtime-1",
@@ -138,15 +130,7 @@ async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    second_request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert first_request is not None
-    assert second_request is not None
+    second_request = await harness.claim()
 
     await harness.reply(
         second_request.request_id,
@@ -275,14 +259,7 @@ async def test_read_file_collects_file_chunks_until_final() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.read"
     await harness.reply(
         request.request_id,
@@ -345,14 +322,7 @@ async def test_write_file_uses_body_stream_chunks() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.body_stream_id is not None
     chunks = await harness.store.read_body_chunks(
         request.body_stream_id,
@@ -388,14 +358,7 @@ async def test_apply_patch_uses_body_stream_and_returns_changes() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.apply_patch"
     assert request.payload["owner_session_id"] == "session-1"
     assert request.payload["payload"] == {
@@ -460,24 +423,10 @@ async def test_apply_patch_cancellation_waits_for_typed_runner_final() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
 
     task.cancel()
-    await asyncio.sleep(0)
-    cancellation = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert cancellation is not None
+    cancellation = await harness.claim()
     assert cancellation.operation_type == "operation.cancel"
     assert cancellation.payload == {"operation_id": f"operation:{request.request_id}"}
     await harness.reply(
@@ -520,14 +469,7 @@ async def test_apply_patch_preserves_typed_failure_detail() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     await harness.reply(
         request.request_id,
         RuntimeReplyEventType.FINAL_ERROR,
@@ -582,15 +524,7 @@ async def test_edit_file_dispatches_one_native_operation_and_returns_count() -> 
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.edit"
     assert request.payload["payload"] == {
         "path": "/workspace/agent/note.txt",
@@ -622,14 +556,7 @@ async def test_list_files_returns_final_entries() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     await harness.reply(
         request.request_id,
         RuntimeReplyEventType.FINAL_SUCCESS,
@@ -665,14 +592,7 @@ async def test_glob_files_dispatches_native_operation_and_returns_matches() -> N
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.glob"
     assert request.payload["payload"] == {
         "pattern": "/workspace/agent/**/*.py",
@@ -712,14 +632,7 @@ async def test_stat_file_returns_final_metadata() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.stat"
     assert request.payload["payload"] == {"path": "/workspace/agent/AGENTS.md"}
     await harness.reply(
@@ -761,14 +674,7 @@ async def test_delete_file_returns_final_path() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.delete"
     assert request.payload["payload"] == {
         "path": "/workspace/agent/old.txt",
@@ -802,14 +708,7 @@ async def test_mkdir_file_returns_final_path() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.mkdir"
     assert request.payload["payload"] == {
         "path": "/workspace/agent/reports",
@@ -844,14 +743,7 @@ async def test_move_file_returns_final_paths() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.move"
     assert request.payload["payload"] == {
         "source_path": "/workspace/agent/a.txt",
@@ -894,14 +786,7 @@ async def test_grep_files_returns_final_matches() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "file.grep"
     payload = request.payload.get("payload")
     assert isinstance(payload, dict)
@@ -952,14 +837,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "process.start"
     assert request.payload["payload"] == {
         "command": "python -m http.server",
@@ -1030,14 +908,7 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "process.write"
     assert request.payload["payload"] == {
         "process_id": "proc_missing",
@@ -1076,14 +947,7 @@ async def test_terminate_session_processes_dispatches_runner_operation() -> None
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "process.terminate_session"
     assert request.payload["payload"] == {"owner_session_id": "session-1"}
 
@@ -1186,14 +1050,7 @@ async def test_create_git_worktree_dispatches_and_folds_text_output() -> None:
             text_output_callback=lambda delta: _append_text_delta(deltas, delta),
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "create_git_worktree"
     assert request.payload["payload"] == {
         "source_project_path": "/workspace/agent/repo",
@@ -1243,14 +1100,7 @@ async def test_git_worktree_integrity_operations_dispatch_and_decode() -> None:
             text_output_callback=None,
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "inspect_git_worktree"
     assert request.payload["payload"] == {
         "source_project_path": "/workspace/agent/repo",
@@ -1288,14 +1138,7 @@ async def test_git_worktree_integrity_operations_dispatch_and_decode() -> None:
             text_output_callback=None,
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "remove_git_worktree"
     assert request.payload["payload"] == {
         "source_project_path": "/workspace/agent/repo",
@@ -1328,14 +1171,7 @@ async def test_git_worktree_integrity_operations_dispatch_and_decode() -> None:
             text_output_callback=None,
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     await harness.reply(
         request.request_id,
         RuntimeReplyEventType.FINAL_SUCCESS,
@@ -1365,14 +1201,7 @@ async def test_runner_operation_failure_preserves_semantic_code() -> None:
             text_output_callback=None,
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     await harness.reply(
         request.request_id,
         RuntimeReplyEventType.FINAL_ERROR,
@@ -1402,14 +1231,7 @@ async def test_list_git_refs_returns_final_refs() -> None:
             text_output_callback=None,
         )
     )
-    await asyncio.sleep(0)
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-    assert request is not None
+    request = await harness.claim()
     assert request.operation_type == "list_git_refs"
     assert request.payload["payload"] == {
         "source_project_path": "/workspace/agent/repo"
@@ -1441,12 +1263,78 @@ async def test_list_git_refs_returns_final_refs() -> None:
     assert result.refs[0].default is True
 
 
+class _ObservableStore(InMemoryRuntimeCoordinationStore):
+    """Expose request append completion as an explicit test boundary."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.request_appended: asyncio.Queue[None] = asyncio.Queue()
+
+    async def append_operation_request_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        metadata: RuntimeOperationMetadata,
+        envelope: RuntimeRequestEnvelope,
+        ttl_seconds: int | None,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        result = await super().append_operation_request_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=connection_generation,
+            metadata=metadata,
+            envelope=envelope,
+            ttl_seconds=ttl_seconds,
+        )
+        self.request_appended.put_nowait(None)
+        return result
+
+    async def request_operation_cancel_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        envelope: RuntimeRequestEnvelope,
+        updated_at: datetime,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        result = await super().request_operation_cancel_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=connection_generation,
+            operation_id=operation_id,
+            expected_runtime_id=expected_runtime_id,
+            expected_target=expected_target,
+            envelope=envelope,
+            updated_at=updated_at,
+        )
+        self.request_appended.put_nowait(None)
+        return result
+
+
 @dataclasses.dataclass(frozen=True)
 class _Harness:
-    store: InMemoryRuntimeCoordinationStore
+    store: _ObservableStore
     control: RuntimeControlProtocolService
     client: RuntimeRunnerOperationClient
     runner_generation: int
+
+    async def claim(self) -> RuntimeRequestEnvelope:
+        """Wait for and claim the next appended Runner request."""
+        await self.store.request_appended.get()
+        request = await self.control.claim_next_runner_request(
+            runtime_id="runtime-1",
+            generation=self.runner_generation,
+            consumer_id="runner-a",
+            block_ms=0,
+        )
+        assert request is not None
+        return request
 
     async def reply(
         self,
@@ -1474,7 +1362,7 @@ async def _make_harness(
     *,
     body_chunk_size_bytes: int = 1024 * 1024,
 ) -> _Harness:
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ObservableStore()
     control = RuntimeControlProtocolService(
         store,
         request_id_factory=_RequestIds(),

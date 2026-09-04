@@ -91,6 +91,7 @@ class Coordinator:
         self.admit_request: CoordinatorAdmitTransferRequest | None = None
         self.reject_first_cancellation = False
         self.cancellation_rejections = 0
+        self.status_requested = asyncio.Event()
 
     async def admit_transfer(
         self, request: CoordinatorAdmitTransferRequest
@@ -123,6 +124,7 @@ class Coordinator:
         self, request: CoordinatorGetTransferStatusRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append(("status", request))
+        self.status_requested.set()
         return self.statuses.pop(0)
 
     async def cancel_transfer(
@@ -678,7 +680,7 @@ async def test_cancellation_propagates_after_coordinator_cancellation() -> None:
         status_poll_interval=timedelta(seconds=10),
     )
     task = asyncio.create_task(service.transfer(_request(source)))
-    await asyncio.sleep(0)
+    await coordinator.status_requested.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -714,7 +716,7 @@ async def test_cancellation_retries_fenced_revisions_past_eight() -> None:
     )
 
     task = asyncio.create_task(service.transfer(_request(source)))
-    await asyncio.sleep(0)
+    await coordinator.status_requested.wait()
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):

@@ -616,11 +616,14 @@ class TestGcpToolkitBackgroundConnect:
         toolkit = _make_toolkit(
             services=[GcpService.LOGGING, GcpService.MONITORING],
         )
+        started = asyncio.Event()
+        release = asyncio.Event()
 
         async def forever_list_tools(
             *args: object, **kwargs: object
         ) -> tuple[list[McpBaseTool], bool]:
-            await asyncio.sleep(3600)
+            started.set()
+            await release.wait()
             return ([], False)
 
         with patch(
@@ -628,6 +631,7 @@ class TestGcpToolkitBackgroundConnect:
             side_effect=forever_list_tools,
         ):
             async with toolkit:
+                await started.wait()
                 assert toolkit._bg_task is not None  # noqa: SLF001
                 assert not toolkit._bg_task.done()  # noqa: SLF001
 
