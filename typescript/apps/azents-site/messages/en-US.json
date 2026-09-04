@@ -9,12 +9,16 @@
     "changeLanguage": "Change language"
   },
   "hero": {
+    "preview": {
+      "label": "Build-in-public preview",
+      "description": "Inspect the architecture, follow development, and share technical feedback."
+    },
     "eyebrow": "Self-host managed agents",
     "headline": "Managed agents, inside your cloud.",
     "subheadline": "Azents is an open-source control plane for remote agent runtimes.",
     "supporting": "Keep sessions, tools, permissions, and execution state next to your repos and private network.",
     "cta": {
-      "github": "GitHub",
+      "github": "Follow development on GitHub",
       "docs": "Read the docs"
     }
   },
@@ -115,21 +119,19 @@
       },
       "providers": {
         "tab": "Providers",
-        "imageAlt": "Abstract architecture diagram showing a runtime adapter branching into multiple provider backends.",
+        "imageAlt": "Abstract architecture diagram showing a Runtime adapter, Kubernetes, and dashed future provider extension points.",
         "eyebrow": "02 / runtime adapter",
         "title": "Providers sit behind one runtime adapter.",
         "mobileTitle": "One adapter, many providers.",
-        "body": "Kubernetes is first. The same adapter shape can map to local machines, E2B, or custom execution backends as the project grows.",
+        "body": "Docker and Kubernetes providers use the Runtime Provider boundary. Additional backends can be added through the same interface.",
         "diagram": {
           "adapterLabel": "stable interface",
           "adapterTitle": "Runtime adapter",
           "adapterBody": "The Engine asks for workspace-scoped execution. Providers decide how that execution is provisioned.",
           "providerFlow": "provider choice",
           "providers": {
-            "kubernetes": "Kubernetes",
-            "local": "Local machine",
-            "e2b": "E2B",
-            "custom": "Custom provider"
+            "docker": "Docker",
+            "kubernetes": "Kubernetes"
           }
         }
       },
@@ -217,7 +219,7 @@
       "data": "Data control",
       "security": "Security boundary",
       "internal": "Private systems",
-      "regulatory": "Compliance",
+      "regulatory": "Operational control",
       "privateCloud": "On-prem / private cloud"
     }
   },
@@ -264,8 +266,8 @@
         "body": "Development workflows for repositories, PRs, and CI loops."
       },
       "tools": {
-        "title": "Self-hosted model",
-        "body": "Designed for private cloud, on-prem, and regulated environments."
+        "title": "Self-hosted infrastructure",
+        "body": "Operate managed runtimes in your cloud or on-premises infrastructure."
       }
     }
   },
@@ -293,8 +295,8 @@
   },
   "finalCta": {
     "title": "Self-host managed agents.",
-    "body": "Run agent sessions, runtimes, and tools where your work already lives.",
-    "github": "GitHub",
+    "body": "Inspect the architecture, follow development, and share technical feedback.",
+    "github": "Follow development on GitHub",
     "docs": "Read the docs"
   },
   "footer": {

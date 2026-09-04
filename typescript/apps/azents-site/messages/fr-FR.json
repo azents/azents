@@ -9,12 +9,16 @@
     "changeLanguage": "Changer de langue"
   },
   "hero": {
+    "preview": {
+      "label": "Build-in-public preview",
+      "description": "Explorez l’architecture, suivez le développement et partagez vos retours techniques."
+    },
     "eyebrow": "Agents managés auto-hébergés",
     "headline": "Des managed agents dans votre cloud.",
     "subheadline": "Azents est un open-source control plane pour exploiter des agent sessions et des Runtimes dans votre propre infrastructure.",
     "supporting": "Exécutez près des repos, des files, des credentials et des internal systems.",
     "cta": {
-      "github": "Star sur GitHub",
+      "github": "Suivre le développement sur GitHub",
       "docs": "Lire les docs"
     }
   },
@@ -115,21 +119,19 @@
       },
       "providers": {
         "tab": "Providers",
-        "imageAlt": "Diagramme d'architecture abstrait montrant un runtime adapter connecté à plusieurs providers.",
+        "imageAlt": "Diagramme d’architecture abstrait montrant un Runtime adapter, Kubernetes et des points d’extension futurs en pointillé.",
         "eyebrow": "02 / runtime adapter",
         "title": "Les providers restent derrière un seul Runtime adapter.",
         "mobileTitle": "Un adapter, plusieurs providers.",
-        "body": "Kubernetes arrive en premier. La même forme d'adapter peut ensuite viser une machine locale, E2B ou des backends custom.",
+        "body": "Les providers Docker et Kubernetes utilisent la frontière Runtime Provider. D’autres backends peuvent être ajoutés via la même interface.",
         "diagram": {
           "adapterLabel": "stable interface",
           "adapterTitle": "Runtime adapter",
           "adapterBody": "L'Engine demande une exécution limitée au workspace. Le Provider choisit comment provisionner cette exécution.",
           "providerFlow": "provider choice",
           "providers": {
-            "kubernetes": "Kubernetes",
-            "local": "Local machine",
-            "e2b": "E2B",
-            "custom": "Custom provider"
+            "docker": "Docker",
+            "kubernetes": "Kubernetes"
           }
         }
       },
@@ -217,7 +219,7 @@
       "data": "Contrôle des données",
       "security": "Périmètre de sécurité",
       "internal": "Systèmes privés",
-      "regulatory": "Conformité",
+      "regulatory": "Contrôle opérationnel",
       "privateCloud": "Sur site / cloud privé"
     }
   },
@@ -264,8 +266,8 @@
         "body": "Workflows de développement pour dépôts, PR et boucles CI."
       },
       "tools": {
-        "title": "Modèle auto-hébergé",
-        "body": "Conçu pour le cloud privé, le sur site et les environnements régulés."
+        "title": "Infrastructure auto-hébergée",
+        "body": "Exploitez des Runtimes managés dans votre cloud privé ou votre infrastructure sur site."
       }
     }
   },
@@ -293,8 +295,8 @@
   },
   "finalCta": {
     "title": "Auto-hébergez vos agents managés.",
-    "body": "Exécutez les sessions d'agents, les runtimes et les outils là où votre travail existe déjà.",
-    "github": "Star sur GitHub",
+    "body": "Explorez l’architecture, suivez le développement et partagez vos retours techniques.",
+    "github": "Suivre le développement sur GitHub",
     "docs": "Lire les docs"
   },
   "footer": {
