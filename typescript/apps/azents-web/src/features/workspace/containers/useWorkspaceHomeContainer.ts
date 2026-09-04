@@ -9,7 +9,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-import { formatModelSelectionSummary } from "@/features/agents/model-selection";
+import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import { trpc } from "@/trpc/client";
 import type {
   AgentTeamFilter,

@@ -4,8 +4,8 @@
 
 import { rem } from "@mantine/core";
 import { useTranslations } from "next-intl";
+import { AgentSettingsHeader } from "@/shared/agent-session/AgentSettingsHeader";
 import { SettingsPageLayout } from "@/shared/components/SettingsPageLayout";
-import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsLayoutProps {

@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { notFound, redirect } from "next/navigation";
-import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
 import { AgentContextPage } from "@/features/agents/AgentContextPage";
 import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
+import { AgentChatTabPage } from "@/features/chat/AgentChatTabPage";
 import { ScheduledTasksPage } from "@/features/scheduled-tasks/ScheduledTasksPage";
 import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
 import { trpc } from "@/trpc/server";
