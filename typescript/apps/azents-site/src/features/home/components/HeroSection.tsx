@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Badge,
   Box,
   Button,
   Container,
@@ -35,15 +36,26 @@ export function HeroSection(): React.ReactElement {
     >
       <Container size="xl">
         <Stack gap="2xl" maw={rem(760)}>
-          <Text
-            c="var(--mantine-color-signal-2)"
-            ff="monospace"
-            fw={700}
-            size="sm"
-            tt="uppercase"
-          >
-            {t("eyebrow")}
-          </Text>
+          <Stack align="flex-start" gap="md">
+            <Badge
+              color="signal"
+              ff="monospace"
+              radius="sm"
+              size="lg"
+              variant="light"
+            >
+              {t("preview.label")}
+            </Badge>
+            <Text
+              c="var(--mantine-color-signal-2)"
+              ff="monospace"
+              fw={700}
+              size="sm"
+              tt="uppercase"
+            >
+              {t("eyebrow")}
+            </Text>
+          </Stack>
           <Stack gap="xl">
             <Title
               fz={{ base: rem(42), sm: rem(58), md: rem(72) }}
@@ -63,6 +75,14 @@ export function HeroSection(): React.ReactElement {
             </Text>
             <Text c="dimmed" lh={1.75} maw={rem(640)} size="lg">
               {t("supporting")}
+            </Text>
+            <Text
+              c="var(--mantine-color-dark-1)"
+              lh={1.65}
+              maw={rem(640)}
+              size="md"
+            >
+              {t("preview.description")}
             </Text>
           </Stack>
           <Group gap="sm">

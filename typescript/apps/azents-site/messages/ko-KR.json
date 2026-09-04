@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "title": "Azents | Self-host managed agents",
+    "title": "Azents | 내 클라우드에서 운영하는 managed agents",
     "description": "내 클라우드에서 managed agents를 운영하기 위한 open-source control plane입니다."
   },
   "nav": {
@@ -9,12 +9,16 @@
     "changeLanguage": "언어 변경"
   },
   "hero": {
+    "preview": {
+      "label": "Build-in-public preview",
+      "description": "아키텍처와 개발 과정을 살펴보고 기술 피드백을 남겨주세요."
+    },
     "eyebrow": "Self-host managed agents",
     "headline": "내 클라우드에서 운영하는 managed agents.",
     "subheadline": "Azents는 agent session과 Runtime을 팀 인프라 안에서 돌리기 위한 open-source control plane입니다.",
     "supporting": "Repo, 파일, credential, internal system 옆에서 실행하세요.",
     "cta": {
-      "github": "GitHub",
+      "github": "GitHub에서 개발 보기",
       "docs": "문서 읽기"
     }
   },
@@ -115,21 +119,19 @@
       },
       "providers": {
         "tab": "Providers",
-        "imageAlt": "Runtime adapter가 여러 provider backend로 연결되는 구조를 보여주는 추상 architecture diagram.",
+        "imageAlt": "Runtime adapter, Kubernetes, 점선으로 표시된 향후 provider 확장 지점을 보여주는 추상 architecture diagram.",
         "eyebrow": "02 / runtime adapter",
         "title": "Provider는 하나의 Runtime adapter 뒤에 둡니다.",
         "mobileTitle": "하나의 adapter, 여러 provider.",
-        "body": "지금은 Kubernetes가 먼저입니다. 같은 adapter 형태로 local machine, E2B, custom backend까지 확장할 수 있게 가져갑니다.",
+        "body": "Docker와 Kubernetes provider는 Runtime Provider boundary를 사용합니다. 같은 interface를 통해 다른 backend도 추가할 수 있습니다.",
         "diagram": {
           "adapterLabel": "stable interface",
           "adapterTitle": "Runtime adapter",
           "adapterBody": "Engine은 workspace-scoped execution을 요청하고, Provider가 실행 환경을 어떻게 띄울지 결정합니다.",
           "providerFlow": "provider choice",
           "providers": {
-            "kubernetes": "Kubernetes",
-            "local": "Local machine",
-            "e2b": "E2B",
-            "custom": "Custom provider"
+            "docker": "Docker",
+            "kubernetes": "Kubernetes"
           }
         }
       },
@@ -217,7 +219,7 @@
       "data": "Data control",
       "security": "Security boundary",
       "internal": "사설 시스템",
-      "regulatory": "규정 준수",
+      "regulatory": "운영 통제",
       "privateCloud": "On-prem / private cloud"
     }
   },
@@ -264,8 +266,8 @@
         "body": "저장소, PR, CI 루프를 위한 개발 워크플로입니다."
       },
       "tools": {
-        "title": "자체 호스팅 모델",
-        "body": "사설 클라우드, 온프레미스, 규제 환경을 위해 설계되었습니다."
+        "title": "자체 호스팅 인프라",
+        "body": "Managed Runtime을 사설 클라우드나 온프레미스 인프라에서 운영할 수 있습니다."
       }
     }
   },
@@ -293,8 +295,8 @@
   },
   "finalCta": {
     "title": "Self-host managed agents.",
-    "body": "Agent session, Runtime, tools를 작업이 이미 존재하는 곳에서 실행하세요.",
-    "github": "GitHub",
+    "body": "아키텍처와 개발 과정을 살펴보고 기술 피드백을 남겨주세요.",
+    "github": "GitHub에서 개발 보기",
     "docs": "문서 읽기"
   },
   "footer": {

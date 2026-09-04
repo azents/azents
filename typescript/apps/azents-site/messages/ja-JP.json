@@ -9,12 +9,16 @@
     "changeLanguage": "言語を変更"
   },
   "hero": {
+    "preview": {
+      "label": "Build-in-public preview",
+      "description": "アーキテクチャと開発状況を確認し、技術的なフィードバックをお寄せください。"
+    },
     "eyebrow": "マネージドエージェントをセルフホスト",
     "headline": "自分たちのクラウドで動く managed agents。",
     "subheadline": "Azents は agent session と Runtime をチームのインフラで運用するための open-source control plane です。",
     "supporting": "Repo、files、credential、internal system の近くで実行できます。",
     "cta": {
-      "github": "GitHub で Star",
+      "github": "GitHub で開発をフォロー",
       "docs": "ドキュメントを読む"
     }
   },
@@ -115,21 +119,19 @@
       },
       "providers": {
         "tab": "Providers",
-        "imageAlt": "Runtime adapter が複数の provider backend へ分岐する様子を示す抽象 architecture diagram。",
+        "imageAlt": "Runtime adapter、Kubernetes、点線で示した将来の provider 拡張ポイントを表す抽象 architecture diagram。",
         "eyebrow": "02 / runtime adapter",
         "title": "Provider はひとつの Runtime adapter の後ろに置きます。",
         "mobileTitle": "ひとつの adapter、複数の provider。",
-        "body": "まずは Kubernetes からです。同じ adapter 形状で local machine、E2B、custom backend へ広げられるようにします。",
+        "body": "Docker と Kubernetes の provider は Runtime Provider boundary を使用します。同じ interface を通じてほかの backend も追加できます。",
         "diagram": {
           "adapterLabel": "stable interface",
           "adapterTitle": "Runtime adapter",
           "adapterBody": "Engine は workspace-scoped execution を要求し、Provider が実行環境の用意方法を決めます。",
           "providerFlow": "provider choice",
           "providers": {
-            "kubernetes": "Kubernetes",
-            "local": "Local machine",
-            "e2b": "E2B",
-            "custom": "Custom provider"
+            "docker": "Docker",
+            "kubernetes": "Kubernetes"
           }
         }
       },
@@ -217,7 +219,7 @@
       "data": "データの制御",
       "security": "セキュリティ境界",
       "internal": "プライベートシステム",
-      "regulatory": "コンプライアンス",
+      "regulatory": "運用管理",
       "privateCloud": "オンプレミス / プライベートクラウド"
     }
   },
@@ -264,8 +266,8 @@
         "body": "リポジトリ、PR、CI ループのための開発ワークフロー。"
       },
       "tools": {
-        "title": "セルフホストモデル",
-        "body": "プライベートクラウド、オンプレミス、規制環境のために設計されています。"
+        "title": "セルフホストインフラ",
+        "body": "管理対象の Runtime をプライベートクラウドやオンプレミスのインフラで運用できます。"
       }
     }
   },
@@ -293,8 +295,8 @@
   },
   "finalCta": {
     "title": "マネージドエージェントをセルフホスト。",
-    "body": "エージェントセッション、ランタイム、ツールを、作業がすでに存在する場所で実行できます。",
-    "github": "GitHub で Star",
+    "body": "アーキテクチャと開発状況を確認し、技術的なフィードバックをお寄せください。",
+    "github": "GitHub で開発をフォロー",
     "docs": "ドキュメントを読む"
   },
   "footer": {
