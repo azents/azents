@@ -14,6 +14,7 @@ from typing import (
     Any,
     Coroutine,
     Generic,
+    NamedTuple,
     ParamSpec,
     Protocol,
     TypeVar,
@@ -77,6 +78,13 @@ class Runnable(Protocol):
 DependencyTask = Callable[..., Coroutine[Any, Any, None]] | Callable[..., Runnable]
 
 
+class OfflineDependencySolution(NamedTuple):
+    """Resolved dependency values and their reusable cache."""
+
+    values: dict[str, Any]
+    dependency_cache: DependencyCache
+
+
 async def solve_offline_dependencies(
     *,
     dependant: Dependant,
@@ -84,7 +92,7 @@ async def solve_offline_dependencies(
     dependency_overrides_provider: DependencyOverridesProvider | None = None,
     dependency_cache: DependencyCache | None = None,
     uses_scopes_cache: _UsesScopesCache | None = None,
-) -> tuple[dict[str, Any], DependencyCache]:
+) -> OfflineDependencySolution:
     values: dict[str, Any] = {}
     dependency_cache = dependency_cache or {}
     if uses_scopes_cache is None:
@@ -119,8 +127,8 @@ async def solve_offline_dependencies(
             dependency_cache=dependency_cache,
             uses_scopes_cache=uses_scopes_cache,
         )
-        sub_values, sub_dependency_cache = solved_result
-        dependency_cache.update(sub_dependency_cache)
+        sub_values = solved_result.values
+        dependency_cache.update(solved_result.dependency_cache)
         sub_dependant_cache_key = _get_cache_key(
             dependant=sub_dependant,
             uses_scopes_cache=uses_scopes_cache,
@@ -149,7 +157,10 @@ async def solve_offline_dependencies(
             values[sub_dependant.name] = solved
         if sub_dependant_cache_key not in dependency_cache:
             dependency_cache[sub_dependant_cache_key] = solved
-    return values, dependency_cache
+    return OfflineDependencySolution(
+        values=values,
+        dependency_cache=dependency_cache,
+    )
 
 
 class Container:
@@ -209,14 +220,14 @@ class Container:
 
         dependant = get_dependant(path="/", call=fake_endpoint)
 
-        values, cache = await solve_offline_dependencies(
+        solution = await solve_offline_dependencies(
             dependant=dependant,
             stack=self._stack,
             dependency_cache=self.cache,
             dependency_overrides_provider=self,
         )
-        self.cache = cache
-        return fake_endpoint(**values)
+        self.cache = solution.dependency_cache
+        return fake_endpoint(**solution.values)
 
     async def drain(
         self,
