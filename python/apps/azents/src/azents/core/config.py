@@ -142,6 +142,8 @@ class Settings(BaseSettings):
     workspace_s3_bucket: str = ""
     workspace_s3_prefix: str = "v1"
     workspace_s3_endpoint_url: str | None = None
+    # Optional browser-visible override; presigned URLs reuse endpoint_url when unset.
+    workspace_s3_public_endpoint_url: str | None = None
     # Explicit credentials. Production keeps None and uses IAM role / ambient session;
     # local dev (RustFS) and testenv inject dummy key/secret only.
     workspace_s3_access_key_id: str | None = None
@@ -483,6 +485,7 @@ class WorkspaceS3Config(BaseModel):
     bucket: str
     prefix: str = "v1"
     endpoint_url: str | None = None
+    public_endpoint_url: str | None = None
     credentials: WorkspaceS3Credentials | None = None
 
 
@@ -657,6 +660,7 @@ class Config(BaseModel):
                 bucket=settings.workspace_s3_bucket,
                 prefix=settings.workspace_s3_prefix,
                 endpoint_url=settings.workspace_s3_endpoint_url,
+                public_endpoint_url=settings.workspace_s3_public_endpoint_url,
                 credentials=(
                     WorkspaceS3Credentials(
                         access_key_id=settings.workspace_s3_access_key_id,
