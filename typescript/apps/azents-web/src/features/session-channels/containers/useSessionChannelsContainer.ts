@@ -3,9 +3,11 @@
 import { useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { sessionChannelDisconnectInvalidationPlan } from "../invalidation";
+import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import type { SessionChannelsState } from "../types";
 import type {
   AgentResponse,
+  AgentSessionResponse,
   ExternalChannelResponseMode,
   ManagedBinding,
 } from "@azents/public-client";
@@ -14,12 +16,15 @@ export interface SessionChannelsContainerProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
 }
 
 export interface SessionChannelsContainerOutput {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
+  onUpdateTitle: (title: string | null) => Promise<AgentSessionResponse>;
   state: SessionChannelsState;
   actionError: string | null;
   disconnectingId: string | null;
@@ -42,8 +47,10 @@ export function useSessionChannelsContainer({
   handle,
   agent,
   sessionId,
+  session,
 }: SessionChannelsContainerProps): SessionChannelsContainerOutput {
   const utils = trpc.useUtils();
+  const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
   const [actionError, setActionError] = useState<string | null>(null);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [responseModeDrafts, setResponseModeDrafts] = useState<
@@ -142,6 +149,8 @@ export function useSessionChannelsContainer({
     handle,
     agent,
     sessionId,
+    session,
+    onUpdateTitle,
     state,
     actionError,
     disconnectingId,

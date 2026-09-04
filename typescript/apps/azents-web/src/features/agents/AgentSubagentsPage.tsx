@@ -4,29 +4,42 @@
 
 import { Box } from "@mantine/core";
 import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
-import { useSubagentTreePanelContainer } from "@/shared/subagent-tree/useSubagentTreeContainer";
 import { SubagentTreePanel } from "./components/SubagentTreePanel";
-import type { AgentResponse } from "@azents/public-client";
+import { useAgentSessionTitleUpdater } from "./containers/useAgentSessionTitleUpdater";
+import { useSubagentTreePanelContainer } from "./containers/useSubagentTreePanelContainer";
+import type {
+  AgentResponse,
+  AgentSessionResponse,
+} from "@azents/public-client";
 
 interface AgentSubagentsPageProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
 }
 
 export function AgentSubagentsPage({
   handle,
   agent,
   sessionId,
+  session,
 }: AgentSubagentsPageProps): React.ReactElement {
   const subagentTreePanel = useSubagentTreePanelContainer({
     agentId: agent.id,
     sessionId,
   });
+  const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentSessionHeader handle={handle} agent={agent} sessionId={sessionId} />
+      <AgentSessionHeader
+        handle={handle}
+        agent={agent}
+        sessionId={sessionId}
+        session={session}
+        onUpdateTitle={onUpdateTitle}
+      />
       <Box style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         <SubagentTreePanel
           handle={handle}

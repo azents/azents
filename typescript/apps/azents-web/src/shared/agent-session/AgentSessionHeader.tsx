@@ -33,8 +33,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShellMobileNav";
 import classes from "./AgentSessionHeader.module.css";
@@ -68,14 +73,14 @@ function resolveActiveTab(
 }
 
 function getSessionDisplayTitle(
-  session: AgentSessionResponse | null,
+  session: AgentSessionResponse,
   t: ReturnType<typeof useTranslations>,
 ): string {
-  const title = session?.title?.trim();
+  const title = session.title?.trim();
   if (title) {
     return title;
   }
-  if (session?.primary_kind === "team_primary") {
+  if (session.primary_kind === "team_primary") {
     return t("sessions.primary");
   }
   return t("sessions.session");
@@ -85,7 +90,8 @@ interface AgentSessionHeaderProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
-  session?: AgentSessionResponse;
+  session: AgentSessionResponse;
+  onUpdateTitle: (title: string | null) => Promise<AgentSessionResponse>;
   onSessionTitleChange?: (session: AgentSessionResponse) => void;
   onOpenRuntime?: () => void;
   chatControls?: ReactNode;
@@ -96,6 +102,7 @@ export function AgentSessionHeader({
   agent,
   sessionId,
   session: initialSession,
+  onUpdateTitle,
   onSessionTitleChange,
   onOpenRuntime,
   chatControls,
@@ -104,19 +111,11 @@ export function AgentSessionHeader({
   const router = useRouter();
   const searchParams = useSearchParams();
   const mobileNav = useAgentFocusedShellMobileNav();
-  const utils = trpc.useUtils();
-  const sessionQuery = trpc.chat.getAgentSession.useQuery(
-    {
-      agentId: agent.id,
-      sessionId,
-    },
-    {
-      enabled: typeof initialSession === "undefined",
-      initialData: initialSession,
-    },
-  );
-  const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
-  const session = initialSession ?? sessionQuery.data ?? null;
+  const [session, setSession] = useState(initialSession);
+  const [renameBusy, setRenameBusy] = useState(false);
+  useEffect(() => {
+    setSession(initialSession);
+  }, [initialSession]);
   const sessionTitle = getSessionDisplayTitle(session, t);
   useDocumentTitle(`${sessionTitle} - Azents`);
   const [editingOpened, setEditingOpened] = useState(false);
@@ -128,73 +127,41 @@ export function AgentSessionHeader({
   );
 
   const handleOpenRename = useCallback((): void => {
-    setEditingTitle(session?.title ?? "");
+    setEditingTitle(session.title ?? "");
     setEditingOpened(true);
-  }, [session?.title]);
+  }, [session.title]);
 
   const handleCloseRename = useCallback((): void => {
     setEditingOpened(false);
     setEditingTitle("");
   }, []);
 
+  const updateSessionTitle = useCallback(
+    async (title: string | null): Promise<void> => {
+      setRenameBusy(true);
+      try {
+        const updatedSession = await onUpdateTitle(title);
+        setSession(updatedSession);
+        onSessionTitleChange?.(updatedSession);
+        handleCloseRename();
+      } finally {
+        setRenameBusy(false);
+      }
+    },
+    [handleCloseRename, onSessionTitleChange, onUpdateTitle],
+  );
+
   const handleSubmitRename = useCallback(async (): Promise<void> => {
     const title = editingTitle.trim();
     if (!title) {
       return;
     }
-    const updatedSession = await updateTitleMutation.mutateAsync({
-      agentId: agent.id,
-      sessionId,
-      title,
-    });
-    onSessionTitleChange?.(updatedSession);
-    await Promise.all([
-      utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
-      utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
-      utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
-      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
-    ]);
-    handleCloseRename();
-  }, [
-    agent.id,
-    editingTitle,
-    handleCloseRename,
-    onSessionTitleChange,
-    sessionId,
-    updateTitleMutation,
-    utils.chat.getAgentSession,
-    utils.chat.getAgentSessionSidebar,
-    utils.chat.listAgentSessions,
-    utils.chat.listAgentUserSessions,
-  ]);
+    await updateSessionTitle(title);
+  }, [editingTitle, updateSessionTitle]);
 
   const handleClearTitle = useCallback(async (): Promise<void> => {
-    const updatedSession = await updateTitleMutation.mutateAsync({
-      agentId: agent.id,
-      sessionId,
-      title: null,
-    });
-    onSessionTitleChange?.(updatedSession);
-    await Promise.all([
-      utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
-      utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
-      utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
-      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
-    ]);
-    handleCloseRename();
-  }, [
-    agent.id,
-    handleCloseRename,
-    onSessionTitleChange,
-    sessionId,
-    updateTitleMutation,
-    utils.chat.getAgentSession,
-    utils.chat.getAgentSessionSidebar,
-    utils.chat.listAgentSessions,
-    utils.chat.listAgentUserSessions,
-  ]);
-
-  const renameBusy = updateTitleMutation.isPending;
+    await updateSessionTitle(null);
+  }, [updateSessionTitle]);
 
   const handleTabChange = useCallback(
     (value: string | null): void => {
@@ -240,7 +207,7 @@ export function AgentSessionHeader({
               variant="subtle"
               color="red"
               leftSection={<IconTrash size={rem(16)} />}
-              disabled={renameBusy || !session?.title}
+              disabled={renameBusy || !session.title}
               onClick={() => void handleClearTitle()}
             >
               {t("sessions.clearTitle")}

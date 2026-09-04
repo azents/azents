@@ -114,16 +114,8 @@ export type OutputPart = TextPart | AttachmentPart | ArtifactPart | FilePart;
 
 export type UserContentPart = TextPart | FilePart;
 
-export type ChatAction =
-  | { type: "command"; name: string }
-  | { type: "goal" }
-  | { type: "skill"; skill_path: string }
-  | {
-      type: "create_git_worktree";
-      source_project_path: string;
-      starting_ref: string;
-    }
-  | { type: "cleanup_orphan_git_worktrees" };
+export type { ChatAction } from "@/shared/chat/types";
+import type { ChatAction } from "@/shared/chat/types";
 
 export interface ActionMessagePayload {
   sender_user_id: string | null;

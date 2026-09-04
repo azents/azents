@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentPreviewBar } from "../components/AttachmentPreviewBar";
 import type { AttachmentPreviewBarLabels } from "../components/AttachmentPreviewBar";
-import type { PendingFile } from "../hooks/useFileUpload";
+import type { PendingFile } from "@/shared/file-upload/useFileUpload";
 
 interface AttachmentPreviewBarContainerProps {
   pendingFiles: PendingFile[];

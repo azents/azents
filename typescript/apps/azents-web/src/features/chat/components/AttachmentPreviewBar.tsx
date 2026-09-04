@@ -15,7 +15,10 @@ import {
 } from "@mantine/core";
 import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
 import { memo } from "react";
-import type { PendingFile, UploadErrorReason } from "../hooks/useFileUpload";
+import type {
+  PendingFile,
+  UploadErrorReason,
+} from "@/shared/file-upload/useFileUpload";
 import type { RefObject } from "react";
 
 const iconBoxStyle: React.CSSProperties = {

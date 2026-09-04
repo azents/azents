@@ -6,7 +6,7 @@ import type { ChatSessionContainerOutput } from "../containers/useChatSessionCon
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
 import type { SubagentNavigationLinks } from "../subagentNavigation";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
-import type { ComposerSubscriptionUsagePresentationProps } from "./ComposerSubscriptionUsage";
+import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import type {
   AgentModelSelection,
   AgentResponse,
@@ -298,6 +298,7 @@ const args: ChatSessionViewContainerOutput = {
   agent,
   sessionId: session.id,
   headerSession: session,
+  onUpdateTitle: () => Promise.resolve(session),
   chatSession,
   currentWorkspaceProfile: { userId: "user_ada", name: "Ada Lovelace" },
   subscriptionUsage,

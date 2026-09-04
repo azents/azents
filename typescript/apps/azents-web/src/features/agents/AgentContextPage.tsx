@@ -14,14 +14,18 @@ import {
 import { IconAlertCircle, IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { SessionContextView } from "@/features/chat/context/SessionContextView";
+import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
+import { SessionContextView } from "@/shared/session-context/SessionContextView";
 import {
   SessionRawEventsView,
   SessionSystemPromptView,
-} from "@/features/chat/context/SessionContextView";
-import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
+} from "@/shared/session-context/SessionContextView";
 import { trpc } from "@/trpc/client";
-import type { AgentResponse } from "@azents/public-client";
+import { useAgentSessionTitleUpdater } from "./containers/useAgentSessionTitleUpdater";
+import type {
+  AgentResponse,
+  AgentSessionResponse,
+} from "@azents/public-client";
 
 export type AgentContextPageView = "context" | "system-prompt" | "raw-events";
 
@@ -29,6 +33,7 @@ interface AgentContextPageProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  session: AgentSessionResponse;
   view: AgentContextPageView;
 }
 
@@ -36,6 +41,7 @@ export function AgentContextPage({
   handle,
   agent,
   sessionId,
+  session,
   view,
 }: AgentContextPageProps): React.ReactElement {
   const t = useTranslations("chat.context");
@@ -46,12 +52,19 @@ export function AgentContextPage({
     sessionId,
     limit: 300,
   });
+  const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
   const sessionPath = `/w/${handle}/agents/${agent.id}/sessions/${sessionId}`;
   const contextHref = `${sessionPath}?page=context`;
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentSessionHeader handle={handle} agent={agent} sessionId={sessionId} />
+      <AgentSessionHeader
+        handle={handle}
+        agent={agent}
+        sessionId={sessionId}
+        session={session}
+        onUpdateTitle={onUpdateTitle}
+      />
       <Box p="lg" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Stack gap="md">
           {view === "system-prompt" && (

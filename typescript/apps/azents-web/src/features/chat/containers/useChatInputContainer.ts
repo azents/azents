@@ -16,7 +16,6 @@ import {
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
-import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
 import type {
   ChatAction,
   ChatLiveRunState,
@@ -25,6 +24,10 @@ import type {
   TodoStateSnapshot,
   TokenUsageSummary,
 } from "../types";
+import type {
+  PendingFile,
+  UploadedFile,
+} from "@/shared/file-upload/useFileUpload";
 import type {
   AgentResponse,
   ModelReasoningEffort,

@@ -10,23 +10,24 @@
 import { useMantineTheme } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRuntimeTerminalContainer } from "@/shared/runtime-terminal/containers/useRuntimeTerminalContainer";
-import { useSubagentTreePanelContainer } from "@/shared/subagent-tree/useSubagentTreeContainer";
-import { useSubscriptionUsageContainer } from "@/shared/subscription-usage/useSubscriptionUsageContainer";
+import { useRuntimeTerminalContainer } from "@/features/chat/containers/useRuntimeTerminalContainer";
+import { useSubagentTreePanelContainer } from "@/features/chat/containers/useSubagentTreePanelContainer";
+import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { trpc } from "@/trpc/client";
 import { ChatSessionView } from "../components/ChatSessionView";
-import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
 import {
   resolveSubagentNavigation,
   type SubagentNavigationLinks,
 } from "../subagentNavigation";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
+import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import { useChatSessionContainer } from "./useChatSessionContainer";
-import type { ComposerSubscriptionUsagePresentationProps } from "../components/ComposerSubscriptionUsage";
+import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { ConnectionStatus } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
-import type { RuntimeTerminalContainerOutput } from "@/shared/runtime-terminal/containers/useRuntimeTerminalContainer";
+import type { RuntimeTerminalContainerOutput } from "@/shared/runtime-terminal/types";
+import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import type {
   AgentResponse,
   AgentSessionResponse,
@@ -58,6 +59,7 @@ export interface ChatSessionViewContainerOutput {
   terminalMobile: boolean;
   runtimeDrawerOpened: boolean;
   onSessionTitleChange: (session: AgentSessionResponse) => void;
+  onUpdateTitle: (title: string | null) => Promise<AgentSessionResponse>;
   onOpenRuntime: () => void;
   onCloseRuntime: () => void;
 }
@@ -73,6 +75,7 @@ export function useChatSessionViewContainer(
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
   const [headerSession, setHeaderSession] =
     useState<AgentSessionResponse>(session);
+  const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
 
   useEffect(() => {
     setHeaderSession(session);
@@ -171,6 +174,7 @@ export function useChatSessionViewContainer(
     terminalMobile: !isWorkspacePanelDocked,
     runtimeDrawerOpened,
     onSessionTitleChange,
+    onUpdateTitle,
     onOpenRuntime,
     onCloseRuntime,
   };

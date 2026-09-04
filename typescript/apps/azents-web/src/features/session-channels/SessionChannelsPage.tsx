@@ -18,12 +18,15 @@ function SessionChannelsWithHeader(
           agent={props.agent}
           sessionId={props.sessionId}
           session={props.state.session}
+          onUpdateTitle={props.onUpdateTitle}
         />
       ) : (
         <AgentSessionHeader
           handle={props.handle}
           agent={props.agent}
           sessionId={props.sessionId}
+          session={props.session}
+          onUpdateTitle={props.onUpdateTitle}
         />
       )}
       <SessionChannels {...props} />

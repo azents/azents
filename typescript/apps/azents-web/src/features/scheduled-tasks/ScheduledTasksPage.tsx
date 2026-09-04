@@ -16,6 +16,8 @@ function ScheduledTasksWithHeader(
         handle={props.handle}
         agent={props.agent}
         sessionId={props.sessionId}
+        session={props.session}
+        onUpdateTitle={props.onUpdateTitle}
       />
       <ScheduledTasks {...props} />
     </Box>

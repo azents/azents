@@ -22,3 +22,20 @@ export interface RuntimeTerminalViewState {
   ctrlActive: boolean;
   altActive: boolean;
 }
+
+export interface RuntimeTerminalContainerOutput extends RuntimeTerminalViewState {
+  hostRef: (node: HTMLDivElement | null) => void;
+  onExpand: () => void;
+  onFocus: () => void;
+  onCollapse: () => void;
+  onReturnToDock: () => void;
+  onTerminate: () => void;
+  onRetry: () => void;
+  onToggleCtrl: () => void;
+  onToggleAlt: () => void;
+  onSoftwareKey: (key: string) => void;
+  onFocusKeyboard: () => void;
+  dockHeight: number;
+  onDockResizeStart: (clientY: number) => void;
+  onDockResizeBy: (delta: number) => void;
+}

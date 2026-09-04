@@ -4,7 +4,6 @@ import { useLocalStorage } from "@mantine/hooks";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { trpc } from "@/trpc/client";
 import {
   classifyTerminalOutputSequence,
   isTerminalProjectionConnectable,
@@ -12,19 +11,20 @@ import {
   reconcilePendingTerminalInput,
   resolveReplayAcknowledgement,
   shouldRestoreChatForTerminalProjection,
-} from "../protocol";
+} from "@/shared/runtime-terminal/protocol";
 import {
   applyTerminalKeyModifiers,
   decodeTerminalOutputFrame,
   decodeTerminalServerControl,
   encodeTerminalInputFrame,
   splitTerminalInput,
-} from "../wire";
+} from "@/shared/runtime-terminal/wire";
+import { trpc } from "@/trpc/client";
 import type {
   RuntimeTerminalConnectionState,
+  RuntimeTerminalContainerOutput,
   RuntimeTerminalPresentation,
-  RuntimeTerminalViewState,
-} from "../types";
+} from "@/shared/runtime-terminal/types";
 
 const SUBPROTOCOL = "azents.terminal.v1";
 const HEARTBEAT_MS = 15_000;
@@ -58,23 +58,6 @@ interface AcceptedReplay {
 interface ActiveReplay {
   maximumSequence: number;
   ended: boolean;
-}
-
-export interface RuntimeTerminalContainerOutput extends RuntimeTerminalViewState {
-  hostRef: (node: HTMLDivElement | null) => void;
-  onExpand: () => void;
-  onFocus: () => void;
-  onCollapse: () => void;
-  onReturnToDock: () => void;
-  onTerminate: () => void;
-  onRetry: () => void;
-  onToggleCtrl: () => void;
-  onToggleAlt: () => void;
-  onSoftwareKey: (key: string) => void;
-  onFocusKeyboard: () => void;
-  dockHeight: number;
-  onDockResizeStart: (clientY: number) => void;
-  onDockResizeBy: (delta: number) => void;
 }
 
 function sendSocketControl(socket: WebSocket, control: object): void {

@@ -5,7 +5,7 @@ import {
   composerSubscriptionSeverity,
   projectComposerSubscriptionIndicator,
   resolveComposerSubscriptionSelection,
-} from "./composerSubscriptionUsage.ts";
+} from "../../shared/subscription-usage/composerSubscriptionUsage.ts";
 import type {
   AgentResponse,
   SubscriptionUsageAvailableResponse,

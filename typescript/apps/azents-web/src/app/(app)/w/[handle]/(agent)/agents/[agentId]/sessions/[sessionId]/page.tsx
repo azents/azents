@@ -46,7 +46,7 @@ export default async function Page({
     redirect(`/w/${handle}/agents/${agentId}/sessions/${sessionId}`);
   }
   try {
-    const [agent] = await Promise.all([
+    const [agent, session] = await Promise.all([
       trpc.agent.get({ handle, agentId }),
       trpc.chat.getAgentSession({ agentId, sessionId }),
     ]);
@@ -57,6 +57,7 @@ export default async function Page({
           handle={handle}
           agent={agent}
           sessionId={sessionId}
+          session={session}
         />
       );
     }
@@ -66,6 +67,7 @@ export default async function Page({
           handle={handle}
           agent={agent}
           sessionId={sessionId}
+          session={session}
         />
       );
     }
@@ -79,6 +81,7 @@ export default async function Page({
           handle={handle}
           agent={agent}
           sessionId={sessionId}
+          session={session}
           initialTaskId={taskId}
           openInitialTaskForEdit={edit === "1" && taskId !== null}
         />
@@ -90,12 +93,18 @@ export default async function Page({
           handle={handle}
           agent={agent}
           sessionId={sessionId}
+          session={session}
           view={view}
         />
       );
     }
     return (
-      <AgentChatTabPage handle={handle} agent={agent} sessionId={sessionId} />
+      <AgentChatTabPage
+        handle={handle}
+        agent={agent}
+        sessionId={sessionId}
+        session={session}
+      />
     );
   } catch (e) {
     if (e instanceof TRPCError && e.code === "NOT_FOUND") {

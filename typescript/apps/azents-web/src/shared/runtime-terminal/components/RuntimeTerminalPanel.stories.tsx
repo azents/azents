@@ -1,7 +1,7 @@
 import { Box, rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RuntimeTerminalPanel } from "./RuntimeTerminalPanel";
-import type { RuntimeTerminalContainerOutput } from "../containers/useRuntimeTerminalContainer";
+import type { RuntimeTerminalContainerOutput } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};

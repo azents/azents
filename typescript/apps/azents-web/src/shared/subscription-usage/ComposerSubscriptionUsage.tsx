@@ -23,8 +23,8 @@ import {
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { Component, type ReactNode, useState } from "react";
+import { projectComposerSubscriptionIndicator } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { subscriptionUsageSummaryLimits } from "@/shared/subscription-usage/subscriptionUsage";
-import { projectComposerSubscriptionIndicator } from "../composerSubscriptionUsage";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
