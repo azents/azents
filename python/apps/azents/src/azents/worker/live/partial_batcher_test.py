@@ -283,8 +283,8 @@ async def test_discard_waits_for_in_flight_flush_before_removal() -> None:
     await flush_started.wait()
 
     discard_task = asyncio.create_task(batcher.discard_session("session-1", discard))
-    await asyncio.sleep(0)
 
+    assert not discard_task.done()
     assert order == []
 
     allow_flush.set()
@@ -394,7 +394,6 @@ async def test_durable_transition_serializes_following_append() -> None:
             content_index=0,
         )
     )
-    await asyncio.sleep(0)
 
     assert not append_task.done()
     assert order == ["flush:before"]

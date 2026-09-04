@@ -371,11 +371,14 @@ class TestAwsToolkitBackgroundConnect:
     async def test_aexit_cancels_task(self) -> None:
         """__aexit__ cancels background task."""
         toolkit = _make_toolkit()
+        started = asyncio.Event()
+        release = asyncio.Event()
 
         async def forever_list_tools(
             *args: object, **kwargs: object
         ) -> tuple[list[McpBaseTool], bool]:
-            await asyncio.sleep(3600)
+            started.set()
+            await release.wait()
             return ([], False)
 
         with patch(
@@ -383,6 +386,7 @@ class TestAwsToolkitBackgroundConnect:
             side_effect=forever_list_tools,
         ):
             async with toolkit:
+                await started.wait()
                 assert toolkit._bg_task is not None  # noqa: SLF001  # directly validate background task status in tests
                 assert not toolkit._bg_task.done()  # noqa: SLF001  # directly validate background task status in tests
 

@@ -475,6 +475,7 @@ class _IdleContinuationService:
         """Record one durable idle continuation outcome."""
         self.calls.append((snapshot, list(toolkits)))
         self.host.idle_continuation_calls.append((snapshot, list(toolkits)))
+        self.host.idle_continuation_recorded.put_nowait(None)
         if self.host.idle_continuation_error is not None:
             raise self.host.idle_continuation_error
         if self.host.pending_idle_continuation_run_id != run_id:
@@ -484,6 +485,7 @@ class _IdleContinuationService:
             return False
         self.host.pending_idle_continuation_run_id = None
         self.host.idle_session_ids.append(snapshot.session_id)
+        self.host.idle_recorded.put_nowait(None)
         self.host.lifecycle_events.append("idle_continuation")
         return True
 
@@ -518,6 +520,13 @@ class _Host:
         self._shutdown_event = asyncio.Event()
         self.command_processed = asyncio.Event()
         self.idle_mark_attempted = asyncio.Event()
+        self.idle_recorded: asyncio.Queue[None] = asyncio.Queue()
+        self.idle_continuation_recorded: asyncio.Queue[None] = asyncio.Queue()
+        self.finalized_user_stop = asyncio.Event()
+        self.handover_recorded = asyncio.Event()
+        self.owner_heartbeat_recorded = asyncio.Event()
+        self.stop_signal_ready = asyncio.Event()
+        self.second_message_started = asyncio.Event()
         self.cleared_session_ids: list[str] = []
         self.finalized_user_stop_session_ids: list[str] = []
         self.parent_result_activity_run_ids: list[str] = []
@@ -585,6 +594,8 @@ class _Host:
         _ = poll_fn, prepare_toolkits
         self.processed_messages.append(message)
         self.message_started.set()
+        if len(self.processed_messages) == 2:
+            self.second_message_started.set()
         if self.block_message_until_release:
             await self.message_release.wait()
         if self.block_message_until_cancel:
@@ -597,8 +608,8 @@ class _Host:
                 raise
         if self.stop_first_message and len(self.processed_messages) == 1:
             assert check_stop is not None
-            while not await check_stop():
-                await asyncio.sleep(0)
+            await self.stop_signal_ready.wait()
+            assert await check_stop()
         if self.shutdown_before_message_returns:
             self.shutdown_event.set()
         message_number = len(self.processed_messages)
@@ -647,6 +658,7 @@ class _Host:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Store wake-up messages sent for handover."""
         self.handover_messages.append(message)
+        self.handover_recorded.set()
 
     async def notify_parent_result_activity(self, run_id: str) -> None:
         """Store parent-result activity notifications."""
@@ -662,6 +674,7 @@ class _Host:
         """Store session for user stop finalization call."""
         del run_id, active_tool_calls
         self.finalized_user_stop_session_ids.append(session_id)
+        self.finalized_user_stop.set()
 
     async def mark_session_running(self, session_id: str) -> None:
         """This test does not change run state."""
@@ -679,6 +692,7 @@ class _Host:
         if not self.idle_transition_allowed:
             return False
         self.idle_session_ids.append(session_id)
+        self.idle_recorded.put_nowait(None)
         self.lifecycle_events.append("mark_session_idle")
         return True
 
@@ -713,6 +727,7 @@ class _Host:
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """Store session for owner heartbeat refresh call."""
         self.owner_heartbeat_session_ids.append(session_id)
+        self.owner_heartbeat_recorded.set()
 
     async def has_stop_request(self, session_id: str) -> bool:
         """Return stop intent existence specified by test."""
@@ -786,8 +801,7 @@ class _ExecutionSnapshotLoader:
 
 async def _wait_for_owner_heartbeat(host: _Host) -> None:
     """Wait until owner heartbeat call is recorded in test host."""
-    while not host.owner_heartbeat_session_ids:
-        await asyncio.sleep(0)
+    await host.owner_heartbeat_recorded.wait()
 
 
 class _ScriptedSessionRunnerWaiter:
@@ -916,12 +930,6 @@ async def _noop_publish_event(event: PublishedEvent) -> None:
     _ = event
 
 
-async def _wait_until(predicate: Callable[[], bool]) -> None:
-    """Wait with short yields until condition becomes true."""
-    while not predicate():
-        await asyncio.sleep(0)
-
-
 class _ReceiveBroker:
     """Return one prepared Worker signal batch."""
 
@@ -980,7 +988,6 @@ async def test_tool_admission_barrier_orders_admission_before_close() -> None:
     admission_task = asyncio.create_task(barrier.run_if_open(action))
     await action_started.wait()
     close_task = asyncio.create_task(barrier.close())
-    await asyncio.sleep(0)
     assert not close_task.done()
 
     release_action.set()
@@ -994,8 +1001,10 @@ async def test_run_stop_controller_user_stop_cancels_active_task_once() -> None:
     """RunStopController delivers user stop as cancel idempotently."""
     controller = RunStopController()
     cancelled = asyncio.Event()
+    started = asyncio.Event()
 
     async def wait_forever() -> RunExecutionResult:
+        started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -1009,7 +1018,7 @@ async def test_run_stop_controller_user_stop_cancels_active_task_once() -> None:
 
     task = asyncio.create_task(wait_forever())
     controller.register_active_task(task)
-    await asyncio.sleep(0)
+    await started.wait()
 
     try:
         assert controller.request_user_stop()
@@ -1033,7 +1042,6 @@ async def test_idle_stop_does_not_latch_next_run() -> None:
 
     try:
         runner.enqueue(SessionStopSignal(session_id="session-001"))
-        await asyncio.sleep(0)
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
     finally:
@@ -1052,7 +1060,7 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
 
     try:
         runner.enqueue(message)
-        await _wait_until(lambda: bool(host.idle_continuation_calls))
+        await host.idle_continuation_recorded.get()
     finally:
         await runner.shutdown()
 
@@ -1096,7 +1104,7 @@ async def test_recovered_no_actionable_wake_up_consumes_durable_idle_boundary() 
 
     try:
         runner.enqueue(message)
-        await _wait_until(lambda: bool(host.idle_continuation_calls))
+        await host.idle_continuation_recorded.get()
     finally:
         await runner.shutdown()
 
@@ -1140,7 +1148,7 @@ async def test_failed_terminal_run_marks_idle_without_goal_continuation(
 
     try:
         runner.enqueue(message)
-        await _wait_until(lambda: bool(host.idle_session_ids))
+        await host.idle_recorded.get()
     finally:
         await runner.shutdown()
 
@@ -1216,7 +1224,7 @@ async def test_no_actionable_wake_up_marks_session_idle_without_continuation() -
 
     try:
         runner.enqueue(message)
-        await _wait_until(lambda: bool(host.idle_session_ids))
+        await host.idle_recorded.get()
     finally:
         await runner.shutdown()
 
@@ -1241,8 +1249,8 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
     try:
         runner.enqueue(first)
         runner.enqueue(stale)
-        await _wait_until(lambda: len(host.processed_messages) == 2)
-        await _wait_until(lambda: bool(host.idle_continuation_calls))
+        await host.second_message_started.wait()
+        await host.idle_continuation_recorded.get()
     finally:
         await runner.shutdown()
 
@@ -1973,8 +1981,8 @@ async def test_stop_restarts_turn_when_pending_buffer_remains() -> None:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(SessionStopSignal(session_id="session-001"))
-        while len(host.processed_messages) < 2:
-            await asyncio.sleep(0)
+        host.stop_signal_ready.set()
+        await host.second_message_started.wait()
     finally:
         await runner.shutdown()
 
@@ -1995,9 +2003,9 @@ async def test_stop_does_not_duplicate_existing_resume_wake_up() -> None:
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
         runner.enqueue(SessionStopSignal(session_id="session-001"))
-        while len(host.processed_messages) < 2:
-            await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        host.stop_signal_ready.set()
+        await host.second_message_started.wait()
+        assert not runner.inbox.has_wake_up_queued("session-001")
     finally:
         await runner.shutdown()
 
@@ -2017,11 +2025,11 @@ async def test_stop_discards_existing_wake_up_when_no_pending_buffer() -> None:
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
         runner.enqueue(SessionStopSignal(session_id="session-001"))
+        host.stop_signal_ready.set()
         await asyncio.wait_for(
-            _wait_until(lambda: host.idle_session_ids == ["session-001"]),
+            host.idle_recorded.get(),
             timeout=2,
         )
-        await asyncio.sleep(0)
     finally:
         await runner.shutdown()
 
@@ -2084,18 +2092,15 @@ async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> N
         runner.enqueue(SessionStopSignal(session_id="session-001"))
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
         await asyncio.wait_for(
-            _wait_until(
-                lambda: host.finalized_user_stop_session_ids == ["session-001"]
-            ),
+            host.finalized_user_stop.wait(),
             timeout=2,
         )
-        await asyncio.sleep(0)
         assert host.idle_session_ids == []
         assert host.released_session_ids == []
 
         host.cancel_cleanup_release.set()
         await asyncio.wait_for(
-            _wait_until(lambda: host.idle_session_ids == ["session-001"]),
+            host.idle_recorded.get(),
             timeout=2,
         )
         assert host.cleared_session_ids == ["session-001"]
@@ -2145,7 +2150,7 @@ async def test_runtime_shutdown_hands_over_active_run(
         host.shutdown_event.set()
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=1)
         await asyncio.wait_for(
-            _wait_until(lambda: host.handover_messages == [message]),
+            host.handover_recorded.wait(),
             timeout=1,
         )
     finally:
@@ -2176,7 +2181,7 @@ async def test_runner_shutdown_does_not_mark_active_run_idle() -> None:
         runner.request_shutdown()
         host.message_release.set()
         await asyncio.wait_for(
-            _wait_until(lambda: runner.terminated),
+            runner.terminated_event.wait(),
             timeout=1,
         )
     finally:

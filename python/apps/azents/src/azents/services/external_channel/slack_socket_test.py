@@ -32,6 +32,7 @@ class FakeSocket:
         self.messages = messages
         self.sent: list[str] = []
         self.closed = False
+        self.connected = asyncio.Event()
         self.on_message: Callable[[aiohttp.WSMessage], Awaitable[None]] | None = None
         self.on_active: Callable[[], Awaitable[None]] | None = None
         self.on_gap: Callable[[str], Awaitable[None]] | None = None
@@ -52,6 +53,7 @@ class FakeSocket:
 
     async def connect(self) -> None:
         """Establish one SDK session and keep recoverable transitions internal."""
+        self.connected.set()
         assert self.on_message is not None
         assert self.on_active is not None
         assert self.on_gap is not None
@@ -490,7 +492,7 @@ async def test_recoverable_endpoint_failure_stays_inside_sdk_lifecycle() -> None
             app_token="xapp-secret",
         )
     )
-    await asyncio.sleep(0)
+    await socket.connected.wait()
     assert socket.on_failure is not None
     await socket.on_failure("socket_endpoint_unavailable", False)
 
@@ -517,7 +519,7 @@ async def test_terminal_endpoint_failure_completes_sdk_lifecycle() -> None:
             app_token="xapp-secret",
         )
     )
-    await asyncio.sleep(0)
+    await socket.connected.wait()
     assert socket.on_failure is not None
     await socket.on_failure("socket_credentials_rejected", True)
 
@@ -539,7 +541,7 @@ async def test_cancellation_closes_sdk_transport() -> None:
             app_token="xapp-secret",
         )
     )
-    await asyncio.sleep(0)
+    await blocking.connected.wait()
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):

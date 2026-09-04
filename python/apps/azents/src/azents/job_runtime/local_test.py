@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from typing import cast
 
 import pytest
@@ -23,6 +24,30 @@ from azents.job_runtime.types import (
     JobPayload,
     JobRequest,
 )
+
+
+class _ReleaseObservableLock(asyncio.Lock):
+    """Signal after a tested critical section releases the lock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.released = asyncio.Event()
+
+    def release(self) -> None:
+        super().release()
+        self.released.set()
+
+
+async def _wait_for_runtime_close_started(
+    runtime: LocalJobRuntime,
+    lock: _ReleaseObservableLock,
+) -> None:
+    """Wait until the close critical section records the closed state."""
+    while not runtime._closed:  # noqa: SLF001
+        lock.released.clear()
+        if runtime._closed:  # noqa: SLF001
+            return
+        await lock.released.wait()
 
 
 def _request(
@@ -385,8 +410,10 @@ async def test_cancellation_grace_overrun_returns_terminal_outcome() -> None:
         )
         assert starts == 1
 
+        close_lock = _ReleaseObservableLock()
+        runtime._lock = close_lock  # noqa: SLF001  # observe the shutdown boundary under test
         close_task = asyncio.create_task(runtime.close())
-        await asyncio.sleep(0)
+        await _wait_for_runtime_close_started(runtime, close_lock)
         assert not close_task.done()
     finally:
         release.set()
@@ -424,12 +451,14 @@ async def test_close_cancellation_preserves_quarantined_ownership() -> None:
         JobOutcomeStatus.TIMED_OUT
     )
 
+    close_lock = _ReleaseObservableLock()
+    runtime._lock = close_lock  # noqa: SLF001  # observe the shutdown boundary under test
     close_task = asyncio.create_task(runtime.close())
     try:
-        await asyncio.sleep(0)
+        await _wait_for_runtime_close_started(runtime, close_lock)
         close_task.cancel()
-        await asyncio.sleep(0)
 
+        assert close_task.cancelling()
         assert not close_task.done()
         assert not container.closed.is_set()
         assert runtime.active_count == 1
@@ -443,7 +472,9 @@ async def test_close_cancellation_preserves_quarantined_ownership() -> None:
 
 
 @pytest.mark.asyncio
-async def test_close_cancellation_tracks_quarantine_created_during_close() -> None:
+async def test_close_cancellation_tracks_quarantine_created_during_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Close refreshes ownership after its cancellation creates quarantine."""
     started = asyncio.Event()
     release = asyncio.Event()
@@ -469,11 +500,30 @@ async def test_close_cancellation_tracks_quarantine_created_during_close() -> No
     await runtime.submit(_request("dynamic-quarantine", timeout=1.0))
     await started.wait()
 
+    close_lock = _ReleaseObservableLock()
+    runtime._lock = close_lock  # noqa: SLF001  # observe the shutdown boundary under test
+    cleanup_adopted = asyncio.Event()
+    adopt_detached_cleanup = runtime._adopt_detached_cleanup  # noqa: SLF001
+
+    async def observe_cleanup_adoption(
+        handler_task: asyncio.Future[JobPayload | None],
+        container_stack: AsyncExitStack,
+        *,
+        request: JobRequest,
+    ) -> None:
+        await adopt_detached_cleanup(
+            handler_task,
+            container_stack,
+            request=request,
+        )
+        cleanup_adopted.set()
+
+    monkeypatch.setattr(runtime, "_adopt_detached_cleanup", observe_cleanup_adoption)
     close_task = asyncio.create_task(runtime.close())
     try:
-        await asyncio.sleep(0)
+        await _wait_for_runtime_close_started(runtime, close_lock)
         close_task.cancel()
-        await asyncio.sleep(0.05)
+        await cleanup_adopted.wait()
 
         assert not close_task.done()
         assert not container.closed.is_set()
@@ -502,8 +552,10 @@ async def test_close_rejects_new_work_and_drains_accepted_task() -> None:
     handle = await runtime.submit(_request("accepted"))
     await started.wait()
 
+    close_lock = _ReleaseObservableLock()
+    runtime._lock = close_lock  # noqa: SLF001  # observe the shutdown boundary under test
     close_task = asyncio.create_task(runtime.close())
-    await asyncio.sleep(0)
+    await _wait_for_runtime_close_started(runtime, close_lock)
 
     with pytest.raises(JobRuntimeClosedError):
         await runtime.submit(_request("rejected"))

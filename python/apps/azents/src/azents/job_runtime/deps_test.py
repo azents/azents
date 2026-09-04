@@ -25,6 +25,30 @@ from azents.job_runtime.types import (
 from azents.utils.appctx import AppContext
 
 
+class _ReleaseObservableLock(asyncio.Lock):
+    """Signal after a tested critical section releases the lock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.released = asyncio.Event()
+
+    def release(self) -> None:
+        super().release()
+        self.released.set()
+
+
+async def _wait_for_runtime_close_started(
+    runtime: LocalJobRuntime,
+    lock: _ReleaseObservableLock,
+) -> None:
+    """Wait until the close critical section records the closed state."""
+    while not runtime._closed:  # noqa: SLF001
+        lock.released.clear()
+        if runtime._closed:  # noqa: SLF001
+            return
+        await lock.released.wait()
+
+
 @pytest.mark.asyncio
 async def test_get_job_runtime_is_one_appcontext_singleton() -> None:
     """Every producer in one process resolves the same Runtime instance."""
@@ -95,6 +119,7 @@ async def test_appcontext_waits_for_quarantined_handler_before_resources_close(
         0.01,
     )
     runtime = await get_job_runtime(appctx, cast(Any, config), container)
+    assert isinstance(runtime, LocalJobRuntime)
     handle = await runtime.submit(
         JobRequest(
             handler_key="test.quarantine",
@@ -110,12 +135,17 @@ async def test_appcontext_waits_for_quarantined_handler_before_resources_close(
         assert outcome.status is JobOutcomeStatus.TIMED_OUT
         assert handler_cancelled.is_set()
 
+        close_lock = _ReleaseObservableLock()
+        runtime._lock = close_lock  # noqa: SLF001  # observe the shutdown boundary under test
         close_task = asyncio.create_task(appctx.close())
-        await asyncio.sleep(0)
+        await asyncio.wait_for(
+            _wait_for_runtime_close_started(runtime, close_lock),
+            timeout=0.2,
+        )
         assert not close_task.done()
         assert not resource_closed.is_set()
         close_task.cancel()
-        await asyncio.sleep(0)
+        assert close_task.cancelling()
         assert not close_task.done()
         assert not resource_closed.is_set()
     finally:
