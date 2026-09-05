@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-01
-spec_version: 41
+last_verified_at: 2026-09-05
+spec_version: 42
 ---
 
 # External Channel Lifecycle
@@ -45,8 +45,10 @@ spec_version: 41
 
 Disconnecting a connected binding terminally sets `disconnected_at`, ends active
 Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
-when needed. Slack renders the presence control with Block Kit and Discord
-uses an Embed; both include the current Agent name and one `View session` button.
+when needed. Discord cleanup deletes a standalone Tracker host but preserves a
+conversational reply host by clearing only its Tracker Embed and controls. Slack
+renders the presence control with Block Kit and Discord uses an Embed; both include the
+current Agent name and one `View session` button.
 The next Discord Gateway typing reconciliation removes the binding's delivery channel
 unless another active Work cycle for the same Bot/channel still contributes it.
 Provider conversation positions and already projected AgentSession history remain.
@@ -314,6 +316,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 42) — Made Discord lifecycle cleanup host-aware:
+  standalone Trackers are deleted while reply-hosted Trackers are detached without
+  deleting conversational content.
 - **2026-09-01** (spec_version 41) — Preserved brief SDK-owned Discord Resume while
   replacing a continuously unready client after one minute, and excluded awaiting
   Work from lifecycle-restored typing targets.

@@ -65,8 +65,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-03
-spec_version: 68
+last_verified_at: 2026-09-05
+spec_version: 69
 ---
 
 # External Channel
@@ -93,9 +93,11 @@ contain multiple independent bindings.
   selector interactions retain only routing, authorization, and replay identity.
 - Bindings are Session lifecycle resources. Each binding's current or latest Channel
   Work cycle and Work-owned provider projection parts are one Session-bound Toolkit
-  State value under `external_channel/channel_work:{binding_id}`. The versioned Work
-  state also owns cycle-scoped Activity Tracker visibility; process-local typing tasks
-  and provider messages are not visibility authority.
+  State value under `external_channel/channel_work:{binding_id}`. Each projection part
+  records whether its Tracker is hosted by a standalone provider message or attached to
+  a conversational reply. The versioned Work state also owns cycle-scoped Activity
+  Tracker visibility; process-local typing tasks and provider messages are not
+  visibility authority.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider history is the inbound content authority. A callback admits only a
   content-free active ingress identity. One resolved history range becomes independent
@@ -530,6 +532,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 69) — Added standalone-versus-reply Tracker host
+  ownership to Channel Work projection parts so Discord can move one conversational
+  Tracker without deleting reply content.
 - **2026-09-01** (spec_version 68) — Added the schema-v4 awaiting Run identity to
   the domain model, aligned hidden-Work promotion with both progress-update modes,
   excluded awaiting Work from Discord typing, and recorded bounded fresh-client

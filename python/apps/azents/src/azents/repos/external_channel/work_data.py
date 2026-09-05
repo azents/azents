@@ -1,7 +1,7 @@
 """Channel Work and direct provider-effect repository records."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -43,6 +43,9 @@ class ChannelActionEffectPlan:
     part: int
     work_cycle_id: str
     expected_desired_progress_revision: int | None
+    dependencies: tuple[int, ...]
+    provider_message_key_effect_index: int | None
+    projection_host_kind: Literal["standalone", "reply"] | None
 
 
 @dataclass(frozen=True)

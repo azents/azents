@@ -51,6 +51,7 @@ from azents.repos.external_channel.work_state import (
 )
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.services.external_channel.provider_effect import ProviderMutationOutcome
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
@@ -79,7 +80,7 @@ def _work(
     projection_parts: list[ChannelWorkProjectionPartState] | None = None,
 ) -> ChannelWorkState:
     return ChannelWorkState(
-        schema_version=4,
+        schema_version=5,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -103,12 +104,14 @@ def _part(
     provider_message_key: str | None,
     revision: int = 3,
     part_ordinal: int = 0,
+    host_kind: Literal["standalone", "reply"] = "standalone",
 ) -> ChannelWorkProjectionPartState:
     return ChannelWorkProjectionPartState(
         part_ordinal=part_ordinal,
         desired_progress_revision=revision,
         status=status,
         provider_message_key=provider_message_key,
+        host_kind=host_kind,
     )
 
 
@@ -381,7 +384,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 ) -> None:
     """Repeated admissions cannot create another Tracker for the same active Work."""
     work = ChannelWorkState(
-        schema_version=4,
+        schema_version=5,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -1268,6 +1271,8 @@ async def _commit_action(
     provider: ExternalChannelProvider,
     mode: ExternalChannelActionMode,
     message: str | None,
+    title: str | None = None,
+    tasks: list[ChannelWorkTask] | None = None,
 ) -> _CommitActionResult:
     """Execute one canonical direct action through repository authority checks."""
     binding = SimpleNamespace(
@@ -1368,8 +1373,8 @@ async def _commit_action(
         binding_id=binding.id,
         mode=mode,
         message=message,
-        title=None,
-        tasks=None,
+        title=title,
+        tasks=tasks,
         files=(),
         now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
     )
@@ -1422,6 +1427,138 @@ async def test_message_only_nonterminal_action_preserves_present_tracker(
     assert updated.desired_progress == work.desired_progress
     assert updated.desired_progress_revision == work.desired_progress_revision
     update.assert_awaited_once()
+
+
+def _moving_tasks() -> list[ChannelWorkTask]:
+    """Return one valid unfinished task list for Tracker relocation tests."""
+    return [
+        ChannelWorkTask(
+            id="task-1",
+            title="Move the Tracker",
+            status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+            details=None,
+            output=None,
+            sources=[],
+        )
+    ]
+
+
+async def test_discord_message_with_progress_moves_tracker_to_final_reply() -> None:
+    """Discord plans reply, remove, then attach against the reply identity."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:555",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, updated, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="I found the next step.",
+        title="Moving the Tracker…",
+        tasks=_moving_tasks(),
+    )
+
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.REPLY,
+        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    ]
+    reply, remove, attach = transition.effects
+    assert reply.dependencies == ()
+    assert remove.dependencies == (0,)
+    assert remove.provider.target.request_payload["provider_message_key"] == (
+        "discord:111:555"
+    )
+    assert remove.provider.target.request_payload["tracker_host_kind"] == "standalone"
+    assert attach.dependencies == (0, 1)
+    assert attach.provider_message_key_effect_index == 0
+    assert attach.projection_host_kind == "reply"
+    assert "provider_message_key" not in attach.provider.target.request_payload
+    assert attach.provider.target.request_payload["tracker_host_kind"] == "reply"
+    assert updated.projection_parts == [projection]
+
+
+async def test_discord_message_with_progress_attaches_without_current_tracker() -> None:
+    """A missing Tracker needs only the delivered reply before attachment."""
+    work = _work(desired=True)
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Work is underway.",
+        title="Starting the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.REPLY,
+        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    ]
+    attach = transition.effects[1]
+    assert attach.dependencies == (0,)
+    assert attach.provider_message_key_effect_index == 0
+    assert attach.projection_host_kind == "reply"
+
+
+async def test_discord_state_only_update_preserves_reply_tracker_host() -> None:
+    """State-only progress edits the existing reply without relocating it."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:555",
+        host_kind="reply",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Refreshing the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert len(transition.effects) == 1
+    effect = transition.effects[0]
+    assert (
+        effect.provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    )
+    assert effect.dependencies == ()
+    assert effect.provider_message_key_effect_index is None
+    assert effect.projection_host_kind == "reply"
+    assert effect.provider.target.request_payload["provider_message_key"] == (
+        "discord:111:555"
+    )
+    assert effect.provider.target.request_payload["tracker_host_kind"] == "reply"
+
+
+async def test_slack_message_with_progress_keeps_standalone_tracker() -> None:
+    """Discord relocation does not alter Slack's retained Tracker lifecycle."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="slack:C1:123.456",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.SLACK,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="I found the next step.",
+        title="Updating the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.REPLY,
+        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    ]
+    assert transition.effects[1].dependencies == ()
+    assert transition.effects[1].projection_host_kind == "standalone"
 
 
 @pytest.mark.parametrize(
@@ -1537,6 +1674,137 @@ async def test_ignore_without_present_tracker_has_no_provider_effect(
     update.assert_awaited_once()
 
 
+async def test_reply_tracker_attachment_settles_known_host_identity() -> None:
+    """Attachment outcomes retain the reply identity for later full updates."""
+    current = _work(desired=True)
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[bool],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[bool]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    provider = make_provider_effect_plan("reply-attachment")
+    provider = replace(
+        provider,
+        target=replace(
+            provider.target,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            request_payload={"provider_message_key": "discord:111:999"},
+        ),
+    )
+    effect = ChannelActionEffectPlan(
+        provider=provider,
+        part=0,
+        work_cycle_id=current.work_cycle_id,
+        expected_desired_progress_revision=current.desired_progress_revision,
+        dependencies=(),
+        provider_message_key_effect_index=0,
+        projection_host_kind="reply",
+    )
+
+    applied = await repository.apply_direct_effect_outcome(
+        MagicMock(spec=AsyncSession),
+        effect=effect,
+        outcome=ProviderMutationOutcome(
+            status="failed",
+            provider_message_key=None,
+            error_kind="provider_rejected",
+            error_summary="Attachment failed.",
+        ),
+    )
+
+    assert applied is True
+    assert len(current.projection_parts) == 1
+    projection = current.projection_parts[0]
+    assert projection.status is ExternalChannelWorkProjectionStatus.FAILED
+    assert projection.provider_message_key == "discord:111:999"
+    assert projection.host_kind == "reply"
+
+
+async def test_reply_tracker_cleanup_preserves_host_kind_after_detach() -> None:
+    """Confirmed detach records absence without losing reply-host classification."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:999",
+        host_kind="reply",
+    )
+    current = _work(desired=True, projection_parts=[projection])
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[bool],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[bool]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    provider = make_provider_effect_plan("reply-detach")
+    provider = replace(
+        provider,
+        target=replace(
+            provider.target,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            request_payload={"provider_message_key": "discord:111:999"},
+        ),
+    )
+    effect = ChannelActionEffectPlan(
+        provider=provider,
+        part=0,
+        work_cycle_id=current.work_cycle_id,
+        expected_desired_progress_revision=current.desired_progress_revision,
+        dependencies=(),
+        provider_message_key_effect_index=None,
+        projection_host_kind="reply",
+    )
+
+    applied = await repository.apply_direct_effect_outcome(
+        MagicMock(spec=AsyncSession),
+        effect=effect,
+        outcome=ProviderMutationOutcome(
+            status="delivered",
+            provider_message_key="discord:111:999",
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+
+    assert applied is True
+    assert current.projection_parts[0].status is (
+        ExternalChannelWorkProjectionStatus.DELETED
+    )
+    assert current.projection_parts[0].provider_message_key is None
+    assert current.projection_parts[0].host_kind == "reply"
+
+
 async def test_direct_effect_revalidation_ignores_connection_health_status() -> None:
     """Post-commit effect authority is independent from ingress health."""
 
@@ -1551,6 +1819,9 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
         part=0,
         work_cycle_id="work-1",
         expected_desired_progress_revision=None,
+        dependencies=(),
+        provider_message_key_effect_index=None,
+        projection_host_kind=None,
     )
 
     with pytest.raises(QueryCaptured):
@@ -1563,6 +1834,64 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
     assert execute_args is not None
     revalidation_query = execute_args.args[0]
     assert "external_channel_connections.status" not in _where_sql(revalidation_query)
+
+
+async def test_direct_effect_revalidation_rejects_stale_progress_revision() -> None:
+    """A newer desired snapshot fences an older Discord mutation before I/O."""
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(id="resource-1")
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.DISCORD,
+        app_mode=ExternalChannelAppMode.SINGLE,
+        encrypted_credentials="ciphertext",
+        provider_tenant_id="111",
+        capabilities=None,
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "111",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
+    )
+    agent_session = SimpleNamespace(id="session-1")
+    agent = SimpleNamespace(id="agent-1", name="Agent", avatar=None)
+    workspace = SimpleNamespace(handle="workspace")
+    query_result = SimpleNamespace(
+        one_or_none=lambda: (
+            binding,
+            resource,
+            route,
+            connection,
+            agent_session,
+            agent,
+            workspace,
+        )
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=query_result)
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    state_store.load = AsyncMock(return_value=_work(desired=True))
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    provider = make_provider_effect_plan("stale-progress")
+    provider = replace(
+        provider,
+        target=replace(
+            provider.target,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+        ),
+    )
+    effect = ChannelActionEffectPlan(
+        provider=provider,
+        part=0,
+        work_cycle_id="work-1",
+        expected_desired_progress_revision=2,
+        dependencies=(),
+        provider_message_key_effect_index=None,
+        projection_host_kind="standalone",
+    )
+
+    assert await repository.revalidate_direct_effect(session, effect=effect) is None
 
 
 async def test_access_control_create_is_claimed_once_before_provider_io() -> None:

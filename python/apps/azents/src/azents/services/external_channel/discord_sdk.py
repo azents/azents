@@ -194,6 +194,7 @@ class DiscordSDKSession(Protocol):
         channel_id: str,
         content: str,
         nonce: str,
+        suppress_notifications: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -206,7 +207,7 @@ class DiscordSDKSession(Protocol):
         guild_id: str,
         channel_id: str,
         message_id: str,
-        content: str,
+        content: str | None,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -623,6 +624,7 @@ class _DiscordPySession:
         channel_id: str,
         content: str,
         nonce: str,
+        suppress_notifications: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -661,6 +663,10 @@ class _DiscordPySession:
                         "Discord text message payload is unavailable."
                     )
                 params.payload["enforce_nonce"] = True
+                if suppress_notifications:
+                    flags = discord.MessageFlags()
+                    flags.suppress_notifications = True
+                    params.payload["flags"] = flags.value
                 payload: object = await self._http.send_message(
                     int(channel_id),
                     params=params,
@@ -745,7 +751,7 @@ class _DiscordPySession:
         guild_id: str,
         channel_id: str,
         message_id: str,
-        content: str,
+        content: str | None,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -754,11 +760,18 @@ class _DiscordPySession:
             channel_id=channel_id,
         )
         try:
-            with handle_message_parameters(
-                content=content,
-                view=_sdk_view(components),
-                embeds=_sdk_embeds(embeds) or [],
-            ) as params:
+            if content is None:
+                parameters = handle_message_parameters(
+                    view=_sdk_view(components),
+                    embeds=_sdk_embeds(embeds) or [],
+                )
+            else:
+                parameters = handle_message_parameters(
+                    content=content,
+                    view=_sdk_view(components),
+                    embeds=_sdk_embeds(embeds) or [],
+                )
+            with parameters as params:
                 payload: object = await self._http.edit_message(
                     int(channel_id),
                     int(message_id),

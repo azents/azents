@@ -328,6 +328,7 @@ class DiscordDeliveryClient:
         channel_id: str,
         content: str,
         operation_key: ProviderOperationKey,
+        suppress_notifications: bool,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
         forward_to_parent: bool = False,
@@ -344,6 +345,7 @@ class DiscordDeliveryClient:
                     channel_id=channel_id,
                     content=content,
                     nonce=discord_delivery_nonce(operation_key),
+                    suppress_notifications=suppress_notifications,
                     components=components,
                     embeds=embeds,
                 )
@@ -465,7 +467,7 @@ class DiscordDeliveryClient:
         guild_id: str,
         channel_id: str,
         message_id: str,
-        content: str,
+        content: str | None,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
