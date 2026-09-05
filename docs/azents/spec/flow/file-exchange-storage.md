@@ -54,7 +54,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-04
+last_verified_at: 2026-09-05
 spec_version: 46
 ---
 
@@ -120,6 +120,14 @@ not.
 ### Agent imports user or internal file
 
 `import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+Sources larger than the configured Runtime transfer limit fail before admission, and
+the tool reports the size-limit rejection without presenting it as a destination-path
+failure.
+Temporary coordinator admission pressure is retried until capacity becomes available or
+the existing transfer deadline expires. Admission timeout, generation fencing, Runner
+stream availability, destination write, integrity, cancellation, and unknown transfer
+failures retain separate safe tool messages instead of being presented as path
+validation failures.
 
 The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
 rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so

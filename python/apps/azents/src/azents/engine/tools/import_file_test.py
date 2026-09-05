@@ -29,7 +29,9 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.runtime.transfer.managed_source import ManagedServerToRuntimeSource
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
+    ServerToRuntimeTransferAdmissionTimeout,
     ServerToRuntimeTransferError,
+    ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
 )
 from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
@@ -372,10 +374,69 @@ async def test_import_file_maps_terminal_transfer_failure_to_tool_error() -> Non
         transfer_service=transfer_service,
     )
 
-    with pytest.raises(FunctionToolError, match="Failed to write imported file"):
+    with pytest.raises(FunctionToolError, match="Failed to transfer imported file"):
         await tool.handler(json.dumps({"uri": exchange_file.uri}))
 
     assert len(transfer_service.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_file_reports_transfer_limit_error() -> None:
+    """A source-size rejection must not be presented as a path failure."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeTransferLimitExceeded(
+                "Transfer source exceeds configured limit"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        FunctionToolError,
+        match="exceeds the configured Runtime transfer limit",
+    ) as raised:
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    assert "absolute runtime paths" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_import_file_reports_admission_timeout() -> None:
+    """Bounded admission waiting reports capacity timeout without path advice."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeTransferAdmissionTimeout(
+                "Runtime transfer admission remained unavailable until deadline",
+                failure=CoordinatorTransferFailure.ADMISSION,
+            )
+        ),
+    )
+
+    with pytest.raises(
+        FunctionToolError,
+        match="capacity remained unavailable until the import deadline",
+    ) as raised:
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    assert "absolute runtime paths" not in str(raised.value)
 
 
 @pytest.mark.asyncio
@@ -473,6 +534,31 @@ async def test_import_file_preserves_read_only_and_staging_error_contracts() -> 
                 "Transfer source authority changed before dispatch"
             ),
             "Session resource authority changed",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer admission failed",
+                failure=CoordinatorTransferFailure.ADMISSION,
+            ),
+            "capacity is temporarily unavailable",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer was fenced",
+                failure=CoordinatorTransferFailure.FENCED,
+            ),
+            "Runtime changed while importing",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer stream failed",
+                failure=CoordinatorTransferFailure.STREAM,
+            ),
+            "connection is unavailable",
+        ),
+        (
+            ServerToRuntimeTransferError("Unclassified transfer failure"),
+            "Failed to transfer imported file to Runtime",
         ),
     ],
 )

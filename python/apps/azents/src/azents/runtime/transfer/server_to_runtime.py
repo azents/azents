@@ -46,6 +46,14 @@ class ServerToRuntimeTransferError(RuntimeError):
         self.failure = failure
 
 
+class ServerToRuntimeTransferLimitExceeded(ServerToRuntimeTransferError):
+    """Raised when source metadata exceeds the configured transfer limit."""
+
+
+class ServerToRuntimeTransferAdmissionTimeout(ServerToRuntimeTransferError):
+    """Raised when transfer admission remains unavailable until the deadline."""
+
+
 _CoordinatorResult = TypeVar("_CoordinatorResult")
 
 
@@ -299,23 +307,21 @@ class ServerToRuntimeTransferService:
         expected_revision: int | None = None
         preparation: ServerToRuntimePreparation | None = None
         try:
-            admitted = await _await_coordinator(
-                self.coordinator.admit_transfer(
-                    CoordinatorAdmitTransferRequest(
-                        identity=identity,
-                        lease_id=uuid7().hex,
-                        runtime_path=request.destination,
-                        overwrite=request.overwrite,
-                        expected_manifest=CoordinatorExpectedManifest(
-                            size=metadata.size,
-                            sha256=metadata.sha256,
-                        ),
-                        product_maximum_size=request.product_maximum_size,
-                        provider_maximum_size=request.provider_maximum_size,
-                        deadline_at=request.deadline_at,
-                        source_expires_at=metadata.expires_at,
-                        resource_class=metadata.source_kind,
+            admitted = await self._admit_until_deadline(
+                CoordinatorAdmitTransferRequest(
+                    identity=identity,
+                    lease_id=uuid7().hex,
+                    runtime_path=request.destination,
+                    overwrite=request.overwrite,
+                    expected_manifest=CoordinatorExpectedManifest(
+                        size=metadata.size,
+                        sha256=metadata.sha256,
                     ),
+                    product_maximum_size=request.product_maximum_size,
+                    provider_maximum_size=request.provider_maximum_size,
+                    deadline_at=request.deadline_at,
+                    source_expires_at=metadata.expires_at,
+                    resource_class=metadata.source_kind,
                 )
             )
             expected_revision = admitted.status.revision
@@ -395,6 +401,32 @@ class ServerToRuntimeTransferService:
                 request.deadline_at,
             )
             raise
+
+    async def _admit_until_deadline(
+        self,
+        request: CoordinatorAdmitTransferRequest,
+    ) -> CoordinatorAdmitTransferResult:
+        """Retry temporary admission pressure until the transfer deadline."""
+        while True:
+            try:
+                return await _await_coordinator(
+                    self.coordinator.admit_transfer(request)
+                )
+            except ServerToRuntimeTransferError as error:
+                if error.failure is not CoordinatorTransferFailure.ADMISSION:
+                    raise
+                now = self.clock()
+                if now >= request.deadline_at:
+                    raise ServerToRuntimeTransferAdmissionTimeout(
+                        "Runtime transfer admission timed out",
+                        failure=CoordinatorTransferFailure.ADMISSION,
+                    ) from error
+                await asyncio.sleep(
+                    min(
+                        self.status_poll_interval.total_seconds(),
+                        (request.deadline_at - now).total_seconds(),
+                    )
+                )
 
     async def _wait_for_terminal_success(
         self,
@@ -477,7 +509,7 @@ class ServerToRuntimeTransferService:
             request.product_maximum_size,
             request.provider_maximum_size,
         ):
-            raise ServerToRuntimeTransferError(
+            raise ServerToRuntimeTransferLimitExceeded(
                 "Transfer source exceeds configured limit"
             )
         if (
