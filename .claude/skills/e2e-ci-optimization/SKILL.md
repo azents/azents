@@ -236,10 +236,12 @@ Replace expected impact in the PR body with:
 - mechanism evidence from artifacts;
 - pass/fail and final classification.
 
-If the final result is rejected, say so directly and recommend closing the PR. When
-another feasible candidate remains, revise the implementation instead of treating the
-first below-threshold measurement as final. Do not preserve an ineffective optimization
-merely because implementation is complete.
+If the final result is rejected after all feasible compatible candidates are exhausted,
+say so directly, update the PR with the measured rejection, and close it. Do not leave
+the rejected experiment open merely to recommend closure. Keep the PR open when another
+feasible candidate remains, the evidence is inconclusive, or the requester explicitly
+asks to retain it. Do not preserve an ineffective optimization merely because
+implementation is complete.
 
 ## Final report
 
