@@ -17,7 +17,7 @@ CHATGPT_OAUTH_DEVICE_REDIRECT_URI = f"{CHATGPT_OAUTH_ISSUER}/deviceauth/callback
 CHATGPT_OAUTH_BACKEND_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CHATGPT_USAGE_BASE_URL = "https://chatgpt.com/backend-api"
 AZENTS_VERSION: Final = "0.1.0"
-CHATGPT_OAUTH_PROTOCOL_VERSION: Final = "0.144.0"
+CHATGPT_OAUTH_PROTOCOL_VERSION: Final = "0.153.1"
 
 
 def resolve_chatgpt_usage_base_url() -> str:

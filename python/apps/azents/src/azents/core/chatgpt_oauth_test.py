@@ -11,11 +11,17 @@ import pytest
 from .chatgpt_oauth import (
     CHATGPT_OAUTH_DEVICE_TOKEN_URL,
     CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
+    CHATGPT_OAUTH_PROTOCOL_VERSION,
     CHATGPT_OAUTH_TOKEN_URL,
     resolve_chatgpt_oauth_device_token_url,
     resolve_chatgpt_oauth_device_user_code_url,
     resolve_chatgpt_oauth_token_url,
 )
+
+
+def test_protocol_version_supports_gpt_6_astra_catalog() -> None:
+    """Request a ChatGPT catalog version that exposes GPT-6-Astra."""
+    assert CHATGPT_OAUTH_PROTOCOL_VERSION == "0.153.1"
 
 
 @pytest.mark.parametrize(
