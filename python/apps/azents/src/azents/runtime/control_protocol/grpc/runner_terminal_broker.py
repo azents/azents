@@ -386,27 +386,20 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             if not await self._accept_or_reject(inputs):
                 continue
             if inputs.value is not None:
+                resize = inputs.value.latest_resize
+                if resize is not None and resize.sequence > self._last_resize_sent:
+                    self._last_resize_sent = resize.sequence
+                    yield RunnerTerminalResize(
+                        sequence=resize.sequence,
+                        columns=resize.columns,
+                        rows=resize.rows,
+                    )
                 for item in inputs.value.inputs:
                     self._last_input_sent = item.sequence
                     yield RunnerTerminalInputFrame(
                         sequence=item.sequence,
                         data=item.data,
                     )
-            resize = await self._store.read_resize(
-                self.terminal_id,
-                runner_stream_generation=self.stream_generation,
-                after_sequence=self._last_resize_sent,
-                current_time=self._now(),
-            )
-            if not await self._accept_or_reject(resize):
-                continue
-            if resize.value is not None:
-                self._last_resize_sent = resize.value.sequence
-                yield RunnerTerminalResize(
-                    sequence=resize.value.sequence,
-                    columns=resize.value.columns,
-                    rows=resize.value.rows,
-                )
             outbound = await self._wait_for_outbound_or_change()
             if outbound is not None:
                 yield outbound

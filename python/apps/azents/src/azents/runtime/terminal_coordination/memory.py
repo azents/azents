@@ -551,30 +551,6 @@ class InMemoryRuntimeTerminalCoordinationStore:
             self._set(_updated(record, updated_at, latest_resize=resize))
             return _result(RuntimeTerminalMutationStatus.APPLIED, resize)
 
-    async def read_resize(
-        self,
-        terminal_id: str,
-        *,
-        runner_stream_generation: int,
-        after_sequence: int,
-        current_time: datetime,
-    ) -> RuntimeTerminalMutationResult[RuntimeTerminalResize]:
-        """Return a newer coalesced resize when available."""
-        async with self._condition:
-            record = self._terminals.get(terminal_id)
-            status = _runner_stream_status(
-                record,
-                runner_stream_generation,
-                current_time,
-            )
-            if status is not RuntimeTerminalMutationStatus.APPLIED:
-                return _result(status)
-            assert record is not None
-            resize = record.latest_resize
-            if resize is None or resize.sequence <= after_sequence:
-                return _result(RuntimeTerminalMutationStatus.APPLIED)
-            return _result(RuntimeTerminalMutationStatus.APPLIED, resize)
-
     async def append_output(
         self,
         terminal_id: str,

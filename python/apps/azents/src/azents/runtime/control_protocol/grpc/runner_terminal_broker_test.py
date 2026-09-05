@@ -12,6 +12,7 @@ from azents_runtime_control.runner_terminal import (
     RunnerTerminalInputFrame,
     RunnerTerminalOutputAcknowledgement,
     RunnerTerminalOutputFrame,
+    RunnerTerminalResize,
     RunnerTerminalStreamRegistration,
     RunnerTerminalTerminate,
     RunnerTerminalTerminationReason,
@@ -132,6 +133,56 @@ async def test_broker_bridges_coordinated_input_output_and_detach() -> None:
     assert detached is not None
     assert detached.runner_stream is None
     assert detached.runner_stream_grace_expires_at == _NOW + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_broker_delivers_latest_resize_before_pending_input() -> None:
+    """A resize accepted before input reaches the Runner first."""
+    store = InMemoryRuntimeTerminalCoordinationStore()
+    admitted = await store.admit_or_get(_admission(), admitted_at=_NOW)
+    assert admitted.status is RuntimeTerminalMutationStatus.APPLIED
+    attachment = await store.attach_browser(
+        "terminal-1",
+        user_id="user-1",
+        attached_at=_NOW,
+        lease_seconds=45,
+    )
+    assert attachment.value is not None
+    resized = await store.update_resize(
+        "terminal-1",
+        attachment_generation=attachment.value.generation,
+        columns=100,
+        rows=41,
+        updated_at=_NOW,
+    )
+    assert resized.status is RuntimeTerminalMutationStatus.APPLIED
+    await store.enqueue_input(
+        "terminal-1",
+        attachment_generation=attachment.value.generation,
+        sequence=1,
+        data=b"stty size\n",
+        accepted_at=_NOW,
+    )
+    broker = CoordinatedRuntimeRunnerTerminalBroker(
+        store=store,
+        clock=lambda: _NOW,
+        monotonic_clock=lambda: 0.0,
+    )
+    stream = await broker.connect(
+        _registration(),
+        authority=_authority(),
+        connected_at=_NOW,
+    )
+    controls = stream.control_frames()
+
+    resize = await anext(controls)
+    input_frame = await anext(controls)
+
+    assert resize == RunnerTerminalResize(sequence=1, columns=100, rows=41)
+    assert input_frame == RunnerTerminalInputFrame(
+        sequence=1,
+        data=b"stty size\n",
+    )
 
 
 @pytest.mark.asyncio
