@@ -46,6 +46,7 @@ from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeSourceMetadata,
     ServerToRuntimeTarget,
     ServerToRuntimeTransferAdmissionTimeout,
+    ServerToRuntimeTransferConnectionTimeout,
     ServerToRuntimeTransferError,
     ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
@@ -456,8 +457,8 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
 
 
 @pytest.mark.asyncio
-async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
-    """Keep gRPC transport details inside the Server-to-Runtime boundary."""
+async def test_transfer_retries_coordinator_unavailable_during_admission() -> None:
+    """Wait through temporary admission connectivity loss."""
     source = Source(
         ServerToRuntimeSourceMetadata(
             "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
@@ -466,14 +467,22 @@ async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
     )
     metadata = grpc.aio.Metadata()
     coordinator = Coordinator(
-        [],
-        admit_error=grpc.aio.AioRpcError(
-            grpc.StatusCode.UNAVAILABLE,
-            metadata,
-            metadata,
-            "coordinator endpoint unavailable",
-            None,
-        ),
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            )
+        ],
+        admit_errors=[
+            grpc.aio.AioRpcError(
+                grpc.StatusCode.UNAVAILABLE,
+                metadata,
+                metadata,
+                "coordinator endpoint unavailable",
+                None,
+            )
+        ],
     )
     service = ServerToRuntimeTransferService(
         coordinator=coordinator,
@@ -481,16 +490,16 @@ async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
         status_poll_interval=timedelta(milliseconds=1),
     )
 
-    with pytest.raises(
-        ServerToRuntimeTransferError,
-        match="Runtime transfer coordinator request failed",
-    ) as raised:
-        await service.transfer(_request(source))
+    await service.transfer(_request(source))
 
-    assert isinstance(raised.value.__cause__, grpc.aio.AioRpcError)
-    assert raised.value.failure is None
-    assert source.prepare_calls == 0
-    assert [name for name, _ in coordinator.calls] == ["admit"]
+    assert source.prepare_calls == 1
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+    ]
 
 
 @pytest.mark.asyncio
@@ -696,6 +705,39 @@ async def test_transfer_times_out_when_admission_pressure_outlives_deadline() ->
     with pytest.raises(
         ServerToRuntimeTransferAdmissionTimeout,
         match="admission timed out",
+    ):
+        await service.transfer(_request(source))
+
+    assert [name for name, _ in coordinator.calls] == ["admit"]
+    assert source.prepare_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_transfer_times_out_when_admission_connection_does_not_recover() -> None:
+    """Admission connectivity retry remains bounded by the transfer deadline."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    times = iter([_NOW, _NOW + timedelta(minutes=1)])
+    coordinator = Coordinator(
+        [],
+        admit_error=ServerToRuntimeTransferError(
+            "Runtime transfer coordinator request failed",
+            failure=CoordinatorTransferFailure.STREAM,
+        ),
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: next(times),
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(
+        ServerToRuntimeTransferConnectionTimeout,
+        match="connection timed out",
     ):
         await service.transfer(_request(source))
 

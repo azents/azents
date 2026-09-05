@@ -37,8 +37,10 @@ from azents.runtime.transfer.managed_source import (
     managed_source_from_exchange,
 )
 from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeCoordinatorError,
     ServerToRuntimeSource,
     ServerToRuntimeTransferAdmissionTimeout,
+    ServerToRuntimeTransferConnectionTimeout,
     ServerToRuntimeTransferError,
     ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
@@ -219,11 +221,46 @@ def make_import_file_tool(
                 "Runtime transfer capacity remained unavailable until the import "
                 "deadline."
             ) from None
+        except ServerToRuntimeTransferConnectionTimeout:
+            logger.exception(
+                "Import file Runtime transfer connection timed out",
+                extra={
+                    "uri": input.uri,
+                    "path": destination,
+                    "session_id": authority.session_id,
+                    "run_id": authority.run_id,
+                    "transfer_failure": CoordinatorTransferFailure.STREAM.value,
+                    "transfer_phase": "admission",
+                },
+            )
+            raise FunctionToolError(
+                "Runtime transfer connection remained unavailable until the import "
+                "deadline."
+            ) from None
         except ServerToRuntimeTransferLimitExceeded:
             raise FunctionToolError(
                 "Imported file exceeds the configured Runtime transfer limit."
             ) from None
         except ServerToRuntimeTransferError as exc:
+            logger.exception(
+                "Import file Runtime transfer failed",
+                extra={
+                    "uri": input.uri,
+                    "path": destination,
+                    "session_id": authority.session_id,
+                    "run_id": authority.run_id,
+                    "transfer_failure": (
+                        exc.failure.value if exc.failure is not None else None
+                    ),
+                    "transfer_phase": (
+                        exc.phase
+                        if isinstance(exc, ServerToRuntimeCoordinatorError)
+                        else "terminal"
+                        if exc.failure is not None
+                        else "unclassified"
+                    ),
+                },
+            )
             raise FunctionToolError(
                 _import_transfer_error_message(exc, destination=destination)
             ) from None

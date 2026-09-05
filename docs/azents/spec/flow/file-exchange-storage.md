@@ -128,6 +128,11 @@ the existing transfer deadline expires. Admission timeout, generation fencing, R
 stream availability, destination write, integrity, cancellation, and unknown transfer
 failures retain separate safe tool messages instead of being presented as path
 validation failures.
+Temporary coordinator connection loss during admission follows the same bounded retry
+window and reports a distinct connection timeout when it does not recover. Coordinator
+RPC failures that reach the tool retain a structured operation phase, transfer failure
+category when available, Session/Run correlation, destination, and exception chain in
+operator logs even when the user-facing message withholds internal details.
 
 The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
 rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so
