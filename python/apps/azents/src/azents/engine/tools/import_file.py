@@ -38,6 +38,7 @@ from azents.runtime.transfer.managed_source import (
 )
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeSource,
+    ServerToRuntimeTransferAdmissionTimeout,
     ServerToRuntimeTransferError,
     ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
@@ -211,8 +212,12 @@ def make_import_file_tool(
                 },
             )
             raise FunctionToolError(
-                f"Failed to write imported file: {destination}. "
-                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+                "Failed to transfer imported file to Runtime."
+            ) from None
+        except ServerToRuntimeTransferAdmissionTimeout:
+            raise FunctionToolError(
+                "Runtime transfer capacity remained unavailable until the import "
+                "deadline."
             ) from None
         except ServerToRuntimeTransferLimitExceeded:
             raise FunctionToolError(
@@ -390,21 +395,16 @@ def _import_transfer_error_message(
                 f"Failed to write imported file: Runtime destination is not writable: "
                 f"{destination}."
             )
-        case (
-            CoordinatorTransferFailure.ADMISSION
-            | CoordinatorTransferFailure.FENCED
-            | CoordinatorTransferFailure.STREAM
-            | None
-        ):
-            return (
-                f"Failed to write imported file: {destination}. "
-                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
-            )
+        case CoordinatorTransferFailure.ADMISSION:
+            return "Runtime transfer capacity is temporarily unavailable."
+        case CoordinatorTransferFailure.FENCED:
+            return "Runtime changed while importing the file. Retry the import."
+        case CoordinatorTransferFailure.STREAM:
+            return "Runtime transfer connection is unavailable. Retry the import."
+        case None:
+            return "Failed to transfer imported file to Runtime."
         case _:
-            return (
-                f"Failed to write imported file: {destination}. "
-                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
-            )
+            return "Failed to transfer imported file to Runtime."
 
 
 def _import_staging_error_message(error: ValueError) -> str:

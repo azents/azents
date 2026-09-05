@@ -123,6 +123,11 @@ not.
 Sources larger than the configured Runtime transfer limit fail before admission, and
 the tool reports the size-limit rejection without presenting it as a destination-path
 failure.
+Temporary coordinator admission pressure is retried until capacity becomes available or
+the existing transfer deadline expires. Admission timeout, generation fencing, Runner
+stream availability, destination write, integrity, cancellation, and unknown transfer
+failures retain separate safe tool messages instead of being presented as path
+validation failures.
 
 The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
 rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so
