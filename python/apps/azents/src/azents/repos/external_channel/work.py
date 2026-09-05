@@ -54,6 +54,7 @@ from azents.repos.external_channel.work_state import (
     ChannelWorkProjectionPartState,
     ChannelWorkState,
     ChannelWorkStateMutation,
+    ChannelWorkTrackerHostKind,
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import (
@@ -689,6 +690,7 @@ class ExternalChannelWorkRepository:
                     desired_progress_revision=work.desired_progress_revision,
                 )
                 payload["embeds"] = page.embeds
+                payload["tracker_host_kind"] = "standalone"
             payload["work_id"] = work.work_cycle_id
             payload["part_ordinal"] = 0
             plan = await self.prepare_direct_control(
@@ -746,6 +748,7 @@ class ExternalChannelWorkRepository:
                             desired_progress_revision=current.desired_progress_revision,
                             status=ExternalChannelWorkProjectionStatus.UNKNOWN,
                             provider_message_key=None,
+                            host_kind="standalone",
                         )
                     )
                     return ChannelWorkStateMutation(state=updated, result="claimed")
@@ -906,7 +909,7 @@ class ExternalChannelWorkRepository:
 
         def new_state() -> ChannelWorkState:
             return ChannelWorkState(
-                schema_version=4,
+                schema_version=5,
                 binding_id=binding_id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -1265,7 +1268,7 @@ class ExternalChannelWorkRepository:
             if mode is ExternalChannelActionMode.IGNORE:
                 raise ValueError("Ignore requires active Channel Work.")
             return ChannelWorkState(
-                schema_version=4,
+                schema_version=5,
                 binding_id=binding.id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -1307,7 +1310,11 @@ class ExternalChannelWorkRepository:
                 *,
                 part: int,
                 expected_desired_progress_revision: int | None,
-            ) -> None:
+                dependencies: tuple[int, ...],
+                provider_message_key_effect_index: int | None,
+                projection_host_kind: ChannelWorkTrackerHostKind | None,
+            ) -> int:
+                effect_index = len(effects)
                 target = ProviderTarget(
                     operation=operation,
                     binding_id=binding.id,
@@ -1334,7 +1341,7 @@ class ExternalChannelWorkRepository:
                         provider=ProviderEffectPlan(
                             target=target,
                             operation_key=ProviderOperationKey.from_seed(
-                                f"{client_tool_call_id}:{len(effects)}:"
+                                f"{client_tool_call_id}:{effect_index}:"
                                 f"{operation.value}:{part}"
                             ),
                         ),
@@ -1343,9 +1350,16 @@ class ExternalChannelWorkRepository:
                         expected_desired_progress_revision=(
                             expected_desired_progress_revision
                         ),
+                        dependencies=dependencies,
+                        provider_message_key_effect_index=(
+                            provider_message_key_effect_index
+                        ),
+                        projection_host_kind=projection_host_kind,
                     )
                 )
+                return effect_index
 
+            reply_effect_indices: list[int] = []
             if message is not None:
                 for part, payload in enumerate(
                     _reply_parts(
@@ -1355,11 +1369,16 @@ class ExternalChannelWorkRepository:
                         files=files,
                     )
                 ):
-                    append_effect(
-                        ExternalChannelDeliveryOperation.REPLY,
-                        payload,
-                        part=part,
-                        expected_desired_progress_revision=None,
+                    reply_effect_indices.append(
+                        append_effect(
+                            ExternalChannelDeliveryOperation.REPLY,
+                            payload,
+                            part=part,
+                            expected_desired_progress_revision=None,
+                            dependencies=(),
+                            provider_message_key_effect_index=None,
+                            projection_host_kind=None,
+                        )
                     )
 
             projection_parts = {
@@ -1435,21 +1454,89 @@ class ExternalChannelWorkRepository:
                         desired_pages = tuple(
                             (page.text, page.embeds) for page in rendered_discord.pages
                         )
+                    move_discord_tracker = (
+                        connection.provider is ExternalChannelProvider.DISCORD
+                        and bool(reply_effect_indices)
+                    )
+                    reply_dependencies = tuple(reply_effect_indices)
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)
+                        if move_discord_tracker:
+                            dependencies = reply_dependencies
+                            if (
+                                part is not None
+                                and part.provider_message_key is not None
+                                and part.status
+                                is not ExternalChannelWorkProjectionStatus.DELETED
+                            ):
+                                cleanup_payload = _provider_payload(
+                                    connection.provider,
+                                    resource.labels,
+                                    provider_message_key=part.provider_message_key,
+                                    desired_progress_revision=(
+                                        work.desired_progress_revision
+                                    ),
+                                )
+                                cleanup_payload["tracker_host_kind"] = part.host_kind
+                                cleanup_index = append_effect(
+                                    ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                                    cleanup_payload,
+                                    part=part_ordinal,
+                                    expected_desired_progress_revision=(
+                                        work.desired_progress_revision
+                                    ),
+                                    dependencies=reply_dependencies,
+                                    provider_message_key_effect_index=None,
+                                    projection_host_kind=part.host_kind,
+                                )
+                                dependencies = (*dependencies, cleanup_index)
+                            payload = _provider_payload(
+                                connection.provider,
+                                resource.labels,
+                                text=text,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            )
+                            payload["embeds"] = presentation
+                            payload["tracker_host_kind"] = "reply"
+                            append_effect(
+                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                                payload,
+                                part=part_ordinal,
+                                expected_desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                                dependencies=dependencies,
+                                provider_message_key_effect_index=(
+                                    reply_effect_indices[-1]
+                                ),
+                                projection_host_kind="reply",
+                            )
+                            continue
+
                         operation: ExternalChannelDeliveryOperation | None = None
+                        host_kind: ChannelWorkTrackerHostKind = (
+                            "standalone" if part is None else part.host_kind
+                        )
                         if (
                             part is None
                             or part.status
                             is ExternalChannelWorkProjectionStatus.DELETED
                         ):
                             operation = ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                            host_kind = "standalone"
                         elif part.status is ExternalChannelWorkProjectionStatus.FAILED:
                             operation = (
                                 ExternalChannelDeliveryOperation.PROGRESS_UPDATE
                                 if part.provider_message_key is not None
                                 else ExternalChannelDeliveryOperation.PROGRESS_CREATE
                             )
+                            if (
+                                operation
+                                is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                            ):
+                                host_kind = "standalone"
                         elif (
                             part.status is ExternalChannelWorkProjectionStatus.PRESENT
                             and part.provider_message_key is not None
@@ -1467,6 +1554,11 @@ class ExternalChannelWorkRepository:
                                 if part.provider_message_key is not None
                                 else ExternalChannelDeliveryOperation.PROGRESS_CREATE
                             )
+                            if (
+                                operation
+                                is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                            ):
+                                host_kind = "standalone"
                         if operation is None or work.tracker_visibility == "hidden":
                             continue
                         payload = _provider_payload(
@@ -1485,6 +1577,7 @@ class ExternalChannelWorkRepository:
                         )
                         if connection.provider is ExternalChannelProvider.DISCORD:
                             payload["embeds"] = presentation
+                            payload["tracker_host_kind"] = host_kind
                         append_effect(
                             operation,
                             payload,
@@ -1492,29 +1585,37 @@ class ExternalChannelWorkRepository:
                             expected_desired_progress_revision=(
                                 work.desired_progress_revision
                             ),
+                            dependencies=(),
+                            provider_message_key_effect_index=None,
+                            projection_host_kind=host_kind,
                         )
                     for part_ordinal, part in sorted(projection_parts.items()):
                         if (
-                            progress_changed
-                            and work.tracker_visibility == "visible"
+                            work.tracker_visibility == "visible"
                             and part.status
                             is ExternalChannelWorkProjectionStatus.PRESENT
                             and part.provider_message_key is not None
                         ):
+                            payload = _provider_payload(
+                                connection.provider,
+                                resource.labels,
+                                provider_message_key=part.provider_message_key,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            )
+                            if connection.provider is ExternalChannelProvider.DISCORD:
+                                payload["tracker_host_kind"] = part.host_kind
                             append_effect(
                                 ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                                _provider_payload(
-                                    connection.provider,
-                                    resource.labels,
-                                    provider_message_key=(part.provider_message_key),
-                                    desired_progress_revision=(
-                                        work.desired_progress_revision
-                                    ),
-                                ),
+                                payload,
                                 part=part_ordinal,
                                 expected_desired_progress_revision=(
                                     work.desired_progress_revision
                                 ),
+                                dependencies=(),
+                                provider_message_key_effect_index=None,
+                                projection_host_kind=part.host_kind,
                             )
             else:
                 work.status = ExternalChannelWorkStatus.FINISHED
@@ -1528,20 +1629,24 @@ class ExternalChannelWorkRepository:
                         part.status is ExternalChannelWorkProjectionStatus.PRESENT
                         and part.provider_message_key is not None
                     ):
+                        payload = _provider_payload(
+                            connection.provider,
+                            resource.labels,
+                            provider_message_key=part.provider_message_key,
+                            desired_progress_revision=(work.desired_progress_revision),
+                        )
+                        if connection.provider is ExternalChannelProvider.DISCORD:
+                            payload["tracker_host_kind"] = part.host_kind
                         append_effect(
                             ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                            _provider_payload(
-                                connection.provider,
-                                resource.labels,
-                                provider_message_key=part.provider_message_key,
-                                desired_progress_revision=(
-                                    work.desired_progress_revision
-                                ),
-                            ),
+                            payload,
                             part=part_ordinal,
                             expected_desired_progress_revision=(
                                 work.desired_progress_revision
                             ),
+                            dependencies=(),
+                            provider_message_key_effect_index=None,
+                            projection_host_kind=part.host_kind,
                         )
             result = ChannelActionTransition(
                 binding_id=binding.id,
@@ -1681,7 +1786,13 @@ class ExternalChannelWorkRepository:
             session_id=agent_session.id,
             binding_id=binding.id,
         )
-        if work is None or work.work_cycle_id != effect.work_cycle_id:
+        if (
+            work is None
+            or work.work_cycle_id != effect.work_cycle_id
+            or effect.expected_desired_progress_revision is not None
+            and work.desired_progress_revision
+            != effect.expected_desired_progress_revision
+        ):
             return None
         return ProviderEffectPlan(
             target=ProviderTarget(
@@ -1748,12 +1859,19 @@ class ExternalChannelWorkRepository:
                 ),
                 None,
             )
+            host_kind = effect.projection_host_kind
+            if host_kind is None:
+                raise AssertionError("Progress effects require a Tracker host kind.")
+            target_message_key = target.request_payload.get("provider_message_key")
+            if not isinstance(target_message_key, str):
+                target_message_key = None
             if part is None:
                 part = ChannelWorkProjectionPartState(
                     part_ordinal=effect.part,
                     desired_progress_revision=expected_revision,
                     status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                    provider_message_key=None,
+                    provider_message_key=target_message_key,
+                    host_kind=host_kind,
                 )
                 updated.projection_parts.append(part)
                 updated.projection_parts.sort(key=lambda item: item.part_ordinal)
@@ -1764,6 +1882,7 @@ class ExternalChannelWorkRepository:
                     changed=False,
                 )
             part.desired_progress_revision = expected_revision
+            part.host_kind = host_kind
             match outcome.status:
                 case "delivered":
                     if (
@@ -1772,15 +1891,24 @@ class ExternalChannelWorkRepository:
                     ):
                         part.status = ExternalChannelWorkProjectionStatus.DELETED
                         part.provider_message_key = None
-                    elif outcome.provider_message_key is None:
-                        part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
                     else:
-                        part.status = ExternalChannelWorkProjectionStatus.PRESENT
-                        part.provider_message_key = outcome.provider_message_key
+                        provider_message_key = (
+                            outcome.provider_message_key or target_message_key
+                        )
+                        part.provider_message_key = provider_message_key
+                        part.status = (
+                            ExternalChannelWorkProjectionStatus.PRESENT
+                            if provider_message_key is not None
+                            else ExternalChannelWorkProjectionStatus.UNKNOWN
+                        )
                 case "failed":
                     part.status = ExternalChannelWorkProjectionStatus.FAILED
+                    if target_message_key is not None:
+                        part.provider_message_key = target_message_key
                 case "unknown":
                     part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+                    if target_message_key is not None:
+                        part.provider_message_key = target_message_key
                 case _ as unreachable:
                     assert_never(unreachable)
             return ChannelWorkStateMutation(state=updated, result=True)
@@ -2235,6 +2363,8 @@ async def terminate_binding_with_plans(
             )
             payload["work_id"] = work.work_cycle_id
             payload["part_ordinal"] = part.part_ordinal
+            if connection.provider is ExternalChannelProvider.DISCORD:
+                payload["tracker_host_kind"] = part.host_kind
             operation = ExternalChannelDeliveryOperation.PROGRESS_DELETE
             progress_plans.append(
                 ProviderEffectPlan(

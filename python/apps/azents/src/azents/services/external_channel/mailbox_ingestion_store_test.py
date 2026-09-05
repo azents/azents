@@ -710,7 +710,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         agent_session_id="session-1",
     )
     work = ChannelWorkState(
-        schema_version=4,
+        schema_version=5,
         binding_id=binding.id,
         work_cycle_id="work-cycle-1",
         status=ExternalChannelWorkStatus.ACTIVE,

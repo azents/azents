@@ -34,7 +34,7 @@ class _SeededBinding:
 def _work(binding_id: str, *, title: str | None = None) -> ChannelWorkState:
     """Build one active Work payload."""
     return ChannelWorkState(
-        schema_version=4,
+        schema_version=5,
         binding_id=binding_id,
         work_cycle_id=f"cycle-{binding_id}",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -484,7 +484,7 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
         await _cleanup_binding(rdb_engine, seeded)
 
 
-def test_work_state_requires_schema_version_four_and_tracker_visibility() -> None:
+def test_work_state_requires_schema_version_five_and_tracker_fields() -> None:
     """Payload validation fails closed for unsupported schema versions."""
     with pytest.raises(ValidationError):
         ChannelWorkState.model_validate(
@@ -520,6 +520,18 @@ def test_work_state_requires_schema_version_four_and_tracker_visibility() -> Non
                 if key != "tracker_visibility"
             }
         )
+    projected = _work("binding-host-kind").model_dump(mode="json")
+    projected["projection_parts"] = [
+        {
+            "part_ordinal": 0,
+            "desired_progress_revision": 1,
+            "status": "present",
+            "provider_message_key": "discord:111:555",
+            "host_kind": "unknown",
+        }
+    ]
+    with pytest.raises(ValidationError):
+        ChannelWorkState.model_validate(projected)
 
 
 def test_finished_work_cannot_await_participant_input() -> None:

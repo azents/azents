@@ -1,5 +1,6 @@
 """Focused direct provider outcome tests for External Channel actions."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
@@ -23,10 +24,12 @@ from azents.core.external_channel_file import (
 from azents.repos.external_channel.work_data import (
     AwaitingInputSettlement,
     ChannelActionEffectPlan,
+    ChannelActionResult,
     ChannelActionTransition,
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    _ExecutedDirectEffect,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.data import DiscordConnectionConfiguration
@@ -168,6 +171,9 @@ def _effect(
         part=part,
         work_cycle_id="work-1",
         expected_desired_progress_revision=None,
+        dependencies=(),
+        provider_message_key_effect_index=None,
+        projection_host_kind=None,
     )
 
 
@@ -250,6 +256,78 @@ def test_discord_ambiguity_remains_unknown() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_serializes_actions_for_the_same_binding() -> None:
+    """Parallel same-binding calls cannot overlap provider mutation sequences."""
+    first_entered = asyncio.Event()
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+    active = 0
+    maximum_active = 0
+    call_count = 0
+
+    async def execute_serialized(**_: object) -> ChannelActionResult:
+        nonlocal active, maximum_active, call_count
+        call_count += 1
+        active += 1
+        maximum_active = max(maximum_active, active)
+        if call_count == 1:
+            first_entered.set()
+            await release_first.wait()
+        active -= 1
+        return ChannelActionResult(
+            binding_id="binding-1",
+            work_status=ExternalChannelWorkStatus.ACTIVE,
+            state_revision=call_count,
+            awaiting_input=False,
+            outcomes=(),
+        )
+
+    execute_mock = AsyncMock(side_effect=execute_serialized)
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            binding_locks={},
+            _execute_serialized=execute_mock,
+        ),
+        ExternalChannelActionService,
+    )
+
+    async def invoke(client_tool_call_id: str) -> ChannelActionResult:
+        return await ExternalChannelActionService.execute(
+            service,
+            session_id="session-1",
+            agent_id="agent-1",
+            run_id="run-1",
+            client_tool_call_id=client_tool_call_id,
+            binding_id="binding-1",
+            mode=ExternalChannelActionMode.CONTINUE,
+            message="Progress.",
+            title=None,
+            tasks=None,
+            files=(),
+            file_storage=None,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+
+    first = asyncio.create_task(invoke("call-1"))
+    await first_entered.wait()
+
+    async def run_second() -> ChannelActionResult:
+        second_started.set()
+        return await invoke("call-2")
+
+    second = asyncio.create_task(run_second())
+    await second_started.wait()
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert maximum_active == 1
+    assert execute_mock.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     """Ignore does not apply finish's final-reply gate to Tracker cleanup."""
     session = SimpleNamespace(commit=AsyncMock())
@@ -272,7 +350,9 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
         reason=None,
         detail=None,
     )
-    execute_direct_effect = AsyncMock(return_value=delivered)
+    execute_direct_effect = AsyncMock(
+        return_value=_ExecutedDirectEffect(delivered, None)
+    )
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
@@ -283,12 +363,12 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            execute_direct_effect=execute_direct_effect,
+            _execute_direct_effect=execute_direct_effect,
         ),
         ExternalChannelActionService,
     )
 
-    result = await ExternalChannelActionService.execute(
+    result = await ExternalChannelActionService._execute_serialized(
         service,
         session_id="session-1",
         agent_id="agent-1",
@@ -345,7 +425,9 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
         reason="provider_rejected",
         detail="The provider rejected the request.",
     )
-    execute_direct_effect = AsyncMock(return_value=failed_reply)
+    execute_direct_effect = AsyncMock(
+        return_value=_ExecutedDirectEffect(failed_reply, None)
+    )
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
@@ -356,12 +438,12 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            execute_direct_effect=execute_direct_effect,
+            _execute_direct_effect=execute_direct_effect,
         ),
         ExternalChannelActionService,
     )
 
-    result = await ExternalChannelActionService.execute(
+    result = await ExternalChannelActionService._execute_serialized(
         service,
         session_id="session-1",
         agent_id="agent-1",
@@ -424,12 +506,14 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            execute_direct_effect=AsyncMock(return_value=delivered),
+            _execute_direct_effect=AsyncMock(
+                return_value=_ExecutedDirectEffect(delivered, None)
+            ),
         ),
         ExternalChannelActionService,
     )
 
-    result = await ExternalChannelActionService.execute(
+    result = await ExternalChannelActionService._execute_serialized(
         service,
         session_id="session-1",
         agent_id="agent-1",
@@ -495,12 +579,14 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            execute_direct_effect=AsyncMock(return_value=failed),
+            _execute_direct_effect=AsyncMock(
+                return_value=_ExecutedDirectEffect(failed, None)
+            ),
         ),
         ExternalChannelActionService,
     )
 
-    result = await ExternalChannelActionService.execute(
+    result = await ExternalChannelActionService._execute_serialized(
         service,
         session_id="session-1",
         agent_id="agent-1",
@@ -522,6 +608,190 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     assert result.state_revision == 5
     repository.settle_awaiting_input.assert_not_awaited()
     session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tracker_relocation_resolves_reply_identity_after_cleanup() -> None:
+    """A dependent attach receives the delivered final reply identity."""
+    session = SimpleNamespace(commit=AsyncMock())
+    reply = _effect(ExternalChannelDeliveryOperation.REPLY)
+    remove = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
+        dependencies=(0,),
+        projection_host_kind="standalone",
+    )
+    attach = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_UPDATE),
+        dependencies=(0, 1),
+        provider_message_key_effect_index=0,
+        projection_host_kind="reply",
+    )
+    attach.provider.target.request_payload.pop("provider_message_key", None)
+    repository = SimpleNamespace(
+        commit_direct_action=AsyncMock(
+            return_value=ChannelActionTransition(
+                binding_id="binding-1",
+                work_id="work-1",
+                work_status=ExternalChannelWorkStatus.ACTIVE,
+                state_revision=5,
+                effects=(reply, remove, attach),
+            )
+        )
+    )
+    captured: list[ChannelActionEffectPlan] = []
+
+    async def execute_effect(
+        effect: ChannelActionEffectPlan,
+        **_: object,
+    ) -> _ExecutedDirectEffect:
+        captured.append(effect)
+        operation = effect.provider.target.operation
+        provider_message_key = (
+            "slack:C1:999.000"
+            if operation is ExternalChannelDeliveryOperation.REPLY
+            else None
+        )
+        return _ExecutedDirectEffect(
+            ProviderEffectOutcome(
+                operation=operation,
+                part=effect.part,
+                status="delivered",
+                reason=None,
+                detail=None,
+            ),
+            provider_message_key,
+        )
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
+
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            session_manager=session_manager,
+            repository=repository,
+            _execute_direct_effect=AsyncMock(side_effect=execute_effect),
+        ),
+        ExternalChannelActionService,
+    )
+
+    result = await ExternalChannelActionService._execute_serialized(
+        service,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-relocate",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Progress.",
+        title=None,
+        tasks=None,
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert [outcome.status for outcome in result.outcomes] == [
+        "delivered",
+        "delivered",
+        "delivered",
+    ]
+    assert captured[2].provider.target.request_payload["provider_message_key"] == (
+        "slack:C1:999.000"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tracker_relocation_skips_attach_when_cleanup_fails() -> None:
+    """Failed old-host cleanup preserves the one-visible-Tracker contract."""
+    session = SimpleNamespace(commit=AsyncMock())
+    reply = _effect(ExternalChannelDeliveryOperation.REPLY)
+    remove = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
+        dependencies=(0,),
+        projection_host_kind="standalone",
+    )
+    attach = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_UPDATE),
+        dependencies=(0, 1),
+        provider_message_key_effect_index=0,
+        projection_host_kind="reply",
+    )
+    repository = SimpleNamespace(
+        commit_direct_action=AsyncMock(
+            return_value=ChannelActionTransition(
+                binding_id="binding-1",
+                work_id="work-1",
+                work_status=ExternalChannelWorkStatus.ACTIVE,
+                state_revision=5,
+                effects=(reply, remove, attach),
+            )
+        )
+    )
+    delivered_reply = _ExecutedDirectEffect(
+        ProviderEffectOutcome(
+            operation=ExternalChannelDeliveryOperation.REPLY,
+            part=0,
+            status="delivered",
+            reason=None,
+            detail=None,
+        ),
+        "slack:C1:999.000",
+    )
+    failed_cleanup = _ExecutedDirectEffect(
+        ProviderEffectOutcome(
+            operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            part=0,
+            status="failed",
+            reason="provider_rejected",
+            detail="Cleanup failed.",
+        ),
+        None,
+    )
+    execute_effect = AsyncMock(side_effect=[delivered_reply, failed_cleanup])
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
+
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            session_manager=session_manager,
+            repository=repository,
+            _execute_direct_effect=execute_effect,
+        ),
+        ExternalChannelActionService,
+    )
+
+    result = await ExternalChannelActionService._execute_serialized(
+        service,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-relocate-failed",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Progress.",
+        title=None,
+        tasks=None,
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert [outcome.status for outcome in result.outcomes] == [
+        "delivered",
+        "failed",
+        "not_attempted",
+    ]
+    assert result.outcomes[2].reason == "effect_dependency_not_delivered"
+    assert execute_effect.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -770,6 +1040,87 @@ async def test_discord_tracker_delivery_includes_session_navigation(
             ],
         }
     ]
+    if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+        assert call.kwargs["suppress_notifications"] is True
+
+
+@pytest.mark.asyncio
+async def test_discord_reply_host_tracker_update_preserves_message_content() -> None:
+    """Attaching or updating a reply Tracker omits conversational content."""
+    update_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    target.request_payload["tracker_host_kind"] = "reply"
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(update_message=update_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-reply-progress"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    call = update_message.await_args
+    assert call is not None
+    assert call.kwargs["content"] is None
+    assert call.kwargs["embeds"] == target.request_payload["embeds"]
+
+
+@pytest.mark.asyncio
+async def test_discord_reply_host_tracker_delete_detaches_presentation() -> None:
+    """Cleanup clears a reply Tracker instead of deleting the reply message."""
+    update_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    delete_message = AsyncMock()
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+    )
+    target.request_payload["provider_message_key"] = "discord:111:555"
+    target.request_payload["tracker_host_kind"] = "reply"
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(
+            discord_client=_DiscordClientDelegate(
+                update_message=update_message,
+                delete_message=delete_message,
+            )
+        ),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-reply-cleanup"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    update_message.assert_awaited_once_with(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        message_id="555",
+        content=None,
+        components=[],
+        embeds=[],
+    )
+    delete_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -825,6 +1176,8 @@ async def test_discord_scheduled_tracker_keeps_session_navigation_only(
             ],
         }
     ]
+    if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+        assert call.kwargs["suppress_notifications"] is False
 
 
 @pytest.mark.asyncio

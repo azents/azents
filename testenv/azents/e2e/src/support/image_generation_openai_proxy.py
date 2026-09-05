@@ -1893,6 +1893,7 @@ class _Handler(BaseHTTPRequestHandler):
                     arguments={
                         "mode": "continue",
                         "binding": binding,
+                        "message": "I found a release that matches the incident.",
                         "title": "Investigating error logs…",
                     },
                 )

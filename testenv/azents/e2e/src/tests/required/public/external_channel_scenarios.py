@@ -5274,11 +5274,13 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             if delivery.get("outcome") in {"delivered", "created", "duplicate"}
             and delivery.get("safe_category") == "activity_tracker"
         ]
-        assert {
+        quiet_tracker_message_ids = {
             delivery["message_id"]
             for delivery in quiet_tracker_deliveries
             if isinstance(delivery.get("message_id"), str)
-        } == {quiet_tracker_deliveries[0]["message_id"]}
+        }
+        assert quiet_tracker_message_ids == {quiet_tracker_deliveries[0]["message_id"]}
+        quiet_tracker_message_id = _string(quiet_tracker_deliveries[0]["message_id"])
         assert (
             sum(
                 delivery.get("operation") == "create_message"
@@ -5286,6 +5288,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             )
             == 1
         )
+        quiet_delivery_count = len(quiet_deliveries)
         quiet_evidence = _objects(
             wait_until(
                 lambda: (
@@ -5413,12 +5416,9 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             for delivery in late_tracker_deliveries
             if isinstance(delivery.get("message_id"), str)
         } == {late_tracker_deliveries[0]["message_id"]}
-        assert (
-            sum(
-                delivery.get("operation") == "create_message"
-                for delivery in late_tracker_deliveries
-            )
-            == 1
+        assert all(
+            delivery.get("operation") in {"create_message", "update_message"}
+            for delivery in late_tracker_deliveries
         )
         assert not any(
             delivery.get("outcome") in {"delivered", "created", "duplicate"}
@@ -5584,6 +5584,42 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     assert request_input_result.get("status") == "completed"
     assert isinstance(request_input_output, str)
     assert '"awaiting_input": true' in request_input_output
+
+    relocated_state = _discord_provider_state(discord_provider_fake_url)
+    relocation_deliveries = _objects(relocated_state["deliveries"])[
+        quiet_delivery_count:
+    ]
+    reply_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if delivery.get("operation") == "create_message"
+        and delivery.get("outcome") in {"delivered", "created", "duplicate"}
+        and delivery.get("safe_category") is None
+    )
+    reply_message_id = _string(relocation_deliveries[reply_index]["message_id"])
+    remove_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if index > reply_index
+        and delivery.get("operation") == "delete_message"
+        and delivery.get("message_id") == quiet_tracker_message_id
+        and delivery.get("outcome") == "delivered"
+    )
+    attach_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if index > remove_index
+        and delivery.get("operation") == "update_message"
+        and delivery.get("message_id") == reply_message_id
+        and delivery.get("safe_category") == "activity_tracker"
+        and delivery.get("outcome") == "delivered"
+    )
+    assert reply_index < remove_index < attach_index
+    assert not any(
+        delivery.get("safe_category") == "activity_tracker"
+        and delivery.get("message_id") != reply_message_id
+        for delivery in relocation_deliveries[attach_index:]
+    )
 
     resume_barrier_arm = requests.post(
         f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",

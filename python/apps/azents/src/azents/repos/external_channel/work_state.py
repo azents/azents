@@ -28,7 +28,10 @@ from azents.repos.toolkit_state.data import ToolkitStateUpsert
 
 EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE = "external_channel"
 CHANNEL_WORK_STATE_NAME_PREFIX = "channel_work:"
-CHANNEL_WORK_STATE_SCHEMA_VERSION = 4
+CHANNEL_WORK_STATE_SCHEMA_VERSION = 5
+
+
+type ChannelWorkTrackerHostKind = Literal["standalone", "reply"]
 
 
 class ChannelWorkProjectionPartState(BaseModel):
@@ -40,6 +43,7 @@ class ChannelWorkProjectionPartState(BaseModel):
     desired_progress_revision: int = Field(ge=0)
     status: ExternalChannelWorkProjectionStatus
     provider_message_key: str | None
+    host_kind: ChannelWorkTrackerHostKind
 
 
 class ChannelWorkState(BaseModel):
@@ -47,7 +51,7 @@ class ChannelWorkState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[4]
+    schema_version: Literal[5]
     binding_id: str = Field(min_length=1)
     work_cycle_id: str = Field(min_length=1)
     status: ExternalChannelWorkStatus
