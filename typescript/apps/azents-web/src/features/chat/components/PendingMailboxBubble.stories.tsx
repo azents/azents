@@ -118,6 +118,12 @@ export const ExternalChannel: Story = {
       canvas.getByText("A safe pending external-channel projection."),
     ).toBeVisible();
     await expect(canvas.getByText("Context")).toBeVisible();
+    await expect(
+      canvas.queryByRole("button", { name: "Copy" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Delete pending message" }),
+    ).not.toBeInTheDocument();
     await userEvent.click(trigger);
     await expect(
       canvas.getByText("The original message is unavailable."),
@@ -144,6 +150,12 @@ export const DiscordExternalChannel: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Alice:")).toBeVisible();
     await expect(canvas.getByText("Invoked")).toBeVisible();
+    await expect(
+      canvas.queryByRole("button", { name: "Copy" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Delete pending message" }),
+    ).not.toBeInTheDocument();
   },
 };
 

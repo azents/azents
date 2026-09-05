@@ -21,8 +21,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-04
-spec_version: 43
+last_verified_at: 2026-09-05
+spec_version: 44
 ---
 
 # Chat Session Resync
@@ -250,7 +250,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 - WS events are replayed on baseline, then applied in realtime.
 - When the active root Session exposes `unread_terminal_run_id`, the client acknowledges that observed boundary only after a fresh latest history/live baseline has committed, the view is `READY`, the timeline is `LATEST_FOLLOWING`, and the document is visible. Route entry, failed/incomplete resync, hidden tabs, and detached history browsing never acknowledge. The acknowledgement invalidates both active Session detail and list projections; a newer terminal boundary remains unread when the request names an older Run.
 - The Agent rail renders an unread terminal-result dot only while the Session is idle. A running Session with an older unread boundary renders its running spinner without the dot; the durable boundary remains unchanged and becomes visible again after the Session returns to idle unless a later acknowledgement clears or replaces it.
-- Can display typed pending mailbox envelopes/items, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Pending items render with source-specific presentation and common reduced emphasis. Nonterminal operation projections render at the live timeline tail immediately above pending mailbox items and the composer, without using the consumed source envelope as a visual anchor. Terminal completed, failed, and cancelled blocks are reconstructed from durable `action_execution_result` history events and render at their transcript positions.
+- Can display typed pending mailbox envelopes/items, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Pending items render with source-specific presentation and common reduced emphasis. Pending External Channel messages are informational source projections and expose neither transcript copy nor pending-delete controls. Nonterminal operation projections render at the live timeline tail immediately above pending mailbox items and the composer, without using the consumed source envelope as a visual anchor. Terminal completed, failed, and cancelled blocks are reconstructed from durable `action_execution_result` history events and render at their transcript positions.
 - Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history. The shared Run indicator remains at the live timeline tail for the full active Run rather than being limited to `waiting_for_model` or `streaming_model`; it shows an unlabeled model-call duration only while `model_call_started_at` is present.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
@@ -480,6 +480,8 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-05** — v44. Removed transcript copy and pending-delete controls
+  from pending External Channel message projections.
 - **2026-09-04** — v43. Mapped the shared Agent-session header/navigation and
   Subagent Tree query-state modules that retain current resync and refetch
   behavior.
