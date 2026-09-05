@@ -50,8 +50,8 @@ from azents.engine.events.engine_adapter import (
     AgentEngineAdapter,
     EventEngineAdapterConfig,
     RunExecutionFactory,
-    _HookedClientToolExecutor,  # Fix Hook wrapper cancellation contract.
-    _WorkingSetClientToolExecutor,  # Verify deferred recency wrapper.
+    _HookedClientToolInvoker,  # Fix Hook wrapper cancellation contract.
+    _WorkingSetClientToolInvoker,  # Verify deferred recency wrapper.
     _xai_imagine_client_factory,  # Test-only default dependency.
 )
 from azents.engine.events.engine_events import RunComplete
@@ -79,10 +79,13 @@ from azents.engine.events.protocols import (
     SummaryGenerator,
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
+from azents.engine.events.tool_invocation import (
+    PreparedClientToolInvocation,
+    UnboundedClientToolResult,
+)
 from azents.engine.events.types import (
     AgentRunState,
     ClientToolCallPayload,
-    ClientToolResultPayload,
     CompactionSummaryPayload,
     Event,
     ExternalChannelMessagePayload,
@@ -123,6 +126,10 @@ from azents.engine.run.types import (
 from azents.engine.tooling.tool_search import (
     ToolWorkingSetState,
     ToolWorkingSetStore,
+)
+from azents.engine.tools.run_tool_to_file import (
+    RUN_TOOL_TO_FILE_NAME,
+    LateBoundClientToolInvoker,
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
@@ -664,23 +671,30 @@ class _StreamingExecution:
         return AgentRunStatus.COMPLETED
 
 
-class _RecordingToolExecutor:
-    """Tool executor that records request_cancel calls."""
+class _RecordingToolInvoker:
+    """Tool invoker that records request_cancel calls."""
 
     def __init__(self) -> None:
-        self.cancelled: list[ClientToolCallPayload] = []
+        self.cancelled: list[PreparedClientToolInvocation] = []
 
-    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+    async def invoke(
+        self,
+        call: PreparedClientToolInvocation,
+    ) -> UnboundedClientToolResult:
         """Return completed result for tests."""
-        return ClientToolResultPayload(
+        return UnboundedClientToolResult(
             call_id=call.call_id,
             name=call.name,
+            wire_dialect=call.wire_dialect,
             status="completed",
+            execution_succeeded=True,
             output=[OutputTextPart(text="ok")],
-            wire_dialect="json_function",
+            metadata={},
+            pending_generated_files=(),
+            terminal_run=False,
         )
 
-    def request_cancel(self, call: ClientToolCallPayload) -> None:
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
         """Record cancellation request."""
         self.cancelled.append(call)
 
@@ -713,6 +727,50 @@ class _DeferredToolkit(Toolkit[BaseModel]):
                 )
             )
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+
+class _RunToolProviderToolkit(Toolkit[BaseModel]):
+    """Toolkit double that supplies an Engine-assembled Runtime Tool."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Expose one ordinary target Tool."""
+        del context
+
+        async def target(arguments: str) -> str:
+            return arguments
+
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="target",
+                        description="Return target output.",
+                        input_schema={"type": "object", "properties": {}},
+                    ),
+                    handler=target,
+                )
+            ],
+        )
+
+    def make_run_tool_to_file(
+        self,
+        binding: LateBoundClientToolInvoker,
+    ) -> FunctionTool:
+        """Return one Runtime-owned higher-order Tool declaration."""
+        del binding
+
+        async def run(arguments: str) -> str:
+            return arguments
+
+        return FunctionTool(
+            spec=FunctionToolSpec(
+                name=RUN_TOOL_TO_FILE_NAME,
+                description="Run a visible Tool and store its output.",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            handler=run,
+        )
 
 
 class _ProfiledCandidateHandler:
@@ -924,8 +982,8 @@ def test_summary_renderer_includes_only_external_channel_invocations() -> None:
 
 def test_hooked_tool_executor_forwards_request_cancel() -> None:
     """Hook wrapper forwards cancellation request to inner executor."""
-    inner = _RecordingToolExecutor()
-    wrapper = _HookedClientToolExecutor(
+    inner = _RecordingToolInvoker()
+    wrapper = _HookedClientToolInvoker(
         inner=inner,
         dispatcher=RuntimeHookDispatcher(),
         providers=[],
@@ -934,11 +992,10 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
         session_id="session-1",
         run_id="run-1",
     )
-    call = ClientToolCallPayload(
+    call = PreparedClientToolInvocation(
         call_id="call-1",
         name="tool",
         arguments="{}",
-        native_artifact=_artifact({"type": "function_call"}),
         wire_dialect="json_function",
     )
 
@@ -951,8 +1008,8 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
     """Treat a denied deferred invocation as current capability intent."""
     store = _ToolWorkingSetStore()
     await store.activate("agent-1", "session-1", ["service__other"])
-    hooked = _HookedClientToolExecutor(
-        inner=_RecordingToolExecutor(),
+    hooked = _HookedClientToolInvoker(
+        inner=_RecordingToolInvoker(),
         dispatcher=RuntimeHookDispatcher(),
         providers=[RuntimeHookProviderRef(slug="deny", toolkit=_DenyHookToolkit())],
         workspace_id="workspace-1",
@@ -960,7 +1017,7 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
         session_id="session-1",
         run_id="run-1",
     )
-    wrapper = _WorkingSetClientToolExecutor(
+    wrapper = _WorkingSetClientToolInvoker(
         inner=hooked,
         deferred_tool_names=frozenset({"service__probe"}),
         store=store,
@@ -968,12 +1025,11 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
         session_id="session-1",
     )
 
-    result = await wrapper.execute(
-        ClientToolCallPayload(
+    result = await wrapper.invoke(
+        PreparedClientToolInvocation(
             call_id="call-1",
             name="service__probe",
             arguments="{}",
-            native_artifact=_artifact({"type": "function_call"}),
             wire_dialect="json_function",
         )
     )
@@ -1322,6 +1378,46 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
 
     assert invoked.status == "completed"
     assert state.tool_names[:2] == ["service__probe", "service__other"]
+
+
+async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
+    """Add the Runtime-owned higher-order Tool to the prepared model call."""
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        execution_factory=_capture_execution_factory(execution),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=_RunToolProviderToolkit(),
+                slug="runtime",
+                use_prefix=False,
+                toolkit_type=None,
+            )
+        ],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "test"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        compaction_provider_integration_id=None,
+        inference_state=None,
+    )
+
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+
+    prepared = execution.prepared_model_call
+    assert prepared is not None
+    native_request = prepared.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in native_request.tools] == [
+        RUN_TOOL_TO_FILE_NAME,
+        "target",
+    ]
 
 
 async def _prepare_profiled_model_call(

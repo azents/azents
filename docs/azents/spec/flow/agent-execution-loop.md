@@ -86,7 +86,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-05
-spec_version: 169
+spec_version: 170
 ---
 
 # Agent Execution Loop
@@ -804,6 +804,33 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
+### Runtime Tool output materialization
+
+`run_tool_to_file` accepts one same-call visible target Tool name, the target's exact string
+arguments, an absolute Runtime directory, and an overwrite flag. Runtime target resolution and
+directory/manifest preflight happen before target invocation. Relative destinations, unavailable
+Runtime authority, manifest conflicts, recursive invocation, hidden names, and missing prepared
+dialects fail before the target runs.
+
+A successful target output is planned into deterministic files: one or more UTF-8 text files,
+authorized Exchange and Artifact managed-object copies, authority-checked ModelFile bytes, and
+transient generated-file bytes. Generated files are ordered at their original output index.
+`manifest.json` records ordered kind, media type, safe filename, selected relative path, stored or
+failed state, and committed size/hash without arguments, bodies, credentials, provider URLs, or
+storage keys. Every part and the manifest use an independent verified Server-to-Runtime transfer
+with a unique transfer operation identity, so multiple files in one outer Tool call cannot collide
+in Runtime coordination.
+
+Complete success returns only a bounded summary and manifest path; stored bodies do not enter model
+context or a new durable file entity. Target validation, policy, hook admission, execution, or
+cancellation failure starts no output transfer and returns the ordinary bounded target failure.
+After target success, a part-level storage failure keeps committed files, writes the part-status
+manifest when possible, returns only failed original parts through ordinary output capping, retains
+failed generated files for normal materialization, and appends a final notice that the target
+already ran. Manifest-only failure likewise keeps committed files and reports that no rollback
+occurred. Cancellation forwards to the active target or transfer and never automatically replays
+the target.
+
 Runtime Toolkit prompt construction is database-only and independent from Runner readiness. It
 renders bounded behavior from the PostgreSQL current desired configuration slot and freezes its
 positive configuration sequence, digest, and desired target generation as the model step's Runtime
@@ -930,6 +957,14 @@ profile enables JSON function for the same semantic profile. Generic LiteLLM Res
 function for ordinary tools but has no V4A patch override, preserving the existing `apply_patch`
 exposure set. The existing `edit` tool remains unconditional.
 
+After compatibility projection, an active Runtime Toolkit with current resource authority may add
+the direct JSON-function `run_tool_to_file`. This Engine-assembled Tool is included in the ordinary
+declaration budget and Tool Search visibility projection, but its target registry is bound only
+after that projection. The registry contains the exact provider-visible prepared client Tools from
+the same model call, excluding `run_tool_to_file` itself. It therefore cannot invoke a deferred Tool
+before activation, a Tool omitted by model compatibility or Runtime capability, a provider-hosted
+Tool, or a name that was not declared to that response.
+
 One prepared logical operation has one declaration and handler variant. A provider failure,
 incomplete call, malformed custom input, cancellation, or route change never resubmits that operation
 through another dialect. A received call whose dialect does not match the prepared declaration fails
@@ -958,6 +993,14 @@ Successful manual or automatic context compaction atomically replaces the Sessio
 Provider-facing client schemas are sorted canonically by final model-visible name after membership is selected. Recency changes membership only and does not reorder an identical visible set. Provider adapters receive the already-projected functions and must not independently truncate or perform LRU selection.
 
 One `PreparedModelCall` freezes the executable catalog, deferred search index, provider-visible projection, and executor routing together. A response can invoke only handlers from the snapshot whose schemas it received; a tool that appears after preparation is not executable by that response. `tool_search` updates session state but its matches first enter schemas when the following model call is prepared. An emitted deferred call refreshes session recency before hook denial, handler error, or result normalization, while the in-flight executor remains immutable.
+
+Prepared client Tool execution has one shared pre-cap invocation boundary for direct and
+higher-order calls. It preserves the admitted wire dialect, Tool Search recency, before/after hooks,
+handler validation and execution, cancellation route, metadata, generated files, and terminal-run
+intent. Ordinary direct calls adapt that result into the durable `client_tool_result` and apply the
+existing global text cap. `run_tool_to_file` consumes the same successful target result before that
+cap; a validation failure, hook denial, handler failure, or cancellation retains failed execution
+classification even if an after-hook replaces its visible text.
 
 Structured preparation logs record the matched rule ID and aggregate limit, hosted, direct, active-deferred, and visible-deferred counts. They do not record tool arguments or credentials.
 
@@ -1360,6 +1403,10 @@ icon.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 170) — Added the Runtime-owned `run_tool_to_file`
+  higher-order Tool, shared pre-cap client Tool invocation, same-call visible target
+  fencing, verified per-part Runtime bundles, failed-part projection, and unique
+  transfer operation identities.
 - **2026-09-05** (spec_version 169) — Preserved result-less terminal image-generation events while
   degrading them to bounded semantic history whenever stateless replay cannot retain a provider item
   ID.

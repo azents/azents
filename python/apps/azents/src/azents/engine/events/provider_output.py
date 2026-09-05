@@ -20,6 +20,7 @@ from azents.engine.events.generated_files import (
     GeneratedFileOutput,
     PendingGeneratedFileOutput,
 )
+from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.types import (
     AttachmentOutputPart,
@@ -684,15 +685,22 @@ class ProviderOutputMaterializer:
         result: ClientToolResultPayload,
         generated_images: tuple[_PreparedGeneratedImage, ...],
     ) -> ClientToolResultPayload:
-        """Replace a client result skeleton with durable output parts."""
+        """Insert durable generated output parts into the client result."""
         if len(generated_images) != 1:
             raise ModelCallError("Generated image result count is invalid.")
         image = generated_images[0]
         if image.call_id != result.call_id:
             raise ModelCallError("Generated image result identity is invalid.")
+        output_parts = list(iter_output_parts(result.output))
+        insert_at = min(image.output_index, len(output_parts))
         return result.model_copy(
             update={
-                "output": [image.file_part, image.attachment_part],
+                "output": [
+                    *output_parts[:insert_at],
+                    image.file_part,
+                    image.attachment_part,
+                    *output_parts[insert_at:],
+                ],
                 "pending_generated_files": [],
             }
         )

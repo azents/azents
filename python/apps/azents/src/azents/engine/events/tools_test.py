@@ -13,9 +13,11 @@ from azents.engine.events.output_parts import (
     TOOL_OUTPUT_TEXT_HARD_CAP_CHARS,
     iter_output_parts,
 )
+from azents.engine.events.tool_invocation import PreparedClientToolInvocation
 from azents.engine.events.tools import (
     ToolCatalog,
     ToolCatalogClientToolExecutor,
+    ToolCatalogClientToolInvoker,
     build_tool_catalog,
     extend_prepared_tool_catalog_with_json_functions,
     project_tool_catalog_for_client_compatibility,
@@ -618,6 +620,54 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
 
     assert result.status == "completed"
     assert result.output == "... (truncated)\n" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+
+async def test_client_tool_invoker_preserves_text_before_global_cap() -> None:
+    """Expose complete target text only through the internal invocation boundary."""
+    long_output = "a" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+    async def handler(arguments: str) -> str:
+        del arguments
+        return long_output
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="long_output",
+                            description="Return long output.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+    catalog = _prepare_json_catalog(catalog)
+
+    result = await ToolCatalogClientToolInvoker(catalog).invoke(
+        PreparedClientToolInvocation(
+            call_id="call-1",
+            name="long_output",
+            arguments="{}",
+            wire_dialect="json_function",
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.execution_succeeded
+    assert result.output == long_output
 
 
 async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
