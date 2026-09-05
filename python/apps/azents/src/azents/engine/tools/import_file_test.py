@@ -30,6 +30,7 @@ from azents.runtime.transfer.managed_source import ManagedServerToRuntimeSource
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
     ServerToRuntimeTransferError,
+    ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
 )
 from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
@@ -376,6 +377,35 @@ async def test_import_file_maps_terminal_transfer_failure_to_tool_error() -> Non
         await tool.handler(json.dumps({"uri": exchange_file.uri}))
 
     assert len(transfer_service.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_file_reports_transfer_limit_error() -> None:
+    """A source-size rejection must not be presented as a path failure."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeTransferLimitExceeded(
+                "Transfer source exceeds configured limit"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        FunctionToolError,
+        match="exceeds the configured Runtime transfer limit",
+    ) as raised:
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    assert "absolute runtime paths" not in str(raised.value)
 
 
 @pytest.mark.asyncio

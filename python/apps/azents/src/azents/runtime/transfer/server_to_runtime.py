@@ -46,6 +46,10 @@ class ServerToRuntimeTransferError(RuntimeError):
         self.failure = failure
 
 
+class ServerToRuntimeTransferLimitExceeded(ServerToRuntimeTransferError):
+    """Raised when source metadata exceeds the configured transfer limit."""
+
+
 _CoordinatorResult = TypeVar("_CoordinatorResult")
 
 
@@ -477,7 +481,7 @@ class ServerToRuntimeTransferService:
             request.product_maximum_size,
             request.provider_maximum_size,
         ):
-            raise ServerToRuntimeTransferError(
+            raise ServerToRuntimeTransferLimitExceeded(
                 "Transfer source exceeds configured limit"
             )
         if (

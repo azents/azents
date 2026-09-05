@@ -39,6 +39,7 @@ from azents.runtime.transfer.managed_source import (
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeSource,
     ServerToRuntimeTransferError,
+    ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
 )
 from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
@@ -212,6 +213,10 @@ def make_import_file_tool(
             raise FunctionToolError(
                 f"Failed to write imported file: {destination}. "
                 f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+            ) from None
+        except ServerToRuntimeTransferLimitExceeded:
+            raise FunctionToolError(
+                "Imported file exceeds the configured Runtime transfer limit."
             ) from None
         except ServerToRuntimeTransferError as exc:
             raise FunctionToolError(
