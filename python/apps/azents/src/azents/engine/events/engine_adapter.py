@@ -77,7 +77,10 @@ from azents.engine.events.openai_responses import (
     openai_responses_client_config,
     openai_responses_websocket_endpoint_eligible,
 )
-from azents.engine.events.output_parts import iter_output_parts
+from azents.engine.events.output_parts import (
+    enforce_tool_output_text_hard_cap,
+    iter_output_parts,
+)
 from azents.engine.events.protocols import (
     AgentRunCreateRepository,
     ClientToolExecutor,
@@ -98,8 +101,14 @@ from azents.engine.events.provider_output import ProviderOutputMaterializer
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_prompt import build_system_prompt
+from azents.engine.events.tool_invocation import (
+    ClientToolInvoker,
+    PreparedClientToolInvocation,
+    UnboundedClientToolResult,
+)
 from azents.engine.events.tools import (
-    ToolCatalogClientToolExecutor,
+    CappedClientToolExecutor,
+    ToolCatalogClientToolInvoker,
     build_tool_catalog,
     extend_prepared_tool_catalog_with_json_functions,
     extend_tool_catalog_candidates,
@@ -167,6 +176,11 @@ from azents.engine.tooling.tool_search import (
     ToolWorkingSetStore,
     make_tool_search_tool,
     project_tool_catalog,
+)
+from azents.engine.tools.run_tool_to_file import (
+    RUN_TOOL_TO_FILE_NAME,
+    LateBoundClientToolInvoker,
+    RunToolToFileToolkitProvider,
 )
 from azents.engine.tools.xai_image_generation import (
     XaiImageGenerationExecutor,
@@ -705,6 +719,25 @@ class AgentEngineAdapter:
                 },
             )
 
+            run_tool_binding: LateBoundClientToolInvoker | None = None
+            runtime_toolkit = next(
+                (
+                    binding.toolkit
+                    for binding in catalog.active_toolkit_bindings
+                    if isinstance(binding.toolkit, RunToolToFileToolkitProvider)
+                ),
+                None,
+            )
+            if runtime_toolkit is not None:
+                candidate_binding = LateBoundClientToolInvoker()
+                run_tool = runtime_toolkit.make_run_tool_to_file(candidate_binding)
+                if run_tool is not None:
+                    catalog = extend_prepared_tool_catalog_with_json_functions(
+                        catalog,
+                        [run_tool],
+                    )
+                    run_tool_binding = candidate_binding
+
             provider_visible_tool_names: tuple[str, ...]
             deferred_tool_names: frozenset[str]
             if request.tool_search_enabled:
@@ -824,9 +857,11 @@ class AgentEngineAdapter:
                     historical_plaintext_custom_supported
                 ),
             )
-            tool_executor = ToolCatalogClientToolExecutor(catalog)
-            hooked_tool_executor = _HookedClientToolExecutor(
-                inner=tool_executor,
+            shared_tool_invoker: ClientToolInvoker = ToolCatalogClientToolInvoker(
+                catalog
+            )
+            shared_tool_invoker = _HookedClientToolInvoker(
+                inner=shared_tool_invoker,
                 dispatcher=hook_dispatcher,
                 providers=hook_providers,
                 workspace_id=request.workspace_id,
@@ -834,19 +869,33 @@ class AgentEngineAdapter:
                 session_id=request.session_id,
                 run_id=context.run_id,
             )
-            prepared_tool_executor: ClientToolExecutor = hooked_tool_executor
             if request.tool_search_enabled:
-                prepared_tool_executor = _WorkingSetClientToolExecutor(
-                    inner=hooked_tool_executor,
+                shared_tool_invoker = _WorkingSetClientToolInvoker(
+                    inner=shared_tool_invoker,
                     deferred_tool_names=deferred_tool_names,
                     store=self.tool_working_set_store,
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                 )
-                prepared_tool_executor = _PreparedToolAllowlistExecutor(
-                    inner=prepared_tool_executor,
-                    allowed_tool_names=frozenset(provider_visible_tool_names),
+            visible_tool_names = frozenset(provider_visible_tool_names)
+            tool_invoker: ClientToolInvoker = _PreparedToolAllowlistInvoker(
+                inner=shared_tool_invoker,
+                allowed_tool_names=visible_tool_names,
+            )
+            if run_tool_binding is not None:
+                target_names = visible_tool_names - {RUN_TOOL_TO_FILE_NAME}
+                run_tool_binding.bind(
+                    invoker=_PreparedToolAllowlistInvoker(
+                        inner=shared_tool_invoker,
+                        allowed_tool_names=target_names,
+                    ),
+                    wire_dialects={
+                        name: catalog.wire_dialects[name] for name in target_names
+                    },
                 )
+            prepared_tool_executor: ClientToolExecutor = CappedClientToolExecutor(
+                tool_invoker
+            )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
                 await hook_dispatcher.dispatch_observation(
@@ -1147,43 +1196,50 @@ def _runtime_hook_provider_refs(
     return refs
 
 
-class _PreparedToolAllowlistExecutor:
+class _PreparedToolAllowlistInvoker:
     """Reject client tool calls outside one prepared provider projection."""
 
     def __init__(
         self,
         *,
-        inner: ClientToolExecutor,
+        inner: ClientToolInvoker,
         allowed_tool_names: frozenset[str],
     ) -> None:
         self.inner = inner
         self.allowed_tool_names = allowed_tool_names
 
-    def request_cancel(self, call: ClientToolCallPayload) -> None:
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
         """Forward cancellation only for tools admitted to this prepared call."""
         if call.name in self.allowed_tool_names:
             self.inner.request_cancel(call)
 
-    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+    async def invoke(
+        self,
+        call: PreparedClientToolInvocation,
+    ) -> UnboundedClientToolResult:
         """Execute only tools whose schemas were sent to the provider."""
         if call.name not in self.allowed_tool_names:
-            return ClientToolResultPayload(
+            return UnboundedClientToolResult(
                 call_id=call.call_id,
                 name=call.name,
                 wire_dialect=call.wire_dialect,
                 status="failed",
+                execution_succeeded=False,
                 output=[OutputTextPart(text=f"Tool not found: {call.name}")],
+                metadata={},
+                pending_generated_files=(),
+                terminal_run=False,
             )
-        return await self.inner.execute(call)
+        return await self.inner.invoke(call)
 
 
-class _WorkingSetClientToolExecutor:
+class _WorkingSetClientToolInvoker:
     """Refresh deferred-tool recency before every admitted invocation."""
 
     def __init__(
         self,
         *,
-        inner: ClientToolExecutor,
+        inner: ClientToolInvoker,
         deferred_tool_names: frozenset[str],
         store: ToolWorkingSetStore,
         agent_id: str,
@@ -1195,24 +1251,27 @@ class _WorkingSetClientToolExecutor:
         self.agent_id = agent_id
         self.session_id = session_id
 
-    def request_cancel(self, call: ClientToolCallPayload) -> None:
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
         """Forward running inner tool cancellation request."""
         self.inner.request_cancel(call)
 
-    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+    async def invoke(
+        self,
+        call: PreparedClientToolInvocation,
+    ) -> UnboundedClientToolResult:
         """Touch deferred recency before hooks or handler execution."""
         if call.name in self.deferred_tool_names:
             await self.store.touch(self.agent_id, self.session_id, call.name)
-        return await self.inner.execute(call)
+        return await self.inner.invoke(call)
 
 
-class _HookedClientToolExecutor:
+class _HookedClientToolInvoker:
     """Apply runtime hook dispatch to Event tool executor."""
 
     def __init__(
         self,
         *,
-        inner: ClientToolExecutor,
+        inner: ClientToolInvoker,
         dispatcher: RuntimeHookDispatcher,
         providers: Sequence[RuntimeHookProviderRef],
         workspace_id: str,
@@ -1228,11 +1287,14 @@ class _HookedClientToolExecutor:
         self._session_id = session_id
         self._run_id = run_id
 
-    def request_cancel(self, call: ClientToolCallPayload) -> None:
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
         """Forward running inner tool cancellation request."""
         self.inner.request_cancel(call)
 
-    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+    async def invoke(
+        self,
+        call: PreparedClientToolInvocation,
+    ) -> UnboundedClientToolResult:
         """Run tool after applying before/after tool hooks."""
         toolkit_slug = _toolkit_slug_from_tool_name(call.name)
         before = await self.dispatcher.dispatch_before_tool_call(
@@ -1248,15 +1310,19 @@ class _HookedClientToolExecutor:
             ),
         )
         if isinstance(before, ToolCallDeny):
-            return ClientToolResultPayload(
+            return UnboundedClientToolResult(
                 call_id=call.call_id,
                 name=call.name,
                 wire_dialect=call.wire_dialect,
                 status="failed",
+                execution_succeeded=False,
                 output=[OutputTextPart(text=before.message)],
+                metadata={},
+                pending_generated_files=(),
+                terminal_run=False,
             )
 
-        result = await self.inner.execute(call)
+        result = await self.inner.invoke(call)
         output_text = _tool_result_text(result)
         after = await self.dispatcher.dispatch_after_tool_call(
             self._providers,
@@ -1273,11 +1339,10 @@ class _HookedClientToolExecutor:
             ),
         )
         if isinstance(after, ToolOutputReplace):
-            return result.model_copy(
-                update={
-                    "status": "completed",
-                    "output": [OutputTextPart(text=after.output_text)],
-                }
+            return dataclasses.replace(
+                result,
+                status="completed",
+                output=[OutputTextPart(text=after.output_text)],
             )
         return result
 
@@ -1289,11 +1354,11 @@ def _toolkit_slug_from_tool_name(name: str) -> str:
     return name.split("__", 1)[0]
 
 
-def _tool_result_text(result: ClientToolResultPayload) -> str | None:
-    """Join Tool output text parts."""
+def _tool_result_text(result: UnboundedClientToolResult) -> str | None:
+    """Join the ordinary capped Tool output text observed by hooks."""
     texts = [
         part.text
-        for part in iter_output_parts(result.output)
+        for part in iter_output_parts(enforce_tool_output_text_hard_cap(result.output))
         if isinstance(part, OutputTextPart) and part.text
     ]
     if not texts:

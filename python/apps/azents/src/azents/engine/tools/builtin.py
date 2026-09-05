@@ -84,6 +84,11 @@ from azents.engine.tools.memory import (
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.run_tool_to_file import (
+    LateBoundClientToolInvoker,
+    RunToolToFileRuntimeContext,
+    make_run_tool_to_file_tool,
+)
 from azents.engine.tools.runtime_instruction_context import (
     PresentFilePublicationExecutor,
     RuntimeInstructionContext,
@@ -751,6 +756,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._agents_missing_cache: dict[str, float] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
         self._expected_runtime_authority: RuntimeOperationAuthority | None = None
+        self._run_tool_to_file_context: RunToolToFileRuntimeContext | None = None
 
     def set_instruction_context_store(
         self, store: RuntimeInstructionContextStore
@@ -912,6 +918,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         :param context: Context passed each turn
         :return: Current state (tools + prompt)
         """
+        self._run_tool_to_file_context = None
         if not await self._runtime_toolkit_allowed():
             return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
 
@@ -973,6 +980,19 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 desired_generation=runtime.desired_generation,
             )
 
+        async def revalidate_resource_authority() -> bool:
+            authority = context.resource_authority
+            if authority is None:
+                return False
+            async with self.session_manager() as session:
+                return await (
+                    self.model_file_service.validate_resource_authority_in_session(
+                        session,
+                        authority,
+                        lock=False,
+                    )
+                )
+
         async def resolve_edit_target() -> RuntimeEditTarget:
             runtime = await resolve_exact_runtime_target()
             return RuntimeEditTarget(
@@ -1016,6 +1036,17 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         ]
         if context.resource_authority is not None:
             authority = context.resource_authority
+            self._run_tool_to_file_context = RunToolToFileRuntimeContext(
+                session_storage=file_ss,
+                exchange_file_service=self.exchange_file_service,
+                artifact_service=self.artifact_service,
+                model_file_service=self.model_file_service,
+                authority=authority,
+                transfer_service=self.server_to_runtime_transfer_service,
+                resolve_runtime_target=resolve_runtime_target,
+                staging_configuration=self.import_file_staging_configuration,
+                revalidate_authority=revalidate_resource_authority,
+            )
             file_tools.extend(
                 [
                     make_import_file_tool(
@@ -1117,6 +1148,19 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if self.instruction_context_store is not None:
             self.instruction_context_store.set(instruction_context)
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    def make_run_tool_to_file(
+        self,
+        binding: LateBoundClientToolInvoker,
+    ) -> FunctionTool | None:
+        """Build the Engine-assembled Runtime output materialization Tool."""
+        context = self._run_tool_to_file_context
+        if context is None:
+            return None
+        return self._guard_runtime_tool(
+            make_run_tool_to_file_tool(binding=binding, runtime=context),
+            RuntimeCapability.RUNTIME_TRANSFER,
+        )
 
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return static runtime/files prompt for the current run."""
