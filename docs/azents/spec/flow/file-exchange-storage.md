@@ -133,6 +133,9 @@ window and reports a distinct connection timeout when it does not recover. Coord
 RPC failures that reach the tool retain a structured operation phase, transfer failure
 category when available, Session/Run correlation, destination, and exception chain in
 operator logs even when the user-facing message withholds internal details.
+Each inbound file transfer allocates a unique Runtime coordination operation identity
+under its originating Run correlation. Multiple imports or External Channel downloads
+in one Run therefore cannot conflict with an earlier transfer's operation metadata.
 
 The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
 rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so

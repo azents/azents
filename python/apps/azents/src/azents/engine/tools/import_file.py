@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
+from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorTransferFailure,
 )
@@ -165,6 +166,7 @@ def make_import_file_tool(
             resolved=resolved,
             staging_configuration=staging_configuration,
         )
+        transfer_operation_id = f"{authority.run_id}:import:{uuid7().hex}"
         try:
             target = await resolve_runtime_target()
             await transfer_service.transfer(
@@ -173,7 +175,7 @@ def make_import_file_tool(
                     target=target,
                     agent_id=authority.agent_id,
                     session_id=authority.session_id,
-                    operation_id=authority.run_id,
+                    operation_id=transfer_operation_id,
                     destination=destination,
                     overwrite=input.overwrite,
                     product_maximum_size=staging_configuration.maximum_size,
@@ -211,6 +213,7 @@ def make_import_file_tool(
                     "path": destination,
                     "session_id": authority.session_id,
                     "run_id": authority.run_id,
+                    "transfer_operation_id": transfer_operation_id,
                 },
             )
             raise FunctionToolError(
@@ -229,6 +232,7 @@ def make_import_file_tool(
                     "path": destination,
                     "session_id": authority.session_id,
                     "run_id": authority.run_id,
+                    "transfer_operation_id": transfer_operation_id,
                     "transfer_failure": CoordinatorTransferFailure.STREAM.value,
                     "transfer_phase": "admission",
                 },
@@ -249,6 +253,7 @@ def make_import_file_tool(
                     "path": destination,
                     "session_id": authority.session_id,
                     "run_id": authority.run_id,
+                    "transfer_operation_id": transfer_operation_id,
                     "transfer_failure": (
                         exc.failure.value if exc.failure is not None else None
                     ),

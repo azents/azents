@@ -99,7 +99,7 @@ def _coordinator_failure(
         return CoordinatorTransferFailure.ADMISSION
     if status is grpc.StatusCode.UNAVAILABLE:
         return CoordinatorTransferFailure.STREAM
-    if status in {grpc.StatusCode.ABORTED, grpc.StatusCode.FAILED_PRECONDITION}:
+    if status is grpc.StatusCode.ABORTED:
         return CoordinatorTransferFailure.FENCED
     if status is grpc.StatusCode.DEADLINE_EXCEEDED:
         return CoordinatorTransferFailure.EXPIRED

@@ -390,6 +390,15 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
             }
         )
     )
+    await state.tools[1].handler(
+        json.dumps(
+            {
+                "file": "external-file:v1:slack:binding-1:::F123",
+                "path": "/workspace/agent/report-2.csv",
+                "overwrite": False,
+            }
+        )
+    )
 
     assert json.loads(require_instance(output, str)) == {
         "bytes": 42,
@@ -397,11 +406,18 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         "media_type": "text/csv",
         "path": "/workspace/agent/report.csv",
     }
-    assert len(file_transfer_service.calls) == 1
+    assert len(file_transfer_service.calls) == 2
     call = file_transfer_service.calls[0]
     assert call["session_id"] == "session-1"
     assert call["agent_id"] == "agent-1"
-    assert call["operation_id"] == "run-current"
+    operation_id = require_instance(call["operation_id"], str)
+    assert operation_id.startswith("run-current:download:")
+    second_operation_id = require_instance(
+        file_transfer_service.calls[1]["operation_id"],
+        str,
+    )
+    assert second_operation_id.startswith("run-current:download:")
+    assert second_operation_id != operation_id
     assert call["file"] == "external-file:v1:slack:binding-1:::F123"
     assert call["path"] == "/workspace/agent/report.csv"
     assert call["overwrite"] is False
@@ -480,7 +496,7 @@ async def test_download_external_file_logs_secret_free_failure_context(
     assert record.message == "External Channel file download failed"
     assert fields["session_id"] == "session-1"
     assert fields["agent_id"] == "agent-1"
-    assert fields["operation_id"] == "run-current"
+    assert fields["operation_id"].startswith("run-current:download:")
     assert fields["runtime_id"] == "runtime-1"
     assert fields["runtime_generation"] == 1
     assert fields["external_channel_provider"] == "discord"

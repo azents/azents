@@ -42,6 +42,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
+    ServerToRuntimeCoordinatorError,
     ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
     ServerToRuntimeTarget,
@@ -546,6 +547,42 @@ async def test_transfer_retries_coordinator_resource_exhaustion() -> None:
         "dispatch",
         "status",
     ]
+
+
+@pytest.mark.asyncio
+async def test_transfer_does_not_misclassify_failed_precondition_as_fencing() -> None:
+    """Coordinator precondition failures retain unknown cause for operator logs."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    metadata = grpc.aio.Metadata()
+    coordinator = Coordinator(
+        [],
+        admit_errors=[
+            grpc.aio.AioRpcError(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                metadata,
+                metadata,
+                "Transfer operation metadata conflicts",
+                None,
+            )
+        ],
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(ServerToRuntimeCoordinatorError) as raised:
+        await service.transfer(_request(source))
+
+    assert raised.value.failure is None
+    assert raised.value.phase == "admission"
+    assert source.prepare_calls == 0
 
 
 @pytest.mark.asyncio
