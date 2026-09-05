@@ -197,14 +197,32 @@ class DeadlineTransportFailureCoordinator(Coordinator):
         self.calls.append(("status", request))
         self.status_calls += 1
         if self.status_calls > 1:
-            raise OSError("Runtime coordinator status transport failed")
+            raise ServerToRuntimeCoordinatorError(
+                "Runtime coordinator status transport failed",
+                phase="cancel_status",
+                failure=CoordinatorTransferFailure.STREAM,
+            )
         return self.statuses.pop(0)
 
     async def cancel_transfer(
         self, request: CoordinatorCancelTransferRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append(("cancel", request))
-        raise OSError("Runtime coordinator cancellation transport failed")
+        raise ServerToRuntimeCoordinatorError(
+            "Runtime coordinator cancellation transport failed",
+            phase="cancel",
+            failure=CoordinatorTransferFailure.STREAM,
+        )
+
+
+class UnexpectedCancellationFailureCoordinator(Coordinator):
+    """Raise one non-domain defect from the cancellation boundary."""
+
+    async def cancel_transfer(
+        self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("cancel", request))
+        raise RuntimeError("synthetic cancellation defect")
 
 
 class StrictStateCoordinator:
@@ -945,6 +963,33 @@ async def test_cancellation_propagates_after_coordinator_cancellation() -> None:
     cancellation = coordinator.calls[-1][1]
     assert isinstance(cancellation, CoordinatorCancelTransferRequest)
     assert cancellation.expected_revision == 4
+
+
+@pytest.mark.asyncio
+async def test_cancellation_does_not_hide_unexpected_coordinator_defect() -> None:
+    """Unexpected cancellation defects remain visible instead of falling back."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = UnexpectedCancellationFailureCoordinator(
+        [_status(4, phase=CoordinatorTransferPhase.READY)]
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(seconds=10),
+    )
+    task = asyncio.create_task(service.transfer(_request(source)))
+    await coordinator.status_requested.wait()
+    task.cancel()
+
+    with pytest.raises(RuntimeError, match="synthetic cancellation defect"):
+        await task
+
+    assert [name for name, _ in coordinator.calls][-1] == "cancel"
 
 
 @pytest.mark.asyncio
