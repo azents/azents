@@ -314,12 +314,14 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
         "\n".join(
             [
                 (
-                    '{"cache_backend":"gha","cache_export_enabled":false,'
+                    '{"build_mode":"source-overlay","cache_backend":"gha",'
+                    '"cache_export_enabled":false,'
                     '"cache_scope":"e2e-server","completed":true,'
                     '"duration_seconds":80.5,"image":"azents-server"}'
                 ),
                 (
-                    '{"cache_backend":"gha","cache_export_enabled":false,'
+                    '{"build_mode":"full","cache_backend":"gha",'
+                    '"cache_export_enabled":false,'
                     '"cache_scope":"e2e-runner","completed":true,'
                     '"duration_seconds":50.25,"image":"azents-runtime-runner"}'
                 ),
@@ -339,6 +341,7 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
 
     assert len(records) == 2
     assert "azents-server" in rendered
+    assert "source-overlay" in rendered
     assert "80.50s" in rendered
     assert "**130.75s**" in rendered
 
@@ -347,12 +350,14 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
     "record",
     [
         (
-            '{"cache_backend":"gha","cache_export_enabled":false,'
+            '{"build_mode":"full","cache_backend":"gha",'
+            '"cache_export_enabled":false,'
             '"cache_scope":"e2e-server","completed":true,'
             '"duration_seconds":80.5,"image":"azents-server","unknown":true}'
         ),
         (
-            '{"cache_backend":"gha","cache_export_enabled":false,'
+            '{"build_mode":"full","cache_backend":"gha",'
+            '"cache_export_enabled":false,'
             '"cache_scope":"e2e-server","completed":"true",'
             '"duration_seconds":80.5,"image":"azents-server"}'
         ),
@@ -367,4 +372,22 @@ def test_parse_image_build_timings_rejects_unvalidated_records(
     timings_path.write_text(record + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError):
+        parse_image_build_timings(timings_path)
+
+
+def test_parse_image_build_timings_rejects_unknown_build_mode(
+    tmp_path: Path,
+) -> None:
+    """Reject image timing modes that the renderer cannot classify."""
+    timings_path = tmp_path / "image-build-timings.jsonl"
+    timings_path.write_text(
+        (
+            '{"build_mode":"incremental","cache_backend":"gha",'
+            '"cache_export_enabled":false,"cache_scope":"e2e-server",'
+            '"completed":true,"duration_seconds":80.5,"image":"azents-server"}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="build_mode"):
         parse_image_build_timings(timings_path)

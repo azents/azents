@@ -28,6 +28,7 @@ jobs:
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
       web_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-e2e'] == 'true' }}
       e2e_server_image: ${{ steps.filter.outputs['e2e-server-image'] == 'true' }}
+      e2e_server_source_overlay: ${{ steps.filter.outputs['e2e-server-image'] == 'true' && steps.filter.outputs['e2e-server-image-dependencies'] != 'true' }}
       e2e_runtime_runner_image: ${{ steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
       e2e_runtime_provider_docker_image: ${{ steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
@@ -58,6 +59,7 @@ jobs:
             python-e2e:
               - '.github/workflows/**'
               - 'azents.Dockerfile'
+              - 'azents-e2e-server-overlay.Dockerfile'
               - 'docker-compose.azents.yaml'
               - 'proto/**'
               - 'python/apps/azents/**'
@@ -74,6 +76,7 @@ jobs:
               - '.dockerignore'
               - '.github/workflows/**'
               - 'azents.Dockerfile'
+              - 'azents-e2e-server-overlay.Dockerfile'
               - 'azents-admin-web.Dockerfile'
               - 'azents-web.Dockerfile'
               - 'proto/**'
@@ -89,7 +92,15 @@ jobs:
             e2e-server-image:
               - '.dockerignore'
               - 'azents.Dockerfile'
+              - 'azents-e2e-server-overlay.Dockerfile'
               - 'python/apps/azents/**'
+              - 'python/libs/az-common/**'
+              - 'python/libs/azents-runtime-control/**'
+            e2e-server-image-dependencies:
+              - '.dockerignore'
+              - 'azents.Dockerfile'
+              - 'python/apps/azents/pyproject.toml'
+              - 'python/apps/azents/uv.lock'
               - 'python/libs/az-common/**'
               - 'python/libs/azents-runtime-control/**'
             e2e-runtime-runner-image:
@@ -409,6 +420,7 @@ jobs:
         env:
           AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
           AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
+          AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ needs.changes.outputs.e2e_server_source_overlay }}
           AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
           AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
           GHCR_TOKEN: ${{ github.token }}
@@ -453,6 +465,7 @@ jobs:
           AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
           AZENTS_E2E_BASE_SHA_CANDIDATES: ${{ steps.snapshot_ancestors.outputs.candidate_shas }}
           AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
+          AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ needs.changes.outputs.e2e_server_source_overlay }}
           AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
           AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
           GHCR_TOKEN: ${{ github.token }}

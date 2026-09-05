@@ -99,6 +99,7 @@ _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
 _E2E_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
 _E2E_IMAGE_BUILD_PROFILE_ENV = "AZENTS_E2E_IMAGE_BUILD_PROFILE"
+_SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
 _SELENIUM_IMAGE = "selenium/standalone-chromium:4.45.0-20260606"
 _MAIN_WEB_UPSTREAM_URL = "http://azents-web:3000"
 _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
@@ -169,6 +170,9 @@ _SERVER_IMAGE_BUILD = _E2EImageBuild(
     dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
     cache_repository="azents-server",
     web=False,
+)
+_SERVER_SOURCE_OVERLAY_DOCKERFILE = (
+    REPOSITORY_ROOT / "azents-e2e-server-overlay.Dockerfile"
 )
 _RUNTIME_RUNNER_IMAGE_BUILD = _E2EImageBuild(
     environment_variable="AZENTS_E2E_RUNTIME_RUNNER_IMAGE",
@@ -856,6 +860,19 @@ def _build_configured_e2e_image(
     image_tag: str,
 ) -> None:
     """Build one configured image using its required context."""
+    if image_build is _SERVER_IMAGE_BUILD and os.environ.get(
+        _SERVER_SOURCE_OVERLAY_BASE_ENV
+    ):
+        _build_e2e_image(
+            image_tag=image_tag,
+            dockerfile=_SERVER_SOURCE_OVERLAY_DOCKERFILE,
+            cache_repository=None,
+            observability_image=image_build.cache_repository,
+            build_mode="source-overlay",
+            builder_override="default",
+        )
+        return
+
     if image_build.web:
         _build_e2e_web_image(
             image_tag=image_tag,
@@ -959,12 +976,19 @@ def _build_e2e_image(
     *,
     image_tag: str,
     dockerfile: Path,
-    cache_repository: str,
+    cache_repository: str | None,
     build_contexts: dict[str, str | Path] | None = None,
+    observability_image: str | None = None,
+    build_mode: str = "full",
+    builder_override: str | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
-    cache_options = _get_e2e_image_cache_options(cache_repository)
-    builder = os.environ.get(_DOCKER_BUILDER_ENV)
+    cache_options = (
+        _E2EImageCacheOptions([], None, "none", None)
+        if cache_repository is None
+        else _get_e2e_image_cache_options(cache_repository)
+    )
+    builder = builder_override or os.environ.get(_DOCKER_BUILDER_ENV)
     started_at = time.monotonic()
     completed = False
 
@@ -982,12 +1006,13 @@ def _build_e2e_image(
         completed = True
     finally:
         _write_e2e_image_build_observability(
-            cache_repository=cache_repository,
+            cache_repository=observability_image or cache_repository or "unknown",
             cache_backend=cache_options.cache_backend,
             cache_scope=cache_options.cache_scope,
             cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,
             duration_seconds=time.monotonic() - started_at,
+            build_mode=build_mode,
         )
 
 
@@ -1064,6 +1089,7 @@ def _write_e2e_image_build_observability(
     cache_export_enabled: bool,
     completed: bool,
     duration_seconds: float,
+    build_mode: str = "full",
 ) -> None:
     """Append safe per-image build timing evidence to the CI artifact directory."""
     artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
@@ -1079,6 +1105,7 @@ def _write_e2e_image_build_observability(
         "cache_export_enabled": cache_export_enabled,
         "completed": completed,
         "duration_seconds": round(duration_seconds, 3),
+        "build_mode": build_mode,
     }
     with _IMAGE_BUILD_OBSERVABILITY_LOCK:
         with artifact_path.open("a", encoding="utf-8") as artifact_file:

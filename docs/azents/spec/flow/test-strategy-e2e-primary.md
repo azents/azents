@@ -11,6 +11,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - azents-e2e-server-overlay.Dockerfile
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -25,8 +26,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-02
-spec_version: 43
+last_verified_at: 2026-09-05
+spec_version: 44
 ---
 
 # E2E Primary Test Strategy
@@ -219,8 +220,18 @@ Always-on required CI does not depend on external credentials.
   remain selected while unresolved images continue the ancestor lookup, and artifacts
   retain both direct and fallback pull evidence. Authentication, history fetch,
   compatibility, availability, pull, or local-tag failure falls back to the existing
-  current-worktree BuildKit build for the affected image. Changed image components
-  always build the current worktree.
+  current-worktree BuildKit build for the affected image. When only
+  `python/apps/azents` runtime content changes while the Server Dockerfile, Docker
+  context rules, dependency manifest and lock, and installed shared libraries remain
+  identical, the lane may pull a dependency-compatible predecessor or bounded
+  ancestor Server snapshot as a source-overlay base. It removes the complete
+  predecessor application directory before copying the current-worktree application
+  directory, so changed and deleted source both match the tested revision. The
+  overlay build does not import or export the full-image remote cache. Dependency,
+  lockfile, Dockerfile, Docker-context, or installed shared-library changes still use
+  the full current-worktree Server build, as does any unavailable or incompatible
+  overlay base. Snapshot and image-build artifacts distinguish final-image pulls,
+  source-overlay-base pulls, full builds, and source-overlay builds.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -363,6 +374,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-05** (spec_version 44) — Added dependency-compatible predecessor
+  Server snapshots as source-overlay bases for app-source-only required E2E changes,
+  with complete app-directory replacement, full-build fallback, separate cache
+  behavior, and explicit overlay observability.
 - **2026-09-02** (spec_version 43) — Added two focused real-Docker Runtime
   Terminal journeys for protocol behavior and Runtime lifecycle authority while
   retaining policy and Web presentation coverage in deterministic lower layers.

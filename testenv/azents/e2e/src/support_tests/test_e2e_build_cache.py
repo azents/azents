@@ -117,6 +117,48 @@ def test_build_passes_gha_cache_options_to_buildx_and_records_duration(
     )
 
 
+def test_server_source_overlay_uses_snapshot_base_without_remote_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Source-only server changes replace app source over the pulled base image."""
+    build_arguments: dict[str, object] = {}
+
+    def fake_build(**kwargs: object) -> None:
+        build_arguments.update(kwargs)
+
+    monkeypatch.setenv(
+        _CONFTEST_MODULE._SERVER_SOURCE_OVERLAY_BASE_ENV,
+        "azents-server:e2e-base-snapshot",
+    )
+    monkeypatch.setattr(_CONFTEST_MODULE.pow_docker, "build", fake_build)
+
+    _CONFTEST_MODULE._build_configured_e2e_image(
+        _CONFTEST_MODULE._SERVER_IMAGE_BUILD,
+        "azents-e2e:test",
+    )
+
+    assert build_arguments["file"] == str(
+        REPOSITORY_ROOT / "azents-e2e-server-overlay.Dockerfile"
+    )
+    assert build_arguments["cache_from"] is None
+    assert build_arguments["cache_to"] is None
+    assert build_arguments["builder"] == "default"
+
+
+def test_server_source_overlay_replaces_the_complete_application_directory() -> None:
+    """Deleted application files cannot survive from the predecessor snapshot."""
+    dockerfile = (REPOSITORY_ROOT / "azents-e2e-server-overlay.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    remove_position = dockerfile.index('RUN rm -rf "${ROOT_DIR}/python/apps/azents"')
+    copy_position = dockerfile.index(
+        'COPY python/apps/azents/ "${ROOT_DIR}/python/apps/azents/"'
+    )
+
+    assert remove_position < copy_position
+
+
 def test_required_profile_builds_independent_images_concurrently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -223,7 +265,8 @@ def test_image_build_observability_excludes_runtime_cache_credentials(
     )
 
     assert (tmp_path / "image-build-timings.jsonl").read_text(encoding="utf-8") == (
-        '{"cache_backend": "gha", "cache_export_enabled": true, '
+        '{"build_mode": "full", "cache_backend": "gha", '
+        '"cache_export_enabled": true, '
         '"cache_scope": "azents-e2e-v1-azents-server", "completed": true, '
         '"duration_seconds": 12.346, "image": "azents-server"}\n'
     )
