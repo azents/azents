@@ -35,9 +35,10 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     author_type: StrictStr
     prompt_role: StrictStr
     body: Optional[StrictStr]
+    reference_mappings: Dict[str, Dict[str, StrictStr]]
     original_url: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "sender_display_name", "author_type", "prompt_role", "body", "original_url"]
+    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "sender_display_name", "author_type", "prompt_role", "body", "reference_mappings", "original_url"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -135,6 +136,7 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
             "author_type": obj.get("author_type"),
             "prompt_role": obj.get("prompt_role"),
             "body": obj.get("body"),
+            "reference_mappings": obj.get("reference_mappings"),
             "original_url": obj.get("original_url")
         })
         # store additional fields in additional_properties

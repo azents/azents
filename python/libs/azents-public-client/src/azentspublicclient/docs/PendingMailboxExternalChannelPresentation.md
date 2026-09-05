@@ -15,6 +15,7 @@ Name | Type | Description | Notes
 **author_type** | **str** |  | 
 **prompt_role** | **str** |  | 
 **body** | **str** |  | 
+**reference_mappings** | **Dict[str, Dict[str, str]]** |  | 
 **original_url** | **str** |  | 
 
 ## Example

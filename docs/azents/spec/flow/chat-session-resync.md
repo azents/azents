@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-09-05
-spec_version: 44
+spec_version: 45
 ---
 
 # Chat Session Resync
@@ -145,7 +145,7 @@ Response fields:
 | Field | Meaning |
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history, including current assistant/reasoning partials and provider-tool activity. |
-| `mailbox_items` | ordered typed pending mailbox envelope projections not yet promoted into a model turn or handed to an action execution. Each envelope contains ordered items with stable `(mailbox_item_id, item_key)` identity and source-safe presentation data. |
+| `mailbox_items` | ordered typed pending mailbox envelope projections not yet promoted into a model turn or handed to an action execution. Each envelope contains ordered items with stable `(mailbox_item_id, item_key)` identity and source-safe presentation data. Pending External Channel presentations include admitted provider reference mappings so the UI renders provider-native user and channel mentions with the same readable names as durable messages while preserving canonical bodies and IDs. |
 | `run` | currently running Run projection. `null` if absent. Includes profile provenance, nullable `model_call_started_at`, optional stable `run.operation` for context preparation, and optional `run.retry` with provider/runtime presentation kind, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |

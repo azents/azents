@@ -402,6 +402,7 @@ def mailbox_item_to_pending_projection(
                 author_type=external.author_type.value,
                 prompt_role=external.prompt_role,
                 body=external.body,
+                reference_mappings=external.reference_mappings,
                 original_url=external.original_url,
             )
         elif mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE:

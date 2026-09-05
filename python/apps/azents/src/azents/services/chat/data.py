@@ -82,6 +82,7 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     author_type: str
     prompt_role: Literal["context", "invocation"]
     body: str | None
+    reference_mappings: dict[str, dict[str, str]]
     original_url: str | None
 
 
