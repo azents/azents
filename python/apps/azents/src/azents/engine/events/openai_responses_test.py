@@ -2381,6 +2381,53 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
     assert "body" not in completed.model_dump(mode="json")
 
 
+def test_typed_normalizer_skips_failed_image_before_success() -> None:
+    """Preserve a failed image call without rejecting a later successful image."""
+    completed = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.6-luna",
+        operation="sampling",
+        integration=None,
+    ).normalize_completed_output(
+        "session-1",
+        {
+            "output": [
+                {
+                    "type": "image_generation_call",
+                    "id": "image-call-failed",
+                    "status": "failed",
+                },
+                {
+                    "type": "image_generation_call",
+                    "id": "image-call-success",
+                    "status": "completed",
+                    "result": _PNG_BASE64,
+                },
+                {
+                    "type": "reasoning",
+                    "id": "reasoning-1",
+                    "summary": [{"text": "Continue after the generated image."}],
+                },
+            ]
+        },
+        [],
+    )
+
+    assert len(completed.events) == 3
+    failed = completed.events[0].payload
+    assert isinstance(failed, ProviderToolCallPayload)
+    assert failed.status == "failed"
+    assert failed.output == []
+    succeeded = completed.events[1].payload
+    assert isinstance(succeeded, ProviderToolCallPayload)
+    assert succeeded.status == "completed"
+    assert succeeded.output == []
+    assert len(completed.pending_provider_files) == 1
+    pending = completed.pending_provider_files[0]
+    assert pending.call_id == "image-call-success"
+    assert pending.body.startswith(b"\x89PNG")
+
+
 def test_typed_stream_extracts_transient_generated_image() -> None:
     """Preserve typed SDK image bytes until transient file extraction."""
     image = ImageGenerationCall(
