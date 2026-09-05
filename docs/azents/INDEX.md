@@ -36,19 +36,19 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-03 | 73 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 44 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-04 | 19 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 20 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-01 | 41 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-01 | 57 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-04 | 45 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 46 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-31 | 17 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-03 | 18 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-04 | 19 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-02 | 43 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-04 | 8 |

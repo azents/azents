@@ -42,10 +42,14 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
+    ServerToRuntimeCoordinatorError,
     ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
     ServerToRuntimeTarget,
+    ServerToRuntimeTransferAdmissionTimeout,
+    ServerToRuntimeTransferConnectionTimeout,
     ServerToRuntimeTransferError,
+    ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
     ServerToRuntimeTransferService,
 )
@@ -84,9 +88,11 @@ class Coordinator:
         statuses: list[CoordinatorTransferStatus],
         *,
         admit_error: Exception | None = None,
+        admit_errors: list[Exception] | None = None,
     ) -> None:
         self.statuses = statuses
         self.admit_error = admit_error
+        self.admit_errors = admit_errors or []
         self.calls: list[tuple[str, object]] = []
         self.admit_request: CoordinatorAdmitTransferRequest | None = None
         self.reject_first_cancellation = False
@@ -98,6 +104,8 @@ class Coordinator:
     ) -> CoordinatorAdmitTransferResult:
         self.calls.append(("admit", request))
         self.admit_request = request
+        if self.admit_errors:
+            raise self.admit_errors.pop(0)
         if self.admit_error is not None:
             raise self.admit_error
         return CoordinatorAdmitTransferResult(
@@ -450,8 +458,8 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
 
 
 @pytest.mark.asyncio
-async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
-    """Keep gRPC transport details inside the Server-to-Runtime boundary."""
+async def test_transfer_retries_coordinator_unavailable_during_admission() -> None:
+    """Wait through temporary admission connectivity loss."""
     source = Source(
         ServerToRuntimeSourceMetadata(
             "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
@@ -460,14 +468,22 @@ async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
     )
     metadata = grpc.aio.Metadata()
     coordinator = Coordinator(
-        [],
-        admit_error=grpc.aio.AioRpcError(
-            grpc.StatusCode.UNAVAILABLE,
-            metadata,
-            metadata,
-            "coordinator endpoint unavailable",
-            None,
-        ),
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            )
+        ],
+        admit_errors=[
+            grpc.aio.AioRpcError(
+                grpc.StatusCode.UNAVAILABLE,
+                metadata,
+                metadata,
+                "coordinator endpoint unavailable",
+                None,
+            )
+        ],
     )
     service = ServerToRuntimeTransferService(
         coordinator=coordinator,
@@ -475,21 +491,67 @@ async def test_transfer_normalizes_coordinator_grpc_transport_failure() -> None:
         status_poll_interval=timedelta(milliseconds=1),
     )
 
-    with pytest.raises(
-        ServerToRuntimeTransferError,
-        match="Runtime transfer coordinator request failed",
-    ) as raised:
-        await service.transfer(_request(source))
+    await service.transfer(_request(source))
 
-    assert isinstance(raised.value.__cause__, grpc.aio.AioRpcError)
-    assert raised.value.failure is None
-    assert source.prepare_calls == 0
-    assert [name for name, _ in coordinator.calls] == ["admit"]
+    assert source.prepare_calls == 1
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_transfer_classifies_coordinator_admission_rejection() -> None:
-    """Preserve admission exhaustion as a bounded transfer failure."""
+async def test_transfer_retries_coordinator_resource_exhaustion() -> None:
+    """Treat coordinator resource exhaustion as retryable admission pressure."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    metadata = grpc.aio.Metadata()
+    coordinator = Coordinator(
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            )
+        ],
+        admit_errors=[
+            grpc.aio.AioRpcError(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                metadata,
+                metadata,
+                "Transfer admission is unavailable",
+                None,
+            )
+        ],
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(_request(source))
+
+    assert source.prepare_calls == 1
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_transfer_does_not_misclassify_failed_precondition_as_fencing() -> None:
+    """Coordinator precondition failures retain unknown cause for operator logs."""
     source = Source(
         ServerToRuntimeSourceMetadata(
             "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
@@ -499,13 +561,15 @@ async def test_transfer_classifies_coordinator_admission_rejection() -> None:
     metadata = grpc.aio.Metadata()
     coordinator = Coordinator(
         [],
-        admit_error=grpc.aio.AioRpcError(
-            grpc.StatusCode.RESOURCE_EXHAUSTED,
-            metadata,
-            metadata,
-            "Transfer admission is unavailable",
-            None,
-        ),
+        admit_errors=[
+            grpc.aio.AioRpcError(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                metadata,
+                metadata,
+                "Transfer operation metadata conflicts",
+                None,
+            )
+        ],
     )
     service = ServerToRuntimeTransferService(
         coordinator=coordinator,
@@ -513,16 +577,209 @@ async def test_transfer_classifies_coordinator_admission_rejection() -> None:
         status_poll_interval=timedelta(milliseconds=1),
     )
 
-    with pytest.raises(
-        ServerToRuntimeTransferError,
-        match="Runtime transfer coordinator request failed",
-    ) as raised:
+    with pytest.raises(ServerToRuntimeCoordinatorError) as raised:
         await service.transfer(_request(source))
 
-    assert raised.value.failure is CoordinatorTransferFailure.ADMISSION
-    assert isinstance(raised.value.__cause__, grpc.aio.AioRpcError)
+    assert raised.value.failure is None
+    assert raised.value.phase == "admission"
     assert source.prepare_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_transfer_rejects_source_over_configured_limit_before_admission() -> None:
+    """Expose local size-limit rejection as a distinct transfer error."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 11, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 11, "a" * 64),
+    )
+    coordinator = Coordinator([])
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(
+        ServerToRuntimeTransferLimitExceeded,
+        match="exceeds configured limit",
+    ):
+        await service.transfer(_request(source))
+
+    assert source.prepare_calls == 0
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_transfer_retries_admission_pressure_until_available() -> None:
+    """Temporary admission pressure waits instead of failing the transfer."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator(
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            )
+        ],
+        admit_errors=[
+            ServerToRuntimeTransferError(
+                "Transfer admission is unavailable",
+                failure=CoordinatorTransferFailure.ADMISSION,
+            ),
+            ServerToRuntimeTransferError(
+                "Transfer admission is unavailable",
+                failure=CoordinatorTransferFailure.ADMISSION,
+            ),
+        ],
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(_request(source))
+
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "admit",
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_transfers_wait_through_independent_admission_pressure() -> None:
+    """Concurrent files survive temporary admission rejection independently."""
+
+    class RetryEachAdmissionCoordinator(Coordinator):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    _status(
+                        4,
+                        phase=CoordinatorTransferPhase.TERMINAL,
+                        outcome=CoordinatorTransferOutcome.SUCCEEDED,
+                    )
+                    for _ in range(5)
+                ]
+            )
+            self.rejected_transfer_ids: set[str] = set()
+
+        async def admit_transfer(
+            self, request: CoordinatorAdmitTransferRequest
+        ) -> CoordinatorAdmitTransferResult:
+            transfer_id = request.identity.transfer_id
+            if transfer_id not in self.rejected_transfer_ids:
+                self.rejected_transfer_ids.add(transfer_id)
+                self.calls.append(("admit", request))
+                raise ServerToRuntimeTransferError(
+                    "Transfer admission is unavailable",
+                    failure=CoordinatorTransferFailure.ADMISSION,
+                )
+            return await super().admit_transfer(request)
+
+    sources = [
+        Source(
+            ServerToRuntimeSourceMetadata(
+                f"exchange://safe-{index}",
+                "exchange",
+                f"file-{index}",
+                "text/plain",
+                3,
+                "a" * 64,
+                None,
+            ),
+            PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+        )
+        for index in range(5)
+    ]
+    coordinator = RetryEachAdmissionCoordinator()
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await asyncio.gather(*(service.transfer(_request(source)) for source in sources))
+
+    assert all(source.prepare_calls == 1 for source in sources)
+    assert len([name for name, _ in coordinator.calls if name == "admit"]) == 10
+
+
+@pytest.mark.asyncio
+async def test_transfer_times_out_when_admission_pressure_outlives_deadline() -> None:
+    """Admission throttling remains bounded by the transfer deadline."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    times = iter([_NOW, _NOW + timedelta(minutes=1)])
+    coordinator = Coordinator(
+        [],
+        admit_error=ServerToRuntimeTransferError(
+            "Transfer admission is unavailable",
+            failure=CoordinatorTransferFailure.ADMISSION,
+        ),
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: next(times),
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(
+        ServerToRuntimeTransferAdmissionTimeout,
+        match="admission timed out",
+    ):
+        await service.transfer(_request(source))
+
     assert [name for name, _ in coordinator.calls] == ["admit"]
+    assert source.prepare_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_transfer_times_out_when_admission_connection_does_not_recover() -> None:
+    """Admission connectivity retry remains bounded by the transfer deadline."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    times = iter([_NOW, _NOW + timedelta(minutes=1)])
+    coordinator = Coordinator(
+        [],
+        admit_error=ServerToRuntimeTransferError(
+            "Runtime transfer coordinator request failed",
+            failure=CoordinatorTransferFailure.STREAM,
+        ),
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: next(times),
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(
+        ServerToRuntimeTransferConnectionTimeout,
+        match="connection timed out",
+    ):
+        await service.transfer(_request(source))
+
+    assert [name for name, _ in coordinator.calls] == ["admit"]
+    assert source.prepare_calls == 0
 
 
 @pytest.mark.asyncio

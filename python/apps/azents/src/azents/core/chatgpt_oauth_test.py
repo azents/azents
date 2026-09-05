@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from .chatgpt_oauth import (
+    CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_DEVICE_TOKEN_URL,
     CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
     CHATGPT_OAUTH_TOKEN_URL,
@@ -16,6 +17,11 @@ from .chatgpt_oauth import (
     resolve_chatgpt_oauth_device_user_code_url,
     resolve_chatgpt_oauth_token_url,
 )
+
+
+def test_model_catalog_uses_full_discovery_client_version() -> None:
+    """Use the provider's full-catalog discovery client version."""
+    assert CHATGPT_MODEL_CATALOG_CLIENT_VERSION == "99.99.99"
 
 
 @pytest.mark.parametrize(

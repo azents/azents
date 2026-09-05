@@ -33,19 +33,19 @@ Details of all living specs. Synchronized from frontmatter.
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-03 | 73 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 44 |
-| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-04 | 19 |
+| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 20 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-01 | 41 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-01 | 57 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-04 | 45 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 46 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-08-31 | 17 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
-| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-03 | 18 |
+| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-04 | 19 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-02 | 43 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-04 | 8 |

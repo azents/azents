@@ -10,8 +10,8 @@ from google.auth.exceptions import TransportError as GoogleTransportError
 from pydantic import TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
+    CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_BACKEND_BASE_URL,
-    CHATGPT_OAUTH_PROTOCOL_VERSION,
 )
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -410,32 +410,35 @@ class _FakeAsyncClient:
         headers: dict[str, str],
     ) -> httpx.Response:
         assert url == f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models"
-        assert params == {"client_version": CHATGPT_OAUTH_PROTOCOL_VERSION}
+        assert params == {"client_version": CHATGPT_MODEL_CATALOG_CLIENT_VERSION}
         assert headers["Authorization"] == "Bearer access-token"
         assert headers["ChatGPT-Account-Id"] == "account-id"
         assert headers["originator"] == "azents"
-        assert headers["version"] == CHATGPT_OAUTH_PROTOCOL_VERSION
+        assert "version" not in headers
         return httpx.Response(
             status_code=200,
             request=httpx.Request("GET", url),
             json={
                 "models": [
                     {
-                        "slug": "gpt-5.6-luna",
-                        "display_name": "GPT-5.6 Luna",
+                        "slug": "gpt-6-astra",
+                        "display_name": "GPT-6-Astra",
                         "visibility": "list",
                         "supported_in_api": True,
                         "context_window": 272000,
                         "max_context_window": 872000,
                         "input_modalities": ["text", "image"],
-                        "supports_parallel_tool_calls": False,
+                        "supports_parallel_tool_calls": True,
                         "supports_reasoning_summaries": True,
                         "supported_reasoning_levels": [
                             {"effort": "low"},
                             {"effort": "medium"},
                             {"effort": "high"},
+                            {"effort": "xhigh"},
+                            {"effort": "max"},
+                            {"effort": "ultra"},
                         ],
-                        "minimal_client_version": [0, 144, 0],
+                        "minimal_client_version": "0.153.0",
                         "tool_mode": "code_mode_only",
                         "base_instructions": "provider-owned instructions",
                     },
@@ -492,26 +495,29 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert result.summary.source == "chatgpt:codex_models"
     assert result.summary.returned_count == 4
     assert result.summary.skipped_count == 2
-    assert all(
-        candidate.normalized_capabilities.built_in_tools.supported
-        == ["web_search", "image_generation"]
-        for candidate in result.models
-    )
     candidate, standard_candidate, legacy_candidate, empty_modalities_candidate = (
         result.models
     )
-    assert candidate.model_identifier == "gpt-5.6-luna"
+    assert candidate.model_identifier == "gpt-6-astra"
+    assert candidate.normalized_capabilities.built_in_tools.supported == ["web_search"]
+    assert all(
+        other_candidate.normalized_capabilities.built_in_tools.supported
+        == ["web_search", "image_generation"]
+        for other_candidate in result.models[1:]
+    )
     assert candidate.normalized_capabilities.compatibility.provider_family == "chatgpt"
     assert candidate.normalized_capabilities.compatibility.responses_api is True
     assert (
         candidate.normalized_capabilities.context_window.default_input_tokens == 272000
     )
     assert candidate.normalized_capabilities.context_window.max_input_tokens == 872000
-    assert candidate.normalized_capabilities.tool_calling.parallel_tool_calls is False
+    assert candidate.normalized_capabilities.tool_calling.parallel_tool_calls is True
     assert candidate.normalized_capabilities.reasoning.effort_levels == [
         ModelReasoningEffort.LOW,
         ModelReasoningEffort.MEDIUM,
         ModelReasoningEffort.HIGH,
+        ModelReasoningEffort.XHIGH,
+        ModelReasoningEffort.MAX,
     ]
     assert candidate.source_metadata is not None
     assert candidate.source_metadata["tool_mode"] == "code_mode_only"

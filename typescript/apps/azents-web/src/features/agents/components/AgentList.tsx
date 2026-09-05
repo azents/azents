@@ -27,7 +27,7 @@ import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useState } from "react";
-import { formatModelSelectionSummary } from "../model-selection";
+import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import type { AgentListContainerOutput } from "../containers/useAgentListContainer";
 import type { AgentResponse } from "@azents/public-client";
 

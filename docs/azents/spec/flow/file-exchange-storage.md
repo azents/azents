@@ -43,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/import_resolver.py
   - python/apps/azents/src/azents/engine/tools/present_file.py
   - python/apps/azents/src/azents/engine/tools/read_image.py
-  - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
+  - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
@@ -54,8 +54,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-04
-spec_version: 45
+last_verified_at: 2026-09-05
+spec_version: 46
 ---
 
 # File Exchange Storage
@@ -120,6 +120,22 @@ not.
 ### Agent imports user or internal file
 
 `import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+Sources larger than the configured Runtime transfer limit fail before admission, and
+the tool reports the size-limit rejection without presenting it as a destination-path
+failure.
+Temporary coordinator admission pressure is retried until capacity becomes available or
+the existing transfer deadline expires. Admission timeout, generation fencing, Runner
+stream availability, destination write, integrity, cancellation, and unknown transfer
+failures retain separate safe tool messages instead of being presented as path
+validation failures.
+Temporary coordinator connection loss during admission follows the same bounded retry
+window and reports a distinct connection timeout when it does not recover. Coordinator
+RPC failures that reach the tool retain a structured operation phase, transfer failure
+category when available, Session/Run correlation, destination, and exception chain in
+operator logs even when the user-facing message withholds internal details.
+Each inbound file transfer allocates a unique Runtime coordination operation identity
+under its originating Run correlation. Multiple imports or External Channel downloads
+in one Run therefore cannot conflict with an earlier transfer's operation metadata.
 
 The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
 rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so
@@ -306,6 +322,8 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-04** — v46. Updated the file-upload hook mapping after its
+  behavior-preserving move to the shared frontend layer.
 - **2026-09-04** — v45. Separated the trusted internal Workspace S3 endpoint from
   the optional browser-reachable endpoint used to generate presigned URLs.
 - **2026-09-04** — v44. Mapped the Composer attachment preview container and

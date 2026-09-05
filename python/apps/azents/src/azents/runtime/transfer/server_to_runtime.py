@@ -46,24 +46,68 @@ class ServerToRuntimeTransferError(RuntimeError):
         self.failure = failure
 
 
+class ServerToRuntimeTransferLimitExceeded(ServerToRuntimeTransferError):
+    """Raised when source metadata exceeds the configured transfer limit."""
+
+
+class ServerToRuntimeTransferAdmissionTimeout(ServerToRuntimeTransferError):
+    """Raised when transfer admission remains unavailable until the deadline."""
+
+
+class ServerToRuntimeTransferConnectionTimeout(ServerToRuntimeTransferError):
+    """Raised when coordinator admission connectivity misses the deadline."""
+
+
+class ServerToRuntimeCoordinatorError(ServerToRuntimeTransferError):
+    """Raised for one classified Runtime Transfer Coordinator RPC failure."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        phase: str,
+        failure: CoordinatorTransferFailure | None,
+    ) -> None:
+        super().__init__(message, failure=failure)
+        self.phase = phase
+
+
 _CoordinatorResult = TypeVar("_CoordinatorResult")
 
 
 async def _await_coordinator(
     operation: Awaitable[_CoordinatorResult],
+    *,
+    phase: str,
 ) -> _CoordinatorResult:
     """Translate coordinator transport failures at the transfer boundary."""
     try:
         return await operation
     except grpc.aio.AioRpcError as error:
-        raise ServerToRuntimeTransferError(
+        raise ServerToRuntimeCoordinatorError(
             "Runtime transfer coordinator request failed",
-            failure=(
-                CoordinatorTransferFailure.ADMISSION
-                if error.code() is grpc.StatusCode.RESOURCE_EXHAUSTED
-                else None
-            ),
+            phase=phase,
+            failure=_coordinator_failure(error.code()),
         ) from error
+
+
+def _coordinator_failure(
+    status: grpc.StatusCode,
+) -> CoordinatorTransferFailure | None:
+    """Map safe gRPC status categories into transfer-domain failures."""
+    if status is grpc.StatusCode.RESOURCE_EXHAUSTED:
+        return CoordinatorTransferFailure.ADMISSION
+    if status is grpc.StatusCode.UNAVAILABLE:
+        return CoordinatorTransferFailure.STREAM
+    if status is grpc.StatusCode.ABORTED:
+        return CoordinatorTransferFailure.FENCED
+    if status is grpc.StatusCode.DEADLINE_EXCEEDED:
+        return CoordinatorTransferFailure.EXPIRED
+    if status is grpc.StatusCode.CANCELLED:
+        return CoordinatorTransferFailure.CANCELLED
+    if status is grpc.StatusCode.DATA_LOSS:
+        return CoordinatorTransferFailure.INTEGRITY
+    return None
 
 
 @dataclass(frozen=True)
@@ -148,7 +192,8 @@ class ServerToRuntimePreparation:
                     preparation_object_handle=preparation_object_handle,
                     multipart_cleanup_handle=multipart_cleanup_handle,
                 )
-            )
+            ),
+            phase="source_cleanup_register",
         )
         self.revision = status.revision
 
@@ -165,7 +210,8 @@ class ServerToRuntimePreparation:
                     expected_revision=self.revision,
                     preparation_object_handle=preparation_object_handle,
                 )
-            )
+            ),
+            phase="source_cleanup_promote",
         )
         self.revision = status.revision
 
@@ -177,7 +223,8 @@ class ServerToRuntimePreparation:
                     identity=self.identity,
                     expected_revision=self.revision,
                 )
-            )
+            ),
+            phase="source_cleanup_clear",
         )
         self.revision = status.revision
 
@@ -299,23 +346,21 @@ class ServerToRuntimeTransferService:
         expected_revision: int | None = None
         preparation: ServerToRuntimePreparation | None = None
         try:
-            admitted = await _await_coordinator(
-                self.coordinator.admit_transfer(
-                    CoordinatorAdmitTransferRequest(
-                        identity=identity,
-                        lease_id=uuid7().hex,
-                        runtime_path=request.destination,
-                        overwrite=request.overwrite,
-                        expected_manifest=CoordinatorExpectedManifest(
-                            size=metadata.size,
-                            sha256=metadata.sha256,
-                        ),
-                        product_maximum_size=request.product_maximum_size,
-                        provider_maximum_size=request.provider_maximum_size,
-                        deadline_at=request.deadline_at,
-                        source_expires_at=metadata.expires_at,
-                        resource_class=metadata.source_kind,
+            admitted = await self._admit_until_deadline(
+                CoordinatorAdmitTransferRequest(
+                    identity=identity,
+                    lease_id=uuid7().hex,
+                    runtime_path=request.destination,
+                    overwrite=request.overwrite,
+                    expected_manifest=CoordinatorExpectedManifest(
+                        size=metadata.size,
+                        sha256=metadata.sha256,
                     ),
+                    product_maximum_size=request.product_maximum_size,
+                    provider_maximum_size=request.provider_maximum_size,
+                    deadline_at=request.deadline_at,
+                    source_expires_at=metadata.expires_at,
+                    resource_class=metadata.source_kind,
                 )
             )
             expected_revision = admitted.status.revision
@@ -347,7 +392,8 @@ class ServerToRuntimeTransferService:
                             sha256=prepared.sha256,
                         ),
                     ),
-                )
+                ),
+                phase="mark_ready",
             )
             expected_revision = status.revision
             preparation.revision = expected_revision
@@ -358,7 +404,8 @@ class ServerToRuntimeTransferService:
                         expected_revision=expected_revision,
                         dispatch_id=uuid7().hex,
                     )
-                )
+                ),
+                phase="dispatch",
             )
             expected_revision = status.revision
             preparation.revision = expected_revision
@@ -396,6 +443,41 @@ class ServerToRuntimeTransferService:
             )
             raise
 
+    async def _admit_until_deadline(
+        self,
+        request: CoordinatorAdmitTransferRequest,
+    ) -> CoordinatorAdmitTransferResult:
+        """Retry temporary admission pressure until the transfer deadline."""
+        while True:
+            try:
+                return await _await_coordinator(
+                    self.coordinator.admit_transfer(request),
+                    phase="admission",
+                )
+            except ServerToRuntimeTransferError as error:
+                if error.failure not in {
+                    CoordinatorTransferFailure.ADMISSION,
+                    CoordinatorTransferFailure.STREAM,
+                }:
+                    raise
+                now = self.clock()
+                if now >= request.deadline_at:
+                    if error.failure is CoordinatorTransferFailure.STREAM:
+                        raise ServerToRuntimeTransferConnectionTimeout(
+                            "Runtime transfer coordinator connection timed out",
+                            failure=CoordinatorTransferFailure.STREAM,
+                        ) from error
+                    raise ServerToRuntimeTransferAdmissionTimeout(
+                        "Runtime transfer admission timed out",
+                        failure=CoordinatorTransferFailure.ADMISSION,
+                    ) from error
+                await asyncio.sleep(
+                    min(
+                        self.status_poll_interval.total_seconds(),
+                        (request.deadline_at - now).total_seconds(),
+                    )
+                )
+
     async def _wait_for_terminal_success(
         self,
         identity: CoordinatorTransferIdentity,
@@ -412,7 +494,8 @@ class ServerToRuntimeTransferService:
             status = await _await_coordinator(
                 self.coordinator.get_transfer_status(
                     CoordinatorGetTransferStatusRequest(identity=identity)
-                )
+                ),
+                phase="status",
             )
             preparation.revision = status.revision
             if status.phase is CoordinatorTransferPhase.TERMINAL:
@@ -449,13 +532,15 @@ class ServerToRuntimeTransferService:
                             expected_revision=revision,
                             reason=CoordinatorCancellationReason.CALLER,
                         )
-                    )
+                    ),
+                    phase="cancel",
                 )
             except Exception:
                 status = await _await_coordinator(
                     self.coordinator.get_transfer_status(
                         CoordinatorGetTransferStatusRequest(identity=identity)
-                    )
+                    ),
+                    phase="cancel_status",
                 )
             if (
                 status.phase is CoordinatorTransferPhase.TERMINAL
@@ -477,7 +562,7 @@ class ServerToRuntimeTransferService:
             request.product_maximum_size,
             request.provider_maximum_size,
         ):
-            raise ServerToRuntimeTransferError(
+            raise ServerToRuntimeTransferLimitExceeded(
                 "Transfer source exceeds configured limit"
             )
         if (

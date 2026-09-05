@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import { type ReactNode } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "@/shared/agent-session/AgentFocusedShellMobileNav";
-import { formatModelSelectionSummary } from "../model-selection";
+import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHeaderProps {
