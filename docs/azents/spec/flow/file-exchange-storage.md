@@ -43,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/import_resolver.py
   - python/apps/azents/src/azents/engine/tools/present_file.py
   - python/apps/azents/src/azents/engine/tools/read_image.py
-  - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
+  - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
@@ -55,7 +55,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-09-04
-spec_version: 45
+spec_version: 46
 ---
 
 # File Exchange Storage
@@ -306,6 +306,8 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-04** — v46. Updated the file-upload hook mapping after its
+  behavior-preserving move to the shared frontend layer.
 - **2026-09-04** — v45. Separated the trusted internal Workspace S3 endpoint from
   the optional browser-reachable endpoint used to generate presigned URLs.
 - **2026-09-04** — v44. Mapped the Composer attachment preview container and

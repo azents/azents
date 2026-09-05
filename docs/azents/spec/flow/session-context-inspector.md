@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-03
-spec_version: 18
+last_verified_at: 2026-09-04
+spec_version: 19
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-  - typescript/apps/azents-web/src/features/chat/context/SessionContextView.tsx
+  - typescript/apps/azents-web/src/shared/session-context/SessionContextView.tsx
 ---
 
 # Session Context Inspector
@@ -144,3 +144,8 @@ cd python/apps/azents && uv run pyright src/azents/services/chat/context.py src/
 cd typescript && corepack pnpm --filter @azents/web format:check
 cd typescript && corepack pnpm --filter @azents/web typecheck
 ```
+
+## Changelog
+
+- **2026-09-04** — v19. Updated the Session Context view mapping after its
+  behavior-preserving move to the shared frontend layer.
