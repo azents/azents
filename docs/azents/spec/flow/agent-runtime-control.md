@@ -60,7 +60,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-03
+last_verified_at: 2026-09-05
 spec_version: 73
 ---
 
@@ -112,6 +112,11 @@ Terminal IDs. Control-stream disconnect or a newer Runner generation terminates 
 old-generation PTY. A data-stream interruption may reconnect only during the bounded
 grace while Control generation remains current; ordered input and replay evidence
 resume the same PTY without replaying accepted input.
+
+Each coordination snapshot sends a newer coalesced resize to the Runner before pending
+input from that snapshot. A resize accepted before subsequent browser input therefore
+reaches the PTY before that input executes, without fixed timing delays or a separate
+resize acknowledgement round trip.
 
 Server coordination admits at most one active Terminal per Session, eight per user,
 and sixteen per Runtime; the Runner independently enforces the Session and Runtime

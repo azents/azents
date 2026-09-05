@@ -188,17 +188,6 @@ class RuntimeTerminalCoordinationStore(Protocol):
         """Coalesce latest browser dimensions."""
         ...
 
-    async def read_resize(
-        self,
-        terminal_id: str,
-        *,
-        runner_stream_generation: int,
-        after_sequence: int,
-        current_time: datetime,
-    ) -> RuntimeTerminalMutationResult[RuntimeTerminalResize]:
-        """Return a newer coalesced resize when available."""
-        ...
-
     async def append_output(
         self,
         terminal_id: str,
