@@ -5,6 +5,7 @@ import logging
 import textwrap
 from typing import Literal
 
+from azcommon.uuid import uuid7
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.enums import (
@@ -491,12 +492,13 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     "Runtime file storage is unavailable for this run."
                 )
             transfer_target = None
+            transfer_operation_id = f"{self.run_id}:download:{uuid7().hex}"
             try:
                 transfer_target = await context.resolve_runtime_target()
                 result = await self.file_transfer_service.download(
                     session_id=self.session_id,
                     agent_id=self.agent_id,
-                    operation_id=self.run_id,
+                    operation_id=transfer_operation_id,
                     file=args.file,
                     path=args.path,
                     overwrite=args.overwrite,
@@ -514,7 +516,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         overwrite=args.overwrite,
                         session_id=self.session_id,
                         agent_id=self.agent_id,
-                        operation_id=self.run_id,
+                        operation_id=transfer_operation_id,
                         transfer_target=transfer_target,
                         error=error,
                     ),
@@ -530,7 +532,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         overwrite=args.overwrite,
                         session_id=self.session_id,
                         agent_id=self.agent_id,
-                        operation_id=self.run_id,
+                        operation_id=transfer_operation_id,
                         transfer_target=transfer_target,
                         error=error,
                     ),

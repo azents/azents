@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -28,8 +29,10 @@ from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.runtime.transfer.managed_source import ManagedServerToRuntimeSource
 from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeCoordinatorError,
     ServerToRuntimeTarget,
     ServerToRuntimeTransferAdmissionTimeout,
+    ServerToRuntimeTransferConnectionTimeout,
     ServerToRuntimeTransferError,
     ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
@@ -322,6 +325,33 @@ async def test_import_file_dedupes_default_path_before_transfer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_import_file_uses_unique_transfer_operation_per_call() -> None:
+    """Multiple imports in one Run never reuse Runtime coordination identity."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    transfer_service = _TransferService(None)
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=transfer_service,
+    )
+
+    await tool.handler(json.dumps({"uri": exchange_file.uri}))
+    await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    operation_ids = [request.operation_id for request in transfer_service.requests]
+    assert len(set(operation_ids)) == 2
+    assert all(
+        operation_id.startswith("run-1:import:") for operation_id in operation_ids
+    )
+
+
+@pytest.mark.asyncio
 async def test_import_file_fails_explicit_destination_conflict_before_admission() -> (
     None
 ):
@@ -437,6 +467,158 @@ async def test_import_file_reports_admission_timeout() -> None:
         await tool.handler(json.dumps({"uri": exchange_file.uri}))
 
     assert "absolute runtime paths" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_import_file_reports_coordinator_connection_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bounded connection recovery reports its own timeout category."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeTransferConnectionTimeout(
+                "Runtime transfer coordinator connection timed out",
+                failure=CoordinatorTransferFailure.STREAM,
+            )
+        ),
+    )
+
+    with (
+        caplog.at_level(
+            logging.ERROR,
+            logger="azents.engine.tools.import_file",
+        ),
+        pytest.raises(
+            FunctionToolError,
+            match="connection remained unavailable until the import deadline",
+        ) as raised,
+    ):
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    assert "capacity" not in str(raised.value)
+    record = caplog.records[-1]
+    assert record.__dict__["transfer_phase"] == "admission"
+    assert record.__dict__["transfer_failure"] == "stream"
+    assert record.exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_import_file_logs_operation_identity_for_os_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unclassified OS failures retain the unique transfer operation identity."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(OSError("coordinator socket failed")),
+    )
+
+    with (
+        caplog.at_level(
+            logging.ERROR,
+            logger="azents.engine.tools.import_file",
+        ),
+        pytest.raises(FunctionToolError, match="Failed to transfer imported file"),
+    ):
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    record = caplog.records[-1]
+    assert record.__dict__["run_id"] == "run-1"
+    assert record.__dict__["transfer_operation_id"].startswith("run-1:import:")
+    assert record.exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_import_file_logs_coordinator_failure_phase(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Coordinator failures retain phase and exception evidence in logs."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeCoordinatorError(
+                "Runtime transfer coordinator request failed",
+                phase="dispatch",
+                failure=CoordinatorTransferFailure.FENCED,
+            )
+        ),
+    )
+
+    with (
+        caplog.at_level(
+            logging.ERROR,
+            logger="azents.engine.tools.import_file",
+        ),
+        pytest.raises(FunctionToolError, match="Runtime changed while importing"),
+    ):
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    record = caplog.records[-1]
+    assert record.__dict__["transfer_phase"] == "dispatch"
+    assert record.__dict__["transfer_failure"] == "fenced"
+    assert record.exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_import_file_logs_classified_terminal_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Terminal failures retain classification and exception evidence in logs."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ServerToRuntimeTransferError(
+                "Runtime transfer failed before destination commit",
+                failure=CoordinatorTransferFailure.INTEGRITY,
+            )
+        ),
+    )
+
+    with (
+        caplog.at_level(
+            logging.ERROR,
+            logger="azents.engine.tools.import_file",
+        ),
+        pytest.raises(FunctionToolError, match="integrity verification failed"),
+    ):
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    record = caplog.records[-1]
+    assert record.__dict__["transfer_phase"] == "terminal"
+    assert record.__dict__["transfer_failure"] == "integrity"
+    assert record.exc_info is not None
 
 
 @pytest.mark.asyncio
