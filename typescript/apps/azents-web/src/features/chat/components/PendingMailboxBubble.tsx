@@ -25,26 +25,28 @@ export function PendingMailboxBubble({
     entry,
     currentWorkspaceProfile?.userId ?? null,
   );
+  const deleteAction =
+    item.presentation.type === "external_channel_message" ? null : (
+      <Tooltip label={t("delete")} withArrow position="left">
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          color="gray"
+          aria-label={t("delete")}
+          disabled={deleting}
+          onClick={() => onDelete(`${item.mailbox_item_id}:${item.item_key}`)}
+        >
+          {deleting ? <Loader size="xs" /> : <IconTrash size={14} />}
+        </ActionIcon>
+      </Tooltip>
+    );
 
   return (
     <MessageBubble
       message={message}
       currentWorkspaceProfile={currentWorkspaceProfile}
       opacity={deleting ? 0.45 : 0.6}
-      additionalActions={
-        <Tooltip label={t("delete")} withArrow position="left">
-          <ActionIcon
-            size="sm"
-            variant="subtle"
-            color="gray"
-            aria-label={t("delete")}
-            disabled={deleting}
-            onClick={() => onDelete(`${item.mailbox_item_id}:${item.item_key}`)}
-          >
-            {deleting ? <Loader size="xs" /> : <IconTrash size={14} />}
-          </ActionIcon>
-        </Tooltip>
-      }
+      additionalActions={deleteAction}
     />
   );
 }
