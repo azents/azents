@@ -85,8 +85,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-02
-spec_version: 167
+last_verified_at: 2026-09-05
+spec_version: 168
 ---
 
 # Agent Execution Loop
@@ -248,19 +248,21 @@ eligible sampling, the adapter lazily opens at most one Responses WebSocket, all
 logical response, serially reuses a healthy connection across model/tool turns, and closes the socket
 before the SDK client when the execution ends. Incoming WebSocket messages have an explicit bounded
 32 MiB receive limit. SDK automatic reconnect is disabled. User Stop, watchdog expiry, execution
-cancellation, pre-terminal stream abandonment, decode failure, or
-WebSocket I/O failure closes and invalidates the connection so unread events cannot enter a later
-response.
+cancellation, pre-terminal stream abandonment, decode failure, WebSocket I/O failure, or a
+WebSocket terminal `error` event with no provider code, message, parameter, or HTTP status closes and
+invalidates the connection so unread events cannot enter a later response.
 
 A classified WebSocket transport failure invalidates the connection, marks the matching
 `SessionRunner` key HTTP-only, and fails the current attempt through the existing failed-Run boundary.
 The next retry reconstructs the complete logical request from durable history and uses SDK HTTP. The
 transport failure consumes the shared failed-Run retry count and backoff; there is no inline
-WebSocket-to-HTTP replay, automatic reconnect loop, or separate WebSocket retry budget. All
-operation-scoped official SDK clients disable automatic HTTP retries, so ordinary sampling retries
-remain owned by the failed-Run boundary rather than being hidden inside one model attempt. The exact
-incremental-continuation recovery described below is a deliberate single inline redispatch, not an SDK
-retry. User Stop, application watchdog expiry, provider terminal failure, authentication,
+WebSocket-to-HTTP replay, automatic reconnect loop, or separate WebSocket retry budget. A
+diagnostic-empty WebSocket terminal `error` is classified as transport failure so the next attempt
+uses HTTP and can either succeed or expose a structured provider rejection. All operation-scoped
+official SDK clients disable automatic HTTP retries, so ordinary sampling retries remain owned by the
+failed-Run boundary rather than being hidden inside one model attempt. The exact incremental-
+continuation recovery described below is a deliberate single inline redispatch, not an SDK retry. User
+Stop, application watchdog expiry, structured provider terminal failure, authentication,
 authorization, rate-limit, and provider-unavailable errors do not mark the key HTTP-only.
 
 OpenAI Platform Responses calls may reuse the immediately preceding stored response within one
@@ -1353,6 +1355,8 @@ icon.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 168) — Classified diagnostic-empty WebSocket terminal
+  errors as transport failures that activate sticky HTTP fallback.
 - **2026-09-01** (spec_version 166) — Removed the obsolete separate model-order
   compaction contract and aligned the flow with Event ID-only transcript ordering.
 - **2026-09-01** (spec_version 165) — Included External Channel invocation-role

@@ -169,6 +169,7 @@ OpenAIResponsesWebSocketFailureStage = Literal[
     "send",
     "receive",
     "decode",
+    "terminal",
 ]
 
 
@@ -766,6 +767,10 @@ class OpenAIResponsesModelAdapter:
                         transport=transport,
                         call_context=call_context,
                     )
+                    if transport == "websocket" and _is_unstructured_response_error(
+                        event
+                    ):
+                        raise _OpenAIResponsesWebSocketFailure(stage="terminal")
                 yield event
             if completed_response is not None and not terminal_failure:
                 self._record_completion(
@@ -1036,6 +1041,22 @@ def _log_openai_terminal_error(
             "openai_responses_transport": transport,
             **fields,
         },
+    )
+
+
+def _is_unstructured_response_error(
+    native_event: ResponseStreamEvent,
+) -> bool:
+    """Detect a terminal error event without actionable provider diagnostics."""
+    if not (
+        isinstance(native_event, ResponseErrorEvent) and native_event.type == "error"
+    ):
+        return False
+    return (
+        sanitize_provider_identifier(native_event.code) is None
+        and extract_provider_message_text(native_event.message) is None
+        and sanitize_provider_error_param(native_event.param) is None
+        and extract_provider_http_status_code(native_event) is None
     )
 
 

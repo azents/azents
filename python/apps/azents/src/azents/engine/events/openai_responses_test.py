@@ -1584,6 +1584,141 @@ async def test_websocket_transport_failure_marks_sticky_http_fallback(
     await fallback_adapter.close()
 
 
+async def test_empty_websocket_terminal_error_marks_sticky_http_fallback() -> None:
+    """Retry an unstructured WebSocket terminal error through HTTP."""
+    terminal_error = ResponseErrorEvent.model_construct(
+        code=None,
+        message=None,
+        param=None,
+        sequence_number=None,
+        type="error",
+    )
+    connection = _FakeWebSocketConnection([terminal_error])
+    http_stream = _FakeStream([_completed_event()])
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(
+        connection_result=connection,
+        http_results=[http_stream],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.6-luna",
+        input=[{"role": "user", "content": "send the generated image"}],
+        tools=[],
+        options={"store": False},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="chatgpt_oauth",
+        model=request.model,
+        inference_profile=None,
+    )
+    call_context = ModelStreamCallContext(
+        call_kind="sampling",
+        provider="chatgpt_oauth",
+        provider_integration_id="integration-1",
+        model=request.model,
+        session_id="session-1",
+        run_id="run-1",
+        attempt_number=1,
+        check_stop=None,
+    )
+
+    with pytest.raises(
+        ModelProviderFailure,
+        match="^Model provider error: The model WebSocket transport failed\\.$",
+    ) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=call_context,
+            )
+        ]
+
+    assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+    assert raised.value.provider_code == "websocket_terminal"
+    assert state.websocket_allowed(key) is False
+    assert connection.closed is True
+
+    events = [
+        event
+        async for event in adapter.stream(
+            request,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=call_context,
+        )
+    ]
+
+    assert len(events) == 1
+    assert client.connect_count == 1
+    assert len(client.http_calls) == 1
+    assert http_stream.closed is True
+    await adapter.close()
+
+
+async def test_structured_websocket_terminal_error_keeps_websocket_enabled() -> None:
+    """Keep provider-authored terminal diagnostics on the provider error path."""
+    terminal_error = ResponseErrorEvent(
+        code="future_error",
+        message="The provider rejected the request.",
+        param=None,
+        sequence_number=1,
+        type="error",
+    )
+    connection = _FakeWebSocketConnection([terminal_error])
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(
+        connection_result=connection,
+        http_results=[],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.6-luna",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={"store": False},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="chatgpt_oauth",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream(
+            request,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+
+    assert events == [terminal_error]
+    assert state.websocket_allowed(key) is True
+    assert client.http_calls == []
+    await adapter.close()
+
+
 async def test_abandoned_websocket_response_invalidates_without_sticky_fallback() -> (
     None
 ):
