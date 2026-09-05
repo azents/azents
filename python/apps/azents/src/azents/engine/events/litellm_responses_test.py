@@ -4074,6 +4074,70 @@ class TestLiteLLMResponsesOutputNormalizer:
             "reasoning_tokens": 2,
         }
 
+    def test_skips_terminal_image_failures_before_success(self) -> None:
+        """Materialize only the successful image after terminal failed calls."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.6-luna",
+            operation="sampling",
+            integration=None,
+        )
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "output": [
+                                {
+                                    "type": "image_generation_call",
+                                    "id": "img-failed",
+                                    "status": "failed",
+                                },
+                                {
+                                    "type": "image_generation_call",
+                                    "id": "img-incomplete",
+                                    "status": "incomplete",
+                                },
+                                {
+                                    "type": "image_generation_call",
+                                    "id": "img-cancelled",
+                                    "status": "cancelled",
+                                },
+                                {
+                                    "type": "image_generation_call",
+                                    "id": "img-interrupted",
+                                    "status": "interrupted",
+                                },
+                                {
+                                    "type": "image_generation_call",
+                                    "id": "img-success",
+                                    "status": "completed",
+                                    "result": _PNG_BASE64,
+                                },
+                            ]
+                        }
+                    },
+                )
+            ],
+        )
+
+        statuses = []
+        for event in output.events:
+            payload = event.payload
+            assert isinstance(payload, ProviderToolCallPayload)
+            statuses.append(payload.status)
+        assert statuses == [
+            "failed",
+            "failed",
+            "cancelled",
+            "interrupted",
+            "completed",
+        ]
+        assert len(output.pending_provider_files) == 1
+        assert output.pending_provider_files[0].call_id == "img-success"
+
     def test_normalizes_chat_usage_shape(self) -> None:
         """Keep LiteLLM chat-style usage details as event usage too."""
         normalizer = LiteLLMResponsesOutputNormalizer(

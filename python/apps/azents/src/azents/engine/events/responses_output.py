@@ -124,6 +124,8 @@ class ResponsesOutputNormalizer:
             for output_index, output_item in enumerate(output_items)
             if (raw_item := response_item_dict(output_item)).get("type")
             == "image_generation_call"
+            and _durable_provider_tool_status(raw_item)
+            not in {"failed", "cancelled", "interrupted"}
         ]
         return CompletedAdapterOutput(
             events=events,
