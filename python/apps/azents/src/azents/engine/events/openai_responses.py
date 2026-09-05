@@ -21,13 +21,14 @@ from typing import (
     Protocol,
     TypedDict,
     TypeGuard,
-    cast,
+    TypeIs,
     runtime_checkable,
 )
 
-from litellm import completion_cost
+from litellm import completion_cost, model_cost
 from litellm.types.llms.openai import ResponsesAPIResponse
 from openai import (
+    APIError,
     APIStatusError,
     AsyncOpenAI,
     Omit,
@@ -197,6 +198,15 @@ _OPTIONS_ADAPTER: TypeAdapter[OpenAIResponsesOptions] = TypeAdapter(
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class _OpenAIResponsesContinuationProperties:
+    """Named non-input properties used for continuation comparison."""
+
+    model: str
+    tools: list[dict[str, object]]
+    options: OpenAIResponsesOptions
+
+
 class OpenAIResponsesRequest(BaseModel):
     """Complete logical OpenAI Responses request before transport reduction."""
 
@@ -215,9 +225,13 @@ class OpenAIResponsesRequest(BaseModel):
         """Return the complete logical input sequence."""
         return self.input
 
-    def continuation_properties(self) -> object:
+    def continuation_properties(self) -> _OpenAIResponsesContinuationProperties:
         """Return every non-input semantic request property with field presence."""
-        return (self.model, self.tools, self.options)
+        return _OpenAIResponsesContinuationProperties(
+            model=self.model,
+            tools=self.tools,
+            options=self.options,
+        )
 
     def continuation_store_enabled(self) -> bool:
         """Return whether stored-response continuation is allowed."""
@@ -737,9 +751,9 @@ class OpenAIResponsesModelAdapter:
                 policy=timeout_policy,
                 context=call_context,
             )
-            if not isinstance(response, AsyncIterable):
+            if not _is_response_event_stream(response):
                 raise RuntimeError("OpenAI Responses call returned a non-stream")
-            async for event in cast(AsyncIterable[ResponseStreamEvent], response):
+            async for event in response:
                 if (
                     isinstance(event, ResponseOutputItemDoneEvent)
                     and event.type == "response.output_item.done"
@@ -984,9 +998,14 @@ class OpenAIResponsesModelAdapter:
 
 def _websocket_status_code(exc: InvalidStatus) -> int | None:
     """Extract only the numeric handshake status from a WebSocket failure."""
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
-    return status_code if isinstance(status_code, int) else None
+    return exc.response.status_code
+
+
+def _is_response_event_stream(
+    response: object,
+) -> TypeIs[AsyncIterable[ResponseStreamEvent]]:
+    """Narrow the official SDK response handle to its streaming contract."""
+    return isinstance(response, AsyncIterable)
 
 
 def _websocket_failure_activates_http_fallback(status_code: int | None) -> bool:
@@ -1762,8 +1781,8 @@ def _normalize_openai_usage(
     if usage is None:
         return None
     raw_usage = _sdk_model_dump(usage)
-    input_details: object = usage.input_tokens_details
-    output_details: object = usage.output_tokens_details
+    input_details = raw_usage.get("input_tokens_details")
+    output_details = raw_usage.get("output_tokens_details")
     return TokenUsagePayload(
         prompt_tokens=usage.input_tokens,
         completion_tokens=usage.output_tokens,
@@ -1784,8 +1803,10 @@ def _normalize_openai_usage(
 
 
 def _optional_usage_detail(details: object, field: str) -> int | None:
-    """Read an optional integer from a provider-compatible usage detail object."""
-    value = getattr(details, field, None)
+    """Read one optional integer from serialized SDK usage details."""
+    if not is_string_object_dict(details):
+        return None
+    value = details.get(field)
     if not isinstance(value, int) or isinstance(value, bool):
         return None
     return value
@@ -1793,25 +1814,23 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
 
 def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
     """Estimate cost through LiteLLM using only usage and pricing metadata."""
+    pricing_model = model.removeprefix("openai/")
+    if pricing_model not in model_cost and f"openai/{pricing_model}" not in model_cost:
+        return None
     minimal_response = ResponsesAPIResponse.model_construct(
         model=model,
         usage=_sdk_model_dump(response.usage),
-        output=[
-            SimpleNamespace(type=item.type)
-            for item in response.output
-            if isinstance(getattr(item, "type", None), str)
-        ],
+        output=[SimpleNamespace(type=item.type) for item in response.output],
     )
-    service_tier = getattr(response, "service_tier", None)
     try:
         cost = completion_cost(
             completion_response=minimal_response,
             model=model,
             call_type="responses",
             custom_llm_provider="openai",
-            service_tier=service_tier if isinstance(service_tier, str) else None,
+            service_tier=response.service_tier,
         )
-    except Exception:
+    except ValueError:
         return None
     if not isinstance(cost, int | float) or isinstance(cost, bool):
         return None
@@ -1974,9 +1993,10 @@ def _map_openai_error(
 ) -> ModelProviderFailure:
     """Map one SDK exception into a sanitized classified or internal error."""
     status_code = exc.status_code if isinstance(exc, APIStatusError) else None
+    api_error = exc if isinstance(exc, APIError) else None
     error_body = _openai_error_body(exc)
     provider_code = sanitize_provider_identifier(
-        error_body.get("code") or getattr(exc, "code", None)
+        error_body.get("code") or (api_error.code if api_error is not None else None)
     )
     provider_error_type = sanitize_provider_identifier(
         error_body.get("type") or exc.__class__.__name__
@@ -1994,7 +2014,9 @@ def _map_openai_error(
         integration=integration,
         provider_message=(
             extract_provider_message_text(error_body.get("message"))
-            or extract_provider_message_text(getattr(exc, "message", None))
+            or extract_provider_message_text(
+                api_error.message if api_error is not None else None
+            )
             or extract_provider_message_text(str(exc))
         ),
         status_code=status_code,
@@ -2031,8 +2053,9 @@ def _openai_retry_after_seconds(exc: OpenAIError) -> float | None:
 def _safe_openai_error_code(exc: OpenAIError) -> str | None:
     """Extract one bounded scalar provider code for continuation handling."""
     error_body = _openai_error_body(exc)
+    api_error = exc if isinstance(exc, APIError) else None
     return sanitize_provider_identifier(
-        error_body.get("code") or getattr(exc, "code", None)
+        error_body.get("code") or (api_error.code if api_error is not None else None)
     )
 
 

@@ -3021,6 +3021,58 @@ def test_pricing_failure_preserves_successful_usage(
     assert completed.usage.cost_usd is None
 
 
+def test_unmapped_pricing_skips_litellm_cost_calculation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing public pricing remains absent without invoking the calculator."""
+
+    def unexpected_pricing(**kwargs: object) -> float:
+        del kwargs
+        raise AssertionError("unmapped pricing must not call completion_cost")
+
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost",
+        unexpected_pricing,
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="unmapped-openai-model",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+    output.process_event(_completed_event())
+
+    completed = output.complete()
+
+    assert completed.usage is not None
+    assert completed.usage.cost_usd is None
+
+
+def test_unexpected_pricing_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected calculator failures remain visible to monitoring."""
+
+    def fail_pricing(**kwargs: object) -> float:
+        del kwargs
+        raise RuntimeError("synthetic calculator defect")
+
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost",
+        fail_pricing,
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+    output.process_event(_completed_event())
+
+    with pytest.raises(RuntimeError, match="synthetic calculator defect"):
+        output.complete()
+
+
 @pytest.mark.parametrize(
     "body",
     [
