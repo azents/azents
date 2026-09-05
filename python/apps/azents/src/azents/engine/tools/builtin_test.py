@@ -64,6 +64,7 @@ from azents.engine.tools.builtin_agents import (
 )
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
 from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.run_tool_to_file import LateBoundClientToolInvoker
 from azents.engine.tools.runtime_instruction_context import (
     PresentFilePublicationExecutor,
     RuntimeInstructionContext,
@@ -1317,6 +1318,30 @@ class TestRuntimeToolkitUpdateContext:
 
         names = {tool.spec.name for tool in state.tools}
         assert {"import_file", "present_file", "read_image"} <= names
+
+    @pytest.mark.asyncio
+    async def test_builds_run_tool_to_file_only_with_resource_authority(self) -> None:
+        """Expose the Engine-assembled Tool only from an authorized Runtime turn."""
+        toolkit = _make_toolkit()
+
+        await toolkit.update_context(_make_context())
+        unavailable = toolkit.make_run_tool_to_file(LateBoundClientToolInvoker())
+
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+        await toolkit.update_context(_make_context(resource_authority=authority))
+        available = toolkit.make_run_tool_to_file(LateBoundClientToolInvoker())
+
+        assert unavailable is None
+        assert available is not None
+        assert available.spec.name == "run_tool_to_file"
 
     @pytest.mark.asyncio
     async def test_read_image_uses_runtime_lifecycle_generation(self) -> None:
