@@ -26,7 +26,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-09-05
-spec_version: 20
+spec_version: 21
 ---
 
 # ChatGPT OAuth Flow
@@ -212,7 +212,7 @@ Rules:
 - ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set
   `store=false`, request encrypted reasoning content for stateless replay, send complete logical
   input over either physical transport, and never use `previous_response_id`.
-- Immediately before a `store=false` runtime call, omit top-level Responses input item `id` fields. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references. Tool `call_id` values and reconstructed `image_generation_call.result` bytes remain in the request for stateless continuity. A compatible generated-image provider call is followed by one bounded user-role context item for its canonical `exchange://` attachment; the attachment is not lowered as a second rich image.
+- Immediately before a `store=false` runtime call, omit top-level Responses input item `id` fields. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references. Tool `call_id` values and reconstructed `image_generation_call.result` bytes remain in the request for stateless continuity. A compatible result-less failed image call cannot remain a valid native item after this omission, so it lowers to bounded non-executable provider-tool history instead. A compatible generated-image provider call is followed by one bounded user-role context item for its canonical `exchange://` attachment; the attachment is not lowered as a second rich image.
 - Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. Only the bounded, redacted provider-authored reason may reach retry state, UI, or provider-failure logs. Every classified category receives the complete current Run retry budget; category and retryability remain diagnostic metadata. Unclassified outcomes raise through the ordinary internal-error path and do not create provider retry state or generic provider-error presentation.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
@@ -307,6 +307,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-05 | 21 | Lowered result-less failed image calls to semantic history before stateless provider-item ID omission | Preserve durable failure history without sending an invalid `image_generation_call` lacking both `id` and `result` |
 | 2026-09-05 | 20 | Adopted the provider's `99.99.99` full-catalog discovery sentinel | Avoid per-release client-version maintenance while exposing API-supported, picker-visible models such as `gpt-6-astra` without changing the runtime request dialect |
 | 2026-09-04 | 19 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-21 | 18 | Ensured subscription-usage response timestamps are timezone-aware before public serialization, preserving supplied offsets | Ensure browser clients receive an explicit offset and localize reset and freshness timestamps correctly |

@@ -743,6 +743,124 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     ]
 
 
+def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None:
+    """Keep failed image history without emitting an invalid stateless item."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="chatgpt_oauth",
+        model="gpt-5.6-luna",
+        provider_id=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={},
+    )
+    artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="chatgpt_oauth",
+            model="gpt-5.6-luna",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="chatgpt_oauth",
+        model="gpt-5.6-luna",
+        schema_version="1",
+        item={
+            "type": "image_generation_call",
+            "id": "image-call-failed",
+            "status": "failed",
+        },
+    )
+    event = Event(
+        id="4" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
+            call_id="image-call-failed",
+            name="image_generation",
+            status="failed",
+            semantic=ProviderToolSemanticContent(
+                input='{"prompt":"draw a moon"}',
+                output=[],
+                references=[],
+            ),
+            native_artifact=artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.6-luna")
+
+    assert request.options.get("store") is False
+    assert request.input == [
+        {
+            "role": "assistant",
+            "content": (
+                "[Provider tool call: image_generation failed]\n"
+                "Input:\n"
+                '{"prompt":"draw a moon"}'
+            ),
+        }
+    ]
+
+
+def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
+    """Keep valid native failed-image replay when stored identity is available."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.6-luna",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+    )
+    artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.6-luna",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.6-luna",
+        schema_version="1",
+        item={
+            "type": "image_generation_call",
+            "id": "image-call-failed",
+            "status": "failed",
+        },
+    )
+    event = Event(
+        id="5" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
+            call_id="image-call-failed",
+            name="image_generation",
+            status="failed",
+            semantic=ProviderToolSemanticContent(
+                input='{"prompt":"draw a moon"}',
+                output=[],
+                references=[],
+            ),
+            native_artifact=artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.6-luna")
+
+    assert request.continuation_store_enabled()
+    assert request.input == [
+        {
+            "type": "image_generation_call",
+            "id": "image-call-failed",
+            "status": "failed",
+            "result": None,
+        }
+    ]
+
+
 def test_openai_sdk_rehydrates_image_generation_call() -> None:
     """Replay a generated-image call through the SDK lowerer."""
     lowerer = OpenAIResponsesLowerer(
@@ -2553,6 +2671,11 @@ def test_typed_normalizer_skips_failed_image_before_success() -> None:
     assert isinstance(failed, ProviderToolCallPayload)
     assert failed.status == "failed"
     assert failed.output == []
+    assert failed.native_artifact.item == {
+        "type": "image_generation_call",
+        "id": "image-call-failed",
+        "status": "failed",
+    }
     succeeded = completed.events[1].payload
     assert isinstance(succeeded, ProviderToolCallPayload)
     assert succeeded.status == "completed"

@@ -86,7 +86,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-05
-spec_version: 168
+spec_version: 169
 ---
 
 # Agent Execution Loop
@@ -616,7 +616,9 @@ pending-file output. The shared materializer strictly decodes and verifies the i
 and 20 MiB decoded bounds, stores the original as an Exchange file, stores a normalized copy as a
 ModelFile, and replaces the pending output with `AttachmentOutputPart` and `FileOutputPart` values on
 the same provider call before durable admission. Base64 and raw bytes never enter event JSON or native
-artifacts.
+artifacts. A terminal failed, cancelled, interrupted, or provider-incomplete image item legitimately
+has no result bytes. It remains a durable provider-tool call with its normalized terminal status,
+empty semantic output, and sanitized native metadata, but creates no pending file or storage resource.
 
 Object uploads occur outside a database transaction. Session, Agent, Workspace, and authenticated
 actor ownership are checked before upload and revalidated while file metadata, the provider call event,
@@ -632,7 +634,10 @@ same-native lowerer emits a second bounded semantic context item for the canonic
 URI and consumes the FileOutputPart only through the native image item. Cross-adapter or incompatible
 replay emits the shared semantic transcript as model-visible text. Image generation retains its richer
 fallback: the FileOutputPart lowers as rich image input when supported, or the normal unavailable-image
-placeholder otherwise, while Exchange URI metadata remains present once.
+placeholder otherwise, while Exchange URI metadata remains present once. A compatible result-less
+image item is replayed natively only when the request retains its provider item ID. If the request is
+stateless or the artifact lacks that identity, the lowerer emits the same bounded provider-tool
+semantic history instead of an invalid native item without either `id` or `result`.
 
 Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
 normalizers extract adapter-native observations locally, normalize stable call identity and semantic
@@ -1355,6 +1360,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 169) — Preserved result-less terminal image-generation events while
+  degrading them to bounded semantic history whenever stateless replay cannot retain a provider item
+  ID.
 - **2026-09-05** (spec_version 168) — Classified diagnostic-empty WebSocket terminal
   errors as transport failures that activate sticky HTTP fallback.
 - **2026-09-01** (spec_version 166) — Removed the obsolete separate model-order
