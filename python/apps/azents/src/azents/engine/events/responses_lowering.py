@@ -284,7 +284,10 @@ class ResponsesRequestLowerer:
                     }
                 )
                 continue
-            native_items = self._compatible_native_items(event)
+            native_items = self._compatible_native_items(
+                event,
+                retain_response_item_ids=kwargs.get("store") is not False,
+            )
             if native_items is not None:
                 input_items.extend(native_items)
                 if _replays_plaintext_custom_call(event, native_items):
@@ -383,6 +386,8 @@ class ResponsesRequestLowerer:
     def _compatible_native_items(
         self,
         event: Event,
+        *,
+        retain_response_item_ids: bool,
     ) -> list[dict[str, object]] | None:
         """Return same-native replay items, including Azents-local context."""
         match event.payload:
@@ -406,12 +411,22 @@ class ResponsesRequestLowerer:
                         return None
                 else:
                     native_result = artifact.item.get("result")
-                    result = native_result if isinstance(native_result, str) else None
+                    result = (
+                        native_result
+                        if isinstance(native_result, str) and native_result
+                        else None
+                    )
                 native_item = _lower_image_generation_native_item(
                     artifact.item,
                     status=status,
                     result=result,
                 )
+                # Result-less terminal calls are valid durable history, but native
+                # replay requires either retained provider identity or inline bytes.
+                if result is None and (
+                    not retain_response_item_ids or "id" not in native_item
+                ):
+                    return None
                 local_parts = [
                     part
                     for part in iter_output_parts(semantic.output)

@@ -1373,6 +1373,50 @@ class TestLiteLLMResponsesLowerer:
             False if provider_id == LLMProvider.CHATGPT_OAUTH else None
         )
 
+    def test_degrades_unstored_failed_image_generation_without_result(self) -> None:
+        """Keep failed image history without an invalid stateless native item."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+        )
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
+                    call_id="image-call-failed",
+                    name="image_generation",
+                    status="failed",
+                    semantic=ProviderToolSemanticContent(
+                        input='{"prompt":"draw a moon"}',
+                        output=[],
+                        references=[],
+                    ),
+                    native_artifact=_artifact(
+                        {
+                            "type": "image_generation_call",
+                            "id": "image-call-failed",
+                            "status": "failed",
+                        }
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.kwargs.get("store") is False
+        assert request.input == [
+            {
+                "role": "assistant",
+                "content": (
+                    "[Provider tool call: image_generation failed]\n"
+                    "Input:\n"
+                    '{"prompt":"draw a moon"}'
+                ),
+            }
+        ]
+
     def test_cross_adapter_image_generation_uses_rich_file_fallback(self) -> None:
         """Lower incompatible generated output with rich image and URI context."""
         capabilities = ModelCapabilities(
@@ -4135,6 +4179,14 @@ class TestLiteLLMResponsesOutputNormalizer:
             "interrupted",
             "completed",
         ]
+        failed = output.events[0].payload
+        assert isinstance(failed, ProviderToolCallPayload)
+        assert failed.output == []
+        assert failed.native_artifact.item == {
+            "type": "image_generation_call",
+            "id": "img-failed",
+            "status": "failed",
+        }
         assert len(output.pending_provider_files) == 1
         assert output.pending_provider_files[0].call_id == "img-success"
 
