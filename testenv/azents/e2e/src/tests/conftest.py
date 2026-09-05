@@ -869,6 +869,7 @@ def _build_configured_e2e_image(
             cache_repository=None,
             observability_image=image_build.cache_repository,
             build_mode="source-overlay",
+            builder_override="default",
         )
         return
 
@@ -979,6 +980,7 @@ def _build_e2e_image(
     build_contexts: dict[str, str | Path] | None = None,
     observability_image: str | None = None,
     build_mode: str = "full",
+    builder_override: str | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
     cache_options = (
@@ -986,7 +988,7 @@ def _build_e2e_image(
         if cache_repository is None
         else _get_e2e_image_cache_options(cache_repository)
     )
-    builder = os.environ.get(_DOCKER_BUILDER_ENV)
+    builder = builder_override or os.environ.get(_DOCKER_BUILDER_ENV)
     started_at = time.monotonic()
     completed = False
 

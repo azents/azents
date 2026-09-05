@@ -142,6 +142,7 @@ def test_server_source_overlay_uses_snapshot_base_without_remote_cache(
     )
     assert build_arguments["cache_from"] is None
     assert build_arguments["cache_to"] is None
+    assert build_arguments["builder"] == "default"
 
 
 def test_server_source_overlay_replaces_the_complete_application_directory() -> None:
