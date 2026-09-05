@@ -35,10 +35,10 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
+import { AgentSettingsHeader } from "@/shared/agent-session/AgentSettingsHeader";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
-import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import type { AgentSessionDirectoryStatus } from "../containers/useAgentSessionDirectoryContainer";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {

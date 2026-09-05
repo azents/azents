@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { AgentDraftChatPage } from "@/features/agents/AgentDraftChatPage";
+import { AgentDraftChatPage } from "@/features/chat/AgentDraftChatPage";
 import { trpc } from "@/trpc/server";
-import type { AgentDraftSessionScope } from "@/features/agents/containers/useAgentDraftChatContainer";
+import type { AgentDraftSessionScope } from "@/features/chat/containers/useAgentDraftChatContainer";
 
 function parseSessionScope(value?: string | string[]): AgentDraftSessionScope {
   const raw = Array.isArray(value) ? value[0] : value;
