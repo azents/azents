@@ -170,6 +170,7 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
         channel_id="333",
         content="Reply",
         operation_key=operation_key,
+        suppress_notifications=False,
         components=components,
         embeds=embeds,
     )
@@ -184,6 +185,7 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
                 "channel_id": "333",
                 "content": "Reply",
                 "nonce": operation_key.value,
+                "suppress_notifications": False,
                 "components": components,
                 "embeds": embeds,
             },
@@ -204,6 +206,7 @@ async def test_create_message_can_forward_the_exact_created_message() -> None:
         channel_id="333",
         content="Terminal result",
         operation_key=operation_key,
+        suppress_notifications=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -222,6 +225,7 @@ async def test_create_message_can_forward_the_exact_created_message() -> None:
                 "channel_id": "333",
                 "content": "Terminal result",
                 "nonce": operation_key.value,
+                "suppress_notifications": False,
                 "components": None,
                 "embeds": None,
             },
@@ -250,6 +254,7 @@ async def test_forward_failure_preserves_created_thread_message_identity() -> No
         channel_id="333",
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-2"),
+        suppress_notifications=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -273,6 +278,7 @@ async def test_forward_permission_failure_keeps_classification_and_identity() ->
         channel_id="333",
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-permission"),
+        suppress_notifications=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -294,6 +300,7 @@ async def test_forward_requires_an_explicit_parent_before_create() -> None:
         channel_id="333",
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-3"),
+        suppress_notifications=False,
         forward_to_parent=True,
     )
 
@@ -415,6 +422,7 @@ async def test_bound_delivery_workflow_reuses_one_sdk_factory_open() -> None:
             channel_id="333",
             content="Reply",
             operation_key=ProviderOperationKey.from_seed("delivery-workflow"),
+            suppress_notifications=False,
         )
 
     assert factory.opens == 1

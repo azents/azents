@@ -186,6 +186,7 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
         channel_id="300",
         content="hello",
         nonce="nonce-1",
+        suppress_notifications=False,
         components=None,
         embeds=None,
     )
@@ -214,6 +215,54 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
     http.delete_message.assert_awaited_once_with(300, 401)
     http.get_channel.assert_awaited_once_with(300)
     http.get_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_create_can_suppress_notifications() -> None:
+    """Silent standalone Trackers set Discord's notification-suppression flag."""
+    http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
+    http.send_message.return_value = _message(message_id="401")
+    session = _session(http)
+
+    await session.create_message(
+        guild_id="111",
+        channel_id="300",
+        content="Tracker",
+        nonce="nonce-silent",
+        suppress_notifications=True,
+        components=None,
+        embeds=[{"description": "progress"}],
+    )
+
+    call = http.send_message.await_args
+    assert call is not None
+    assert call.kwargs["params"].payload["flags"] == 1 << 12
+
+
+@pytest.mark.asyncio
+async def test_private_update_can_omit_reply_content() -> None:
+    """Tracker-only edits preserve the existing conversational reply body."""
+    http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
+    http.edit_message.return_value = _message(message_id="401")
+    session = _session(http)
+
+    await session.update_message(
+        guild_id="111",
+        channel_id="300",
+        message_id="401",
+        content=None,
+        components=[],
+        embeds=[],
+    )
+
+    call = http.edit_message.await_args
+    assert call is not None
+    payload = call.kwargs["params"].payload
+    assert "content" not in payload
+    assert payload["components"] == []
+    assert payload["embeds"] == []
 
 
 @pytest.mark.asyncio
@@ -460,6 +509,7 @@ async def test_private_message_mutation_rejects_cross_guild_channel() -> None:
             channel_id="300",
             content="hello",
             nonce="nonce-1",
+            suppress_notifications=False,
             components=None,
             embeds=None,
         )

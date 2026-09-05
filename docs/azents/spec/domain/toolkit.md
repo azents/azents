@@ -60,8 +60,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-04
-spec_version: 105
+last_verified_at: 2026-09-05
+spec_version: 106
 ---
 
 # Toolkit
@@ -735,12 +735,13 @@ Runtime abstraction is `ToolkitStateStore` and typed `ToolkitStateHandle`. `load
 
 External Channel uses the same storage model through a domain-specific typed store.
 Each binding owns exactly one identity in namespace `external_channel` with state name
-`channel_work:{binding_id}`. The payload contains the current or latest Channel Work
-cycle, nullable Slack status anchor and initiator, and ordered current provider
-projection parts. Schema version 3 preserves existing version-2 Work while adding
-those provider-presentation coordinates. It preserves a stable `work_cycle_id`,
-validates the binding-derived identity, and uses independent whole-state optimistic
-concurrency per binding.
+`channel_work:{binding_id}`. The schema-version-5 payload contains the current or
+latest Channel Work cycle, nullable Slack status anchor and initiator, binding-scoped
+awaiting Run identity, and ordered current provider projection parts. Each projection
+part records its current provider identity, outcome status, desired revision, and
+`standalone | reply` Tracker host kind. It preserves a stable `work_cycle_id`, validates
+the binding-derived identity, and uses independent whole-state optimistic concurrency
+per binding.
 
 ### Session Todo State
 
@@ -838,8 +839,10 @@ publication promotes visibility monotonically. Slack native Work presence is
 independent from this Tracker policy. The tool atomically commits an optional
 conversational reply and
 an optional current-work title plus complete ordered task replacement before any
-provider call. It then executes the returned process-local provider effects in order
-and returns ordered sanitized `delivered`, `failed`, `unknown`, or `not_attempted`
+provider call. Complete Actions for the same Binding are serialized by the current
+service instance; Actions for separate Bindings remain independent. It then executes
+the returned process-local provider effects in order and returns ordered sanitized
+`delivered`, `failed`, `unknown`, or `not_attempted`
 outcomes. The normal Tool call/result events are the only durable execution history;
 the tool creates no Action, Delivery, provider-operation, retry, or recovery record.
 Task updates require a same-call title. The tool guides the Agent to
@@ -848,8 +851,13 @@ an ellipsis. Tasks have stable IDs, `pending`, `in_progress`, `completed`, or
 `failed` state, and optional details, output, and labeled URL sources. One update
 supports at most 49 tasks, and its complete desired progress snapshot must fit the
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
-updates the retained Tracker; every continue invalidates older awaiting settlement,
-while message-only continuation leaves progress unchanged. `request_input` requires a
+projects the complete latest Tracker; every continue invalidates older awaiting
+settlement, while message-only continuation leaves progress and Tracker position
+unchanged. For Discord, a same-Action reply plus progress change delivers every reply
+part first, removes the current standalone or reply-hosted Tracker, and then attaches
+the Tracker to the final reply through a content-preserving edit. Failed or ambiguous
+reply/removal dependencies leave attachment not attempted, and later progress changes
+repair the best-effort projection without durable retry work. `request_input` requires a
 participant-visible message, preserves active Work, and establishes binding-scoped
 awaiting state only after every reply part is confirmed delivered. Failed, unknown, or
 stale delivery stays ready. Newly created same-binding human input or `continue`
@@ -893,6 +901,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 106) — Advanced Channel Work state to schema version
+  5 with Tracker host classification and made Discord message-plus-progress Actions
+  serialize per Binding before delivered-reply, remove-first, content-preserving
+  Tracker relocation through process-local effect dependencies.
 - **2026-09-04** (spec_version 105) — Documented Kubernetes exec response
   normalization for native strings, WebSocket payload bytes, other response
   objects, and empty successful output.

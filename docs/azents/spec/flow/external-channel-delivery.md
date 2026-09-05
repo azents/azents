@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
+  - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_presence.py
@@ -43,8 +44,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-31
-spec_version: 54
+last_verified_at: 2026-09-05
+spec_version: 55
 ---
 
 # External Channel Delivery and Channel Work
@@ -111,9 +112,11 @@ state changes so accepted continuation context is never silently truncated. Each
 binding has independent work state even when several bindings share one AgentSession.
 The canonical value is one Session-bound Toolkit State identity composed from the
 Agent, Session, namespace `external_channel`, and state name
-`channel_work:{binding_id}`. Its schema-version-4 payload stores the stable
+`channel_work:{binding_id}`. Its schema-version-5 payload stores the stable
 `work_cycle_id`, current or latest work lifecycle, desired progress, and ordered
-provider projection parts plus nullable `awaiting_input_run_id`. The awaiting marker
+provider projection parts plus nullable `awaiting_input_run_id`. One service instance
+serializes complete Actions for the same Binding while allowing different Bindings to
+proceed independently. The awaiting marker
 is valid only for active Work, is not exposed through public management state, and is
 cleared by terminal or replacement transitions. Whole-state optimistic-lock retries
 are isolated per binding.
@@ -354,14 +357,22 @@ Session title and Agent execution.
   same accepted binding transaction. Hidden cycles omit the Embed until promoted. A
   Scheduled Task-owned Tracker instead contains
   `◉ Agent is running a scheduled task…` followed by the task title on the next line.
-  Later complete snapshots replace that retained message's content with an empty
-  string and its Embed with the current bounded title, status summary, ordered
-  checklist, prioritized context, and labeled sources. Creation and update both send
-  a `View session` link derived from the current canonical Workspace, Agent, and
-  Session target. Conversational Tracker creation and update also derive one signed
+  A state-only conversational progress change updates the current Tracker host in
+  place, or creates one notification-suppressed standalone Tracker when none exists.
+  A message-only Action delivers the reply without changing Tracker presentation.
+  When one Action contains both a Discord reply and changed progress, every reply part
+  is delivered first without Tracker presentation. Confirmed reply delivery permits
+  removal of the previous Tracker: standalone hosts are deleted, while reply hosts
+  keep their conversational content and have only Tracker Embeds and controls cleared.
+  Confirmed removal then permits a partial edit that attaches the complete current
+  Tracker to the final reply part without replacing its content or attachments. The
+  normal successful path therefore exposes at most one Tracker, while temporary
+  absence is allowed between removal and attachment. Creation and update both send a
+  `View session` link derived from the current canonical Workspace, Agent, and Session
+  target. Conversational Tracker creation and update also derive one signed
   `Conversation settings` action from the current Binding. Scheduled Task Trackers
-  retain only Session navigation and task controls. Update, delete, replacement, and
-  final-reply cleanup use the same Work-owned Tracker identity and revision fence.
+  retain only Session navigation and task controls and keep their existing standalone
+  notification behavior.
 - Slack and Discord create no separate settings-only follow-up control. Every visible
   conversational Tracker is the recurring signed settings entry point. Initial hidden
   checking Work creates neither Tracker nor settings surface; canonical unfinished Todo
@@ -373,13 +384,16 @@ Session title and Agent execution.
   until a valid selection commits.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
-snapshot, desired revision, and retained provider identity. A matching Slack
-deletion event or confirmed
-`message_not_found` result clears that identity for the matching desired revision.
-Neither confirmed absence nor an ambiguous outcome creates replacement, catch-up,
-retry, or recovery work. A later explicit `channel_action` progress change may plan a
-new create from the then-current desired state. A Tracker delete that returns
-`message_not_found` is treated as already absent.
+snapshot, desired revision, retained provider identity, and whether each Tracker part
+is hosted by a standalone message or a conversational reply. Every progress effect is
+revalidated against its exact desired revision before provider I/O; a newer canonical
+snapshot makes an older pending progress effect not attempted. Process-local effect
+dependencies require delivered reply parts and confirmed previous-host removal before
+a reply attachment executes. Failed or ambiguous Tracker mutations never roll back
+canonical Work or a delivered reply, create no durable retry work, and converge only
+through a later explicit complete progress update. A matching Slack deletion event or
+confirmed `message_not_found` result clears the corresponding standalone identity. A
+Tracker delete that returns `message_not_found` is treated as already absent.
 
 ## Approval Control Messages
 
@@ -541,6 +555,13 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 55) — Moved Discord conversational Trackers to
+  messages that accompany changed progress: replies deliver first, the previous
+  standalone or reply-hosted Tracker is removed, and a partial edit attaches the
+  complete Tracker to the final reply. Added persisted host classification,
+  same-Binding Action serialization, process-local effect dependencies,
+  notification-suppressed standalone creation, exact progress-revision revalidation,
+  and best-effort later-update recovery.
 - **2026-08-31** (spec_version 54) — Added concise `request_input` guidance,
   delivery-confirmed binding-scoped awaiting state, same-binding human-input and
   `continue` resume, ready-only idle continuation, awaiting compaction, Slack idle
