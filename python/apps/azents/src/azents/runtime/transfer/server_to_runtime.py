@@ -535,7 +535,7 @@ class ServerToRuntimeTransferService:
                     ),
                     phase="cancel",
                 )
-            except Exception:
+            except ServerToRuntimeTransferError:
                 status = await _await_coordinator(
                     self.coordinator.get_transfer_status(
                         CoordinatorGetTransferStatusRequest(identity=identity)
