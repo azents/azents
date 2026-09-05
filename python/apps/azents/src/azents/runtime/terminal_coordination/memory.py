@@ -588,17 +588,17 @@ class InMemoryRuntimeTerminalCoordinationStore:
                 return _result(RuntimeTerminalMutationStatus.SEQUENCE_REJECTED)
             if record.live_output_bytes + len(data) > MAX_LIVE_OUTPUT_BYTES:
                 return _result(RuntimeTerminalMutationStatus.CAPACITY_EXCEEDED)
-            replay, replay_bytes, truncated = _append_replay(record, item)
+            replay = _append_replay(record, item)
             updated = _updated(
                 record,
                 accepted_at,
                 live_outputs=(*record.live_outputs, item),
                 live_output_bytes=record.live_output_bytes + len(data),
-                replay_outputs=replay,
-                replay_output_bytes=replay_bytes,
+                replay_outputs=replay.outputs,
+                replay_output_bytes=replay.output_bytes,
                 highest_output_sequence=sequence,
                 output_bytes=record.output_bytes + len(data),
-                replay_truncated=record.replay_truncated or truncated,
+                replay_truncated=record.replay_truncated or replay.truncated,
                 last_activity_at=accepted_at,
             )
             self._set(updated)
@@ -1092,10 +1092,19 @@ def _apply_runner_input_evidence(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _ReplayAppendResult:
+    """Bounded replay outputs and their aggregate metadata."""
+
+    outputs: tuple[RuntimeTerminalOutput, ...]
+    output_bytes: int
+    truncated: bool
+
+
 def _append_replay(
     record: RuntimeTerminalRecord,
     item: RuntimeTerminalOutput,
-) -> tuple[tuple[RuntimeTerminalOutput, ...], int, bool]:
+) -> _ReplayAppendResult:
     replay = [*record.replay_outputs, item]
     size = record.replay_output_bytes + len(item.data)
     truncated = False
@@ -1103,7 +1112,11 @@ def _append_replay(
         removed = replay.pop(0)
         size -= len(removed.data)
         truncated = True
-    return tuple(replay), size, truncated
+    return _ReplayAppendResult(
+        outputs=tuple(replay),
+        output_bytes=size,
+        truncated=truncated,
+    )
 
 
 def _bounded_chunks[ChunkT: (RuntimeTerminalInput, RuntimeTerminalOutput)](

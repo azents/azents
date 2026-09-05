@@ -783,17 +783,17 @@ class RedisRuntimeTerminalCoordinationStore:
                     None,
                     None,
                 )
-            replay, replay_bytes, truncated = _append_replay(record, item)
+            replay = _append_replay(record, item)
             updated = _updated(
                 record,
                 accepted_at,
                 live_outputs=(*record.live_outputs, item),
                 live_output_bytes=record.live_output_bytes + len(data),
-                replay_outputs=replay,
-                replay_output_bytes=replay_bytes,
+                replay_outputs=replay.outputs,
+                replay_output_bytes=replay.output_bytes,
                 highest_output_sequence=sequence,
                 output_bytes=record.output_bytes + len(data),
-                replay_truncated=record.replay_truncated or truncated,
+                replay_truncated=record.replay_truncated or replay.truncated,
                 last_activity_at=accepted_at,
             )
             return _Mutation(RuntimeTerminalMutationStatus.APPLIED, updated, updated)
