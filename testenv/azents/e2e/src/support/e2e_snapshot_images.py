@@ -11,9 +11,12 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 _REGISTRY = "ghcr.io"
 _OWNER = "azents"
+_SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE"
+_SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,7 @@ class SnapshotImage:
     environment_variable: str
     changed_environment_variable: str
     pathspecs: tuple[str, ...]
+    source_overlay_pathspecs: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,18 @@ class SnapshotPull:
     completed: bool
     duration_seconds: float
     failure_stage: str | None
+    environment_variable: str
+    purpose: Literal["final", "source_overlay_base"]
+
+
+@dataclass(frozen=True)
+class SnapshotPullRequest:
+    """Describe one final-image or source-overlay snapshot pull."""
+
+    image: SnapshotImage
+    environment_variable: str
+    pathspecs: tuple[str, ...]
+    purpose: Literal["final", "source_overlay_base"]
 
 
 @dataclass(frozen=True)
@@ -71,6 +87,14 @@ _REQUIRED_IMAGES = (
             "python/libs/az-common",
             "python/libs/azents-runtime-control",
         ),
+        source_overlay_pathspecs=(
+            ".dockerignore",
+            "azents.Dockerfile",
+            "python/apps/azents/pyproject.toml",
+            "python/apps/azents/uv.lock",
+            "python/libs/az-common",
+            "python/libs/azents-runtime-control",
+        ),
     ),
     SnapshotImage(
         image="azents-runtime-runner",
@@ -83,6 +107,7 @@ _REQUIRED_IMAGES = (
             "python/apps/azents-runtime-runner",
             "python/libs/azents-runtime-control",
         ),
+        source_overlay_pathspecs=None,
     ),
     SnapshotImage(
         image="azents-runtime-provider-docker",
@@ -97,6 +122,7 @@ _REQUIRED_IMAGES = (
             "python/apps/azents-runtime-provider-docker",
             "python/libs/azents-runtime-control",
         ),
+        source_overlay_pathspecs=None,
     ),
 )
 
@@ -115,10 +141,10 @@ def _run_command(
 
 
 def _compatible_with_base(
-    image: SnapshotImage,
     *,
     candidate_sha: str,
     base_sha: str,
+    pathspecs: Sequence[str],
     command_runner: CommandRunner,
 ) -> bool:
     """Return whether one ancestor has identical image-relevant content."""
@@ -132,7 +158,7 @@ def _compatible_with_base(
             candidate_sha,
             base_sha,
             "--",
-            *image.pathspecs,
+            *pathspecs,
         ),
         None,
     )
@@ -140,7 +166,7 @@ def _compatible_with_base(
 
 
 def _pull_snapshot(
-    image: SnapshotImage,
+    request: SnapshotPullRequest,
     *,
     base_sha: str,
     candidate_shas: Sequence[str],
@@ -150,37 +176,44 @@ def _pull_snapshot(
     attempted_sources: list[str] = []
     for candidate_sha in candidate_shas:
         if not _compatible_with_base(
-            image,
             candidate_sha=candidate_sha,
             base_sha=base_sha,
+            pathspecs=request.pathspecs,
             command_runner=command_runner,
         ):
             continue
-        source = f"{_REGISTRY}/{_OWNER}/{image.package}:sha-{candidate_sha}"
+        source = f"{_REGISTRY}/{_OWNER}/{request.image.package}:sha-{candidate_sha}"
         attempted_sources.append(source)
         pull = command_runner(("docker", "pull", source), None)
         if pull.returncode != 0:
             continue
 
-        tag = command_runner(("docker", "tag", source, image.local_tag), None)
+        tag = command_runner(
+            ("docker", "tag", source, request.image.local_tag),
+            None,
+        )
         return SnapshotPull(
-            image=image.image,
+            image=request.image.image,
             source=source,
             candidate_sha=candidate_sha,
             attempted_sources=tuple(attempted_sources),
             completed=tag.returncode == 0,
             duration_seconds=time.monotonic() - started_at,
             failure_stage=None if tag.returncode == 0 else "tag",
+            environment_variable=request.environment_variable,
+            purpose=request.purpose,
         )
 
     return SnapshotPull(
-        image=image.image,
+        image=request.image.image,
         source=None,
         candidate_sha=None,
         attempted_sources=tuple(attempted_sources),
         completed=False,
         duration_seconds=time.monotonic() - started_at,
         failure_stage="pull" if attempted_sources else "compatibility",
+        environment_variable=request.environment_variable,
+        purpose=request.purpose,
     )
 
 
@@ -199,25 +232,53 @@ def prepare_required_snapshot_images(
         for image in _REQUIRED_IMAGES
         if environment.get(image.changed_environment_variable) == "false"
     )
-    unchanged_images = tuple(
-        image
+    pull_requests = [
+        SnapshotPullRequest(
+            image=image,
+            environment_variable=image.environment_variable,
+            pathspecs=image.pathspecs,
+            purpose="final",
+        )
         for image in unchanged_required_images
         if not environment.get(image.environment_variable)
-    )
+    ]
+    server_image = _REQUIRED_IMAGES[0]
+    if (
+        environment.get(_SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV) == "true"
+        and environment.get(server_image.changed_environment_variable) == "true"
+        and not environment.get(server_image.environment_variable)
+        and not environment.get(_SERVER_SOURCE_OVERLAY_BASE_ENV)
+    ):
+        source_overlay_pathspecs = server_image.source_overlay_pathspecs
+        if source_overlay_pathspecs is None:
+            raise RuntimeError("Server source overlay pathspecs are missing.")
+        pull_requests.append(
+            SnapshotPullRequest(
+                image=server_image,
+                environment_variable=_SERVER_SOURCE_OVERLAY_BASE_ENV,
+                pathspecs=source_overlay_pathspecs,
+                purpose="source_overlay_base",
+            )
+        )
     prepared_environment = {
         image.environment_variable: value
         for image in _REQUIRED_IMAGES
         if (value := environment.get(image.environment_variable))
     }
-    if not github_token or not github_actor or not unchanged_images:
+    if overlay_base := environment.get(_SERVER_SOURCE_OVERLAY_BASE_ENV):
+        prepared_environment[_SERVER_SOURCE_OVERLAY_BASE_ENV] = overlay_base
+    if not github_token or not github_actor or not pull_requests:
         return SnapshotPreparation(
             environment=prepared_environment,
             pulls=(),
             login_completed=False,
-            all_images_prepared=len(prepared_environment) == len(_REQUIRED_IMAGES),
+            all_images_prepared=all(
+                image.environment_variable in prepared_environment
+                for image in _REQUIRED_IMAGES
+            ),
             fallback_required=any(
-                image.environment_variable not in prepared_environment
-                for image in unchanged_required_images
+                request.environment_variable not in prepared_environment
+                for request in pull_requests
             ),
         )
 
@@ -237,42 +298,47 @@ def prepare_required_snapshot_images(
             environment=prepared_environment,
             pulls=(),
             login_completed=False,
-            all_images_prepared=len(prepared_environment) == len(_REQUIRED_IMAGES),
+            all_images_prepared=all(
+                image.environment_variable in prepared_environment
+                for image in _REQUIRED_IMAGES
+            ),
             fallback_required=any(
-                image.environment_variable not in prepared_environment
-                for image in unchanged_required_images
+                request.environment_variable not in prepared_environment
+                for request in pull_requests
             ),
         )
 
-    with ThreadPoolExecutor(max_workers=len(unchanged_images)) as executor:
+    with ThreadPoolExecutor(max_workers=len(pull_requests)) as executor:
         pulls = tuple(
             executor.map(
-                lambda image: _pull_snapshot(
-                    image,
+                lambda request: _pull_snapshot(
+                    request,
                     base_sha=base_sha,
                     candidate_shas=candidate_shas,
                     command_runner=command_runner,
                 ),
-                unchanged_images,
+                pull_requests,
             )
         )
 
-    pulls_by_image = {pull.image: pull for pull in pulls}
     prepared_environment.update(
         {
-            image.environment_variable: image.local_tag
-            for image in unchanged_images
-            if pulls_by_image[image.image].completed
+            pull.environment_variable: request.image.local_tag
+            for request, pull in zip(pull_requests, pulls, strict=True)
+            if pull.completed
         }
     )
     return SnapshotPreparation(
         environment=prepared_environment,
         pulls=pulls,
         login_completed=True,
-        all_images_prepared=len(prepared_environment) == len(_REQUIRED_IMAGES),
+        all_images_prepared=all(
+            image.environment_variable in prepared_environment
+            for image in _REQUIRED_IMAGES
+        ),
         fallback_required=any(
-            image.environment_variable not in prepared_environment
-            for image in unchanged_required_images
+            request.environment_variable not in prepared_environment
+            for request in pull_requests
         ),
     )
 
@@ -328,6 +394,8 @@ def _write_observability(
                         "completed": pull.completed,
                         "duration_seconds": round(pull.duration_seconds, 3),
                         "failure_stage": pull.failure_stage,
+                        "environment_variable": pull.environment_variable,
+                        "purpose": pull.purpose,
                     },
                     sort_keys=True,
                 )

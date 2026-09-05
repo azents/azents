@@ -99,6 +99,116 @@ def test_builds_changed_image_and_prepares_unchanged_images() -> None:
     assert not result.fallback_required
 
 
+def test_prepares_changed_server_as_source_overlay_base() -> None:
+    runner = FakeCommandRunner(frozenset())
+    environment = _unchanged_environment()
+    environment.update(
+        {
+            "AZENTS_E2E_SERVER_IMAGE_CHANGED": "true",
+            "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE": "true",
+        }
+    )
+
+    result = prepare_required_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert result.login_completed
+    assert not result.all_images_prepared
+    assert not result.fallback_required
+    assert result.environment == {
+        "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE": (
+            "azents-runtime-provider-docker:e2e-base-snapshot"
+        ),
+        "AZENTS_E2E_RUNTIME_RUNNER_IMAGE": ("azents-runtime-runner:e2e-base-snapshot"),
+        "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE": ("azents-server:e2e-base-snapshot"),
+    }
+    overlay_pull = next(
+        pull for pull in result.pulls if pull.purpose == "source_overlay_base"
+    )
+    assert overlay_pull.image == "azents-server"
+    assert overlay_pull.environment_variable == "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
+    assert overlay_pull.completed
+
+
+def test_source_overlay_pull_failure_requires_full_build_fallback() -> None:
+    runner = FakeCommandRunner(frozenset({"azents-server-snapshot"}))
+    environment = _unchanged_environment()
+    environment.update(
+        {
+            "AZENTS_E2E_SERVER_IMAGE_CHANGED": "true",
+            "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE": "true",
+        }
+    )
+
+    result = prepare_required_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert not result.all_images_prepared
+    assert result.fallback_required
+    assert "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE" not in result.environment
+    failed_pull = next(
+        pull for pull in result.pulls if pull.purpose == "source_overlay_base"
+    )
+    assert not failed_pull.completed
+    assert failed_pull.failure_stage == "pull"
+
+
+def test_source_overlay_uses_dependency_compatible_ancestor() -> None:
+    runner = FakeCommandRunner(frozenset({f"azents-server-snapshot:sha-{_BASE_SHA}"}))
+    environment = _unchanged_environment()
+    environment.update(
+        {
+            "AZENTS_E2E_SERVER_IMAGE_CHANGED": "true",
+            "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE": "true",
+        }
+    )
+
+    result = prepare_required_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    overlay_pull = next(
+        pull for pull in result.pulls if pull.purpose == "source_overlay_base"
+    )
+    assert overlay_pull.completed
+    assert overlay_pull.candidate_sha == _ANCESTOR_SHA
+    assert not result.fallback_required
+    assert (
+        (
+            "git",
+            "diff",
+            "--quiet",
+            _ANCESTOR_SHA,
+            _BASE_SHA,
+            "--",
+            ".dockerignore",
+            "azents.Dockerfile",
+            "python/apps/azents/pyproject.toml",
+            "python/apps/azents/uv.lock",
+            "python/libs/az-common",
+            "python/libs/azents-runtime-control",
+        ),
+        None,
+    ) in runner.commands
+
+
 def test_pull_failure_falls_back_to_build() -> None:
     runner = FakeCommandRunner(frozenset({"azents-runtime-runner-snapshot"}))
 
