@@ -10,8 +10,8 @@ from google.auth.exceptions import TransportError as GoogleTransportError
 from pydantic import TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
+    CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_BACKEND_BASE_URL,
-    CHATGPT_OAUTH_PROTOCOL_VERSION,
 )
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -410,11 +410,11 @@ class _FakeAsyncClient:
         headers: dict[str, str],
     ) -> httpx.Response:
         assert url == f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models"
-        assert params == {"client_version": CHATGPT_OAUTH_PROTOCOL_VERSION}
+        assert params == {"client_version": CHATGPT_MODEL_CATALOG_CLIENT_VERSION}
         assert headers["Authorization"] == "Bearer access-token"
         assert headers["ChatGPT-Account-Id"] == "account-id"
         assert headers["originator"] == "azents"
-        assert headers["version"] == CHATGPT_OAUTH_PROTOCOL_VERSION
+        assert "version" not in headers
         return httpx.Response(
             status_code=200,
             request=httpx.Request("GET", url),

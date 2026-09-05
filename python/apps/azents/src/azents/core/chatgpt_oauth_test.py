@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 
 from .chatgpt_oauth import (
+    CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_DEVICE_TOKEN_URL,
     CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
-    CHATGPT_OAUTH_PROTOCOL_VERSION,
     CHATGPT_OAUTH_TOKEN_URL,
     resolve_chatgpt_oauth_device_token_url,
     resolve_chatgpt_oauth_device_user_code_url,
@@ -19,9 +19,9 @@ from .chatgpt_oauth import (
 )
 
 
-def test_protocol_version_supports_gpt_6_astra_catalog() -> None:
-    """Request a ChatGPT catalog version that exposes GPT-6-Astra."""
-    assert CHATGPT_OAUTH_PROTOCOL_VERSION == "0.153.1"
+def test_model_catalog_uses_full_discovery_client_version() -> None:
+    """Use the provider's full-catalog discovery client version."""
+    assert CHATGPT_MODEL_CATALOG_CLIENT_VERSION == "99.99.99"
 
 
 @pytest.mark.parametrize(

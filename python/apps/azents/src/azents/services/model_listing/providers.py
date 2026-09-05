@@ -31,8 +31,8 @@ from openai import APIStatusError, AsyncOpenAI, OpenAIError
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
+    CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_BACKEND_BASE_URL,
-    CHATGPT_OAUTH_PROTOCOL_VERSION,
     build_chatgpt_oauth_headers,
 )
 from azents.core.credentials import (
@@ -444,16 +444,11 @@ async def _list_chatgpt_models(
     secrets = _require_chatgpt_secrets(integration.secrets)
     fetched_at = datetime.now(timezone.utc)
     headers = build_chatgpt_oauth_headers(account_id=config.account_id)
-    headers.update(
-        {
-            "Authorization": f"Bearer {secrets.access_token}",
-            "version": CHATGPT_OAUTH_PROTOCOL_VERSION,
-        }
-    )
+    headers["Authorization"] = f"Bearer {secrets.access_token}"
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.get(
             f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models",
-            params={"client_version": CHATGPT_OAUTH_PROTOCOL_VERSION},
+            params={"client_version": CHATGPT_MODEL_CATALOG_CLIENT_VERSION},
             headers=headers,
         )
         response.raise_for_status()

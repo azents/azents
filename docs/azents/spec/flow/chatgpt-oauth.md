@@ -146,10 +146,10 @@ Rules:
 The OAuth success transaction creates the integration and its empty account-scoped catalog together. Azents then queues the initial integration catalog sync. Integration updates and explicit picker sync use the same catalog service. The sync path refreshes the OAuth token when necessary, then requests:
 
 ```text
-GET https://chatgpt.com/backend-api/codex/models?client_version=0.153.1
+GET https://chatgpt.com/backend-api/codex/models?client_version=99.99.99
 ```
 
-The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies reasoning, modality, context-window, and tool metadata. Request-dialect hints are not projected into normalized capabilities. A backend model remains selectable without a matching LiteLLM metadata key.
+The model listing uses the provider's full-catalog discovery client version rather than tracking each Codex release version. This sentinel is scoped only to catalog discovery and does not declare a ChatGPT runtime protocol version. The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies reasoning, modality, context-window, and tool metadata. Request-dialect hints are not projected into normalized capabilities. A backend model remains selectable without a matching LiteLLM metadata key.
 
 Picker reads use only the stored integration catalog and do not call ChatGPT. Before the first snapshot exists, the catalog returns an empty status-aware result; ChatGPT OAuth has no system-catalog fallback. Failed sync attempts preserve the last successful snapshot.
 
@@ -307,7 +307,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
-| 2026-09-05 | 20 | Advanced the ChatGPT catalog client protocol to `0.153.1` | The provider omits `gpt-6-astra`, whose minimum client version is `0.153.0`, from older-version catalog responses |
+| 2026-09-05 | 20 | Adopted the provider's `99.99.99` full-catalog discovery sentinel | Avoid per-release client-version maintenance while exposing API-supported, picker-visible models such as `gpt-6-astra` without changing the runtime request dialect |
 | 2026-09-04 | 19 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-21 | 18 | Ensured subscription-usage response timestamps are timezone-aware before public serialization, preserving supplied offsets | Ensure browser clients receive an explicit offset and localize reset and freshness timestamps correctly |
 | 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-288) and validated subscription usage implementation |
