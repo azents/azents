@@ -15,8 +15,12 @@ from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.execution import ClientToolExecutor
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
-from azents.engine.events.output_parts import enforce_tool_output_text_hard_cap
 from azents.engine.events.system_prompt import ToolkitPromptInput
+from azents.engine.events.tool_invocation import (
+    ClientToolInvoker,
+    PreparedClientToolInvocation,
+    UnboundedClientToolResult,
+)
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -533,28 +537,33 @@ def _toolkit_prompt_metadata(binding: ToolkitBinding) -> dict[str, str]:
     return metadata
 
 
-class ToolCatalogClientToolExecutor(ClientToolExecutor):
-    """Event client tool call executor."""
+class ToolCatalogClientToolInvoker:
+    """Invoke client Tools from one prepared catalog without output capping."""
 
     def __init__(self, catalog: ToolCatalog) -> None:
         self.catalog = catalog
 
-    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
-        """Run Tool handler and convert to event tool result."""
+    async def invoke(
+        self,
+        call: PreparedClientToolInvocation,
+    ) -> UnboundedClientToolResult:
+        """Run one Tool handler and preserve its complete returned output."""
         tool = self.catalog.tools.get(call.name)
         if tool is None:
-            return ClientToolResultPayload(
+            return UnboundedClientToolResult(
                 call_id=call.call_id,
                 name=call.name,
                 wire_dialect=call.wire_dialect,
                 status="failed",
-                output=enforce_tool_output_text_hard_cap(
-                    [OutputTextPart(text=f"Tool not found: {call.name}")]
-                ),
+                execution_succeeded=False,
+                output=[OutputTextPart(text=f"Tool not found: {call.name}")],
+                metadata={},
+                pending_generated_files=(),
+                terminal_run=False,
             )
         expected_wire_dialect = self.catalog.wire_dialects.get(call.name)
         if expected_wire_dialect != call.wire_dialect:
-            return _dialect_mismatch_result(
+            return _unbounded_dialect_mismatch_result(
                 call,
                 expected_wire_dialect=expected_wire_dialect,
             )
@@ -565,7 +574,7 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
             ):
                 if call.wire_dialect == "plaintext_custom":
                     if not isinstance(tool.handler, PlaintextCustomToolHandler):
-                        return _dialect_mismatch_result(
+                        return _unbounded_dialect_mismatch_result(
                             call,
                             expected_wire_dialect=expected_wire_dialect,
                         )
@@ -573,20 +582,21 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
                 else:
                     result = await tool.handler(call.arguments)
         except FunctionToolError as exc:
-            return ClientToolResultPayload(
+            return UnboundedClientToolResult(
                 call_id=call.call_id,
                 name=call.name,
                 wire_dialect=call.wire_dialect,
                 status="failed",
-                output=enforce_tool_output_text_hard_cap(
-                    [OutputTextPart(text=str(exc))]
-                ),
+                execution_succeeded=False,
+                output=[OutputTextPart(text=str(exc))],
                 metadata=dict(exc.metadata),
+                pending_generated_files=(),
+                terminal_run=False,
             )
 
-        return _tool_result_payload(call, result)
+        return _unbounded_tool_result(call, result)
 
-    def request_cancel(self, call: ClientToolCallPayload) -> None:
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
         """Call Tool cancellation hook fire-and-forget."""
         tool = self.catalog.tools.get(call.name)
         if tool is None or tool.cancel_handler is None:
@@ -599,29 +609,65 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
         asyncio.create_task(_call_cancel_handler(tool, request))
 
 
-def _dialect_mismatch_result(
+class CappedClientToolExecutor(ClientToolExecutor):
+    """Adapt an unbounded invoker to the ordinary durable client Tool result."""
+
+    def __init__(self, invoker: ClientToolInvoker) -> None:
+        self.invoker = invoker
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Invoke and apply the ordinary model-visible Tool output cap."""
+        result = await self.invoker.invoke(_prepared_invocation(call))
+        return result.to_client_tool_result()
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Forward cancellation to the unbounded invoker."""
+        self.invoker.request_cancel(_prepared_invocation(call))
+
+
+class ToolCatalogClientToolExecutor(CappedClientToolExecutor):
+    """Compatibility constructor for direct prepared-catalog execution."""
+
+    def __init__(self, catalog: ToolCatalog) -> None:
+        super().__init__(ToolCatalogClientToolInvoker(catalog))
+
+
+def _prepared_invocation(
     call: ClientToolCallPayload,
+) -> PreparedClientToolInvocation:
+    """Drop durable native artifacts from an admitted invocation."""
+    return PreparedClientToolInvocation(
+        call_id=call.call_id,
+        name=call.name,
+        arguments=call.arguments,
+        wire_dialect=call.wire_dialect,
+    )
+
+
+def _unbounded_dialect_mismatch_result(
+    call: PreparedClientToolInvocation,
     *,
     expected_wire_dialect: ClientToolWireDialect | None,
-) -> ClientToolResultPayload:
-    """Return one safe failed result without invoking a handler."""
-    return ClientToolResultPayload(
+) -> UnboundedClientToolResult:
+    """Return one safe unbounded failure without invoking a handler."""
+    return UnboundedClientToolResult(
         call_id=call.call_id,
         name=call.name,
         wire_dialect=call.wire_dialect,
         status="failed",
-        output=enforce_tool_output_text_hard_cap(
-            [
-                OutputTextPart(
-                    text="Tool call dialect does not match the prepared declaration."
-                )
-            ]
-        ),
+        execution_succeeded=False,
+        output=[
+            OutputTextPart(
+                text="Tool call dialect does not match the prepared declaration."
+            )
+        ],
         metadata={
             "kind": "client_tool_dialect_mismatch",
             "expected_wire_dialect": expected_wire_dialect,
             "received_wire_dialect": call.wire_dialect,
         },
+        pending_generated_files=(),
+        terminal_run=False,
     )
 
 
@@ -641,24 +687,40 @@ def _tool_result_payload(
     result: str | FunctionToolResult,
 ) -> ClientToolResultPayload:
     """Convert FunctionToolResult to event payload."""
+    return _unbounded_tool_result(
+        _prepared_invocation(call),
+        result,
+    ).to_client_tool_result()
+
+
+def _unbounded_tool_result(
+    call: PreparedClientToolInvocation,
+    result: str | FunctionToolResult,
+) -> UnboundedClientToolResult:
+    """Convert a handler return value without applying the Engine text cap."""
     if isinstance(result, str):
-        return ClientToolResultPayload(
+        return UnboundedClientToolResult(
             call_id=call.call_id,
             name=call.name,
             wire_dialect=call.wire_dialect,
             status="completed",
-            output=enforce_tool_output_text_hard_cap(result),
+            execution_succeeded=True,
+            output=result,
+            metadata={},
+            pending_generated_files=(),
+            terminal_run=False,
         )
 
     output = _TOOL_OUTPUT_ADAPTER.validate_python(result.output)
-    return ClientToolResultPayload(
+    return UnboundedClientToolResult(
         call_id=call.call_id,
         name=call.name,
         wire_dialect=call.wire_dialect,
         status="completed",
-        output=enforce_tool_output_text_hard_cap(output),
+        execution_succeeded=True,
+        output=output,
         metadata=dict(result.metadata),
-        pending_generated_files=[
+        pending_generated_files=tuple(
             PendingGeneratedFileOutput(
                 call_id=call.call_id,
                 tool_name=call.name,
@@ -669,7 +731,7 @@ def _tool_result_payload(
                 body=generated.body,
             )
             for generated in result.generated_files
-        ],
+        ),
         terminal_run=result.terminal_run,
     )
 

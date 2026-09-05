@@ -37,12 +37,14 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/model_file_materializer.py
   - python/apps/azents/src/azents/engine/events/provider_output.py
   - python/apps/azents/src/azents/engine/events/generated_files.py
+  - python/apps/azents/src/azents/engine/events/tool_invocation.py
   - python/apps/azents/src/azents/engine/tools/xai_image_generation.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/engine/tools/import_file.py
   - python/apps/azents/src/azents/engine/tools/import_resolver.py
   - python/apps/azents/src/azents/engine/tools/present_file.py
   - python/apps/azents/src/azents/engine/tools/read_image.py
+  - python/apps/azents/src/azents/engine/tools/run_tool_to_file.py
   - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
@@ -55,14 +57,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-09-05
-spec_version: 46
+spec_version: 47
 ---
 
 # File Exchange Storage
 
 ## Overview
 
-File Exchange Storage is the flow that separately stores and retrieves user-facing attachments exchanged between user and Agent, internal Artifacts for agent/tool, managed VFS files, and ModelFiles for LLM rich input. User uploads files from chat input, and Agent imports an external attachment, internal artifact, or current-run managed resource into sandbox with `import_file`, or exposes sandbox file to user with `present_file`. Generated provider image/file output is preserved as canonical file and attachment output parts on one provider tool call instead of storing raw Base64 directly in an event.
+File Exchange Storage is the flow that separately stores and retrieves user-facing attachments exchanged between user and Agent, internal Artifacts for agent/tool, managed VFS files, and ModelFiles for LLM rich input. User uploads files from chat input, and Agent imports an external attachment, internal artifact, or current-run managed resource into sandbox with `import_file`, saves a visible Tool's complete returned parts into Runtime with `run_tool_to_file`, or exposes sandbox file to user with `present_file`. Generated provider image/file output is preserved as canonical file and attachment output parts on one provider tool call instead of storing raw Base64 directly in an event.
 
 External Channel file transfer is a separate explicit Runtime/provider path. It does not
 create ExchangeFile, Artifact, ModelFile, FilePart, or another durable file-body object.
@@ -156,6 +158,30 @@ the source into the same Server-to-Runtime transfer service. Ordinary Runtime fi
 tools do not resolve the URI directly. The source entry remains in the retained AgentRun
 projection; only the copied Runtime path follows Runtime persistence rules, and a
 default `/tmp/agent/imports/` copy is temporary.
+
+### Agent stores visible Tool output in Runtime
+
+`run_tool_to_file` materializes one successfully completed same-call visible client Tool result
+without creating an ExchangeFile, Artifact, ModelFile, FilePart, or second durable Tool execution
+record. The destination is one absolute Runtime directory. Text becomes deterministic UTF-8 files;
+Exchange and Artifact parts use their existing authority-checked managed S3 copy sources;
+ModelFile parts use same-session authority-checked normalized bytes; and transient generated files
+use their already validated bytes. Existing source resources are copied rather than consumed.
+
+Every output part uses an independent verified Server-to-Runtime transfer and a unique Runtime
+coordination operation identity. Duplicate or existing filenames receive deterministic numeric
+suffixes when overwrite is disabled; duplicate names inside one new result never replace each
+other. `manifest.json` is transferred separately after all part attempts and records ordered source
+kind, declared media type and safe name, selected path, status, and committed size/hash or bounded
+failure category. It contains no Tool arguments, output body, provider URL, storage key, credential,
+or raw exception.
+
+Successfully stored bodies remain only in the Runtime filesystem and are omitted from the outer
+Tool result. If one part fails after target success, committed files remain, failed original parts
+alone use their ordinary bounded model representation, failed generated files follow normal result
+materialization, and the final notice states that the target already executed. Manifest-only
+failure does not roll back committed files. Target validation, hook admission, policy, handler, or
+cancellation failure creates no Runtime output bundle.
 
 ### Agent transfers an External Channel file
 
@@ -322,6 +348,10 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-05** — v47. Added `run_tool_to_file` Runtime bundles for complete
+  visible client Tool output, authorized text/Exchange/Artifact/ModelFile/generated
+  sources, per-file verified transfers with unique operation IDs, a bounded manifest,
+  and failed-part-only result projection.
 - **2026-09-04** — v46. Updated the file-upload hook mapping after its
   behavior-preserving move to the shared frontend layer.
 - **2026-09-04** — v45. Separated the trusted internal Workspace S3 endpoint from

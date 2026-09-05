@@ -32,6 +32,7 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
     NativeArtifact,
+    OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
@@ -609,6 +610,39 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     assert preview.source_exchange_file_id == source.id
     assert model_repository.created[0].metadata["source_kind"] == "client_tool"
     assert s3_service.deleted == []
+
+
+async def test_materializes_client_tool_image_without_replacing_existing_output() -> (
+    None
+):
+    """Insert generated resources while preserving higher-order failure notices."""
+    materializer, _, _, _ = _materializer()
+    result = ClientToolResultPayload(
+        call_id="image-call-1",
+        name="run_tool_to_file",
+        status="completed",
+        output=[
+            OutputTextPart(text="Stored 1 output part."),
+            OutputTextPart(text="The target tool already ran successfully."),
+        ],
+        pending_generated_files=[
+            pending_image_generation_output(
+                {"id": "image-call-1", "result": _PNG_BASE64},
+                output_index=0,
+            )
+        ],
+        wire_dialect="json_function",
+    )
+
+    prepared = await materializer.prepare_client_result(result)
+
+    assert len(prepared.result.output) == 4
+    assert isinstance(prepared.result.output[0], FileOutputPart)
+    assert isinstance(prepared.result.output[1], AttachmentOutputPart)
+    assert prepared.result.output[2] == OutputTextPart(text="Stored 1 output part.")
+    assert prepared.result.output[3] == OutputTextPart(
+        text="The target tool already ran successfully."
+    )
 
 
 async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:

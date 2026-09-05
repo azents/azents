@@ -60,8 +60,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-04
-spec_version: 105
+last_verified_at: 2026-09-05
+spec_version: 106
 ---
 
 # Toolkit
@@ -148,7 +148,7 @@ ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It 
 {toolkit_slug}__{tool_name}
 ```
 
-Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
+Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
 
 Some toolkits may add their own internal segment before the outer ToolkitConfig slug is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With ToolkitConfig slug `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
@@ -174,8 +174,9 @@ is provider-visible after Tool Search projection.
 
 Candidate catalog construction records tool declarations without selecting a wire dialect.
 Provider declaration lowering and execution require a prepared catalog produced by compatibility
-projection. The only post-projection extension is the internal Tool Search function, which is
-validated as one unconditional JSON-function variant before it is added.
+projection. Internal post-projection extensions are validated as unconditional JSON-function
+variants before they are added. The current extensions are `run_tool_to_file` when Runtime
+authority is available and `tool_search` when deferred entries require search.
 
 The current dual-variant entry is `apply_patch`. It requires the reviewed V4A patch semantic profile
 and declares JSON-function and plaintext-custom variants. Native OpenAI Responses prefers plaintext
@@ -183,6 +184,22 @@ custom, while the reviewed OpenRouter LiteLLM Responses profile selects JSON fun
 LiteLLM routes keep ordinary JSON tools but do not enable the V4A patch semantic profile. A prepared
 catalog exposes one variant, never both, and Tool Search/declaration-budget projection counts that
 selected declaration once.
+
+### Higher-order Runtime output Tool
+
+Runtime Toolkit owns the unprefixed direct `run_tool_to_file` capability, while the Engine assembles
+it because only the Engine owns the final per-call Tool Catalog. The Runtime Toolkit supplies file
+storage, transfer, source-resolution, resource-authority, and exact Runtime-target dependencies.
+The Engine binds a one-shot target invoker to the exact provider-visible client Tools from that call,
+excluding the higher-order Tool itself. Stable usage guidance lives in the Tool description and its
+four input fields; it adds no static or dynamic prompt.
+
+The target follows its prepared JSON-function or plaintext-custom handler, Tool Search recency,
+Runtime hooks, validation, and cancellation route. Ordinary direct calls retain the global output
+cap, while the higher-order Tool may consume the same normalized successful output before that cap
+and save it through authorized Runtime transfer. Target failure cannot be reclassified as storable
+output. Stored parts are suppressed from the outer result; only failed parts and a final
+already-executed notice remain model-visible after partial Runtime storage failure.
 
 ### Managed Skill VFS
 
@@ -893,6 +910,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-05** (spec_version 106) — Added the Engine-assembled,
+  Runtime-owned `run_tool_to_file` direct Tool and its same-call visible target,
+  shared invocation, prompt-placement, failure, and output-suppression contracts.
 - **2026-09-04** (spec_version 105) — Documented Kubernetes exec response
   normalization for native strings, WebSocket payload bytes, other response
   objects, and empty successful output.

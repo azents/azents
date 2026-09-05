@@ -245,6 +245,44 @@ _APPLY_PATCH_TRAVERSAL_INSPECT_ARGUMENTS: dict[str, object] = {
     "yield_time_ms": 10000,
     "max_output_bytes": 1000,
 }
+_RUN_TOOL_TO_FILE_PROMPT = "Run tool to file E2E"
+_RUN_TOOL_TO_FILE_CREATE_CALL_ID = "call_run_tool_to_file_create"
+_RUN_TOOL_TO_FILE_STORE_CALL_ID = "call_run_tool_to_file_store"
+_RUN_TOOL_TO_FILE_INSPECT_CALL_ID = "call_run_tool_to_file_inspect"
+_RUN_TOOL_TO_FILE_SOURCE_PATH = "/workspace/agent/run-tool-to-file-source/source.txt"
+_RUN_TOOL_TO_FILE_DIRECTORY = "/workspace/agent/run-tool-to-file-output"
+_RUN_TOOL_TO_FILE_CREATE_ARGUMENTS: dict[str, object] = {
+    "command": (
+        f"mkdir -p {_RUN_TOOL_TO_FILE_SOURCE_PATH.rsplit('/', 1)[0]} && "
+        f"head -c 35050 /dev/zero | tr '\\000' x > "
+        f"{_RUN_TOOL_TO_FILE_SOURCE_PATH}"
+    ),
+    "yield_time_ms": 10_000,
+    "max_output_bytes": 2_000,
+}
+_RUN_TOOL_TO_FILE_ARGUMENTS: dict[str, object] = {
+    "tool_name": "read",
+    "arguments": json.dumps(
+        {
+            "path": _RUN_TOOL_TO_FILE_SOURCE_PATH,
+            "offset": 0,
+            "limit": 40_000,
+            "encoding": "utf-8",
+        },
+        separators=(",", ":"),
+    ),
+    "directory": _RUN_TOOL_TO_FILE_DIRECTORY,
+    "overwrite": True,
+}
+_RUN_TOOL_TO_FILE_INSPECT_ARGUMENTS: dict[str, object] = {
+    "command": (
+        f"wc -c < {_RUN_TOOL_TO_FILE_DIRECTORY}/output.txt; "
+        f"sha256sum {_RUN_TOOL_TO_FILE_DIRECTORY}/output.txt | cut -d' ' -f1; "
+        f"cat {_RUN_TOOL_TO_FILE_DIRECTORY}/manifest.json"
+    ),
+    "yield_time_ms": 10_000,
+    "max_output_bytes": 4_000,
+}
 _DYNAMIC_WORKTREE_CREATE_PREFIX = "Agent-managed worktree E2E create\nSource: "
 _DYNAMIC_WORKTREE_REMOVE_PREFIX = "Agent-managed worktree E2E remove\nPath: "
 _DYNAMIC_WORKTREE_FORCE_TRUE_SUFFIX = "\nForce: true"
@@ -541,6 +579,28 @@ def apply_patch_scenario(request: dict[str, object]) -> str | None:
             if scenario is not None:
                 return scenario
     return None
+
+
+def is_run_tool_to_file_scenario(request: dict[str, object]) -> bool:
+    """Recognize the deterministic Runtime output materialization journey."""
+    if _last_user_text(request) == _RUN_TOOL_TO_FILE_PROMPT:
+        return True
+    previous_response_id = request.get("previous_response_id")
+    if previous_response_id in {
+        "resp_run_tool_to_file_create",
+        "resp_run_tool_to_file_store",
+        "resp_run_tool_to_file_inspect",
+        "resp_run_tool_to_file_completed",
+    }:
+        return True
+    return any(
+        request_has_tool_output(request, call_id)
+        for call_id in (
+            _RUN_TOOL_TO_FILE_CREATE_CALL_ID,
+            _RUN_TOOL_TO_FILE_STORE_CALL_ID,
+            _RUN_TOOL_TO_FILE_INSPECT_CALL_ID,
+        )
+    )
 
 
 def external_channel_file_tool_output_evidence(
@@ -1207,6 +1267,62 @@ class _Handler(BaseHTTPRequestHandler):
                 _State.requests.append(request)
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
+            return
+        if self.path == "/v1/responses" and is_run_tool_to_file_scenario(request):
+            if request_has_tool_output(
+                request,
+                _RUN_TOOL_TO_FILE_INSPECT_CALL_ID,
+            ):
+                self._write_text_response(
+                    request,
+                    "RUN_TOOL_TO_FILE_E2E_COMPLETED",
+                    response_id="resp_run_tool_to_file_completed",
+                )
+                return
+            if request_has_tool_output(
+                request,
+                _RUN_TOOL_TO_FILE_STORE_CALL_ID,
+            ):
+                self._write_function_call_response(
+                    request,
+                    call_id=_RUN_TOOL_TO_FILE_INSPECT_CALL_ID,
+                    name="exec_command",
+                    arguments=_RUN_TOOL_TO_FILE_INSPECT_ARGUMENTS,
+                )
+                return
+            if request_has_tool_output(
+                request,
+                _RUN_TOOL_TO_FILE_CREATE_CALL_ID,
+            ):
+                self._write_function_call_response(
+                    request,
+                    call_id=_RUN_TOOL_TO_FILE_STORE_CALL_ID,
+                    name="run_tool_to_file",
+                    arguments=_RUN_TOOL_TO_FILE_ARGUMENTS,
+                )
+                return
+            if not all(
+                _request_has_named_tool(request, name)
+                for name in ("exec_command", "read", "run_tool_to_file")
+            ):
+                self._write_json(
+                    409,
+                    {
+                        "error": {
+                            "message": (
+                                "run_tool_to_file E2E request did not expose the "
+                                "required Runtime tools."
+                            )
+                        }
+                    },
+                )
+                return
+            self._write_function_call_response(
+                request,
+                call_id=_RUN_TOOL_TO_FILE_CREATE_CALL_ID,
+                name="exec_command",
+                arguments=_RUN_TOOL_TO_FILE_CREATE_ARGUMENTS,
+            )
             return
         patch_scenario = apply_patch_scenario(request)
         if self.path == "/v1/responses" and patch_scenario == "success":

@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-03 | 9 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-04 | 105 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-05 | 106 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-04 | 79 |
 
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-05 | 169 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-05 | 170 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-05 | 73 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 44 |
@@ -42,7 +42,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-01 | 41 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-01 | 57 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 46 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
@@ -432,6 +432,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Reliable Automatic Session Title Requirements](requirements/title-260803-reliable-automatic-title.md) | title-260803 | 2026-08-03 | 2026-08-03 |
 | [Expose Session Todo State through Toolkit State and Chat Live State Historical Requirements Reconstruction](requirements/todo-260613-todo-toolkit-ui.md) | todo-260613 | 2026-06-13 | - |
 | [Token Usage Storage Historical Requirements Reconstruction](requirements/token-260305-token-usage.md) | token-260305 | 2026-03-05 | 2026-04-21 |
+| [Run Tool Output Directly to Runtime Requirements](requirements/tool-260905-run-tool-to-file.md) | tool-260905 | 2026-09-05 | 2026-09-05 |
 | [Toolkit Assignment Historical Requirements Reconstruction](requirements/toolkit-260225-toolkit-assignment.md) | toolkit-260225 | 2026-02-25 | 2026-03-23 |
 | [Sentry Toolkit Historical Requirements Reconstruction](requirements/toolkit-260327-sentry-toolkit.md) | toolkit-260327 | 2026-03-27 | 2026-03-27 |
 | [Adopt Toolkit Hooks and Toolkit State Historical Requirements Reconstruction](requirements/toolkit-260514-toolkit-hooks-for-agents-md.md) | toolkit-260514 | 2026-05-14 | 2026-05-17 |
@@ -842,6 +843,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Reliable Automatic Session Titles](adr/title-260803-reliable-automatic-title.md)
 - [Expose Session Todo State through Toolkit State and Chat Live State](adr/todo-260613-todo-toolkit-ui.md)
 - [Token Usage Storage Historical Decision Reconstruction](adr/token-260305-token-usage.md)
+- [Run Tool Output Directly to Runtime](adr/tool-260905-run-tool-to-file.md)
 - [Toolkit Assignment Historical Decision Reconstruction](adr/toolkit-260225-toolkit-assignment.md)
 - [Sentry Toolkit Historical Decision Reconstruction](adr/toolkit-260327-sentry-toolkit.md)
 - [Adopt Toolkit Hooks and Toolkit State](adr/toolkit-260514-toolkit-hooks-for-agents-md.md)
