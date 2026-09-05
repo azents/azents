@@ -65,6 +65,11 @@ class TestPresentation(unittest.TestCase):
                 author_type = '',
                 prompt_role = 'context',
                 body = '',
+                reference_mappings = {
+                    'key' : {
+                        'key' : ''
+                        }
+                    },
                 original_url = '',
                 action = None,
                 message = ''
@@ -82,6 +87,11 @@ class TestPresentation(unittest.TestCase):
                 author_type = '',
                 prompt_role = 'context',
                 body = '',
+                reference_mappings = {
+                    'key' : {
+                        'key' : ''
+                        }
+                    },
                 original_url = '',
                 action = None,
                 message = '',

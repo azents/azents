@@ -106,6 +106,7 @@ export const ExternalChannel: Story = {
       author_type: "human",
       prompt_role: "context",
       body: "A safe pending external-channel projection.",
+      reference_mappings: { users: {}, channels: {} },
       original_url: null,
     }),
   },
@@ -142,7 +143,11 @@ export const DiscordExternalChannel: Story = {
       sender_display_name: "Alice",
       author_type: "human",
       prompt_role: "invocation",
-      body: "Continue the bound Discord thread without another mention.",
+      body: "<@123456789012345678> continue the bound Discord thread.",
+      reference_mappings: {
+        users: { "123456789012345678": "Bob" },
+        channels: {},
+      },
       original_url: null,
     }),
   },
@@ -150,6 +155,9 @@ export const DiscordExternalChannel: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Alice:")).toBeVisible();
     await expect(canvas.getByText("Invoked")).toBeVisible();
+    await expect(
+      canvas.getByText("@Bob continue the bound Discord thread."),
+    ).toBeVisible();
     await expect(
       canvas.queryByRole("button", { name: "Copy" }),
     ).not.toBeInTheDocument();
@@ -172,6 +180,7 @@ export const MobileExternalChannelOverflow: Story = {
       author_type: "human",
       prompt_role: "invocation",
       body: "Please investigate this unbroken-reference-without-natural-break-points-and-keep-the-card-inside-the-mobile-viewport.",
+      reference_mappings: { users: {}, channels: {} },
       original_url:
         "https://discord.com/channels/1440378991704932494/1442342792822263808/1531600000000000000",
     }),
@@ -236,6 +245,7 @@ export const CompoundEnvelopeOrder: Story = {
           author_type: "human",
           prompt_role: "context",
           body: "First item remains first.",
+          reference_mappings: { users: {}, channels: {} },
           original_url: null,
         })}
       />
@@ -251,6 +261,7 @@ export const CompoundEnvelopeOrder: Story = {
           author_type: "human",
           prompt_role: "context",
           body: "Second item remains contiguous.",
+          reference_mappings: { users: {}, channels: {} },
           original_url: null,
         })}
       />

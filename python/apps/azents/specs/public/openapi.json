@@ -25373,6 +25373,16 @@
             ],
             "title": "Body"
           },
+          "reference_mappings": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Reference Mappings"
+          },
           "original_url": {
             "anyOf": [
               {
@@ -25396,6 +25406,7 @@
           "author_type",
           "prompt_role",
           "body",
+          "reference_mappings",
           "original_url"
         ],
         "title": "PendingMailboxExternalChannelPresentation",

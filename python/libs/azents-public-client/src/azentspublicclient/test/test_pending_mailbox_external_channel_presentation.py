@@ -44,6 +44,11 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 author_type = '',
                 prompt_role = 'context',
                 body = '',
+                reference_mappings = {
+                    'key' : {
+                        'key' : ''
+                        }
+                    },
                 original_url = ''
             )
         else:
@@ -57,6 +62,11 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 author_type = '',
                 prompt_role = 'context',
                 body = '',
+                reference_mappings = {
+                    'key' : {
+                        'key' : ''
+                        }
+                    },
                 original_url = '',
         )
         """

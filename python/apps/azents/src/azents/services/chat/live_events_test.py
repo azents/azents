@@ -332,9 +332,14 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
         sender_display_name="Ada",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         prompt_role="invocation",
-        body="Deploy is ready.",
+        body="<@provider-user-2> says deploy is ready.",
         attachment_metadata={},
-        reference_mappings={},
+        reference_mappings={
+            "users": {
+                "provider-user-1": "Ada",
+                "provider-user-2": "Grace",
+            }
+        },
         provider_created_at=None,
         provider_updated_at=None,
         original_url="https://example.test/message-1",
@@ -382,7 +387,13 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
     presentation = projection.items[0].presentation
     assert isinstance(presentation, PendingMailboxExternalChannelPresentation)
     assert presentation.type == "external_channel_message"
-    assert presentation.body == "Deploy is ready."
+    assert presentation.body == "<@provider-user-2> says deploy is ready."
+    assert presentation.reference_mappings == {
+        "users": {
+            "provider-user-1": "Ada",
+            "provider-user-2": "Grace",
+        }
+    }
     assert not hasattr(presentation, "provider_tenant_id")
     assert not hasattr(presentation, "binding_id")
 

@@ -1,3 +1,4 @@
+import { externalChannelReferenceMappingsMetadata } from "./externalChannelMessage.ts";
 import type { PendingMailboxEntry } from "./hooks/pendingMailboxState";
 import type { ChatMessage, FileAttachment, PendingInputBuffer } from "./types";
 
@@ -73,7 +74,10 @@ export function pendingMailboxMessage(
           source_path: `/${presentation.message_kind}`,
         },
       };
-    case "external_channel_message":
+    case "external_channel_message": {
+      const referenceMappings = externalChannelReferenceMappingsMetadata(
+        presentation.reference_mappings,
+      );
       return {
         id: item.id,
         role: "user",
@@ -95,8 +99,12 @@ export function pendingMailboxMessage(
           ...(presentation.original_url
             ? { original_url: presentation.original_url }
             : {}),
+          ...(referenceMappings
+            ? { reference_mappings: referenceMappings }
+            : {}),
         },
       };
+    }
     case "goal_continuation":
       return {
         id: item.id,
