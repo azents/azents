@@ -3,6 +3,7 @@
 import base64
 import datetime
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from io import BytesIO
 from typing import IO
 
@@ -380,14 +381,19 @@ def _normalized_output(
     )
 
 
+@dataclass(frozen=True)
+class _MaterializerFixture:
+    """Provider-output materializer and its observable collaborators."""
+
+    materializer: ProviderOutputMaterializer
+    exchange_repository: _ExchangeFileRepository
+    model_repository: _ModelFileRepository
+    s3_service: _S3Service
+
+
 def _materializer(
     s3_service: _S3Service | None = None,
-) -> tuple[
-    ProviderOutputMaterializer,
-    _ExchangeFileRepository,
-    _ModelFileRepository,
-    _S3Service,
-]:
+) -> _MaterializerFixture:
     exchange_repository = _ExchangeFileRepository()
     model_repository = _ModelFileRepository()
     session_repository = _AgentSessionRepository()
@@ -417,8 +423,8 @@ def _materializer(
         s3_service=s3_service,
         config=config,
     )
-    return (
-        ProviderOutputMaterializer(
+    return _MaterializerFixture(
+        materializer=ProviderOutputMaterializer(
             exchange_file_service=exchange_service,
             model_file_service=model_service,
             authority=SessionResourceAuthority(
@@ -432,9 +438,9 @@ def _materializer(
             ),
             provider_name="openai",
         ),
-        exchange_repository,
-        model_repository,
-        s3_service,
+        exchange_repository=exchange_repository,
+        model_repository=model_repository,
+        s3_service=s3_service,
     )
 
 
@@ -528,7 +534,11 @@ def test_maps_pillow_decompression_bomb_to_model_error(
 
 async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     """Prepare uploads and persist both metadata resources with event references."""
-    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    exchange_repository = fixture.exchange_repository
+    model_repository = fixture.model_repository
+    s3_service = fixture.s3_service
 
     prepared = await materializer.prepare(_normalized_output())
 
@@ -566,7 +576,11 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
 
 async def test_materializes_client_tool_image_with_shared_storage_contract() -> None:
     """Attach client-generated image resources in the result transaction."""
-    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    exchange_repository = fixture.exchange_repository
+    model_repository = fixture.model_repository
+    s3_service = fixture.s3_service
     generated = generated_image_output(_PNG_BASE64, output_index=0)
     result = ClientToolResultPayload(
         call_id="image-call-1",
@@ -616,7 +630,7 @@ async def test_materializes_client_tool_image_without_replacing_existing_output(
     None
 ):
     """Insert generated resources while preserving higher-order failure notices."""
-    materializer, _, _, _ = _materializer()
+    materializer = _materializer().materializer
     result = ClientToolResultPayload(
         call_id="image-call-1",
         name="run_tool_to_file",
@@ -647,7 +661,11 @@ async def test_materializes_client_tool_image_without_replacing_existing_output(
 
 async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     """Keep deterministic resources safe across repeated output admission."""
-    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    exchange_repository = fixture.exchange_repository
+    model_repository = fixture.model_repository
+    s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
     await first.persist(_Session())
     first.admitted = True
@@ -670,7 +688,9 @@ async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
 
 async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
     """Keep admitted deterministic object keys bound to their original bytes."""
-    materializer, _, _, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
     await first.persist(_Session())
     first.admitted = True
@@ -689,7 +709,11 @@ async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
 
 async def test_failed_admission_compensates_every_uploaded_object() -> None:
     """Delete uploaded objects after the metadata transaction rolls back."""
-    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    exchange_repository = fixture.exchange_repository
+    model_repository = fixture.model_repository
+    s3_service = fixture.s3_service
     run_repository = require_instance(
         materializer.model_file_service.agent_run_repository,
         _AgentRunRepository,
@@ -709,7 +733,7 @@ async def test_failed_admission_compensates_every_uploaded_object() -> None:
 async def test_failed_upload_compensates_prepared_object_keys() -> None:
     """Compensate the full deterministic key set after a partial upload."""
     s3_service = _FailingS3Service()
-    materializer, _, _, _ = _materializer(s3_service)
+    materializer = _materializer(s3_service).materializer
 
     prepared = await materializer.prepare(_normalized_output())
     with pytest.raises(OSError, match="object storage unavailable"):
@@ -722,7 +746,9 @@ async def test_failed_upload_compensates_prepared_object_keys() -> None:
 
 async def test_allows_userless_provider_output_before_upload() -> None:
     """Prepare provider output without synthesizing Human provenance."""
-    materializer, _, _, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    s3_service = fixture.s3_service
 
     prepared = await materializer.prepare(_normalized_output())
 
@@ -732,7 +758,11 @@ async def test_allows_userless_provider_output_before_upload() -> None:
 
 async def test_rejects_provider_output_after_owner_generation_changes() -> None:
     """A stale worker cannot upload provider output after Session takeover."""
-    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    exchange_repository = fixture.exchange_repository
+    model_repository = fixture.model_repository
+    s3_service = fixture.s3_service
     prepared = await materializer.prepare(_normalized_output())
     session_repository = materializer.model_file_service.agent_session_repository
     assert isinstance(session_repository, _AgentSessionRepository)
@@ -751,7 +781,9 @@ async def test_rejects_provider_output_after_owner_generation_changes() -> None:
 
 async def test_rejects_duplicate_call_identity_before_upload() -> None:
     """Reject multiple generated files for one provider result event."""
-    materializer, _, _, s3_service = _materializer()
+    fixture = _materializer()
+    materializer = fixture.materializer
+    s3_service = fixture.s3_service
     normalized = _normalized_output()
     duplicate = normalized.pending_provider_files[0].model_copy(
         update={"output_index": 1}
