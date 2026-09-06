@@ -85,8 +85,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-05
-spec_version: 170
+last_verified_at: 2026-09-06
+spec_version: 171
 ---
 
 # Agent Execution Loop
@@ -597,9 +597,11 @@ configured builtin is silently omitted.
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
 `cost_usd` is a content-free estimate from LiteLLM's public pricing function using provider usage,
-model, service tier, and required output-type metadata only. Pricing failures, unsupported prices,
-negative values, and non-finite values leave cost unset without failing completed output. ChatGPT
-OAuth cost is an API price-map estimate, not subscription billing.
+model, service tier, and required output-type metadata only. Unsupported or unmapped prices, a
+pricing-calculator `ValueError`, negative values, and non-finite values leave cost unset without
+failing completed output. Unexpected calculator defects propagate through the ordinary internal-error
+path instead of being reclassified as missing pricing. ChatGPT OAuth cost is an API price-map estimate,
+not subscription billing.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -1403,6 +1405,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-06** (spec_version 171) — Distinguished unsupported or invalid
+  public-price estimates from unexpected calculator defects that remain visible
+  through the internal-error path.
 - **2026-09-05** (spec_version 170) — Added the Runtime-owned `run_tool_to_file`
   higher-order Tool, shared pre-cap client Tool invocation, same-call visible target
   fencing, verified per-part Runtime bundles, failed-part projection, and unique
