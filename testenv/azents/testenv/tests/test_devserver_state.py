@@ -47,13 +47,18 @@ def test_devserver_state_writer_includes_worktree_fingerprint(
 
     start_devserver = cast(_StartDevserver, devserver.__dict__["_start_devserver"])
     start_devserver(
-        {"AZ_PUBLIC_API_PORT": "8010", "AZ_ADMIN_API_PORT": "8011"},
+        {
+            "AZ_PUBLIC_API_PORT": "8010",
+            "AZ_ADMIN_API_PORT": "8011",
+            "AZ_RUNTIME_CONTROL_PORT": "8030",
+        },
         reload=False,
     )
 
     raw = json.loads(state_file.read_text(encoding="utf-8"))
     assert raw["schema_version"] == 1
     assert raw["started_by"] == "devserver.py up"
+    assert raw["runtime_control_port"] == 8030
     assert raw["worktree_fingerprint"]["fingerprint"] == "sha256:fingerprint"
 
 
@@ -80,3 +85,41 @@ def test_legacy_devserver_state_without_fingerprint_is_stale(tmp_path: Path) -> 
 
     with pytest.raises(ValidationError):
         validate_state_for_fixture(raw)
+
+
+def test_up_starts_web_when_backend_is_already_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`up --web` honors the Web request without restarting a healthy backend."""
+    web_timeouts: list[int] = []
+
+    monkeypatch.setattr(devserver, "require_tmux", lambda: None)
+    monkeypatch.setattr(
+        devserver,
+        "require_env",
+        lambda: {
+            "AZ_PUBLIC_API_PORT": "8010",
+            "AZ_ADMIN_API_PORT": "8011",
+            "AZ_RUNTIME_CONTROL_PORT": "8030",
+        },
+    )
+    monkeypatch.setattr(devserver.tmux, "has_session", lambda _: True)
+    monkeypatch.setattr(devserver, "read_state", lambda: None)
+    monkeypatch.setattr(devserver, "probe_url", lambda _: True)
+    monkeypatch.setattr(devserver, "probe_port", lambda *_: True)
+    monkeypatch.setattr(
+        devserver,
+        "_ensure_web_ready",
+        lambda *, timeout: web_timeouts.append(timeout),
+    )
+
+    devserver.up(
+        force=False,
+        timeout=45,
+        reload=False,
+        no_infra=False,
+        no_migrate=False,
+        web=True,
+    )
+
+    assert web_timeouts == [45]

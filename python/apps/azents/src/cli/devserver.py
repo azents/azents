@@ -1,7 +1,8 @@
 """Local development server.
 
-Runs the Public API (:8010), Admin API (:8011), Engine Worker, and Scheduler together.
-When ``AZ_TESTENV_API_ENABLED=1`` is set, it also runs the Testenv API (:8012).
+Runs Runtime Control (:8030), Public API (:8010), Admin API (:8011), Engine Worker,
+and Scheduler together. When ``AZ_TESTENV_API_ENABLED=1`` is set, it also runs the
+Testenv API (:8012).
 
 run:
     uv run python src/cli/devserver.py
@@ -13,6 +14,8 @@ import asyncio
 import logging
 import signal
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import NamedTuple
 
@@ -29,6 +32,10 @@ from azents.app import (
 )
 from azents.core.config import Config
 from azents.core.deps import get_appctx
+from azents.runtime.control_server import (
+    RuntimeControlSettings,
+    runtime_control_server_lifespan,
+)
 from azents.scheduler.service import SchedulerService
 from azents.utils.appctx import AppContext
 from azents.worker.worker import AgentWorker
@@ -113,6 +120,19 @@ def _enforce_production_testenv_guard(config: Config) -> None:
         )
 
 
+@asynccontextmanager
+async def _run_devserver_resources(
+    config: Config,
+) -> AsyncIterator[di.Container]:
+    """Run Runtime Control and the shared application container."""
+    runtime_control_settings = RuntimeControlSettings()
+    async with (
+        runtime_control_server_lifespan(runtime_control_settings),
+        run_with_container(config) as container,
+    ):
+        yield container
+
+
 async def main(*, reload: bool = False) -> None:
     """Run the local development server."""
     config = Config.from_env()
@@ -145,7 +165,7 @@ async def main(*, reload: bool = False) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _on_shutdown, sig)
 
-    async with run_with_container(config) as container:
+    async with _run_devserver_resources(config) as container:
         appctx = await container.solve(get_appctx)
         worker = await container.solve(AgentWorker)
         scheduler = await container.solve(SchedulerService)

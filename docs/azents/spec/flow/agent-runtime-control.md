@@ -41,6 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/runtime/control_server.py
+  - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/src/cli/runtime_control_server.py
   - python/apps/azents-runtime-runner/**
   - python/apps/azents-runtime-provider-docker/**
@@ -60,8 +61,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-05
-spec_version: 73
+last_verified_at: 2026-09-06
+spec_version: 74
 ---
 
 # Agent Runtime Control
@@ -71,6 +72,11 @@ spec_version: 73
 Agent Runtime is top-level domain of execution environment per Agent, not a sub-concept of sandbox/session. Runtime is one per Agent, and Control API looks up, creates, and controls Runtime by `agent_id` without using active session lookup. Legacy `azents-sandbox` provider-control path does not receive production traffic.
 
 Control replica is stateless. Runtime existence, desired state, provider observed state, provider connection state, runner state, and failure summary have PostgreSQL `agent_runtimes` row as durable source of truth. Process-local handle/cache cannot be used even as performance aid for deciding Runtime state.
+
+The local all-in-one devserver starts Runtime Control before composing the Worker,
+then keeps Runtime Control, APIs, Worker, and Scheduler under one shared shutdown
+lifecycle. Local configuration uses the same trusted coordinator interface as
+production while explicitly opting into insecure loopback transport.
 
 ## Planes
 
@@ -817,6 +823,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-06 (spec_version=74)** — Added local all-in-one devserver
+  composition that starts Runtime Control before Worker dependencies and keeps
+  the trusted transfer coordinator under the shared local shutdown lifecycle.
 - **2026-09-03 (spec_version=73)** — Added concrete Terminal quotas,
   frame/buffer/replay and lifetime bounds, final-exit reconnect delivery, and the
   policy, folder, transition, and removal authority mappings.

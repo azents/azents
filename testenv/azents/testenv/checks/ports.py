@@ -1,14 +1,14 @@
 """Port preflight checks.
 
-Checks whether the devserver ports (8010, 8011) are free. Container ports such
-as 5433, 6379, and 9000 are validated by Docker Compose health/status checks.
+Checks whether the devserver ports (8010, 8011, 8030) are free. Container ports
+such as 5433, 6379, and 9000 are validated by Docker Compose health/status checks.
 """
 
 import socket
 
 from .base import Check, CheckResult, RunContext, Status
 
-_DEVSERVER_PORTS = (8010, 8011)
+_DEVSERVER_PORTS = (8010, 8011, 8030)
 
 
 class DevserverPortsFree(Check):
@@ -17,7 +17,7 @@ class DevserverPortsFree(Check):
     def __init__(self) -> None:
         super().__init__(
             id="devserver-ports-free",
-            name="Devserver ports free (8010, 8011)",
+            name="Devserver ports free (8010, 8011, 8030)",
             category="ports",
         )
 

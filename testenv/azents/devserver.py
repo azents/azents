@@ -25,6 +25,7 @@ from testenv.devserverlib.compose import compose_down, compose_up
 from testenv.devserverlib.env import require_env
 from testenv.devserverlib.paths import (
     AZENTS_DIR,
+    DEFAULT_RUNTIME_CONTROL_PORT,
     DEFAULT_WEB_PORT,
     EXIT_ERROR,
     EXIT_NOT_RUNNING,
@@ -35,7 +36,12 @@ from testenv.devserverlib.paths import (
     THIS_DIR,
     WEB_SESSION_NAME,
 )
-from testenv.devserverlib.readiness import probe_url, tail_log, wait_for_ready
+from testenv.devserverlib.readiness import (
+    probe_port,
+    probe_url,
+    tail_log,
+    wait_for_ready,
+)
 from testenv.devserverlib.state import clear_state, read_state, write_state
 from testenv.devserverlib.tmux import require_tmux
 from testenv.devserverlib.web import (
@@ -87,6 +93,12 @@ def _start_devserver(env: dict[str, str], *, reload: bool) -> None:
             "reload": reload,
             "public_port": int(env.get("AZ_PUBLIC_API_PORT", "8010")),
             "admin_port": int(env.get("AZ_ADMIN_API_PORT", "8011")),
+            "runtime_control_port": int(
+                env.get(
+                    "AZ_RUNTIME_CONTROL_PORT",
+                    str(DEFAULT_RUNTIME_CONTROL_PORT),
+                )
+            ),
             "repo_root": worktree.repo_root,
             "head_sha": worktree.head_sha,
             "worktree_fingerprint": worktree.model_dump(mode="json"),
@@ -113,6 +125,17 @@ def _graceful_shutdown(*, timeout: int) -> bool:
     return False
 
 
+def _ensure_web_ready(*, timeout: int) -> None:
+    """Start the Web session when needed and report its readiness."""
+    start_web(port=DEFAULT_WEB_PORT)
+    typer.echo(f"web session active ('{WEB_SESSION_NAME}')")
+    if wait_for_web_ready(port=DEFAULT_WEB_PORT, timeout=timeout):
+        typer.echo(f"  web:   http://localhost:{DEFAULT_WEB_PORT}")
+    else:
+        typer.echo("warning: azents-web did not become ready in time", err=True)
+    typer.echo(f"  attach: tmux attach -t {WEB_SESSION_NAME}")
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -132,6 +155,9 @@ def up(
     env = require_env()
     public_port = int(env.get("AZ_PUBLIC_API_PORT", "8010"))
     admin_port = int(env.get("AZ_ADMIN_API_PORT", "8011"))
+    runtime_control_port = int(
+        env.get("AZ_RUNTIME_CONTROL_PORT", str(DEFAULT_RUNTIME_CONTROL_PORT))
+    )
 
     running = tmux.has_session(SESSION_NAME)
     state = read_state()
@@ -139,11 +165,16 @@ def up(
     if running and not force:
         public_ok = probe_url(f"http://127.0.0.1:{public_port}/health/v1/readiness")
         admin_ok = probe_url(f"http://127.0.0.1:{admin_port}/health/v1/readiness")
-        if public_ok and admin_ok:
+        runtime_control_ok = probe_port("127.0.0.1", runtime_control_port)
+        if public_ok and admin_ok and runtime_control_ok:
             typer.echo(f"devserver already running and healthy (session: {SESSION_NAME})")
+            if web:
+                _ensure_web_ready(timeout=timeout)
             return
         typer.echo(
-            f"warning: session alive but unhealthy (public={public_ok} admin={admin_ok}),"
+            "warning: session alive but unhealthy "
+            f"(public={public_ok} admin={admin_ok} "
+            f"runtime_control={runtime_control_ok}),"
             " restarting",
             err=True,
         )
@@ -181,6 +212,7 @@ def up(
     ok, reason = wait_for_ready(
         public_port=public_port,
         admin_port=admin_port,
+        runtime_control_port=runtime_control_port,
         timeout=timeout,
         session_alive=lambda: tmux.has_session(SESSION_NAME),
     )
@@ -193,18 +225,17 @@ def up(
         clear_state()
         raise typer.Exit(code=EXIT_ERROR)
 
-    typer.echo(f"ready (public=http://localhost:{public_port} admin=http://localhost:{admin_port})")
+    typer.echo(
+        "ready "
+        f"(public=http://localhost:{public_port} "
+        f"admin=http://localhost:{admin_port} "
+        f"runtime-control=localhost:{runtime_control_port})"
+    )
     typer.echo(f"  attach: tmux attach -t {SESSION_NAME}")
     typer.echo("  logs:   (cd testenv/azents && uv run devserver.py logs -f)")
 
     if web:
-        start_web(port=DEFAULT_WEB_PORT)
-        typer.echo(f"web started in tmux session '{WEB_SESSION_NAME}'")
-        if wait_for_web_ready(port=DEFAULT_WEB_PORT, timeout=timeout):
-            typer.echo(f"  web:   http://localhost:{DEFAULT_WEB_PORT}")
-        else:
-            typer.echo("warning: azents-web did not become ready in time", err=True)
-        typer.echo(f"  attach: tmux attach -t {WEB_SESSION_NAME}")
+        _ensure_web_ready(timeout=timeout)
 
 
 @app.command()
@@ -270,6 +301,7 @@ def status() -> None:
 
     public_port = 8010
     admin_port = 8011
+    runtime_control_port = DEFAULT_RUNTIME_CONTROL_PORT
     if state is not None:
         public_port_val = state.get("public_port", public_port)
         admin_port_val = state.get("admin_port", admin_port)
@@ -277,11 +309,18 @@ def status() -> None:
             public_port = public_port_val
         if isinstance(admin_port_val, int):
             admin_port = admin_port_val
+        runtime_control_port_val = state.get(
+            "runtime_control_port",
+            runtime_control_port,
+        )
+        if isinstance(runtime_control_port_val, int):
+            runtime_control_port = runtime_control_port_val
 
     public_ok = probe_url(f"http://127.0.0.1:{public_port}/health/v1/readiness")
     admin_ok = probe_url(f"http://127.0.0.1:{admin_port}/health/v1/readiness")
+    runtime_control_ok = probe_port("127.0.0.1", runtime_control_port)
 
-    if public_ok and admin_ok:
+    if public_ok and admin_ok and runtime_control_ok:
         typer.echo("devserver: running")
         exit_code = 0
     else:
@@ -300,6 +339,8 @@ def status() -> None:
     admin_mark = "200 OK" if admin_ok else "unreachable"
     typer.echo(f"  public:  http://localhost:{public_port}  ({public_mark})")
     typer.echo(f"  admin:   http://localhost:{admin_port}  ({admin_mark})")
+    runtime_control_mark = "listening" if runtime_control_ok else "unreachable"
+    typer.echo(f"  runtime-control: localhost:{runtime_control_port}  ({runtime_control_mark})")
 
     if is_web_running():
         web_ok = probe_url(f"http://127.0.0.1:{DEFAULT_WEB_PORT}/")
