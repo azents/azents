@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fireEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentWorkspaceDirectoryPickerModal } from "./AgentWorkspaceDirectoryPickerModal";
 import type { ProjectDirectoryPickerState } from "../types";
@@ -75,6 +76,15 @@ const runtimeUnavailableState = {
   },
 } satisfies ProjectDirectoryPickerState;
 
+const mobileOverflowState = {
+  ...readyState,
+  entries: Array.from({ length: 20 }, (_, index) => ({
+    path: `/workspace/agent/project-${String(index + 1).padStart(2, "0")}`,
+    kind: "directory" as const,
+    repositoryType: index % 3 === 0 ? ("git" as const) : null,
+  })),
+} satisfies ProjectDirectoryPickerState;
+
 const meta = {
   component: AgentWorkspaceDirectoryPickerModal,
   decorators: [
@@ -112,5 +122,41 @@ export const RuntimeUnavailable = {
 export const Ready = {
   args: {
     state: readyState,
+  },
+} satisfies Story;
+
+export const MobileOverflow = {
+  args: {
+    state: mobileOverflowState,
+  },
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const dialog = await page.findByRole("dialog", {
+      name: "Select Project folder",
+    });
+    const scrollArea = page.getByTestId(
+      "agent-workspace-picker-directory-list",
+    );
+    const viewport = scrollArea.querySelector<HTMLElement>(
+      "[data-scrollarea-viewport]",
+    );
+
+    await expect(dialog.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      window.innerHeight,
+    );
+    await expect(viewport).not.toBeNull();
+    if (!viewport) {
+      return;
+    }
+
+    await expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight);
+    viewport.scrollTop = viewport.scrollHeight;
+    await fireEvent.scroll(viewport);
+    await expect(viewport.scrollTop).toBeGreaterThan(0);
   },
 } satisfies Story;

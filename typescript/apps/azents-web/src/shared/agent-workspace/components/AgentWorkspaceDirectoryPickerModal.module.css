@@ -1,0 +1,46 @@
+.modalContent {
+  overflow-x: hidden;
+}
+
+.modalBody {
+  overflow-x: hidden;
+}
+
+.bodyStack,
+.readyContent {
+  min-width: 0;
+}
+
+.directoryList {
+  max-height: 27.5rem;
+}
+
+.directoryViewport {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+@media (max-width: 47.99em) {
+  .modalContent {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--mantine-spacing-xl));
+    max-height: calc(100dvh - var(--mantine-spacing-xl));
+    overflow: hidden;
+  }
+
+  .modalBody,
+  .bodyStack,
+  .readyContent {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .directoryList {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+}
