@@ -2210,6 +2210,15 @@ export function useChatSessionContainer(
     { sessionId },
     { enabled: isSubscribeReady },
   );
+  const inputActionItems = inputActionsQuery.data?.items;
+  const inputActions = useMemo(
+    () =>
+      (inputActionItems ?? []).flatMap((item) => {
+        const action = chatActionFromValue(item.action);
+        return action === null ? [] : [{ ...item, action }];
+      }),
+    [inputActionItems],
+  );
 
   const utils = trpc.useUtils();
   const acknowledgedUnreadTerminalRunIdRef = useRef<string | null>(null);
@@ -3471,10 +3480,7 @@ export function useChatSessionContainer(
     isStopAvailable,
     isStopPending,
     onStopRequest,
-    inputActions: (inputActionsQuery.data?.items ?? []).flatMap((item) => {
-      const action = chatActionFromValue(item.action);
-      return action === null ? [] : [{ ...item, action }];
-    }),
+    inputActions,
     authorizationRequests,
     onAuthorizationComplete,
     actionExecutions:

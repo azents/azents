@@ -801,11 +801,13 @@ export function useRuntimeTerminalContainer({
       if (terminateRequestedRef.current) {
         terminateRequestedRef.current = false;
       }
-      setConnection({ type: "exited" });
+      setConnection((current) =>
+        current.type === "exited" ? current : { type: "exited" },
+      );
       return;
     }
     if (activatedRef.current && isTerminalProjectionReconnectable(state)) {
-      void connect();
+      connectRef.current();
       return;
     }
     if (shouldRestoreChatForTerminalProjection(state)) {
@@ -821,14 +823,17 @@ export function useRuntimeTerminalContainer({
       clearOutputAckTimer();
       clearReconnectTimer();
       presentationRef.current = "collapsed";
-      setPresentation("collapsed");
-      setConnection({ type: "idle" });
+      setPresentation((current) =>
+        current === "collapsed" ? current : "collapsed",
+      );
+      setConnection((current) =>
+        current.type === "idle" ? current : { type: "idle" },
+      );
     }
   }, [
     clearHeartbeatTimer,
     clearOutputAckTimer,
     clearReconnectTimer,
-    connect,
     projectionQuery.data?.state,
   ]);
 
