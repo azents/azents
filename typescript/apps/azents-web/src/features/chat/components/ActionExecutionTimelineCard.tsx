@@ -33,7 +33,8 @@ interface ActionExecutionTimelineCardProps {
 
 type ActionExecutionEvent = ActionExecutionProjection["events"][number];
 
-const GIT_WORKTREE_STEP_KEY = "create_git_worktree";
+const CREATE_GIT_WORKTREE_STEP_KEY = "create_git_worktree";
+const REMOVE_GIT_WORKTREE_STEP_KEY = "remove_git_worktree";
 
 interface CleanupCandidate {
   path: string;
@@ -112,12 +113,13 @@ function commandLine(commandArgv: string[]): string {
 
 function commandStartedEvent(
   events: ActionExecutionEvent[],
+  stepKey: string,
 ): ActionExecutionEvent | null {
   return (
     events.find(
       (event) =>
         event.kind === "command_started" &&
-        event.step_key === GIT_WORKTREE_STEP_KEY &&
+        event.step_key === stepKey &&
         Array.isArray(event.command_argv) &&
         event.command_argv.length > 0,
     ) ?? null
@@ -126,12 +128,12 @@ function commandStartedEvent(
 
 function commandCompletedEvent(
   events: ActionExecutionEvent[],
+  stepKey: string,
 ): ActionExecutionEvent | null {
   return (
     events.find(
       (event) =>
-        event.kind === "command_completed" &&
-        event.step_key === GIT_WORKTREE_STEP_KEY,
+        event.kind === "command_completed" && event.step_key === stepKey,
     ) ?? null
   );
 }
@@ -139,12 +141,13 @@ function commandCompletedEvent(
 function streamText(
   events: ActionExecutionEvent[],
   kind: "stdout" | "stderr",
+  stepKey: string,
 ): string | null {
   const text = events
     .filter(
       (event) =>
         event.kind === kind &&
-        (event.step_key === null || event.step_key === GIT_WORKTREE_STEP_KEY) &&
+        (event.step_key === null || event.step_key === stepKey) &&
         event.content,
     )
     .map((event) => event.content)
@@ -434,9 +437,24 @@ function CleanupActionExecutionTimelineCard({
 function resultLabel(
   actionExecution: ActionExecutionProjection,
   commandCompleted: ActionExecutionEvent | null,
+  removal: boolean,
   t: ReturnType<typeof useTranslations<"chat.actionExecution">>,
 ): string {
   const status = actionExecution.execution.status;
+  if (removal) {
+    switch (status) {
+      case "completed":
+        return t("removalResult.completed");
+      case "failed":
+        return t("removalResult.failed");
+      case "cancelled":
+        return t("removalResult.cancelled");
+      case "running":
+        return t("removalResult.running");
+      default:
+        return t("removalResult.pending");
+    }
+  }
   if (status === "completed") {
     return t("result.completed");
   }
@@ -494,15 +512,19 @@ export function ActionExecutionTimelineCard({
       />
     );
   }
+  const removal = execution.action_type === "agent_remove_git_worktree";
+  const stepKey = removal
+    ? REMOVE_GIT_WORKTREE_STEP_KEY
+    : CREATE_GIT_WORKTREE_STEP_KEY;
   const color = statusColor(execution.status);
-  const commandEvent = commandStartedEvent(events);
+  const commandEvent = commandStartedEvent(events, stepKey);
   const commandArgv = commandEvent?.command_argv ?? null;
-  const commandCompleted = commandCompletedEvent(events);
-  const stdout = streamText(events, "stdout");
-  const stderr = streamText(events, "stderr");
-  const branchName = commandArgumentAfter(commandArgv, "-b");
-  const createdPath = worktreePath(commandArgv);
-  const baseRef = startingRef(commandArgv);
+  const commandCompleted = commandCompletedEvent(events, stepKey);
+  const stdout = streamText(events, "stdout", stepKey);
+  const stderr = streamText(events, "stderr", stepKey);
+  const branchName = removal ? null : commandArgumentAfter(commandArgv, "-b");
+  const createdPath = removal ? null : worktreePath(commandArgv);
+  const baseRef = removal ? null : startingRef(commandArgv);
 
   return (
     <Box
@@ -517,7 +539,7 @@ export function ActionExecutionTimelineCard({
         <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
           <Group gap="xs" miw={0} wrap="nowrap">
             <Text size="xs" fw={700} c="dimmed" truncate>
-              {t("title")}
+              {removal ? t("removalTitle") : t("title")}
             </Text>
             <Badge
               size="xs"
@@ -586,7 +608,7 @@ export function ActionExecutionTimelineCard({
             c={isFailedStatus(execution.status) ? "red" : "dimmed"}
             fw={600}
           >
-            {resultLabel(actionExecution, commandCompleted, t)}
+            {resultLabel(actionExecution, commandCompleted, removal, t)}
           </Text>
           {execution.status === "completed" && createdPath !== null ? (
             <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>

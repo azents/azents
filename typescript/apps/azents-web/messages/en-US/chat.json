@@ -26,6 +26,7 @@
   },
   "actionExecution": {
     "title": "Worktree action",
+    "removalTitle": "Worktree removal",
     "attempt": "Attempt {attempt}",
     "retry": "Retry",
     "discard": "Discard",
@@ -52,6 +53,13 @@
       "failed": "Worktree creation failed.",
       "cancelled": "Worktree creation was cancelled.",
       "registrationFailed": "Project registration failed after worktree creation."
+    },
+    "removalResult": {
+      "pending": "Waiting to remove worktree…",
+      "running": "Removing worktree…",
+      "completed": "Worktree Project removed successfully",
+      "failed": "Worktree removal failed.",
+      "cancelled": "Worktree removal was cancelled."
     },
     "status": {
       "pending": "Pending",

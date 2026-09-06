@@ -26,6 +26,7 @@
   },
   "actionExecution": {
     "title": "Worktree 작업",
+    "removalTitle": "Worktree 삭제",
     "attempt": "시도 {attempt}",
     "retry": "다시 시도",
     "discard": "건너뛰기",
@@ -52,6 +53,13 @@
       "failed": "Worktree 생성에 실패했습니다.",
       "cancelled": "Worktree 생성이 취소되었습니다.",
       "registrationFailed": "Worktree 생성 후 Project 등록에 실패했습니다."
+    },
+    "removalResult": {
+      "pending": "Worktree 삭제를 기다리는 중…",
+      "running": "Worktree 삭제 중…",
+      "completed": "Worktree Project가 삭제되었습니다",
+      "failed": "Worktree 삭제에 실패했습니다.",
+      "cancelled": "Worktree 삭제가 취소되었습니다."
     },
     "status": {
       "pending": "대기 중",

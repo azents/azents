@@ -347,6 +347,63 @@ export const RunningWorktreeAction = {
   },
 } satisfies Story;
 
+export const RunningWorktreeRemovalAction = {
+  args: {
+    actionExecution: {
+      provenance: "live",
+      execution: {
+        id: "action-execution-removal-1",
+        source_mailbox_item_id: "buffer-action-removal-1",
+        sender_user_id: null,
+        action_type: "agent_remove_git_worktree",
+        action: {
+          type: "agent_remove_git_worktree",
+          bridge_identity: "bridge-removal-1",
+          originating_run_id: "run-removal-1",
+          client_tool_call_id: "tool-call-removal-1",
+          session_agent_context_id: "context-removal-1",
+          originating_agent_session_id: "session-removal-1",
+          worktree_project_id: "project-removal-1",
+          worktree_allocation_id: "allocation-removal-1",
+          worktree_path: "/workspace/agent/.azents/worktrees/removal/project",
+          force: false,
+        },
+        status: "running",
+        owner_generation: 1,
+        failure_summary: null,
+        started_at: "2026-09-06T00:00:00Z",
+        completed_at: null,
+        updated_at: "2026-09-06T00:00:02Z",
+      },
+      events: [
+        {
+          id: "action-event-removal-1",
+          action_execution_id: "action-execution-removal-1",
+          sequence: 1,
+          kind: "command_started",
+          step_key: "remove_git_worktree",
+          command_argv: [
+            "git",
+            "-C",
+            "/workspace/agent/project",
+            "worktree",
+            "remove",
+            "/workspace/agent/.azents/worktrees/removal/project",
+          ],
+          content: "Removing the Agent-managed Git worktree checkout.",
+          created_at: "2026-09-06T00:00:02Z",
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await expect(canvas.getByText("Removing worktree…")).toBeVisible();
+    await expect(canvas.queryByText("Creating worktree…")).toBeNull();
+  },
+} satisfies Story;
+
 export const CancelledWorktreeAction = {
   args: {
     actionExecution: {
