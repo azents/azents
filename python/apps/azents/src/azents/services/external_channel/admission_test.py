@@ -15,6 +15,10 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
+    ExternalChannelInteractionAdmission,
+    ExternalChannelInteractionCreate,
+    ExternalChannelPrincipal,
+    ExternalChannelPrincipalCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -54,6 +58,72 @@ class _InteractionRepositoryDouble:
         del session
         assert interaction_id == "interaction-1"
         self.transitions.append((status, error_kind, error_summary))
+
+
+class _InteractionAdmissionRepositoryDouble:
+    """Record the canonical connection-before-principal admission lock order."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.admission = ExternalChannelInteractionAdmission.model_construct(
+            interaction=ExternalChannelInteraction.model_construct(id="interaction-1"),
+            created=True,
+        )
+
+    async def lock_connection_for_interaction_admission(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> None:
+        del session
+        assert connection_id == "connection-1"
+        self.calls.append("connection")
+
+    async def create_principal_idempotent(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelPrincipalCreate,
+    ) -> ExternalChannelPrincipal:
+        del session, create
+        self.calls.append("principal")
+        return ExternalChannelPrincipal.model_construct(id="principal-1")
+
+    async def admit_interaction(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelInteractionCreate,
+    ) -> ExternalChannelInteractionAdmission:
+        del session
+        assert create.principal_id == "principal-1"
+        self.calls.append("interaction")
+        return self.admission
+
+
+@pytest.mark.asyncio
+async def test_interaction_admission_locks_connection_before_principal_upsert() -> None:
+    """HTTP admission follows the connection-first Gateway transaction order."""
+    session = _SessionDouble()
+    repository = _InteractionAdmissionRepositoryDouble()
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield cast(AsyncSession, session)
+
+    result = await ExternalChannelAdmissionService(
+        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        repository=cast(ExternalChannelRepository, repository),
+    ).admit_interaction(
+        create=ExternalChannelInteractionCreate.model_construct(
+            connection_id="connection-1",
+            principal_id=None,
+        ),
+        principal=ExternalChannelPrincipalCreate.model_construct(),
+    )
+
+    assert result is repository.admission
+    assert repository.calls == ["connection", "principal", "interaction"]
+    assert session.committed is True
 
 
 @pytest.mark.asyncio

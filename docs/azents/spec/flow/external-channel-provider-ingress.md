@@ -54,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
+  - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -67,8 +68,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-01
-spec_version: 57
+last_verified_at: 2026-09-06
+spec_version: 58
 ---
 
 # External Channel Provider Ingress
@@ -167,6 +168,9 @@ retained.
    acknowledgement is returned. Message Commands materialize their selected source
    through the same canonical source-before-selection boundary; selector responses use
    signed compact component scope and return before any post-response control delivery.
+   The admission transaction locks the owning connection before upserting the provider
+   principal and inserting the interaction, matching Gateway ingestion's lock order so
+   concurrent setup messages and HTTP components cannot deadlock each other.
 7. A valid signed setup-location component additionally claims its provider mutation
    before returning Discord's deferred component-update acknowledgement. The callback
    path does not resolve the setup/replay processor, authenticate the Bot SDK, validate
@@ -568,6 +572,9 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-09-06** (spec_version 58) — Made HTTP interaction admission lock the
+  connection before principal upsert and interaction insertion, matching Gateway
+  ingestion order and preventing concurrent Discord setup deadlocks.
 - **2026-09-01** (spec_version 57) — Excluded awaiting Work from the Discord
   Gateway typing registry while retaining ready hidden and visible Work.
 - **2026-09-01** (spec_version 56) — Bounded each Discord SDK client's continuous
