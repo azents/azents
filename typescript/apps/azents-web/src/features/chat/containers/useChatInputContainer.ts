@@ -571,6 +571,10 @@ function useChatInputContainerImplementation({
           a.score - b.score || a.action.keyword.localeCompare(b.action.keyword),
       );
   }, [inputActionQuery, inputActions]);
+  const visibleInputActionResetKey = JSON.stringify([
+    inputActionQuery,
+    visibleInputActions.map((ranked) => ranked.action.id),
+  ]);
   const todoPreviewVisible =
     todo !== null &&
     editingMessageId === null &&
@@ -581,7 +585,7 @@ function useChatInputContainerImplementation({
 
   useEffect(() => {
     setActiveInputActionIndex(0);
-  }, [visibleInputActions]);
+  }, [visibleInputActionResetKey]);
 
   useEffect(() => {
     inputActionOptionRefs.current
