@@ -39,7 +39,21 @@
     "baseRef": "Base ref: {ref}",
     "cleanup": {
       "title": "Worktree cleanup",
-      "phase": "Phase: {phase}",
+      "phase": {
+        "discovering": "Finding inactive worktrees…",
+        "processing": "Cleaning up inactive worktrees…",
+        "completed": "Worktree cleanup completed",
+        "failed": "Worktree cleanup needs attention",
+        "cancelled": "Worktree cleanup was cancelled",
+        "unknown": "Worktree cleanup status is unavailable"
+      },
+      "outcome": {
+        "removed": "Removed",
+        "alreadyAbsent": "Already absent",
+        "protected": "Kept in use",
+        "failed": "Failed",
+        "unresolved": "Not checked"
+      },
       "examined": "Examined {count}",
       "removed": "Removed {count}",
       "protected": "Protected {count}",

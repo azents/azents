@@ -39,7 +39,21 @@
     "baseRef": "基準 ref: {ref}",
     "cleanup": {
       "title": "Worktree のクリーンアップ",
-      "phase": "フェーズ: {phase}",
+      "phase": {
+        "discovering": "使用されていない Worktree を検索中…",
+        "processing": "使用されていない Worktree をクリーンアップ中…",
+        "completed": "Worktree のクリーンアップが完了しました",
+        "failed": "Worktree のクリーンアップを確認してください",
+        "cancelled": "Worktree のクリーンアップをキャンセルしました",
+        "unknown": "Worktree のクリーンアップ状態を確認できません"
+      },
+      "outcome": {
+        "removed": "削除済み",
+        "alreadyAbsent": "すでに存在しません",
+        "protected": "使用中のため保持",
+        "failed": "失敗",
+        "unresolved": "未確認"
+      },
       "examined": "{count} 件を確認",
       "removed": "{count} 件を削除",
       "protected": "{count} 件を保護",

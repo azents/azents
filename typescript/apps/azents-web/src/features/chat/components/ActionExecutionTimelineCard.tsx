@@ -38,13 +38,23 @@ const REMOVE_GIT_WORKTREE_STEP_KEY = "remove_git_worktree";
 
 interface CleanupCandidate {
   path: string;
-  outcome: string;
-  reason_code: string | null;
+  outcome: CleanupOutcome;
   summary: string | null;
 }
 
+type CleanupPhase =
+  | "discovering"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+
+type CleanupOutcome =
+  "removed" | "already_absent" | "protected" | "failed" | "unresolved";
+
 interface CleanupResult {
-  phase: string;
+  phase: CleanupPhase;
   examined_count: number;
   protected_count: number;
   removed_count: number;
@@ -199,27 +209,52 @@ function numberField(value: Record<string, unknown>, key: string): number {
   return typeof field === "number" ? field : 0;
 }
 
+function cleanupPhase(value: unknown): CleanupPhase {
+  switch (value) {
+    case "discovering":
+    case "processing":
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return value;
+    default:
+      return "unknown";
+  }
+}
+
+function cleanupOutcome(value: unknown): CleanupOutcome | null {
+  switch (value) {
+    case "removed":
+    case "already_absent":
+    case "protected":
+    case "failed":
+    case "unresolved":
+      return value;
+    default:
+      return null;
+  }
+}
+
 function cleanupResult(value: unknown): CleanupResult | null {
   if (!isRecord(value)) {
     return null;
   }
   const candidates = Array.isArray(value.candidates)
     ? value.candidates.flatMap((candidate) => {
+        const outcome = isRecord(candidate)
+          ? cleanupOutcome(candidate.outcome)
+          : null;
         if (
           !isRecord(candidate) ||
           typeof candidate.path !== "string" ||
-          typeof candidate.outcome !== "string"
+          outcome === null
         ) {
           return [];
         }
         return [
           {
             path: candidate.path,
-            outcome: candidate.outcome,
-            reason_code:
-              typeof candidate.reason_code === "string"
-                ? candidate.reason_code
-                : null,
+            outcome,
             summary:
               typeof candidate.summary === "string" ? candidate.summary : null,
           },
@@ -227,7 +262,7 @@ function cleanupResult(value: unknown): CleanupResult | null {
       })
     : [];
   return {
-    phase: typeof value.phase === "string" ? value.phase : "pending",
+    phase: cleanupPhase(value.phase),
     examined_count: numberField(value, "examined_count"),
     protected_count: numberField(value, "protected_count"),
     removed_count: numberField(value, "removed_count"),
@@ -238,7 +273,45 @@ function cleanupResult(value: unknown): CleanupResult | null {
   };
 }
 
-function cleanupOutcomeColor(outcome: string): string {
+function cleanupPhaseLabel(
+  phase: CleanupPhase,
+  t: ReturnType<typeof useTranslations<"chat.actionExecution">>,
+): string {
+  switch (phase) {
+    case "discovering":
+      return t("cleanup.phase.discovering");
+    case "processing":
+      return t("cleanup.phase.processing");
+    case "completed":
+      return t("cleanup.phase.completed");
+    case "failed":
+      return t("cleanup.phase.failed");
+    case "cancelled":
+      return t("cleanup.phase.cancelled");
+    case "unknown":
+      return t("cleanup.phase.unknown");
+  }
+}
+
+function cleanupOutcomeLabel(
+  outcome: CleanupOutcome,
+  t: ReturnType<typeof useTranslations<"chat.actionExecution">>,
+): string {
+  switch (outcome) {
+    case "removed":
+      return t("cleanup.outcome.removed");
+    case "already_absent":
+      return t("cleanup.outcome.alreadyAbsent");
+    case "protected":
+      return t("cleanup.outcome.protected");
+    case "failed":
+      return t("cleanup.outcome.failed");
+    case "unresolved":
+      return t("cleanup.outcome.unresolved");
+  }
+}
+
+function cleanupOutcomeColor(outcome: CleanupOutcome): string {
   switch (outcome) {
     case "removed":
       return "green";
@@ -316,7 +389,7 @@ function CleanupActionExecutionTimelineCard({
             </Group>
 
             <Text size="xs" c="dimmed">
-              {t("cleanup.phase", { phase: result?.phase ?? "pending" })}
+              {cleanupPhaseLabel(result?.phase ?? "unknown", t)}
             </Text>
 
             {result !== null ? (
@@ -405,12 +478,12 @@ function CleanupActionExecutionTimelineCard({
                     variant="light"
                     style={{ flexShrink: 0 }}
                   >
-                    {candidate.outcome}
+                    {cleanupOutcomeLabel(candidate.outcome, t)}
                   </Badge>
                 </Group>
-                {(candidate.summary ?? candidate.reason_code) ? (
+                {candidate.summary ? (
                   <Text size="xs" c="dimmed" mt={rem(3)}>
-                    {candidate.summary ?? candidate.reason_code}
+                    {candidate.summary}
                   </Text>
                 ) : null}
               </Box>
