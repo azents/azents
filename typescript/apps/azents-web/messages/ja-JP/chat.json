@@ -26,6 +26,7 @@
   },
   "actionExecution": {
     "title": "Worktree アクション",
+    "removalTitle": "Worktree の削除",
     "attempt": "試行 {attempt}",
     "retry": "再試行",
     "discard": "破棄",
@@ -52,6 +53,13 @@
       "failed": "Worktree の作成に失敗しました。",
       "cancelled": "Worktree の作成をキャンセルしました。",
       "registrationFailed": "Worktree 作成後の Project 登録に失敗しました。"
+    },
+    "removalResult": {
+      "pending": "Worktree の削除を待機中…",
+      "running": "Worktree を削除中…",
+      "completed": "Worktree Project を削除しました",
+      "failed": "Worktree の削除に失敗しました。",
+      "cancelled": "Worktree の削除をキャンセルしました。"
     },
     "status": {
       "pending": "保留中",

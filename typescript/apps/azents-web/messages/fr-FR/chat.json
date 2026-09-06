@@ -26,6 +26,7 @@
   },
   "actionExecution": {
     "title": "Action de worktree",
+    "removalTitle": "Suppression du worktree",
     "attempt": "Tentative {attempt}",
     "retry": "Réessayer",
     "discard": "Ignorer",
@@ -52,6 +53,13 @@
       "failed": "Échec de la création du worktree.",
       "cancelled": "La création du worktree a été annulée.",
       "registrationFailed": "Échec de l’enregistrement du Project après la création du worktree."
+    },
+    "removalResult": {
+      "pending": "En attente de suppression du worktree…",
+      "running": "Suppression du worktree…",
+      "completed": "Worktree Project supprimé avec succès",
+      "failed": "Échec de la suppression du worktree.",
+      "cancelled": "La suppression du worktree a été annulée."
     },
     "status": {
       "pending": "En attente",
