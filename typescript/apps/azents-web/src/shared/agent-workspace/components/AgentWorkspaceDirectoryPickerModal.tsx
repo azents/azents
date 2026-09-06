@@ -27,6 +27,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
+import classes from "./AgentWorkspaceDirectoryPickerModal.module.css";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -223,7 +224,7 @@ export function AgentWorkspaceDirectoryPickerModal({
         : null;
 
     return (
-      <Stack gap="sm">
+      <Stack className={classes.readyContent} gap="sm">
         <Group justify="space-between" gap="sm" wrap="nowrap">
           <Stack gap="xs" style={{ minWidth: 0, flex: 1 }}>
             <Text c="dimmed" size="xs">
@@ -255,7 +256,15 @@ export function AgentWorkspaceDirectoryPickerModal({
             </Tooltip>
           </Group>
         </Group>
-        <ScrollArea.Autosize mah={{ base: rem(520), sm: rem(440) }} type="auto">
+        <ScrollArea
+          className={classes.directoryList}
+          classNames={{ viewport: classes.directoryViewport }}
+          data-testid="agent-workspace-picker-directory-list"
+          offsetScrollbars="y"
+          overscrollBehavior="contain"
+          scrollbars="y"
+          type="auto"
+        >
           <Stack gap="xs" style={{ minWidth: 0, width: "100%" }}>
             {parent ? (
               <Button
@@ -333,7 +342,7 @@ export function AgentWorkspaceDirectoryPickerModal({
               </Text>
             ) : null}
           </Stack>
-        </ScrollArea.Autosize>
+        </ScrollArea>
       </Stack>
     );
   };
@@ -345,13 +354,13 @@ export function AgentWorkspaceDirectoryPickerModal({
       opened={opened}
       size="lg"
       title={t("projectPickerTitle")}
-      styles={{
-        body: { overflowX: "hidden" },
-        content: { overflowX: "hidden" },
+      classNames={{
+        body: classes.modalBody,
+        content: classes.modalContent,
       }}
       onClose={onClose}
     >
-      <Stack gap="sm" style={{ minWidth: 0, overflowX: "hidden" }}>
+      <Stack className={classes.bodyStack} gap="sm">
         <Text c="dimmed" size="sm">
           {t("projectPickerDescription")}
         </Text>
