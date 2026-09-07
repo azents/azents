@@ -23,6 +23,7 @@ from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitNotBelongToAgent,
     DuplicateSlug,
+    EffectiveSlugConflict,
     InvalidConfig,
     InvalidCredentials,
     InvalidToolkitType,
@@ -254,6 +255,11 @@ async def update_toolkit_config(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Duplicate toolkit slug in workspace.",
+                )
+            case EffectiveSlugConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Toolkit slug conflicts with another toolkit for an agent.",
                 )
             case InvalidCredentials(detail=detail):
                 raise HTTPException(
@@ -523,6 +529,13 @@ async def attach_toolkit_to_agent(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Agent already has this toolkit attached.",
+                )
+            case EffectiveSlugConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Toolkit slug conflicts with another toolkit for this agent."
+                    ),
                 )
             case _:
                 assert_never(error)

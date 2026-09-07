@@ -32,7 +32,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.services.artifact import ArtifactService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -187,7 +187,6 @@ def get_vfs_projection_service(
         catalog=catalog,
         agent_run_repository=AgentRunRepository(),
         agent_session_repository=AgentSessionRepository(),
-        agent_toolkit_repository=AgentToolkitRepository(),
         toolkit_repository=ToolkitRepository(),
         required_provider_sources={
             scheduled_toolkit_provider.slug: scheduled_toolkit_provider

@@ -444,6 +444,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Always-Visible Toolkit Tools Requirements](requirements/toolkit-260818-always-visible-tools.md) | toolkit-260818 | 2026-08-18 | 2026-08-18 |
+| [Agent-Scoped Toolkit Management Requirements](requirements/toolkit-260907-agent-scoped-management.md) | toolkit-260907 | 2026-09-07 | - |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Task-Only Tracker Edit Requirements](requirements/tracker-260907-task-only-edit.md) | tracker-260907 | 2026-09-07 | 2026-09-07 |
@@ -859,6 +860,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
 - [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
 - [Always-Visible Toolkit Tools](adr/toolkit-260818-always-visible-tools.md)
+- [Agent-Scoped Toolkit Management Decisions](adr/toolkit-260907-agent-scoped-management.md)
 - [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
 - [Discord Todo Work Activity Tracker Visibility Decisions](adr/tracker-260829-todo-work-visibility.md)
 - [Discord Task-Only Tracker Edit Decisions](adr/tracker-260907-task-only-edit.md)

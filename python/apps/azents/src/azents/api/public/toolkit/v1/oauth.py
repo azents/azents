@@ -382,7 +382,7 @@ async def connect_oauth(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         existing = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
@@ -532,7 +532,7 @@ async def exchange_oauth_connection(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         connection = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
@@ -610,7 +610,7 @@ async def disconnect_oauth_connection(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         if toolkit is None or toolkit.workspace_id != member.workspace_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -769,7 +769,7 @@ async def test_connection_saved(
     toolkit_repo = ToolkitRepository(cipher=cipher)
 
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
         raise HTTPException(
@@ -898,7 +898,9 @@ async def _resolve_test_credentials(
     if body.toolkit_config_id is not None:
         toolkit_repo = ToolkitRepository(cipher=cipher)
         async with session_manager() as session:
-            toolkit = await toolkit_repo.get_by_id(session, body.toolkit_config_id)
+            toolkit = await toolkit_repo.get_shared_by_id(
+                session, body.toolkit_config_id
+            )
 
         if toolkit is not None and toolkit.workspace_id == workspace_id:
             saved: dict[str, object] = {}

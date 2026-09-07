@@ -175,6 +175,13 @@ class DuplicateSlug:
 
 
 @dataclasses.dataclass(frozen=True)
+class EffectiveSlugConflict:
+    """Another enabled Toolkit already uses the slug for one Agent."""
+
+    slug: str
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidToolkitType:
     """Toolkit type absent from TOOL_REGISTRY."""
 

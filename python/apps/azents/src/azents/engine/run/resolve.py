@@ -80,7 +80,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTOAuthProviderRejected,
@@ -1241,7 +1241,6 @@ async def resolve_agent_tools(
     *,
     execution_mode: ToolkitExecutionMode,
     toolkit_registry: dict[str, ToolkitProvider[Any]],
-    agent_toolkit_repository: AgentToolkitRepository,
     toolkit_repository: ToolkitRepository,
     session_manager: SessionManager[AsyncSession],
     web_url: str,
@@ -1267,7 +1266,6 @@ async def resolve_agent_tools(
     :param context: Toolkit runtime context
     :param execution_mode: Toolkit resolution mode for root or future subagent runs
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
-    :param agent_toolkit_repository: AgentToolkit repository
     :param toolkit_repository: Toolkit repository
     :param session_manager: DB session factory used only for Toolkit snapshot reads
     :param web_url: Frontend URL for OAuth redirect_uri construction
@@ -1288,13 +1286,11 @@ async def resolve_agent_tools(
     :return: List of (Toolkit, slug) tuples
     """
     async with session_manager() as session:
-        agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
-        registered_toolkits = []
-        for agent_toolkit in agent_toolkits:
-            toolkit = await toolkit_repository.get_by_id(
-                session, agent_toolkit.toolkit_id
-            )
-            registered_toolkits.append((agent_toolkit, toolkit))
+        registered_toolkits = await toolkit_repository.list_effective_for_agent(
+            session,
+            agent_id,
+            workspace_id=context.workspace_id,
+        )
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     registered_toolkit_config_ids: dict[int, str] = {}
@@ -1314,23 +1310,21 @@ async def resolve_agent_tools(
     ] = []
 
     # DB-registered toolkit (registry-based, prefix applied)
-    for at, toolkit in registered_toolkits:
-        provider = toolkit_registry.get(at.toolkit_type)
+    for effective in registered_toolkits:
+        toolkit = effective.toolkit
+        provider = toolkit_registry.get(toolkit.toolkit_type)
         if provider is None:
             logger.warning(
                 "Unknown toolkit_type, skipping",
                 extra={
-                    "toolkit_type": at.toolkit_type,
+                    "toolkit_type": toolkit.toolkit_type,
                     "agent_id": agent_id,
                 },
             )
             continue
 
-        if toolkit is None or not toolkit.enabled:
-            continue
-
         resolve_ctx = ResolveContext(
-            toolkit_id=at.toolkit_id,
+            toolkit_id=toolkit.id,
             toolkit_name=toolkit.name,
             credentials_json=toolkit.credentials,
             agent_id=context.agent_id,
@@ -1347,16 +1341,16 @@ async def resolve_agent_tools(
             resolved = await _resolve_toolkit_with_logging(
                 agent_id=agent_id,
                 context=context,
-                source="registered",
+                source=effective.source.value,
                 slug=toolkit.slug,
                 provider=provider,
-                toolkit_id=at.toolkit_id,
-                toolkit_type=at.toolkit_type,
+                toolkit_id=toolkit.id,
+                toolkit_type=toolkit.toolkit_type,
                 toolkit_name=toolkit.name,
                 resolve=provider.resolve(validated_config, resolve_ctx),
             )
             resolved.display_name = provider.name
-            registered_toolkit_config_ids[id(resolved)] = at.toolkit_id
+            registered_toolkit_config_ids[id(resolved)] = toolkit.id
             registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
             registered_toolkit_always_expose_tools[id(resolved)] = (
                 toolkit.always_expose_tools
@@ -1367,8 +1361,8 @@ async def resolve_agent_tools(
                 exc_info=True,
                 extra={
                     "agent_id": agent_id,
-                    "toolkit_id": at.toolkit_id,
-                    "toolkit_type": at.toolkit_type,
+                    "toolkit_id": toolkit.id,
+                    "toolkit_type": toolkit.toolkit_type,
                     "toolkit_slug": toolkit.slug,
                 },
             )
@@ -1382,7 +1376,7 @@ async def resolve_agent_tools(
                 toolkit.slug,
                 toolkit.prompt,
                 True,
-                at.toolkit_type,
+                toolkit.toolkit_type,
                 _ROOT_AND_SUBAGENT_EXECUTION_MODES,
             )
         )
