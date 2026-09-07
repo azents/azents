@@ -26,10 +26,24 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_toolkit_oauth_v1_connect_agent_oauth(self) -> None:
+        """Test case for toolkit_oauth_v1_connect_agent_oauth
+
+        Connect Agent Oauth
+        """
+        pass
+
     def test_toolkit_oauth_v1_connect_oauth(self) -> None:
         """Test case for toolkit_oauth_v1_connect_oauth
 
         Connect Oauth
+        """
+        pass
+
+    def test_toolkit_oauth_v1_disconnect_agent_oauth_connection(self) -> None:
+        """Test case for toolkit_oauth_v1_disconnect_agent_oauth_connection
+
+        Disconnect Agent Oauth Connection
         """
         pass
 
@@ -40,10 +54,38 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
         """
         pass
 
+    def test_toolkit_oauth_v1_exchange_agent_oauth_connection(self) -> None:
+        """Test case for toolkit_oauth_v1_exchange_agent_oauth_connection
+
+        Exchange Agent Oauth Connection
+        """
+        pass
+
     def test_toolkit_oauth_v1_exchange_oauth_connection(self) -> None:
         """Test case for toolkit_oauth_v1_exchange_oauth_connection
 
         Exchange Oauth Connection
+        """
+        pass
+
+    def test_toolkit_oauth_v1_get_agent_github_platform_install_url(self) -> None:
+        """Test case for toolkit_oauth_v1_get_agent_github_platform_install_url
+
+        Get Agent Github Platform Install Url
+        """
+        pass
+
+    def test_toolkit_oauth_v1_get_agent_github_platform_installations(self) -> None:
+        """Test case for toolkit_oauth_v1_get_agent_github_platform_installations
+
+        Get Agent Github Platform Installations
+        """
+        pass
+
+    def test_toolkit_oauth_v1_get_agent_github_platform_oauth_url(self) -> None:
+        """Test case for toolkit_oauth_v1_get_agent_github_platform_oauth_url
+
+        Get Agent Github Platform Oauth Url
         """
         pass
 
@@ -65,6 +107,20 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
         """Test case for toolkit_oauth_v1_get_github_platform_oauth_url
 
         Get Github Platform Oauth Url
+        """
+        pass
+
+    def test_toolkit_oauth_v1_test_agent_connection_saved(self) -> None:
+        """Test case for toolkit_oauth_v1_test_agent_connection_saved
+
+        Test Agent Connection Saved
+        """
+        pass
+
+    def test_toolkit_oauth_v1_test_agent_connection_unsaved(self) -> None:
+        """Test case for toolkit_oauth_v1_test_agent_connection_unsaved
+
+        Test Agent Connection Unsaved
         """
         pass
 

@@ -5,19 +5,29 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.engine.tools.mcp import McpToolkitProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
-from azents.repos.toolkit.data import ToolkitConfig
+from azents.repos.toolkit.data import NotFound, ToolkitConfig
+from azents.services.agent.data import NotAdmin
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
-from azents.services.toolkit.data import EffectiveSlugConflict, ToolkitUpdateInput
+from azents.services.toolkit.data import (
+    AgentNotBelongToWorkspace,
+    AgentToolkitOAuthConnectionInput,
+    EffectiveSlugConflict,
+    ToolkitCreateInput,
+    ToolkitUpdateInput,
+)
 
 
 class TestMergeEnvVarCredentials:
@@ -97,6 +107,8 @@ class TestMergeEnvVarCredentials:
             scope_repo=MagicMock(),
             agent_toolkit_repo=MagicMock(),
             agent_repo=MagicMock(),
+            agent_admin_repo=MagicMock(),
+            github_user_installation_repo=MagicMock(),
             session_manager=session_manager,
             toolkit_registry={},
             github_runtime=MagicMock(),
@@ -156,10 +168,353 @@ def _service(
         scope_repo=MagicMock(),
         agent_toolkit_repo=agent_toolkit_repo,
         agent_repo=agent_repo,
+        agent_admin_repo=MagicMock(),
+        github_user_installation_repo=MagicMock(),
         session_manager=session_manager,
         toolkit_registry={},
         github_runtime=MagicMock(),
     )
+
+
+def _active_agent(
+    *,
+    agent_id: str = "agent-1",
+    workspace_id: str = "workspace-1",
+) -> SimpleNamespace:
+    """Build the Agent fields used by Toolkit management authorization."""
+    return SimpleNamespace(
+        id=agent_id,
+        workspace_id=workspace_id,
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
+    )
+
+
+def _agent_management_service(
+    *,
+    toolkit_repo: MagicMock,
+    agent_repo: MagicMock,
+    agent_admin_repo: MagicMock,
+    agent_toolkit_repo: MagicMock,
+    toolkit_registry: dict[str, Any],
+) -> ToolkitService:
+    """Build a ToolkitService for Agent-owned management tests."""
+    session_manager = MagicMock()
+    session_manager.return_value = AsyncMock()
+    return ToolkitService(
+        toolkit_repo=toolkit_repo,
+        mcp_oauth_connection_repo=MagicMock(),
+        scope_repo=MagicMock(),
+        agent_toolkit_repo=agent_toolkit_repo,
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        github_user_installation_repo=MagicMock(),
+        session_manager=session_manager,
+        toolkit_registry=toolkit_registry,
+        github_runtime=MagicMock(),
+    )
+
+
+async def test_workspace_owner_can_manage_agent_without_explicit_admin() -> None:
+    """Workspace Owner authority does not depend on an AgentAdmin row."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock(return_value=False)
+    service = _agent_management_service(
+        toolkit_repo=MagicMock(),
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+
+    result = await service.authorize_agent_management(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Success)
+    agent_admin_repo.is_admin.assert_not_awaited()
+
+
+async def test_explicit_agent_admin_can_manage_agent() -> None:
+    """A non-Owner receives authority only through the AgentAdmin relation."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock(return_value=True)
+    service = _agent_management_service(
+        toolkit_repo=MagicMock(),
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+
+    result = await service.authorize_agent_management(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.MEMBER,
+    )
+
+    assert isinstance(result, Success)
+    agent_admin_repo.is_admin.assert_awaited_once()
+
+
+async def test_workspace_manager_role_alone_cannot_manage_agent_toolkits() -> None:
+    """Workspace Toolkit permissions do not grant Agent-only authority."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock(return_value=False)
+    service = _agent_management_service(
+        toolkit_repo=MagicMock(),
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+
+    result = await service.authorize_agent_management(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.MANAGER,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, NotAdmin)
+
+
+async def test_cross_workspace_agent_is_hidden_even_from_owner() -> None:
+    """The path Workspace must own the active Agent before role evaluation."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value=_active_agent(workspace_id="workspace-other")
+    )
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock()
+    service = _agent_management_service(
+        toolkit_repo=MagicMock(),
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+
+    result = await service.authorize_agent_management(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, AgentNotBelongToWorkspace)
+    agent_admin_repo.is_admin.assert_not_awaited()
+
+
+async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> None:
+    """Agent-owned creation writes only the canonical owner relation."""
+    agent = _active_agent()
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=agent)
+    agent_repo.lock_by_id = AsyncMock(return_value=agent)
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock()
+    agent_toolkit_repo = MagicMock()
+    agent_toolkit_repo.create = AsyncMock()
+    scope_repo = MagicMock()
+    scope_repo.create = AsyncMock()
+    created = _toolkit_config(slug="private")
+    created = created.model_copy(
+        update={"id": "toolkit-owned", "owner_agent_id": "agent-1"}
+    )
+    toolkit_repo = MagicMock()
+    toolkit_repo.has_effective_slug_conflict = AsyncMock(return_value=False)
+    toolkit_repo.create = AsyncMock(return_value=Success(created))
+    provider = McpToolkitProvider()
+    service = _agent_management_service(
+        toolkit_repo=toolkit_repo,
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=agent_toolkit_repo,
+        toolkit_registry={"mcp": provider},
+    )
+    service.scope_repo = scope_repo
+
+    result = await service.create_agent_owned(
+        "agent-1",
+        ToolkitCreateInput(
+            workspace_id="workspace-1",
+            toolkit_type="mcp",
+            slug="private",
+            name="Private",
+            config={
+                "server_url": "https://mcp.test",
+                "auth_type": "none",
+            },
+            always_expose_tools=False,
+        ),
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        user_id="user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Success)
+    create_args = toolkit_repo.create.await_args
+    assert create_args is not None
+    create = create_args.args[1]
+    assert create.workspace_id == "workspace-1"
+    assert create.owner_agent_id == "agent-1"
+    scope_repo.create.assert_not_awaited()
+    agent_toolkit_repo.create.assert_not_awaited()
+
+
+async def test_agent_owned_item_lookup_hides_another_agents_toolkit() -> None:
+    """An authorized administrator cannot read another Agent's owned config."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
+    toolkit_repo = MagicMock()
+    toolkit_repo.get_agent_owned_by_id = AsyncMock(return_value=None)
+    service = _agent_management_service(
+        toolkit_repo=toolkit_repo,
+        agent_repo=agent_repo,
+        agent_admin_repo=MagicMock(),
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+
+    result = await service.get_agent_owned(
+        "agent-1",
+        "toolkit-owned-by-agent-2",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, NotFound)
+    assert result.error.toolkit_id == "toolkit-owned-by-agent-2"
+
+
+async def test_agent_github_installation_sync_rechecks_current_authority() -> None:
+    """Installation persistence stops when AgentAdmin authority was removed."""
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
+    agent_admin_repo = MagicMock()
+    agent_admin_repo.is_admin = AsyncMock(return_value=False)
+    github_repo = MagicMock()
+    github_repo.sync = AsyncMock()
+    service = _agent_management_service(
+        toolkit_repo=MagicMock(),
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+    service.github_user_installation_repo = github_repo
+
+    result = await service.sync_agent_github_installations(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        user_id="user-1",
+        role=WorkspaceUserRole.MANAGER,
+        platform_app_id="123",
+        installations=[],
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, NotAdmin)
+    github_repo.sync.assert_not_awaited()
+
+
+async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None:
+    """OAuth persistence revalidates ownership and authority in one transaction."""
+    toolkit = _toolkit_config(slug="private").model_copy(
+        update={"owner_agent_id": "agent-1"}
+    )
+    toolkit_repo = MagicMock()
+    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    agent_repo = MagicMock()
+    agent_repo.lock_by_id = AsyncMock(return_value=_active_agent())
+    oauth_repo = MagicMock()
+    oauth_repo.upsert_connected = AsyncMock()
+    oauth_repo.mark_reconnect_required = AsyncMock()
+    service = _agent_management_service(
+        toolkit_repo=toolkit_repo,
+        agent_repo=agent_repo,
+        agent_admin_repo=MagicMock(),
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+    service.mcp_oauth_connection_repo = oauth_repo
+
+    result = await service.store_agent_oauth_connection(
+        "agent-1",
+        "toolkit-1",
+        AgentToolkitOAuthConnectionInput(
+            issuer="https://mcp.test",
+            resource="https://mcp.test",
+            server_url="https://mcp.test",
+            authorization_endpoint="https://mcp.test/authorize",
+            token_endpoint="https://mcp.test/token",
+            registration_endpoint=None,
+            client_id="client-1",
+            client_secret="secret-1",
+            token_endpoint_auth_method="client_secret_post",
+            scope=None,
+            access_token=None,
+            refresh_token=None,
+            expires_at=None,
+        ),
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+        connected=False,
+    )
+
+    assert isinstance(result, Success)
+    toolkit_repo.get_by_id_for_update.assert_awaited_once()
+    agent_repo.lock_by_id.assert_awaited_once()
+    oauth_repo.upsert_connected.assert_awaited_once()
+    oauth_repo.mark_reconnect_required.assert_awaited_once()
+
+
+async def test_agent_oauth_delete_rejects_another_agents_toolkit() -> None:
+    """The service does not delete OAuth state through a mismatched Agent path."""
+    toolkit = _toolkit_config(slug="private").model_copy(
+        update={"owner_agent_id": "agent-other"}
+    )
+    toolkit_repo = MagicMock()
+    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    oauth_repo = MagicMock()
+    oauth_repo.delete_by_toolkit_id = AsyncMock()
+    service = _agent_management_service(
+        toolkit_repo=toolkit_repo,
+        agent_repo=MagicMock(),
+        agent_admin_repo=MagicMock(),
+        agent_toolkit_repo=MagicMock(),
+        toolkit_registry={},
+    )
+    service.mcp_oauth_connection_repo = oauth_repo
+
+    result = await service.delete_agent_oauth_connection(
+        "agent-1",
+        "toolkit-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, NotFound)
+    oauth_repo.delete_by_toolkit_id.assert_not_awaited()
 
 
 async def test_attach_rejects_effective_slug_conflict_before_projection_create() -> (
@@ -368,6 +723,8 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
         scope_repo=MagicMock(),
         agent_toolkit_repo=AgentToolkitRepository(),
         agent_repo=agent_repo,
+        agent_admin_repo=MagicMock(),
+        github_user_installation_repo=MagicMock(),
         session_manager=session_manager,
         toolkit_registry={},
         github_runtime=MagicMock(),
