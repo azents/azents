@@ -91,6 +91,10 @@ def upgrade() -> None:
             "high_water_generation >= 0 AND accepted_generation >= 0",
             name="ck_runtime_connection_generations_non_negative",
         ),
+        sa.CheckConstraint(
+            "high_water_generation <= 9007199254740991",
+            name="ck_runtime_connection_generations_safe_integer_max",
+        ),
         sa.PrimaryKeyConstraint("connection_kind", "subject_id"),
     )
 

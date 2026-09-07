@@ -42,9 +42,8 @@ Reference local deployment currently mounts a persistent Valkey data volume, whi
 ### Pending material decisions
 
 - [x] `redis-260907/ADR-D1` — Use one durable per-subject connection-generation high-water relation.
-- [x] `redis-260907/ADR-D2` — Use one-shot Redis candidates with DB-only preflight and acceptance transactions.
-- [x] `redis-260907/ADR-D3` — Seed only migration-time subjects into a Home-bounded legacy-safe generation band and use a strict namespace cutover.
-- [x] `redis-260907/ADR-D4` — Represent JSON-exposed connection generations as canonical decimal strings.
+- [x] `redis-260907/ADR-D2` — Use one-shot volatile candidates with DB-only allocation, preflight, and acceptance transactions.
+- [x] `redis-260907/ADR-D3` — Seed migration-time Home subjects into a safe numeric band and use a strict namespace cutover.
 
 ### Agent-owned implementation details
 
@@ -68,84 +67,84 @@ The relation deliberately has no polymorphic foreign key to both Provider and Ru
 - Using Provider connection-history maximum plus `agent_runtimes.runner_generation` directly was rejected because those projections are written at different lifecycle boundaries and do not represent one uniform allocation authority.
 - A global sequence or random token was rejected because current fencing and durable state contracts require per-subject monotonic numeric generations, and changing that meaning would broaden protocol and persistence scope without solving subject-current ordering.
 
-### redis-260907/ADR-D2: Use one-shot Redis candidates with DB-only preflight and acceptance transactions
+### redis-260907/ADR-D2: Use one-shot volatile candidates with final durable acceptance
 
 **Affected requirements:** `redis-260907/REQ-1`, `REQ-2`, `REQ-3`, `REQ-4`, `REQ-8`
 
-Registration uses committed database state and one-shot volatile publication capabilities. No database transaction remains open across a Redis call.
+Registration crosses PostgreSQL and Redis through separate committed phases. No database transaction remains open across Redis, HTTP, gRPC, filesystem, object-storage, or other external I/O.
 
-Runtime Control first allocates and commits a generation from the D1 high-water relation in one short database-only transaction. It then stages the complete connection record under a generation- and token-specific Redis candidate key with a short TTL. Candidate records are not routing records. After staging, a second short database-only transaction confirms that the candidate generation is still the subject high-water. A stale candidate stops before promotion.
+Runtime Control first validates the subject and allocates generation `g` from the D1 high-water relation in one short database-only transaction. The committed high-water retains `g` even when every later phase fails. Outside that transaction, Control stages the complete proposed connection record under a generation- and random-token-specific volatile candidate key with a short TTL. Candidate records are not visible to routing, heartbeat, dispatch, reports, results, or close handling.
 
-Outside that transaction, one atomic Redis operation promotes only the stored candidate record into the subject's current-connection key when no higher current generation exists. The promotion operation must read and consume the candidate key; it cannot reconstruct the candidate solely from call arguments. Replacing Redis with an empty instance therefore destroys every pre-reset publication capability as well as the old current connection.
+A second database-only transaction verifies that `g` is still the subject high-water and that current registration authority remains eligible. After that transaction ends, one atomic coordination-store operation reads and consumes the exact stored candidate and promotes it into the subject's current connection record with the normal connection TTL. Promotion cannot reconstruct a missing candidate from arguments and refuses to replace a currently visible higher generation.
 
-After explicit promotion success, a final short database-only compare-and-set transaction accepts the generation only while it remains the high-water and advances durable accepted-generation evidence. Provider registration records its authenticated connection history in that same acceptance transaction. If the acceptance compare-and-set loses a race, Runtime Control attempts an exact-generation revoke only after the transaction has ended and rejects the registration. It emits `register_accepted` only after the acceptance transaction commits.
+A final database-only acceptance transaction advances durable `accepted_generation` to `g` only while `g` is still the high-water and current authorization remains valid. Provider connection history, credential use, binding state, and matching audit evidence commit in this same transaction. Runner acceptance revalidates the current Runtime and credential authority without adding a second Runner connection-history entity.
 
-An allocation, candidate stage, promotion, acceptance, or response failure consumes the generation but never permits generation reuse. A Redis command with an uncertain outcome is not replayed as success and does not reuse the same publication capability. The client must reconnect through a fresh registration and receive a higher generation. Candidate and unacknowledged current records remain bounded by TTL, and exact-generation cleanup cannot revoke a newer connection.
+If acceptance loses a race or authorization changes, Control ends the transaction before attempting exact-generation volatile revoke. Failed cleanup is bounded by the current-record TTL and cannot remove a higher generation. Only a committed acceptance permits relay tasks to start and `register_accepted(g)` to be emitted.
 
-Concurrent registrations may briefly replace routing before their final database acceptance. Until `register_accepted`, the registering client has not received the generation and its relay loop has not started; losing the final compare-and-set therefore produces a bounded fail-closed routing gap rather than published connection authority. Once a higher registration has completed promotion and durable acceptance, a lower delayed registration cannot become accepted after an empty Redis replacement: its pre-reset candidate is gone, while a candidate staged after the reset fails the durable high-water checks.
+Stage or promotion commands whose outcome is unknown are never replayed as success and never retried with the same publication capability. The registration fails, the issued generation remains consumed, and a fresh registration receives a higher generation. Replacing Redis with an empty instance destroys candidates and current records; no pre-reset publication capability can be reconstructed from PostgreSQL.
+
+A delayed lower-generation promotion after an empty-store reset may temporarily replace routing before final acceptance rejects it and cleanup or TTL removes it. The lower client has not received the generation and its relay loop has not started, so it cannot send an accepted heartbeat, report, result, operation, or revoke. The effect is bounded fail-closed unavailability rather than stale authority.
 
 **Rejected alternatives:**
 
-- Holding a row lock or transaction-scoped advisory lock while installing Redis state was rejected because external calls inside database transactions are forbidden.
-- Allocating in PostgreSQL and directly writing a generation-maximized Redis current record was rejected because a newly empty Redis has no retained comparison floor and could accept a delayed lower publisher.
-- Making PostgreSQL own the current live connection and requiring database validation on every heartbeat, route, and operation fence was rejected because Redis can remain the volatile live-routing authority with the candidate capability and durable acceptance boundary.
-- Holding a PostgreSQL session advisory lock or expiring durable lease across Redis I/O was rejected because it pins database coordination to external latency and still needs stale-holder fencing after connection loss or lease expiry.
+- Holding a database transaction or row lock across volatile publication was rejected because every external call inside a database transaction is forbidden.
+- A database precheck followed by direct current-record publication was rejected because an empty Redis instance has no comparison floor and a delayed lower publisher can win after the check.
+- Redis-only maximum-generation comparison was rejected because Redis replacement removes the maximum.
+- PostgreSQL session advisory locks or expiring durable leases around Redis I/O were rejected as the primary protocol because they pin database coordination to external latency and still require a final durable acceptance rule for ambiguous delayed commands.
+- Moving every live connection, operation, Transfer, and Terminal fence into PostgreSQL was rejected because the candidate protocol preserves safety with bounded fail-closed interruption while retaining Redis as the volatile live-routing and bounded-operation store. The durable-hot-path alternative would add outbox/inbox recovery, materially more database load, and a much broader state migration.
 
-### redis-260907/ADR-D3: Seed only migration-time subjects into a Home-bounded legacy-safe generation band and use a strict namespace cutover
+### redis-260907/ADR-D3: Seed migration-time Home subjects into a safe numeric band and use a strict namespace cutover
 
 **Affected requirements:** `redis-260907/REQ-1`, `REQ-2`, `REQ-3`, `REQ-6`, `REQ-7`, `REQ-8`
 
-The cutover does not depend on reading or restoring legacy Redis counters. The requester confirmed that Home is the only legacy deployment and delegated selection of a conservative cutover floor below `2^63`. The migration inserts D1 high-water rows for every Provider and Runtime subject that exists at migration time and seeds their high-water at `2^48 - 1` (`281474976710655`). Their first post-cutover allocation therefore begins at `2^48` (`281474976710656`). This is far above the bounded generation volume that the single 2026 Home deployment could have issued while remaining comfortably inside PostgreSQL signed `BIGINT`.
+Home is the only deployment that can contain legacy Redis-issued Provider or Runner connection generations. After every legacy Runtime Control replica has stopped, one table-locked migration transaction creates the allocator schema, seeds only Provider and Runtime subjects that exist at that migration boundary, installs database-enforced generation-row creation for future subjects, and records an immutable allocator cutover marker.
 
-Subjects created after the migration are not seeded into the legacy-safe band. Their absent high-water row is initialized at zero and their first generation is one because their newly generated immutable subject identity has no pre-cutover connection authority. High-water rows remain after later subject lifecycle transitions, as required by D1, so a migrated or newly created identity never falls back to another initialization rule.
+Each migration-time subject receives `high_water_generation = max(2^48 - 1, accepted_generation)`. Provider accepted evidence is the maximum durable `runtime_provider_connections.generation`, or zero when absent. Runner accepted evidence is `agent_runtimes.runner_generation`, or zero when absent. The first post-cutover allocation is therefore normally `2^48` (`281474976710656`), far above any plausible generation volume for the single Home legacy deployment even if Redis is already empty.
 
-The generation persistence boundary uses signed `BIGINT` and fails closed before overflow rather than wrapping or reusing authority. Redis records encode connection generations in one canonical fixed-width or otherwise order-preserving decimal string representation, and Lua scripts compare that representation without converting it to a Lua number. The protobuf remains `uint64`, but this allocator intentionally uses its positive signed 64-bit subset.
+Subjects created after the cutover are not seeded into the legacy-safe band. `AFTER INSERT` triggers on the Provider and Agent Runtime subject tables create the matching `0/0` generation row inside the subject-creation transaction, so the first allocation receives generation one. The migration installs these triggers before releasing the table locks, closing the race with subject-creation transactions that began before the migration but insert only after it commits. Allocation never infers migration membership from timestamps and never lazily creates a missing row; any missing generation row is an allocator integrity error and fails closed. Generation rows survive subject disablement, Runtime stop or removal, connection expiry, and subject-row deletion so an identity never re-enters through a lower initialization rule.
 
-Runtime Control uses a strict cutover rather than a rolling mixed-version period. All legacy Runtime Control replicas stop accepting and serving streams before schema migration and new-version startup. The migration seeds the existing subjects and establishes the allocator schema. Only then may new Runtime Control replicas become ready. Existing Provider and Runner streams disconnect and reconnect through the new allocator.
+PostgreSQL stores allocated and accepted generations as signed `BIGINT`, but the allocator's application maximum is JavaScript's exact-integer ceiling, `2^53 - 1` (`9007199254740991`). Existing protobuf `uint64`, Redis JSON/Lua numeric comparison, public JSON numbers, and TypeScript safe-integer contracts remain unchanged and exact throughout the allocator domain. Exhaustion fails closed without wraparound, reset, random fallback, or representation change.
 
-The new Runtime Control version uses a fresh Redis coordination namespace for connection candidates, current connections, request/reply/body streams, operation metadata, system metrics, and consumer-group state. It never reads, seeds, writes, or falls back to the legacy connection-generation counters or coordination namespace. Legacy volatile keys may expire naturally or disappear with the disposable Redis instance; their deletion is not a correctness prerequisite.
+Runtime Control uses a one-time strict non-overlapping cutover. Home scales Runtime Control to zero and confirms legacy endpoints are absent before applying the migration and deploying the new version. The cutover procedure temporarily disables Runtime Control HPA and PDB constraints that would prevent zero replicas, then restores normal rolling deployment configuration after the new version is active.
 
-Startup fails closed when the database schema or allocator cutover marker is not compatible with the new allocator. The deployment boundary must prevent legacy and new Runtime Control binaries from serving concurrently; the current default rolling Deployment behavior is not retained for this transition.
+The new version uses a fresh versioned Runtime coordination namespace for connection candidates and current records, request/reply/body streams, operation metadata, metrics, consumer groups, cursors, and other keys owned by the Runtime Coordination Store. It never reads, writes, imports, seeds, or deletes the legacy namespace. Runtime Transfer and Terminal keep their independently owned namespaces and existing empty-store recovery contracts.
 
-**Rejected alternatives:**
-
-- Seeding every future subject into the high generation band was rejected because a subject identity created after migration has no legacy authority to fence; new subjects retain the natural first generation of one.
-- Backfilling from Provider history, Runtime projections, and a one-time import of Redis counters was rejected because an already-empty Redis cannot reveal a Runner generation that was accepted but not yet reported durably.
-- A rolling mixed-version transition with temporary dual reads or writes was rejected because legacy replicas could continue issuing Redis generations and would preserve two competing allocation and namespace authorities.
-- Reusing the legacy Redis namespace and deleting selected keys was rejected because old streams, operations, current records, consumer groups, and counters could be mistaken for post-cutover volatile state.
-
-### redis-260907/ADR-D4: Represent JSON-exposed connection generations as canonical decimal strings
-
-**Affected requirements:** `redis-260907/REQ-2`, `REQ-3`, `REQ-7`, `REQ-8`
-
-Provider and Runner connection generations remain positive integers in PostgreSQL, Python, and the existing protobuf `uint64` fields. Every public or browser-facing JSON contract that exposes one of those connection generations represents it as a canonical decimal string. TypeScript treats the value as an opaque string and performs exact equality rather than numeric arithmetic.
-
-This coordinated contract change covers the public Runtime raw-state projection, Terminal WebSocket messages, and any other JSON schema discovered by the implementation audit to carry a Provider or Runner connection generation. OpenAPI schemas and generated clients change from numeric to string types in the same cutover. Internal JSON stored in Redis uses the same canonical string rule for exact Lua fencing.
-
-The cutover does not add numeric-and-string unions, duplicate fields, version negotiation, or permanent compatibility parsing. The strict Runtime Control and application deployment boundary from D3 updates producers and consumers together.
+Before the first new-band acceptance, deployment may return to the legacy release by restoring the pre-cutover procedure. After any new-band generation commits final acceptance, the transition is roll-forward-only: a legacy allocator must not restart, and PostgreSQL recovery must not move generation authority behind accepted evidence.
 
 **Rejected alternatives:**
 
-- Keeping JSON numbers was rejected because JavaScript cannot exactly represent the full allocator domain and two distinct future generations could compare equal after numeric conversion.
-- Changing only values above the JavaScript safe-integer limit to strings was rejected because a union type would add a permanent compatibility mode and value-dependent parsing.
-- Removing generation from the Runtime and Terminal contracts was rejected because those diagnostics and exact Terminal authority checks remain useful and would require a broader interface redesign.
+- Seeding from durable maxima alone was rejected because Runner authority may have been returned before any durable Runner report.
+- Requiring a Redis counter import was rejected because migration must succeed when Redis is already empty.
+- Seeding every future subject into the high band was rejected because a newly generated post-cutover identity has no legacy authority to collide with.
+- Classifying an absent row from `subject.created_at > cutover_at` was rejected because PostgreSQL transaction timestamps can predate a migration lock even when the blocked insert occurs only after cutover.
+- Updating every subject-creation service and quiescing all such writers was rejected because database triggers provide one atomic invariant without expanding the outage beyond Runtime Control.
+- A rolling mixed-version transition was rejected because legacy and new replicas would issue from different authorities and operate different namespaces concurrently.
+- Permanently changing Runtime Control to a `Recreate` deployment strategy was rejected because the outage is a one-time Home migration procedure, not the desired behavior for later releases.
+- Reusing or synchronously deleting the legacy namespace was rejected because correctness must not depend on retained Redis state or its cleanup.
+- Using numeric generations up to signed `BIGINT` maximum was rejected because Redis Lua/cjson and browser JavaScript cannot exactly compare that full range.
+- Changing JSON generations to decimal strings was rejected because the `2^53 - 1` allocator ceiling preserves exact current numeric contracts without a public compatibility migration.
+
 
 ## Consequences
 
 - Connection generation becomes a small durable fencing authority rather than retained Redis state.
-- Provider and Runner registration use one allocation contract while preserving their separate authentication and observed-state models.
-- Generation rows intentionally outlive volatile connection data and require bounded lifecycle and integrity handling.
-- Redis coordination implementations accept an externally allocated generation and expose candidate staging and promotion instead of allocation.
-- Migration-time subjects enter the `2^48` generation band, while later new identities retain generation one as their natural first value.
-- JSON and browser contracts carry connection generations as decimal strings while protobuf retains `uint64`.
-- Runtime Control requires one bounded strict cutover and cannot roll back to the legacy allocator after a new-band generation is accepted.
-- Legacy Redis Runtime coordination data is ignored rather than migrated, interpreted, or synchronously deleted.
+- Provider and Runner registration share one allocation authority while retaining their separate authentication and observed-state models.
+- Generation rows intentionally outlive volatile connection data and subject lifecycle transitions.
+- Redis and in-memory coordination consume externally allocated generations and expose invisible candidate staging plus exact one-shot promotion.
+- Registration can consume generations without returning them, and gaps are expected.
+- A promoted registration that loses final acceptance can briefly interrupt routing, but it cannot grant stale authority.
+- Migration-time Home subjects normally resume at generation `2^48`, while later identities start at one.
+- Generation storage widens to `BIGINT`, but public JSON, protobuf, Redis numeric encoding, and TypeScript contracts remain unchanged within the `2^53 - 1` allocator ceiling.
+- Runtime Control requires one planned non-overlapping cutover and a fresh coordination namespace; legacy Redis state becomes ignored disposable data.
 
 ## Risks
 
 - A polymorphic subject key cannot rely on one database foreign key. Registration authorization and bounded identifier validation must prevent invalid rows.
-- The requester-approved `2^48` floor relies on the confirmed single Home legacy deployment rather than a mathematical bound over every possible Redis signed integer; implementation evidence must verify all observable legacy maxima remain below the floor.
-- Connection generation requires signed `BIGINT` storage and exact string-safe JSON/Redis comparison; any remaining 32-bit or floating-point boundary could corrupt fencing.
-- Candidate promotion before final database acceptance can create a short fail-closed routing gap. Exact cleanup, TTL, and fresh higher registration must bound it without reporting success.
-- The strict cutover intentionally disconnects all Provider and Runner streams and requires deterministic deployment ordering before new replicas become ready.
-- A missing high-water row for a subject that existed at migration time must fail closed; initializing it at one would reintroduce legacy collision risk.
+- Candidate and current-record TTLs must bound every crash and cleanup path without expiring an accepted stream before its first heartbeat.
+- Provider durable history and accepted-generation evidence must commit atomically so a rejected credential cannot retain accepted volatile authority.
+- Runner authorization must be revalidated in the final acceptance transaction without introducing a competing Runner history authority.
+- The Home database maximum could not be independently queried because the provided read-only credential was rejected; the conservative floor relies on the confirmed single-deployment boundary rather than Redis or database maxima.
+- The migration must serialize its subject snapshot against concurrent Provider or Runtime creation so a legacy-capable subject cannot be omitted.
+- Subject-creation triggers become part of the allocator integrity boundary and must be present before the cutover marker permits new Runtime Control readiness.
+- Every persisted field that directly stores a Provider or Runner connection generation must accept the new band, while unrelated desired, configuration, owner, and stream generations retain their existing domains.
+- Runtime Control must fail readiness on missing or incompatible cutover authority, and operators must not restart a legacy image after first new-band acceptance.

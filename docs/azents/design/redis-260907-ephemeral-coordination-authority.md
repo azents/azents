@@ -14,14 +14,14 @@ snapshot_id: redis-260907
 - Document reference: `redis-260907/DESIGN`
 - Requirements: [Ephemeral Redis Coordination Authority Requirements](../requirements/redis-260907-ephemeral-coordination-authority.md) (`redis-260907/REQ`)
 - Decisions: [Ephemeral Redis Coordination Authority](../adr/redis-260907-ephemeral-coordination-authority.md) (`redis-260907/ADR`)
-- Design mode: Collaborative
-- Design revision: `2`
+- Design mode: Autonomous
+- Design revision: `1`
 
 ## Summary
 
 Redis remains the distributed live-routing and bounded-operation store, but it no longer allocates or preserves Provider and Runner connection generations. PostgreSQL owns one durable per-subject generation row. Registration crosses the two stores through committed database transactions and one-shot volatile Redis candidates; no external call occurs inside a database transaction.
 
-The migration gives only Provider and Runtime subjects that already exist at cutover a requester-approved `2^48` floor sized for the single Home legacy deployment. Subjects created after migration start at generation one. Runtime Control performs a strict non-rolling cutover into a new Redis namespace, so legacy counters, connections, streams, operations, metrics, and consumer groups are never read as new state.
+The migration gives only Provider and Runtime subjects that already exist at cutover a `2^48` floor sized for the single Home legacy deployment. Subjects created after migration start at generation one. The allocator fails closed at the exact numeric ceiling `2^53 - 1`, preserving the current protobuf, Redis JSON/Lua, public JSON, and TypeScript numeric contracts. Runtime Control performs a strict non-rolling cutover into a new Redis namespace, so legacy counters, connections, streams, operations, metrics, and consumer groups are never read as new state.
 
 All other Redis-backed features retain their existing ownership. Empty Redis loses in-flight coordination, fails it closed, and permits reconnect or reconciliation from PostgreSQL and existing object-storage authority. Provider enrollment rate limiting intentionally starts a fresh best-effort window.
 
@@ -60,7 +60,6 @@ Broker signals and ownership leases, Runtime operations and transfers, interacti
 | `redis-260907/ADR-D1` | Common durable generation relation |
 | `redis-260907/ADR-D2` | One-shot Redis candidate plus DB-only preflight and acceptance transactions |
 | `redis-260907/ADR-D3` | Existing-subject Home-bounded seed, new-subject generation one, strict namespace cutover |
-| `redis-260907/ADR-D4` | Canonical decimal strings for JSON-exposed connection generations |
 
 ## Architecture and Ownership
 
@@ -77,10 +76,10 @@ A new PostgreSQL relation stores one row per connection subject:
 The primary key is `(connection_kind, subject_id)`. The generation columns use PostgreSQL signed `BIGINT` and enforce:
 
 ```text
-0 <= accepted_generation <= high_water_generation <= 9223372036854775807
+0 <= accepted_generation <= high_water_generation <= 9007199254740991
 ```
 
-The protobuf remains `uint64`, but the server allocator intentionally uses its positive signed 64-bit subset.
+The database uses `BIGINT`, while the allocator intentionally stays inside JavaScript's and Redis Lua/cjson's exact integer domain. The protobuf remains `uint64`, and public JSON remains numeric.
 
 The relation has no polymorphic foreign key. Existing authentication and registration services prove subject existence before allocation. The row is never deleted as a consequence of connection expiry, disconnect, Provider disablement, Runtime stop, Runtime removal, or related lifecycle cleanup. Provider and Runtime IDs are generated immutable identities; a later object receives a different identity and therefore a different high-water row.
 
@@ -132,7 +131,7 @@ sequenceDiagram
 
 ### Phase 1: allocate
 
-After existing identity, protocol, capability, configuration, and credential checks, a short database-only transaction locks or atomically upserts the subject row, increments `high_water_generation`, and returns `g`. It rejects allocation at the signed `BIGINT` maximum rather than wrapping or reusing authority.
+After existing identity, protocol, capability, configuration, and credential checks, a short database-only transaction locks the existing subject generation row, increments `high_water_generation`, and returns `g`. A missing row is an allocator integrity failure; allocation does not infer subject age or lazily create authority state. It rejects allocation at `2^53 - 1` rather than wrapping, resetting, changing representation, or reusing authority.
 
 A failed or committed-but-abandoned allocation creates only a gap. Gaps are valid and never repaired downward.
 
@@ -194,18 +193,18 @@ Heartbeat, message, operation, report, result, and close paths retain exact-gene
 
 After every legacy Runtime Control replica has stopped, the migration inserts generation-authority rows for all Provider resource IDs and Agent Runtime IDs present in PostgreSQL. Each inserted row has:
 
-- `high_water_generation = 281474976710655` (`2^48 - 1`); and
+- `high_water_generation = max(281474976710655, accepted_generation)`; and
 - `accepted_generation` equal to the best available durable accepted evidence, or zero when none exists.
 
 Provider accepted evidence is the maximum Provider connection-history generation. Runner accepted evidence is the current `agent_runtimes.runner_generation` projection. This evidence is informational and monotonic; the high-water seed, not the evidence maximum, prevents collision with accepted-but-unreported legacy Runner registrations.
 
-The first post-cutover allocation for each migrated subject is `281474976710656` (`2^48`). The requester confirmed on 2026-09-07 that Home is the only legacy deployment. At one million successful registrations per second for one subject, reaching this floor would still require about 8.9 years, which is far beyond the bounded lifetime and throughput of that deployment.
+The first post-cutover allocation for a subject below the seed is `281474976710656` (`2^48`). The requester confirmed on 2026-09-07 that Home is the only legacy deployment. At one million successful registrations per second for one subject, reaching this floor would still require about 8.9 years. From the cutover floor to `2^53 - 1`, the allocator retains `8,725,724,278,030,336` values, or about 276 years at the same impossible sustained rate.
 
 ### Subjects created after migration
 
-The migration does not precreate rows for future identities. Allocation for an absent authorized subject atomically creates its row at high-water zero and advances it to generation one. Because Provider and Runtime IDs are immutable generated identities, a post-migration subject has no legacy connection authority.
+The migration installs `AFTER INSERT` triggers on `runtime_providers` and `agent_runtimes` while both subject tables remain locked. Each future subject creation transaction atomically inserts the corresponding generation row with `high_water_generation = 0` and `accepted_generation = 0`. The first later allocation advances that row to generation one. Because Provider and Runtime IDs are immutable generated identities, a post-migration subject has no legacy connection authority.
 
-A generation-authority row survives later deletion or lifecycle transition of its subject. If an internal repair ever encounters an authorized subject without a row, it may initialize at zero only when the subject creation timestamp is strictly after the recorded allocator cutover. A missing row for a migration-time-or-older subject is a fail-closed integrity error, not permission to start at one.
+The seed and trigger installation occur in the same migration transaction. A subject-creation transaction that began earlier but blocks on the migration table lock resumes only after the trigger exists and therefore receives its zeroed row. No timestamp comparison participates in classification. A generation-authority row survives later deletion or lifecycle transition of its subject, and any missing row is a fail-closed integrity error rather than permission to initialize.
 
 ### PostgreSQL types
 
@@ -220,17 +219,13 @@ Unrelated lifecycle desired generations, configuration sequences, owner generati
 
 ### Redis encoding
 
-Runtime coordination JSON encodes Provider and Runner connection generations as canonical 19-digit zero-padded decimal strings. Equality uses exact string comparison; ordering uses lexicographic comparison because every encoded value has equal width. Lua never calls `tonumber()` for these connection-generation values.
+Runtime coordination JSON keeps Provider and Runner connection generations as JSON numbers. Every ingress, decoded record, and candidate validates `1 <= generation <= 2^53 - 1` before the value reaches Lua or business logic. Redis Lua may use `tonumber()` because every permitted allocator value is exactly representable by IEEE-754 binary64.
 
-Python boundaries decode the canonical string into `int` and validate the positive signed `BIGINT` range. Protobuf continues carrying `uint64`; public JSON schemas and generated non-protobuf clients change under ADR-D4.
-
-Generation-derived Redis stream IDs and key segments use the same canonical encoding so two distinct connection generations cannot collide through floating-point conversion.
+Generation-derived Redis stream IDs and key segments continue using ordinary canonical decimal integer formatting. The upper bound guarantees that two permitted generations cannot compare equal or collapse through Lua/cjson conversion.
 
 ### Public and browser JSON encoding
 
-Every public or browser-facing JSON field that carries a Provider or Runner connection generation uses an unpadded canonical decimal string. This includes `AgentRuntimeRawStateResponse.runner_generation`, Terminal WebSocket Runner authority, and any additional JSON contract found by the implementation audit. TypeScript models the value as an opaque string and uses exact equality only.
-
-OpenAPI schemas and generated clients change in the same coordinated cutover. There is no numeric/string union, duplicate legacy field, value-dependent encoding, or compatibility parser. Protobuf keeps its existing `uint64` fields and Python converts explicitly between protobuf integers, PostgreSQL `BIGINT`, Redis fixed-width strings, and public unpadded strings.
+Public and browser-facing Provider and Runner connection generations remain JSON numbers. This includes `AgentRuntimeRawStateResponse.runner_generation`, Terminal WebSocket Runner authority, and any additional JSON contract found by the implementation audit. TypeScript continues using safe-integer validation and exact numeric equality. OpenAPI schemas, generated clients, and protobuf `uint64` fields retain their current shapes; boundary tests reject values above `2^53 - 1`.
 
 ## Redis Namespace Cutover
 
@@ -248,7 +243,7 @@ There is no connection-generation counter in the new namespace.
 
 New code never reads or deletes the legacy namespace during registration, dispatch, recovery, or cleanup. Legacy keys may expire, remain harmless until the Redis instance is replaced, or be removed by an operator as ordinary disposal of volatile state. Correctness and new-service readiness never depend on their presence or deletion.
 
-Runtime Transfer and interactive Terminal retain their independently versioned namespaces and current empty-store behavior. They are not migrated into the Runtime coordination namespace. Their records that reference a Runner generation must preserve exact string-safe serialization and comparison where the migrated generation can flow through them.
+Runtime Transfer and interactive Terminal retain their independently versioned namespaces and current empty-store behavior. They are not migrated into the Runtime coordination namespace. Their records that reference a Runner generation must preserve exact safe-integer serialization and comparison where the migrated generation can flow through them.
 
 ## Empty-Store Recovery by Capability
 
@@ -300,19 +295,20 @@ Cleanup, observer notification, logging export, and metrics export occur after t
 - The migration is generated through the repository Alembic workflow.
 - Runtime Control replacement can tolerate a bounded planned outage while Provider and Runner streams reconnect.
 - PostgreSQL remains available throughout cutover; old Redis contents are not a precondition.
-- The migration asserts that every observable durable Provider and Runner connection generation is below `2^48`; a violation aborts before seeding or serving new Runtime Control.
+- The migration asserts that every observable durable Provider and Runner connection generation is at most `2^53 - 1`; a violation aborts before seeding or serving new Runtime Control.
+- The migration serializes its seed snapshot against Provider and Runtime inserts, even though legacy Runtime Control is already stopped, so no migration-time subject can miss initialization.
 
 ### Strict cutover sequence
 
-1. Stop all legacy Runtime Control replicas and wait until no old pod can accept new Provider or Runner streams.
-2. Apply the schema migration and existing-subject seed while no legacy allocator is running.
+1. Temporarily disable Runtime Control HPA and PDB constraints, scale Runtime Control to zero, and verify that no legacy endpoint remains.
+2. Apply the schema migration, table-locked existing-subject seed, future-subject insert triggers, and immutable cutover marker while no legacy allocator is running.
 3. Deploy the new Runtime Control image configured only for the new Runtime coordination namespace.
 4. Permit readiness only after the expected schema revision and allocator cutover marker are present.
-5. Start the desired new replica count. Provider and Runner reconnect loops establish fresh connections.
+5. Restore the desired Runtime Control replica count, HPA, and PDB. Provider and Runner reconnect loops establish fresh connections.
 6. Verify new accepted generations and normal lifecycle reconciliation before considering the cutover complete.
 7. Remove the reference Valkey persistence implication and retain old Redis data only as disposable, ignored state until it is naturally or operationally discarded.
 
-The Kubernetes Runtime Control Deployment uses a non-overlapping replacement boundary for this transition rather than its current default rolling behavior. A release-specific Recreate boundary or an equivalent explicit scale-to-zero/migrate/scale-up procedure is acceptable; the implementation plan must choose one deterministic chart-supported path and test its rendered contract.
+The transition uses an explicit Home release procedure rather than a permanent Deployment strategy change. Later Runtime Control releases return to normal rolling behavior. The implementation plan must encode or document one deterministic chart-supported scale-to-zero/migrate/scale-up path and test the rendered HPA/PDB constraints.
 
 The existing Runtime Control entrypoint schema check remains useful, but it is not sufficient by itself because it does not stop legacy replicas. Migration and deployment ordering must be explicit in the chart and operator documentation.
 
@@ -392,7 +388,7 @@ The generation table contains identifiers and counters only. It stores no creden
 | Transfer and Terminal reset | Old volatile handle/PTY cannot resume; new operation can start from current authority |
 | Broker and External Channel recovery | Durable pending work produces fresh wake-up/delivery without old Redis state |
 | Enrollment limit reset | Counter window may restart while invalid/consumed/revoked grants remain rejected |
-| Public/browser generation encoding | Runtime raw-state and Terminal WebSocket values are exact decimal strings and consecutive high generations never compare equal |
+| Public/browser generation encoding | Runtime raw-state and Terminal WebSocket values remain numeric safe integers; the `2^53 - 1` ceiling is enforced and consecutive high generations remain distinct |
 | Reference deployment | Valkey has no persistent volume or required persistence mode; PostgreSQL/object storage remain durable |
 
 The primary end-to-end scenario runs real PostgreSQL, Valkey, Runtime Control, Provider, and Runner. It records an accepted connection, clears or replaces the Valkey instance without seeding keys, waits for reconnect, and proves both monotonic generation and successful new work. It then sends stale-generation heartbeat, report, result, and revoke attempts and verifies they cannot affect the new connection or durable state.
@@ -402,15 +398,17 @@ The primary end-to-end scenario runs real PostgreSQL, Valkey, Runtime Control, P
 The migration suite creates Provider and Runtime subjects plus representative Provider history and Runner projection before upgrade. After upgrade it verifies:
 
 - exactly one generation-authority row per migration-time subject;
-- high-water seed `2^48 - 1`;
+- high-water seed `max(2^48 - 1, accepted_generation)`;
 - accepted evidence is bounded by the high-water;
+- Provider and Runtime inserts blocked behind the migration lock resume through the installed trigger and receive a zeroed row;
 - required generation columns preserve values and accept the new band;
-- a subject inserted after migration is not preseeded and allocates generation one; and
+- every subject inserted after migration receives `0/0` authority atomically and allocates generation one;
+- allocation at `2^53 - 1` fails closed without changing representation or wrapping; and
 - downgrade or rollback policy cannot silently restart the legacy allocator after new acceptance.
 
 ### Contract and race tests
 
-The shared Redis/in-memory store contract covers candidate invisibility, exact token checks, canonical uint64 encoding, higher-generation promotion fencing, exact revoke, TTL, and empty-store candidate invalidation. Deterministic synchronization controls every concurrency test; fixed sleeps are used only when testing an actual expiry contract.
+The shared Redis/in-memory store contract covers candidate invisibility, exact token checks, numeric safe-integer validation, higher-generation promotion fencing, exact revoke, TTL, and empty-store candidate invalidation. Deterministic synchronization controls every concurrency test; fixed sleeps are used only when testing an actual expiry contract.
 
 Service tests inject failures after allocation, stage, preflight, promotion, acceptance, and response serialization. Tests assert transaction scopes are closed before each fake external call. Provider acceptance tests verify connection history and credential audit commit atomically with accepted generation. Runner tests verify no history table is introduced and later observed-state predicates remain monotonic.
 
@@ -430,22 +428,21 @@ Evidence includes pytest results, migration upgrade checks, Helm/Compose render 
 | Coordination store generation allocation method | ADR-D1, ADR-D2 | External allocation plus candidate stage/promotion contract | Backend service/store cutover | Store contract requires caller-supplied generation and contains no allocator state |
 | In-memory process-local generation counters | `redis-260907/REQ-2`; ADR-D1 | Same PostgreSQL generation authority used with in-memory volatile routing | In-memory adapter cutover | Restarted in-memory store receives higher DB generation |
 | Unversioned Runtime coordination namespace | `redis-260907/REQ-1`, `REQ-3`; ADR-D3 | New versioned namespace | Strict Runtime Control cutover | New code has no read/write reference to the legacy prefix except explicit test/removal assertions |
-| Rolling mixed-version Runtime Control transition | ADR-D3 | Non-overlapping strict cutover | Deployment release boundary | Chart/render and rollout documentation prove old replicas stop before new readiness |
+| Rolling mixed-version Runtime Control transition at the allocator boundary | ADR-D3 | One-time Home scale-to-zero/migrate/scale-up procedure; later releases retain normal rolling behavior | Deployment release boundary | Chart/render and rollout documentation prove old replicas stop before new readiness and HPA/PDB are restored afterward |
 | Redis-retained generation requirement in Living Spec | `redis-260907/REQ-7`; ADR-D1 | Durable PostgreSQL issuance and volatile Redis publication | Spec synchronization after implementation | Current Spec contains no persistence requirement |
 | Compose `valkeydata` volume and implied retention | `redis-260907/REQ-6` | Explicit ephemeral Valkey configuration | Reference deployment update | Compose render/config has no Valkey data volume or persistence mode |
 | Redis counter import or compatibility fallback | `redis-260907/REQ-1`, fixed constraint; ADR-D3 | None | Migration and code cutover | No import job, fallback reader, dual write, or legacy namespace lookup exists |
 | Existing durable Runtime, Provider, Session, External Channel, Scheduled Task, and file authorities | `redis-260907/REQ-4` | Remain unchanged | None | Feasibility and regression tests verify existing repositories remain authoritative |
 | Existing Runtime Transfer and Terminal volatile state models | `redis-260907/REQ-3`, `REQ-4` | Remain volatile with current cleanup/reconnect boundaries | Only exact connection-generation serialization where needed | No relational Transfer/Terminal state or replay authority is added |
 | Provider enrollment Redis rate-limit window | `redis-260907/REQ-5` | Remains best-effort Redis state | Documentation/test update only | Reset test proves fresh window and unchanged durable grant rejection |
-| Public Runtime Control protobuf shape | Fixed constraint; ADR-D4 | Existing `uint64 generation` fields remain | None | Protobuf and generated protobuf diffs are absent |
-| Numeric JSON connection-generation fields | ADR-D4 | Canonical decimal-string OpenAPI, generated client, and Terminal WebSocket fields | Coordinated application/client cutover | Schemas and TypeScript contain no numeric Provider/Runner connection-generation field or compatibility union |
+| Existing protobuf and JSON connection-generation contracts | Fixed compatibility constraint; ADR-D3 | Existing protobuf `uint64` and numeric JSON safe-integer fields remain | None | Schema, generated-client, and wire-shape diffs are absent; boundary tests reject values above `2^53 - 1` |
 
 ## Feasibility Validation
 
 | Requirement | Result | Repository evidence and condition |
 | --- | --- | --- |
 | `redis-260907/REQ-1` | feasible | Runtime coordination keys are isolated behind store implementations; durable recovery paths already tolerate missing signals and volatile Transfer/Terminal state. New namespace can start empty. |
-| `redis-260907/REQ-2` | feasible | Provider/Runtime subjects use generated immutable IDs; Provider history already enforces `(provider_id, generation)` uniqueness; protobuf generations are `uint64`. Existing connection-generation columns can widen from `INTEGER` to `BIGINT`, and Redis/JSON boundaries can use exact strings. |
+| `redis-260907/REQ-2` | feasible | Provider/Runtime subjects use generated immutable IDs; Provider history already enforces `(provider_id, generation)` uniqueness; protobuf generations are `uint64`. Existing connection-generation columns can widen from `INTEGER` to `BIGINT`, while the allocator ceiling keeps Redis Lua and JSON boundaries exact numeric safe integers. |
 | `redis-260907/REQ-3` | feasible | Operation, Transfer, Terminal, broker, and live-state paths already use generation/owner/attempt fences and bounded TTL or durable reconciliation. Registration publication adds no success reconstruction. |
 | `redis-260907/REQ-4` | feasible | PostgreSQL models already own Runtime desired/observed state, Provider history, Sessions, runs, mailboxes, External Channels, Scheduled Tasks, and results. Object-store orphan cleanup is state-independent where required. |
 | `redis-260907/REQ-5` | feasible | Enrollment rate limiting is Redis-only while grants, credentials, bindings, consumption, expiry, and revocation are repository-backed. No schema change is required for rate limiting. |
@@ -455,11 +452,11 @@ Evidence includes pytest results, migration upgrade checks, Helm/Compose render 
 
 No requirement is blocked. The strict Runtime Control outage and roll-forward-only post-acceptance boundary are accepted operational consequences of `redis-260907/ADR-D3`, not feasibility blockers.
 
-The main implementation risk is exact connection-generation propagation through Redis Lua/JSON, public JSON, TypeScript, and existing PostgreSQL `INTEGER` columns. The repository exposes all known connection-generation storage and comparison paths, and the Design requires a bounded audit for every `provider_generation`, `runner_generation`, operation generation, Transfer accepted Runner generation, Terminal Runner generation, raw Runtime response, and Terminal WebSocket field before implementation completes.
+The main implementation risk is enforcing the exact safe-integer ceiling across Redis Lua/JSON, public JSON, TypeScript, protobuf ingress, and existing PostgreSQL `INTEGER` columns. The repository exposes all known connection-generation storage and comparison paths, and the Design requires a bounded audit for every `provider_generation`, `runner_generation`, operation generation, Transfer accepted Runner generation, Terminal Runner generation, raw Runtime response, and Terminal WebSocket field before implementation completes.
 
 ## Design Authority
 
-- Design revision: `2`
+- Design revision: `1`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -468,20 +465,20 @@ The main implementation risk is exact connection-generation propagation through 
 | M3 | One-shot volatile candidate capability and atomic Redis/in-memory promotion | `redis-260907/REQ-1`, `REQ-2`, `REQ-3`; ADR-D2 | `decided` |
 | M4 | Provider history and authorization commit atomically with final accepted generation | `redis-260907/REQ-2`, `REQ-4`; ADR-D2; existing Provider history authority | `derived` |
 | M5 | Runner acceptance uses the common relation without a new Runner history entity | `redis-260907/REQ-2`, `REQ-4`; ADR-D1, ADR-D2 | `derived` |
-| M6 | Migration-time subjects seed at `2^48 - 1`; later subjects start at zero | `redis-260907/REQ-2`; ADR-D3 | `decided` |
-| M7 | Signed `BIGINT` persistence and exact Redis connection-generation representation | Fixed protocol constraint; ADR-D3, ADR-D4 | `derived` |
+| M6 | Migration-time subjects seed at `max(2^48 - 1, accepted_generation)`; database insert triggers atomically create `0/0` authority for every later subject | `redis-260907/REQ-1`, `REQ-2`; ADR-D3 | `decided` |
+| M7 | PostgreSQL `BIGINT` persistence with an exact numeric allocator ceiling of `2^53 - 1` across Redis, JSON, TypeScript, and protobuf boundaries | Fixed compatibility constraint; ADR-D3 | `derived` |
 | M8 | Strict non-overlapping Runtime Control cutover and readiness marker | `redis-260907/REQ-1`, `REQ-2`, `REQ-6`; ADR-D3 | `decided` |
 | M9 | Fresh Runtime coordination namespace with no legacy reader, writer, import, or fallback | `redis-260907/REQ-1`, `REQ-3`, `REQ-7`; ADR-D3 | `decided` |
 | M10 | Existing Redis-backed capabilities fail closed and recover from their current durable authorities | `redis-260907/REQ-1`, `REQ-3`, `REQ-4`, `REQ-5`; current Specs | `existing` |
 | M11 | Ephemeral reference Valkey and no retention/HA correctness contract | `redis-260907/REQ-6`; Redis optionality project convention | `required` |
 | M12 | Deterministic migration, race, empty-store, fail-closed, and deployment verification | `redis-260907/REQ-8` | `required` |
-| M13 | Canonical decimal strings for public and browser JSON connection generations | `redis-260907/REQ-2`, `REQ-7`, `REQ-8`; ADR-D4 | `decided` |
 
 ## Assumptions and Non-Blocking Risks
 
 - Provider resource IDs and Agent Runtime IDs continue using generated immutable identities. The design does not authorize reusing a deleted subject ID for a new object.
-- Every subject visible to the migration seed is placed in the legacy-safe band, including one created after old Runtime Control stops but before the seed transaction. A subject created only after that seed cannot have legacy connection authority and may safely follow the generation-one rule.
-- Generation exhaustion at signed `BIGINT` maximum `2^63 - 1` is practically remote but fails closed and requires a future protocol decision; wraparound is never allowed.
+- Every subject visible to the migration seed is placed in the legacy-safe band. A subject insert that races the migration is serialized by the table lock and trigger installation, so it either appears in the seed snapshot or atomically receives a zeroed row after cutover.
+- The provided Home read-only database credential reached PostgreSQL but failed password authentication, so live maxima were unavailable as supplementary evidence. The design does not depend on those maxima or on Redis contents; the conservative floor relies on the requester-confirmed single Home legacy deployment boundary.
+- Generation exhaustion at the exact numeric ceiling `2^53 - 1` is practically remote but fails closed and requires a future protocol decision; wraparound and representation fallback are never allowed.
 - A registration that is promoted but loses final acceptance can briefly replace routing before exact cleanup or TTL. The client has not received the generation and relay tasks have not started, so this is bounded fail-closed unavailability rather than published authority.
 - Removing Valkey persistence may make local `docker compose restart` lose active coordination more visibly. This is intentional and exercises the supported recovery contract.
 - Redis availability and HA may still be used to reduce disruption, but operators must not treat retained Redis data as backup or recovery authority.
@@ -490,7 +487,7 @@ The main implementation risk is exact connection-generation propagation through 
 
 After implementation verification:
 
-- update `docs/azents/spec/flow/agent-runtime-control.md` to replace Redis-retained counters with PostgreSQL issuance, one-shot publication, exact string-safe fencing, strict cutover history, and empty-store reconnect behavior;
+- update `docs/azents/spec/flow/agent-runtime-control.md` to replace Redis-retained counters with PostgreSQL issuance, one-shot publication, exact safe-integer fencing, strict cutover history, and empty-store reconnect behavior;
 - update `docs/azents/spec/flow/run-resume.md` and `docs/azents/spec/flow/agent-execution-loop.md` where needed to state that missing broker state is reconstructed only from durable work;
 - update `docs/azents/spec/flow/file-exchange-storage.md` and Terminal-related current Specs only where they need explicit empty-store and exact connection-generation wording;
 - update External Channel, Scheduled Task, and enrollment documentation only where their Redis reset outcomes are not already explicit;
@@ -499,10 +496,9 @@ After implementation verification:
 
 ## Design Approval
 
-- Mode: `Collaborative`
-- Decision owner: `건우`
+- Mode: `Autonomous`
+- Decision owner: `redis-design-interviewee`
 - Approved on: `2026-09-07`
-- Approved Design revision: `2`
-- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13`
-- Approved scope: Replace Redis-persistent Provider and Runner generation allocation with PostgreSQL high-water authority, one-shot volatile publication, a `2^48` migration floor only for subjects visible to the Home cutover seed, generation one for later identities, strict Runtime Control and Redis namespace cutover, exact decimal-string JSON contracts, ephemeral reference Valkey configuration, deterministic empty-store verification, and no compatibility authority or fallback.
-- Approval basis: After the Design exposed the JavaScript numeric precision conflict, the requester selected the decimal-string contract, supplied the single-Home-deployment boundary, delegated selection of the smaller floor, and instructed the Agent to proceed through implementation if validation found no blocker. Authority and repository feasibility checks for revision 2 found no blocker.
+- Approved Design revision: `1`
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12`
+- Approved scope: PostgreSQL high-water and accepted-generation authority; transaction-free external publication through one-shot volatile candidates; atomic Provider acceptance and repository-only Runner revalidation; table-locked legacy seed plus future-subject insert triggers; exact numeric generation ceiling `2^53 - 1`; one-time Home Runtime Control scale-to-zero cutover and roll-forward boundary; fresh Runtime coordination namespace; retained durable authorities for every other Redis-backed capability; ephemeral reference Valkey; and deterministic migration, race, crash, reset, stale-authority, numeric-boundary, deployment, and E2E verification.

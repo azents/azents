@@ -43,6 +43,28 @@ async def _post_cutover_time(
     return cutover_at + datetime.timedelta(microseconds=1)
 
 
+async def _activate_subject(
+    repository: RuntimeConnectionGenerationRepository,
+    session: AsyncSession,
+    *,
+    connection_kind: RuntimeConnectionAuthorityKind,
+    subject_id: str,
+    high_water_generation: int = 0,
+    accepted_generation: int = 0,
+) -> None:
+    """Create the Phase 2 activation state required by repository primitives."""
+    await _post_cutover_time(repository, session)
+    session.add(
+        RDBRuntimeConnectionGeneration(
+            connection_kind=connection_kind,
+            subject_id=subject_id,
+            high_water_generation=high_water_generation,
+            accepted_generation=accepted_generation,
+        )
+    )
+    await session.flush()
+
+
 class TestRuntimeConnectionGenerationRepository:
     """Verify monotonic allocation and acceptance fencing."""
 
@@ -51,13 +73,17 @@ class TestRuntimeConnectionGenerationRepository:
         rdb_session: AsyncSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
-        subject_created_at = await _post_cutover_time(repository, rdb_session)
+        await _activate_subject(
+            repository,
+            rdb_session,
+            connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+            subject_id="generation-runtime-1",
+        )
 
         first = await repository.allocate_generation(
             rdb_session,
             connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
             subject_id="generation-runtime-1",
-            subject_created_at=subject_created_at,
         )
         assert first.high_water_generation == 1
         assert first.accepted_generation == 0
@@ -90,7 +116,6 @@ class TestRuntimeConnectionGenerationRepository:
             rdb_session,
             connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
             subject_id="generation-runtime-1",
-            subject_created_at=subject_created_at,
         )
         assert second.high_water_generation == 2
         assert second.accepted_generation == 1
@@ -101,24 +126,57 @@ class TestRuntimeConnectionGenerationRepository:
             generation=1,
         )
 
-    async def test_missing_pre_cutover_subject_fails_closed(
+    async def test_missing_subject_fails_closed(
         self,
         rdb_session: AsyncSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _post_cutover_time(repository, rdb_session)
-        cutover = await repository.get_cutover(rdb_session)
-        assert cutover is not None
 
         with pytest.raises(
             RuntimeConnectionGenerationIntegrityError,
-            match="Pre-cutover Runtime connection subject",
+            match="generation state is missing",
         ):
             await repository.allocate_generation(
                 rdb_session,
                 connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
-                subject_id="missing-pre-cutover-provider",
-                subject_created_at=cutover.cutover_at,
+                subject_id="missing-provider",
+            )
+
+    async def test_missing_subject_preflight_fails_closed(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        repository = RuntimeConnectionGenerationRepository()
+        await _post_cutover_time(repository, rdb_session)
+
+        with pytest.raises(
+            RuntimeConnectionGenerationIntegrityError,
+            match="generation state is missing",
+        ):
+            await repository.generation_is_current_high_water(
+                rdb_session,
+                connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+                subject_id="missing-preflight-provider",
+                generation=1,
+            )
+
+    async def test_missing_subject_acceptance_fails_closed(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        repository = RuntimeConnectionGenerationRepository()
+        await _post_cutover_time(repository, rdb_session)
+
+        with pytest.raises(
+            RuntimeConnectionGenerationIntegrityError,
+            match="generation state is missing",
+        ):
+            await repository.accept_generation(
+                rdb_session,
+                connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+                subject_id="missing-acceptance-runtime",
+                generation=1,
             )
 
     async def test_exhausted_generation_never_wraps(
@@ -126,16 +184,14 @@ class TestRuntimeConnectionGenerationRepository:
         rdb_session: AsyncSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
-        subject_created_at = await _post_cutover_time(repository, rdb_session)
-        rdb_session.add(
-            RDBRuntimeConnectionGeneration(
-                connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
-                subject_id="exhausted-runtime",
-                high_water_generation=MAX_CONNECTION_GENERATION,
-                accepted_generation=MAX_CONNECTION_GENERATION,
-            )
+        await _activate_subject(
+            repository,
+            rdb_session,
+            connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+            subject_id="exhausted-runtime",
+            high_water_generation=MAX_CONNECTION_GENERATION,
+            accepted_generation=MAX_CONNECTION_GENERATION,
         )
-        await rdb_session.flush()
 
         with pytest.raises(
             RuntimeConnectionGenerationExhausted,
@@ -145,7 +201,6 @@ class TestRuntimeConnectionGenerationRepository:
                 rdb_session,
                 connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
                 subject_id="exhausted-runtime",
-                subject_created_at=subject_created_at,
             )
 
     async def test_concurrent_first_allocations_are_serialized(
@@ -156,7 +211,12 @@ class TestRuntimeConnectionGenerationRepository:
         subject_id = "concurrent-generation-runtime"
         async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
             async with session.begin():
-                subject_created_at = await _post_cutover_time(repository, session)
+                await _activate_subject(
+                    repository,
+                    session,
+                    connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+                    subject_id=subject_id,
+                )
 
         async def allocate() -> int:
             async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
@@ -165,7 +225,6 @@ class TestRuntimeConnectionGenerationRepository:
                         session,
                         connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
                         subject_id=subject_id,
-                        subject_created_at=subject_created_at,
                     )
                     return state.high_water_generation
 

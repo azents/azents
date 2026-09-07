@@ -1,9 +1,6 @@
 """Durable Runtime Control connection-generation authority repository."""
 
-import datetime
-
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeConnectionAuthorityKind
@@ -20,7 +17,7 @@ from .data import (
 )
 
 CURRENT_ALLOCATOR_VERSION = 1
-MAX_CONNECTION_GENERATION = 2**63 - 1
+MAX_CONNECTION_GENERATION = 2**53 - 1
 
 
 class RuntimeConnectionGenerationRepository:
@@ -57,7 +54,6 @@ class RuntimeConnectionGenerationRepository:
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
-        subject_created_at: datetime.datetime,
     ) -> RuntimeConnectionGeneration:
         """Allocate the next generation while retaining every committed gap."""
         cutover = await self.get_cutover(session)
@@ -72,34 +68,9 @@ class RuntimeConnectionGenerationRepository:
             subject_id=subject_id,
         )
         if rdb is None:
-            if subject_created_at <= cutover.cutover_at:
-                raise RuntimeConnectionGenerationIntegrityError(
-                    "Pre-cutover Runtime connection subject is missing generation state"
-                )
-            await session.execute(
-                insert(RDBRuntimeConnectionGeneration)
-                .values(
-                    connection_kind=connection_kind,
-                    subject_id=subject_id,
-                    high_water_generation=0,
-                    accepted_generation=0,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[
-                        RDBRuntimeConnectionGeneration.connection_kind,
-                        RDBRuntimeConnectionGeneration.subject_id,
-                    ]
-                )
+            raise RuntimeConnectionGenerationIntegrityError(
+                "Runtime connection generation state is missing"
             )
-            rdb = await self._get_generation_for_update(
-                session,
-                connection_kind=connection_kind,
-                subject_id=subject_id,
-            )
-            if rdb is None:
-                raise RuntimeConnectionGenerationIntegrityError(
-                    "Runtime connection generation state could not be initialized"
-                )
 
         if rdb.high_water_generation >= MAX_CONNECTION_GENERATION:
             raise RuntimeConnectionGenerationExhausted(
@@ -119,20 +90,15 @@ class RuntimeConnectionGenerationRepository:
         generation: int,
     ) -> bool:
         """Return whether a publication candidate remains the latest allocation."""
-        result = await session.scalar(
-            sa.select(sa.literal(True)).where(
-                sa.exists(
-                    sa.select(RDBRuntimeConnectionGeneration.subject_id).where(
-                        RDBRuntimeConnectionGeneration.connection_kind
-                        == connection_kind,
-                        RDBRuntimeConnectionGeneration.subject_id == subject_id,
-                        RDBRuntimeConnectionGeneration.high_water_generation
-                        == generation,
-                    )
-                )
-            )
+        rdb = await session.get(
+            RDBRuntimeConnectionGeneration,
+            (connection_kind, subject_id),
         )
-        return result is True
+        if rdb is None:
+            raise RuntimeConnectionGenerationIntegrityError(
+                "Runtime connection generation state is missing"
+            )
+        return rdb.high_water_generation == generation
 
     async def accept_generation(
         self,
@@ -155,7 +121,17 @@ class RuntimeConnectionGenerationRepository:
             .returning(RDBRuntimeConnectionGeneration)
         )
         rdb = result.scalar_one_or_none()
-        return self._build_generation(rdb) if rdb is not None else None
+        if rdb is not None:
+            return self._build_generation(rdb)
+        existing = await session.get(
+            RDBRuntimeConnectionGeneration,
+            (connection_kind, subject_id),
+        )
+        if existing is None:
+            raise RuntimeConnectionGenerationIntegrityError(
+                "Runtime connection generation state is missing"
+            )
+        return None
 
     async def _get_generation_for_update(
         self,

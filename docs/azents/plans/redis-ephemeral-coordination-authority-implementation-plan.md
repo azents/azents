@@ -1,6 +1,7 @@
 ---
 title: "Ephemeral Redis Coordination Authority Implementation Plan"
 created: 2026-09-07
+updated: 2026-09-07
 tags: [runtime, redis, postgresql, reliability, migration]
 ---
 
@@ -9,80 +10,84 @@ tags: [runtime, redis, postgresql, reliability, migration]
 ## Authority and Scope
 
 - Requirements: [Ephemeral Redis Coordination Authority Requirements](../requirements/redis-260907-ephemeral-coordination-authority.md) (`redis-260907/REQ`)
-- ADR: [Ephemeral Redis Coordination Authority](../adr/redis-260907-ephemeral-coordination-authority.md) (`redis-260907/ADR-D1` through `ADR-D4`)
-- Approved Design: [Ephemeral Redis Coordination Authority Design](../design/redis-260907-ephemeral-coordination-authority.md) revision `2` (`redis-260907/DESIGN`)
-- Approved mechanisms: `M1` through `M13`
+- ADR: [Ephemeral Redis Coordination Authority](../adr/redis-260907-ephemeral-coordination-authority.md) (`redis-260907/ADR-D1` through `ADR-D3`)
+- Approved Design: [Ephemeral Redis Coordination Authority Design](../design/redis-260907-ephemeral-coordination-authority.md) revision `1` (`redis-260907/DESIGN`)
+- Approved mechanisms: `M1` through `M12`
 - Design delta: `None`
 
 ## Objective
 
-Remove Redis/Valkey persistence as a correctness dependency. PostgreSQL becomes the durable Provider/Runner connection-generation issuer, Redis remains disposable volatile routing, existing Home subjects enter the `2^48` migration band, later identities start at generation one, and JSON-exposed connection generations use exact decimal strings.
+Remove Redis/Valkey persistence as a correctness dependency. PostgreSQL becomes the durable Provider/Runner connection-generation issuer, Redis remains disposable volatile routing, migration-time Home subjects enter the `2^48` band, every later subject atomically receives zeroed authority, the allocator stays within `2^53 - 1`, and lost volatile work fails closed before automatic reconnect or durable reconciliation.
 
 ## Delivery Stack
 
 | Phase | Branch | Base | PR boundary | Approved mechanisms |
 | --- | --- | --- | --- | --- |
-| 1 | `feature/redis-ephemeral-1-authority-foundation` | `main` | Approved snapshot documents, additive generation-authority schema without a cutover marker or seed, `BIGINT` widening, repository primitives, focused migration/repository tests | `M1`, storage portion of `M7`, repository portion of `M12` |
-| 2 | `feature/redis-ephemeral-2-runtime-cutover` | Phase 1 | Strict activation migration with marker and existing-subject seed, one-shot registration publication, Redis v2 namespace, runtime integration, JSON string contracts and generated clients, deployment cutover, ephemeral Valkey, empty-store E2E, Living Specs, implementation markers, and plan cleanup | `M2`-`M6`, remaining `M7`, `M8`-`M13` |
+| 1 | `feature/redis-ephemeral-1-authority-foundation` | `main` | Approved snapshot documents, additive generation-authority schema without activation seed/marker/triggers, connection-generation `BIGINT` widening, DB-only repository primitives, and focused migration/repository tests | `M1`, storage portion of `M7`, repository portion of `M12` |
+| 2 | `feature/redis-ephemeral-2-runtime-cutover` | Phase 1 | Activation migration with table-locked seed, future-subject triggers and marker; one-shot candidate publication; Provider/Runner registration integration; fresh Runtime coordination namespace; Home cutover controls; ephemeral Valkey reference contract | `M2`-`M9`, `M11`, integration portion of `M12` |
+| 3 | `feature/redis-ephemeral-3-validation-specs` | Phase 2 | Empty-store and cross-capability validation, numeric-boundary evidence, Living Spec promotion, implementation markers, removal audit, and plan cleanup | `M10`, validation completion for `M1`-`M12` |
 
-Phase 1 is additive and does not activate a second allocator or namespace. Phase 2 is one coordinated activation boundary so the new allocator, JSON contracts, namespace, deployment policy, and verification cannot be deployed independently.
+Phase 1 is additive and unused. Phase 2 is the coordinated activation boundary and must deploy only through the Home Runtime Control scale-to-zero procedure. Phase 3 proves the complete behavior before promoting current Specs and removing temporary plans.
 
 ## Integration Boundaries
 
-- Phase 1 exposes database-only allocate, preflight, acceptance, and integrity primitives without changing `RuntimeCoordinationStore.register_connection()` callers.
-- Phase 2 replaces store-owned allocation with candidate stage/promotion and composes Phase 1 primitives in the Runtime Control registration coordinator.
-- Provider final acceptance includes authenticated connection history in the same DB transaction.
+- Phase 1 exposes database-only allocate, preflight, acceptance, and integrity primitives without changing current Runtime registration callers.
+- Phase 2 activation migration seeds existing subjects, installs `AFTER INSERT` generation-row triggers, and records the marker in one table-locked transaction.
+- Phase 2 replaces store-owned generation allocation with candidate stage/promotion and composes Phase 1 repository primitives in one registration coordinator.
+- Provider final acceptance includes authenticated connection history, credential use, binding state, and audit evidence in one DB-only transaction.
 - Runner final acceptance revalidates Runtime and credential authority without adding Runner history.
 - Redis, HTTP, gRPC, filesystem, object-storage, Provider, and infrastructure calls never occur inside a DB transaction.
-- Protobuf `uint64` generation fields remain unchanged. Public/browser JSON generation fields cut directly from number to canonical decimal string with no union or fallback.
+- Protobuf `uint64`, public JSON numbers, Redis numeric JSON, and TypeScript numeric contracts remain unchanged; every boundary enforces `1 <= generation <= 2^53 - 1`.
+- Phase 3 may fix defects in the owning earlier phase but cannot introduce a new material mechanism.
 
 ## Removal Obligations
 
 - Remove Redis `INCR`/`PERSIST` generation counters and in-memory adapter counters.
 - Remove the unversioned Runtime coordination namespace from active code.
-- Remove numeric public/browser JSON connection-generation fields.
-- Remove the Compose Valkey data volume and persistence behavior.
+- Remove rolling mixed-version activation for the allocator boundary while retaining normal rolling behavior after cutover.
+- Remove the Compose Valkey data volume and any persistence implication.
 - Remove the Living Spec requirement for Redis-retained generation counters.
-- Do not add Redis counter import, legacy namespace reads, dual writes, fallback allocation, or a second live connection authority.
+- Do not add Redis counter import, legacy namespace reads, dual writes, lazy missing-row initialization, timestamp-based migration classification, fallback allocation, or a second live connection authority.
 
-Absence is verified by repository searches, contract tests, generated schema diffs, rendered deployment tests, and empty-store E2E.
+Absence is verified by repository searches, store contract tests, migration tests, rendered deployment assertions, and empty-store E2E.
 
 ## Validation Matrix
 
 | Area | Required evidence |
 | --- | --- |
-| Schema and migration | Alembic upgrade tests, existing-subject `2^48 - 1` seed, later-subject generation one, durable maxima guard, `BIGINT` round trip |
-| Generation repository | Concurrent monotonic allocation, gaps, preflight, acceptance CAS, row retention/integrity |
-| Registration publication | Candidate invisibility, exact token, reset invalidation, higher-generation fencing, crash point and ambiguous-outcome tests |
-| Provider/Runner integration | Credential revalidation, Provider history atomicity, Runner observed-state monotonicity, stale heartbeat/report/result/revoke rejection |
-| JSON and clients | OpenAPI/generated clients use strings, Terminal WebSocket uses opaque strings, no number/string union |
-| Deployment | Runtime Control non-overlap, schema readiness, new Redis namespace, Compose Valkey without persistence |
+| Schema and migrations | Additive foundation upgrade; activation seed/trigger/marker transaction; blocked-insert race; `BIGINT` round trip; missing-row integrity; `2^53 - 1` exhaustion |
+| Generation repository | Concurrent monotonic allocation, retained gaps, preflight, acceptance CAS, row retention, and no external calls |
+| Registration publication | Candidate invisibility, exact token, reset invalidation, higher-generation fencing, exact cleanup, crash boundaries, ambiguous-outcome failure |
+| Provider/Runner integration | Final authorization revalidation, Provider history atomicity, Runner observed-state monotonicity, stale heartbeat/report/result/revoke rejection |
+| Numeric contracts | Redis Lua/cjson, protobuf, public API, Terminal WebSocket, and TypeScript preserve distinct safe integers up to the ceiling with no schema change |
+| Deployment | Runtime Control scale-to-zero procedure, temporary HPA/PDB suspension, schema readiness marker, new namespace, and later restoration of normal rollout settings |
 | Empty-store recovery | Real PostgreSQL/Valkey/Runtime Control/Provider/Runner E2E proves reconnect, stale rejection, and new work |
 | Other Redis paths | Lost operation/Transfer/Terminal fails closed; broker/External Channel recovery; enrollment window resets without credential authority |
-| Quality | Ruff, format, `ty check --error-on-warning`, affected pytest suites, Helm tests, docs validation |
+| Quality | Ruff, format, `ty check --error-on-warning`, affected pytest suites, migration suite, Helm tests, docs validation, code review, and Spec review |
 
 ## Rollout and Rollback
 
-- Phase 2 documents and renders the strict sequence: stop old Runtime Control, migrate, start only the new version, reconnect streams.
-- The new Runtime Control refuses readiness without the required schema/cutover evidence.
-- After a `2^48`-band generation is accepted, Runtime Control is roll-forward-only; the legacy allocator must not restart.
-- No live Home deployment change, Helm sync, restart, Redis clear, or PR merge is performed by this implementation session.
+- Phase 2 documents and renders the strict Home sequence: disable HPA/PDB constraints, scale Runtime Control to zero, confirm no legacy endpoint, migrate, deploy the new namespace and binary, restore replicas/HPA/PDB, and verify reconnect.
+- The new Runtime Control refuses readiness without the required schema and cutover marker.
+- Before first new-band acceptance, deployment may restore the legacy procedure. After acceptance commit, Runtime Control is roll-forward-only and the legacy allocator must not restart.
+- No live Home deployment change, Helm sync, restart, Redis clear, PR merge, or Kubernetes write is performed by this implementation session.
 
 ## Spec and Documentation
 
-Phase 2 updates the current Runtime Control and affected recovery Specs, operator/chart documentation, OpenAPI-generated documentation, and reference Compose contract. Requirements and Design receive the same `implemented` date only after all validation passes.
+Phase 3 updates the current Runtime Control and affected recovery Specs plus operator/chart documentation. Requirements and Design receive the same `implemented` date only after code, migration, deployment-contract, E2E, and Living Spec verification complete.
 
 ## Owners and Review
 
 - Implementation owner: `/root`
-- Independent reviewer for both phase PRs: `hardtack`
+- Exact independent read-only reviewer for every phase: `redis-implementation-reviewer`
+- GitHub reviewer requested on every PR: `hardtack`
 - GitHub PR title/body language: English
-- Reviewer inputs: confirmed Requirements, accepted ADR, approved Design revision `2`, this plan, each phase plan, current diff, focused tests, and absence evidence.
+- Reviewer inputs: confirmed Requirements, accepted ADR, approved Design revision `1`, this plan, the active phase plan, current diff, focused test evidence, and absence evidence.
 
 ## Context Checkpoints
 
-At each phase boundary record completed behavior, changed interfaces, commands and results, removal evidence, remaining work, risks, and blockers. New material behavior returns to technical design. Local details stay within approved mechanisms.
+At each phase boundary record completed behavior, changed interfaces, commands and results, removal evidence, remaining work, relevant paths, risks, and blockers. New material behavior returns to technical design. Local details remain within approved mechanisms.
 
 ## Cleanup
 
-Phase 2 deletes this implementation plan and both phase execution plans after implementation, validation, Living Spec promotion, and implementation markers are complete.
+Phase 3 deletes this implementation plan and all phase execution plans only after implementation, validation, Living Spec promotion, implementation markers, and final absence verification complete.

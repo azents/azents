@@ -50,6 +50,10 @@ class RDBRuntimeConnectionGeneration(RDBModel):
         "accepted_generation <= high_water_generation",
         name="ck_runtime_connection_generations_accepted_within_high_water",
     )
+    CK_SAFE_INTEGER_MAX = sa.CheckConstraint(
+        "high_water_generation <= 9007199254740991",
+        name="ck_runtime_connection_generations_safe_integer_max",
+    )
 
     connection_kind: Mapped[RuntimeConnectionAuthorityKind] = mapped_column(
         runtime_connection_authority_kind_enum,
@@ -75,4 +79,5 @@ class RDBRuntimeConnectionGeneration(RDBModel):
     __table_args__ = (
         CK_NON_NEGATIVE,
         CK_ACCEPTED_WITHIN_HIGH_WATER,
+        CK_SAFE_INTEGER_MAX,
     )
