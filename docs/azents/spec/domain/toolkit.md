@@ -61,7 +61,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-07
-spec_version: 108
+spec_version: 109
 ---
 
 # Toolkit
@@ -871,13 +871,15 @@ supports at most 49 tasks, and its complete desired progress snapshot must fit t
 projects the complete latest Tracker; every continue invalidates older awaiting
 settlement, while message-only continuation leaves progress and Tracker position
 unchanged. For Discord, an explicitly supplied complete ordered task snapshot is
-compared with the canonical pre-transition tasks. A changed snapshot attempts any
-reply parts first, removes or detaches the current Tracker, and then creates the
-complete latest Tracker as a notification-suppressed standalone message. Replacement
-creation depends on confirmed current-host removal but not on reply delivery. An
-identical task replacement or title-only change updates the current standalone or
-reply host in place. Later progress changes repair failed or ambiguous best-effort
-projection without durable retry work. `request_input` requires a
+compared with the canonical pre-transition tasks. A changed snapshot accompanied by a
+message attempts reply parts first, removes or detaches the current Tracker, and then
+creates the complete latest Tracker as a notification-suppressed standalone message.
+Replacement creation depends on confirmed current-host removal but not on reply
+delivery. A changed snapshot without a message updates the current standalone or reply
+host in place, or creates a missing standalone host. Identical task replacements and
+title-only changes also update the current host in place. Later progress changes
+repair failed or ambiguous best-effort projection without durable retry work.
+`request_input` requires a
 participant-visible message, preserves active Work, and establishes binding-scoped
 awaiting state only after every reply part is confirmed delivered. Failed, unknown, or
 stale delivery stays ready. Newly created same-binding human input or `continue`
@@ -921,6 +923,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 109) — Restricted Discord task-change relocation to
+  Actions that also contain a conversational message; message-free task changes now
+  update the current host in place or create only when the host is missing.
 - **2026-09-07** (spec_version 108) — Replaced reply-plus-progress Tracker movement
   with exact task-snapshot-change relocation to a silent standalone Discord message,
   retained current hosts for unchanged tasks, and removed transient reply-result

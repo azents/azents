@@ -5615,8 +5615,17 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     recreated_tracker_message_id = _string(
         relocation_deliveries[create_index]["message_id"]
     )
+    task_only_update_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if index > create_index
+        and delivery.get("operation") == "update_message"
+        and delivery.get("message_id") == recreated_tracker_message_id
+        and delivery.get("safe_category") == "activity_tracker"
+        and delivery.get("outcome") == "delivered"
+    )
     assert recreated_tracker_message_id != quiet_tracker_message_id
-    assert reply_index < remove_index < create_index
+    assert reply_index < remove_index < create_index < task_only_update_index
     assert not any(
         delivery.get("safe_category") == "activity_tracker"
         and delivery.get("message_id") != recreated_tracker_message_id

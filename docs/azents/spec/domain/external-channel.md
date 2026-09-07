@@ -66,7 +66,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-07
-spec_version: 71
+spec_version: 72
 ---
 
 # External Channel
@@ -231,10 +231,12 @@ contain multiple independent bindings.
   visibility through schema migration, and Scheduled Task-owned Trackers keep their
   separate unconditional lifecycle.
 - Discord compares each explicitly supplied ordered task snapshot with the canonical
-  pre-transition tasks. A changed snapshot removes or detaches the current Tracker and
-  then creates the complete latest Tracker as a notification-suppressed standalone
-  message. An identical task replacement or title-only change updates the current
-  standalone or reply host in place; a message-only Action leaves it unchanged.
+  pre-transition tasks. A changed snapshot accompanied by a conversational message
+  removes or detaches the current Tracker and then creates the complete latest Tracker
+  as a notification-suppressed standalone message. A changed snapshot without a
+  message updates the current standalone or reply host in place, or creates a missing
+  standalone host. An identical task replacement or title-only change also updates the
+  current host in place; a message-only Action leaves it unchanged.
 - Every model input boundary exposes `request_input` and `ignore` beside `finish` and
   `continue`. `request_input` requires an ordinary participant-visible message,
   preserves active Work, and stores nullable requesting Run identity in version-4
@@ -537,6 +539,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 72) — Kept message-free Discord task changes on the
+  current Tracker host, preserved silent standalone relocation for task changes that
+  accompany a message, and retained missing-host creation.
 - **2026-09-07** (spec_version 71) — Made complete ordered task changes the sole
   Discord Tracker relocation trigger, recreated changed-task Trackers as silent
   standalone messages after current-host removal, and retained current host position
