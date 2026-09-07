@@ -8,6 +8,7 @@ import {
   Badge,
   Button,
   Card,
+  Flex,
   Group,
   Loader,
   Modal,
@@ -282,7 +283,12 @@ export function ManagedToolkitCard({
   return (
     <Card withBorder padding="sm">
       <Stack gap="xs">
-        <Group justify="space-between" align="flex-start">
+        <Flex
+          justify="space-between"
+          align="flex-start"
+          direction={{ base: "column", sm: "row" }}
+          gap="xs"
+        >
           <Stack gap={3}>
             <Group gap="xs">
               <Text fw={600}>{item.toolkit.name}</Text>
@@ -349,7 +355,7 @@ export function ManagedToolkitCard({
               </ActionIcon>
             </Group>
           )}
-        </Group>
+        </Flex>
         {item.toolkit.description && (
           <Text size="sm" c="dimmed">
             {item.toolkit.description}

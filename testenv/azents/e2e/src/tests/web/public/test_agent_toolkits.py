@@ -349,7 +349,15 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _fill_text_input(browser_driver, "Name", toolkit_name)
     _fill_text_input(browser_driver, "Server URL", "https://example.com/mcp")
     _assert_visible_text(browser_driver, "Authentication")
-    _assert_visible_text(browser_driver, "None")
+    _wait(browser_driver).until(
+        lambda current_driver: (
+            current_driver.find_element(
+                By.XPATH,
+                "//label[normalize-space(text())='Authentication']/following::input[1]",
+            ).get_attribute("value")
+            == "None"
+        )
+    )
     _click_button(browser_driver, "Add")
 
     _assert_visible_text(browser_driver, toolkit_name)
