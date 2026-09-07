@@ -12,7 +12,7 @@ This directory contains all azents project documentation.
 
 Azents is an AI agent platform, so much of the system behavior lives outside the public API contract: runtime decisions, memory policy, tool selection, and similar behavior cannot be fully described by OpenAPI alone. The project therefore uses a four-layer documentation model.
 
-- **Requirements** (`requirements/`) — what users need for one confirmed development snapshot.
+- **Requirements** (`requirements/`) — confirmed user or system outcomes for one development snapshot.
 - **ADR** (`adr/`) — why a material architecture or product-contract decision was made. Append-only decision log.
 - **Design** (`design/`) — how the system was designed to satisfy the Requirements and ADR decisions at development time.
 - **SPEC.md** (`spec/domain/`, `spec/flow/`) — how the current system actually behaves. These are living documents linked to code through `code_paths`.
@@ -77,13 +77,18 @@ Use snapshot-first typed references:
 
 Use a Markdown link on the first meaningful cross-document mention. Later mentions may use the short reference alone.
 
-Requirements contain product intent only: problem, actors, one primary scenario, supporting scenarios, goals, non-goals, requirements with acceptance criteria, fixed constraints, open assumptions, and requester confirmation. Keep APIs, data models, architecture, implementation choices, phases, and ADR decisions out of Requirements.
+Requirements contain confirmed intent only: the problem or technical gap, one
+primary actor and user scenario or one primary system outcome, supporting scenarios
+or effects, goals, non-goals, requirements with acceptance criteria, fixed
+constraints, open assumptions, and requester confirmation. Keep APIs, data models,
+architecture, implementation choices, phases, and ADR decisions out of
+Requirements.
 
 The shared format applies to the core Requirements, ADR, and primary Design for every current development snapshot. Specs, Notes, Issues, Plans, audit reports, validation reports, and other supporting records retain descriptive naming rules only when explicitly classified as supporting. Legacy numbered ADRs, pre-migration Design filenames, and bare `ADR-NNNN-DN` references are historical inputs only; they are not valid current core documents after migration and may remain only in explicit provenance or ambiguity records.
 
 ### Development Snapshot Lifecycle
 
-- Create the Requirements document after one primary scenario is established and before creating an ADR.
+- Create the Requirements document after one primary user scenario or primary system outcome is established and before creating an ADR.
 - Obtain explicit requester confirmation of Requirements before accepting design decisions.
 - Create the same-basename ADR after Requirements confirmation, then create the same-basename Design after the ADR defines a coherent direction.
 - Audit material Design mechanisms against confirmed authority, validate
@@ -131,7 +136,10 @@ tags: [backend, engine]
 ### Additional Rules for `requirements/`
 
 - The filename must match `{word}-{YYMMDD}-{slug}.md` and its date must match the KST `created` date.
-- Keep one primary end-to-end scenario. Classify other scenarios as supporting, secondary, or future scope.
+- Keep one primary end-to-end user scenario for user-facing work or one primary
+  system outcome for infrastructure, internal tooling, migration, performance,
+  reliability, and other primarily technical work. Classify other scenarios or
+  effects as supporting, secondary, or future scope.
 - Write solution-neutral requirements with observable acceptance criteria.
 - Use document-local `REQ-N` identifiers and qualify cross-document references with the canonical short ID.
 - Do not create an ADR or design before the requester confirms the Requirements document.

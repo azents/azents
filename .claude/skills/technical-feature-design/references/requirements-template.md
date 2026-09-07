@@ -1,6 +1,8 @@
 # Requirements Snapshot Template
 
-Use this template after confirming one primary scenario. Keep the document solution-neutral and obtain explicit requester confirmation before creating an ADR.
+Use this template after confirming one primary user scenario or one primary system
+outcome. Keep the document solution-neutral and obtain explicit requester
+confirmation before creating an ADR.
 
 ```markdown
 ---
@@ -19,17 +21,30 @@ tags: [<feature>, <product-area>]
 
 <Describe the user pain or missing capability without proposing a solution.>
 
-## Primary Actor
+## Primary Context
 
-<Identify the main user or system actor.>
+Choose exactly one form that matches the work.
 
-## Primary Scenario
+For user-facing work:
+
+### Primary Actor
+
+<Identify the main user or operator.>
+
+### Primary Scenario
 
 <Describe one end-to-end scenario from trigger to observable outcome.>
 
-## Supporting Scenarios
+For infrastructure, internal tooling, migration, performance, reliability, or
+other primarily technical work:
 
-- <Secondary or supporting scenario, if any>
+### Primary System Outcome
+
+<Describe one bounded system condition or transition and its observable result.>
+
+## Supporting Scenarios or Effects
+
+- <Secondary user scenario, operator effect, or system effect, if any>
 
 ## Goals
 

@@ -49,9 +49,9 @@ Before planning implementation:
 - read relevant current Specs and impacted application/package rules; and
 - identify E2E, fixture, credential, and external prerequisites.
 
-Return to `feature-design` when Requirements, ADR, Design authority, approval, or a
-material decision is incomplete. Do not reconstruct missing product or design
-intent in an implementation plan.
+Return to `technical-feature-design` when Requirements, ADR, Design authority,
+approval, or a material decision is incomplete. Do not reconstruct missing product
+or design intent in an implementation plan.
 
 ## Phase 1: Create the implementation plan
 
@@ -70,7 +70,7 @@ Before writing the plan:
 4. classify new findings:
    - local detail within an approved contract → plan it;
    - product scope or user-visible contract change → return to Requirements;
-   - new material mechanism or decision → return to `feature-design`;
+   - new material mechanism or decision → return to `technical-feature-design`;
    - unsupported mechanism → omit it.
 
 The tracked multi-phase plan must contain:
@@ -118,7 +118,7 @@ At phase boundaries, record completed behavior, changed interfaces, evidence,
 remaining scope, relevant paths, risks, and blockers. Reuse an active role only
 while its context remains relevant and compact; record role changes and redistribute
 the exact reviewer identity. Update incomplete execution decomposition in the plan;
-return product intent or a material mechanism to `feature-design`. While waiting,
+return product intent or a material mechanism to `technical-feature-design`. While waiting,
 prepare later inputs without starting later-phase work; silence is not progress.
 
 ## Phase 2: Implement each phase
@@ -180,7 +180,7 @@ same `implemented` date only after implementation and validation are complete.
 Keep implemented Requirements, accepted ADRs, and Designs immutable.
 
 If validation reveals an unrecorded material decision or mechanism, return to
-`feature-design` and complete authority, feasibility, and approval before marking
+`technical-feature-design` and complete authority, feasibility, and approval before marking
 the snapshot implemented.
 
 ## Phase 5: Clean up plans
@@ -216,7 +216,7 @@ validation, checkpoint, and next branch.
 - Do not implement before confirmed Requirements, accepted ADR, and matching Design
   approval.
 - Plans never create Design authority; every phase starts with `Design delta: None`.
-- Return new material decisions to `feature-design` and keep local details
+- Return new material decisions to `technical-feature-design` and keep local details
   agent-owned.
 - Keep implementation and independent review separate and use the exact reviewer.
 - Do not start the next phase before opening the current phase PR.

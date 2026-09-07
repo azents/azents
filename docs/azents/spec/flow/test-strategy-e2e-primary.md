@@ -7,7 +7,7 @@ owner: "@Hardtack"
 touches_domains: []
 code_paths:
   - .claude/skills/e2e-ci-optimization/**
-  - .claude/skills/feature-design/SKILL.md
+  - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-02
-spec_version: 43
+last_verified_at: 2026-09-07
+spec_version: 44
 ---
 
 # E2E Primary Test Strategy
