@@ -2,7 +2,7 @@
 
 import datetime
 import logging
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,6 +74,13 @@ from azents.services.external_channel.management import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class _DiscordActivationDiagnostic(NamedTuple):
+    """Stable sanitized fields for one Discord activation failure."""
+
+    failure_stage: str
+    failure_code: str
 
 
 class SlackConnectionSetupRequest(BaseModel):
@@ -1643,14 +1650,14 @@ def _discord_activation_error(
     connection_id: str | None,
 ) -> HTTPException:
     """Log a sanitized Discord setup failure and return a safe client error."""
-    failure_stage, failure_code = _discord_activation_diagnostic(error)
+    diagnostic = _discord_activation_diagnostic(error)
     logger.error(
         "Discord External Channel activation failed",
         extra={
             "operation": operation,
             "connection_id": connection_id,
-            "failure_stage": failure_stage,
-            "failure_code": failure_code,
+            "failure_stage": diagnostic.failure_stage,
+            "failure_code": diagnostic.failure_code,
             "error_type": type(error).__name__,
         },
     )
@@ -1688,12 +1695,24 @@ def _discord_activation_error(
 
 def _discord_activation_diagnostic(
     error: DiscordAPIError | ValueError,
-) -> tuple[str, str]:
+) -> _DiscordActivationDiagnostic:
     """Return stable diagnostic fields without serializing exception data."""
     if isinstance(error, DiscordAPICredentialsInvalid):
-        return "provider_authentication", "credentials_invalid"
+        return _DiscordActivationDiagnostic(
+            failure_stage="provider_authentication",
+            failure_code="credentials_invalid",
+        )
     if isinstance(error, DiscordAPIConfigurationInvalid):
-        return "provider_callback", "callback_configuration_invalid"
+        return _DiscordActivationDiagnostic(
+            failure_stage="provider_callback",
+            failure_code="callback_configuration_invalid",
+        )
     if isinstance(error, DiscordAPIUnavailable):
-        return "provider_api", "api_unavailable"
-    return "configuration", "configuration_invalid"
+        return _DiscordActivationDiagnostic(
+            failure_stage="provider_api",
+            failure_code="api_unavailable",
+        )
+    return _DiscordActivationDiagnostic(
+        failure_stage="configuration",
+        failure_code="configuration_invalid",
+    )

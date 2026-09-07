@@ -6,9 +6,16 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from .paths import LOG_FILE
+
+
+class ReadinessResult(NamedTuple):
+    """Outcome of waiting for the local Azents services."""
+
+    ready: bool
+    reason: str
 
 
 def probe_url(url: str, *, timeout: float = 2.0) -> bool:
@@ -38,7 +45,7 @@ def wait_for_ready(
     runtime_control_port: int,
     timeout: int,
     session_alive: Callable[[], bool],
-) -> tuple[bool, str]:
+) -> ReadinessResult:
     """Wait for API and Runtime Control readiness while the session stays alive.
 
     - Poll every 0.5 seconds.
@@ -55,18 +62,24 @@ def wait_for_ready(
 
     while time.monotonic() < deadline:
         if not session_alive():
-            return False, "devserver session died"
+            return ReadinessResult(
+                ready=False,
+                reason="devserver session died",
+            )
         public_ok = probe_url(public_url)
         admin_ok = probe_url(admin_url)
         runtime_control_ok = probe_port("127.0.0.1", runtime_control_port)
         if public_ok and admin_ok and runtime_control_ok:
-            return True, ""
+            return ReadinessResult(ready=True, reason="")
         time.sleep(0.5)
 
-    return (
-        False,
-        f"readiness timeout after {timeout}s "
-        f"(public={public_ok} admin={admin_ok} runtime_control={runtime_control_ok})",
+    return ReadinessResult(
+        ready=False,
+        reason=(
+            f"readiness timeout after {timeout}s "
+            f"(public={public_ok} admin={admin_ok} "
+            f"runtime_control={runtime_control_ok})"
+        ),
     )
 
 

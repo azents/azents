@@ -4,6 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -49,6 +50,13 @@ from azents.testing.external_channel import make_provider_effect_plan
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 _THREAD_INTERACTION_ID = "01a03c28f6137b60b35e68ba50ce5319"
 _THREAD_BINDING_ID = "01a03bfcc50a7891a94d3328bdbd88bf"
+
+
+class _DiscordSettingsServiceFixture(NamedTuple):
+    """Service and repository used by Discord settings tests."""
+
+    service: DiscordSettingsResponseService
+    repository: AsyncMock
 
 
 def _object_dict(value: object) -> dict[str, object]:
@@ -179,7 +187,7 @@ def _service(
     *,
     origin: ExternalChannelInteraction,
     participation: object,
-) -> tuple[DiscordSettingsResponseService, AsyncMock]:
+) -> _DiscordSettingsServiceFixture:
     repository = AsyncMock(spec=ExternalChannelRepository)
     repository.lock_interaction.return_value = origin
     config = MagicMock(spec=Config)
@@ -194,7 +202,10 @@ def _service(
         ),
         config=config,
     )
-    return service, repository
+    return _DiscordSettingsServiceFixture(
+        service=service,
+        repository=repository,
+    )
 
 
 @pytest.mark.parametrize(
@@ -243,7 +254,7 @@ async def test_parent_settings_render_current_selects_without_session() -> None:
         binding=None,
     )
     participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.initial_response(
         origin_interaction_id="interaction-1",
@@ -280,7 +291,7 @@ async def test_setup_settings_retain_location_buttons() -> None:
         binding=None,
     )
     participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.initial_response(
         origin_interaction_id="interaction-1",
@@ -322,7 +333,7 @@ async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() 
         resolve_settings=AsyncMock(side_effect=[setup, committed]),
         select_location=AsyncMock(),
     )
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.component_response(
         interaction_id="component-interaction-1",
@@ -383,7 +394,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
             )
         ),
     )
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.component_response(
         interaction_id="component-interaction-1",
@@ -449,10 +460,10 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
             )
         ),
     )
-    service, _ = _service(
+    service = _service(
         origin=_origin(thread_resource_key="discord:guild-1:thread-1"),
         participation=participation,
-    )
+    ).service
 
     response = await service.component_response(
         interaction_id="component-interaction-1",
@@ -496,7 +507,7 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
         resolve_settings=AsyncMock(return_value=current),
         mutate_parent_settings=AsyncMock(),
     )
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.component_response(
         interaction_id="component-interaction-1",
@@ -537,7 +548,7 @@ async def test_invalid_select_value_returns_notice_without_mutation() -> None:
         resolve_settings=AsyncMock(return_value=current),
         mutate_parent_settings=AsyncMock(),
     )
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     response = await service.component_response(
         interaction_id="component-interaction-1",
@@ -594,7 +605,9 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
             )
         ),
     )
-    service, repository = _service(origin=_origin(), participation=participation)
+    fixture = _service(origin=_origin(), participation=participation)
+    service = fixture.service
+    repository = fixture.repository
 
     opened = await service.component_response(
         interaction_id="component-interaction-1",
@@ -687,7 +700,7 @@ async def test_binding_open_renders_bounded_thread_controls() -> None:
         binding=binding,
     )
     participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
-    service, _ = _service(origin=_origin(), participation=participation)
+    service = _service(origin=_origin(), participation=participation).service
 
     opened = await service.component_response(
         interaction_id=_THREAD_INTERACTION_ID,
