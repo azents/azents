@@ -11,6 +11,7 @@ import externalChannelApproval from "../../messages/en-US/externalChannelApprova
 import features from "../../messages/en-US/features.json";
 import footer from "../../messages/en-US/footer.json";
 import hero from "../../messages/en-US/hero.json";
+import landing from "../../messages/en-US/landing.json";
 import memberProfile from "../../messages/en-US/memberProfile.json";
 import metadata from "../../messages/en-US/metadata.json";
 import nav from "../../messages/en-US/nav.json";
@@ -39,6 +40,7 @@ const messages = composeMessages([
   ["features", features],
   ["footer", footer],
   ["hero", hero],
+  ["landing", landing],
   ["memberProfile", memberProfile],
   ["metadata", metadata],
   ["nav", nav],

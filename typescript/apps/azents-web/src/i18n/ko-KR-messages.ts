@@ -11,6 +11,7 @@ import externalChannelApproval from "../../messages/ko-KR/externalChannelApprova
 import features from "../../messages/ko-KR/features.json";
 import footer from "../../messages/ko-KR/footer.json";
 import hero from "../../messages/ko-KR/hero.json";
+import landing from "../../messages/ko-KR/landing.json";
 import memberProfile from "../../messages/ko-KR/memberProfile.json";
 import metadata from "../../messages/ko-KR/metadata.json";
 import nav from "../../messages/ko-KR/nav.json";
@@ -40,6 +41,7 @@ const messages = composeMessages([
   ["features", features],
   ["footer", footer],
   ["hero", hero],
+  ["landing", landing],
   ["memberProfile", memberProfile],
   ["metadata", metadata],
   ["nav", nav],

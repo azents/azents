@@ -18,6 +18,7 @@ export const MESSAGE_NAMESPACES = [
   "features",
   "footer",
   "hero",
+  "landing",
   "memberProfile",
   "metadata",
   "nav",

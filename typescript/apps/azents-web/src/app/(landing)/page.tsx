@@ -1,4 +1,4 @@
-/** Main landing page. Dark mode is forced in (landing) root layout. */
+/** Main localized landing page. */
 import { HomePage } from "@/features/home/HomePage";
 
 export default function Page(): React.ReactElement {
