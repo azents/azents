@@ -1,0 +1,28 @@
+{
+  "sectionTag": "Fonctionnalités",
+  "headline": "Construisez les agents dont votre équipe a vraiment besoin.",
+  "teamAgents": {
+    "title": "Agents d'équipe",
+    "description": "Des agents qui comprennent le contexte et les projets de votre équipe. Pas un assistant personnel — un vrai coéquipier."
+  },
+  "uiBuilder": {
+    "title": "Constructeur no-code",
+    "description": "Concevez vos agents en glisser-déposer. Compétences, déclencheurs, outils — zéro ligne de code."
+  },
+  "batteryIncluded": {
+    "title": "Prêt à l'emploi",
+    "description": "Plus de 30 compétences intégrées, de la revue de code aux résumés de réunion. Automatisez en minutes, pas en semaines."
+  },
+  "security": {
+    "title": "Sécurité & Confidentialité",
+    "description": "SSO, journaux d'audit, RBAC et isolation des données inclus. Vos données ne quittent jamais votre équipe."
+  },
+  "automation": {
+    "title": "Automatisation 24/7",
+    "description": "Configurez une fois, c'est opérationnel 24/7. Surveillance, rapports, actions — même pendant que vous dormez."
+  },
+  "multiAgent": {
+    "title": "Collaboration multi-agents",
+    "description": "Les agents se passent le relais. Un réviseur signale un problème, un rédacteur met à jour la spec, un notificateur alerte l'équipe."
+  }
+}
