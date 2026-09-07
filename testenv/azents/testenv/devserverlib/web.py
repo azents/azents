@@ -29,6 +29,8 @@ from .paths import (
 )
 from .readiness import probe_url
 
+_LOOPBACK_PUBLIC_API_URL = "http://127.0.0.1:8010"
+
 
 def is_web_running() -> bool:
     """Return whether the azents-web tmux session is running."""
@@ -68,9 +70,10 @@ def start_web(port: int = DEFAULT_WEB_PORT) -> None:  # noqa: ARG001 — port is
         name=WEB_SESSION_NAME,
         cwd=TYPESCRIPT_DIR,
         env={
-            # Default backend API URLs for azents-web development.
-            "PUBLIC_API_URL": "http://localhost:8010",
-            "INTERNAL_API_URL": "http://localhost:8010",
+            # Use explicit IPv4 loopback because Node may resolve localhost to ::1
+            # while the local Uvicorn devserver listens on IPv4.
+            "PUBLIC_API_URL": _LOOPBACK_PUBLIC_API_URL,
+            "INTERNAL_API_URL": _LOOPBACK_PUBLIC_API_URL,
             "NODE_ENV": "development",
         },
         command=command,

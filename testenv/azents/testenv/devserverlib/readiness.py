@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -21,17 +22,27 @@ def probe_url(url: str, *, timeout: float = 2.0) -> bool:
         return False
 
 
+def probe_port(host: str, port: int, *, timeout: float = 2.0) -> bool:
+    """Return whether one TCP listener accepts a connection."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def wait_for_ready(
     *,
     public_port: int,
     admin_port: int,
+    runtime_control_port: int,
     timeout: int,
     session_alive: Callable[[], bool],
 ) -> tuple[bool, str]:
-    """Wait for Public and Admin readiness while the session stays alive.
+    """Wait for API and Runtime Control readiness while the session stays alive.
 
     - Poll every 0.5 seconds.
-    - Both endpoints must return 200 to be ready.
+    - Both HTTP endpoints must return 200 and Runtime Control must accept TCP.
     - Fail early when `session_alive()` returns False, which usually means the
       devserver process exited.
     """
@@ -40,17 +51,23 @@ def wait_for_ready(
     deadline = time.monotonic() + timeout
     public_ok = False
     admin_ok = False
+    runtime_control_ok = False
 
     while time.monotonic() < deadline:
         if not session_alive():
             return False, "devserver session died"
         public_ok = probe_url(public_url)
         admin_ok = probe_url(admin_url)
-        if public_ok and admin_ok:
+        runtime_control_ok = probe_port("127.0.0.1", runtime_control_port)
+        if public_ok and admin_ok and runtime_control_ok:
             return True, ""
         time.sleep(0.5)
 
-    return False, f"readiness timeout after {timeout}s (public={public_ok} admin={admin_ok})"
+    return (
+        False,
+        f"readiness timeout after {timeout}s "
+        f"(public={public_ok} admin={admin_ok} runtime_control={runtime_control_ok})",
+    )
 
 
 def tail_log(lines: int = 50) -> str:

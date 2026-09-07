@@ -28,6 +28,7 @@ class DevserverFixtureState(BaseModel):
     reload: bool
     public_port: int
     admin_port: int
+    runtime_control_port: int = 8030
     repo_root: str
     head_sha: str
     worktree_fingerprint: WorktreeFingerprint

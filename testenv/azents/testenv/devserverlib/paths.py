@@ -31,6 +31,7 @@ WEB_LOG_FILE = STATE_DIR / "web.log"
 
 # Stage 4 default port.
 DEFAULT_WEB_PORT = 3003
+DEFAULT_RUNTIME_CONTROL_PORT = 8030
 
 # Exit codes returned by the CLI.
 EXIT_OK = 0

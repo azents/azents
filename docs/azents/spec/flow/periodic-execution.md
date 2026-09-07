@@ -40,8 +40,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-08-31
-spec_version: 17
+last_verified_at: 2026-09-06
+spec_version: 18
 ---
 
 # Periodic Execution Flow Spec
@@ -58,7 +58,10 @@ Production runs periodic execution through a dedicated scheduler role. The produ
 The Helm chart defines a separate scheduler Deployment and PodDisruptionBudget. The scheduler uses
 the server image and server environment sources, but it is not the AgentWorker.
 
-Devserver runs Public API, Admin API, AgentWorker, and Scheduler in one local process. This is local packaging only; it does not collapse the production scheduler role into AgentWorker.
+Devserver runs Runtime Control, Public API, Admin API, AgentWorker, and Scheduler in
+one local process. Runtime Control starts before Worker dependency composition so the
+Worker's required trusted transfer coordinator is available. This is local packaging
+only; it does not collapse the production scheduler role into AgentWorker.
 
 ## Task definition registry
 
@@ -357,6 +360,8 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-09-06** — v18. Added Runtime Control to local devserver composition and
+  made it ready before Worker dependency resolution.
 - **2026-08-18** — v16. Added durable scheduler-owned cleanup for avatars
   superseded by committed Agent replacement/removal, plus exact observation of
   Local Job Runtime handler failures that settle during cancellation grace.

@@ -59,7 +59,9 @@ The Compose stack provides PostgreSQL, Valkey, and RustFS on test-only host port
 
 ## Devserver lifecycle
 
-The testenv devserver commands manage the current worktree's backend processes and local infrastructure:
+The testenv devserver commands manage the current worktree's backend processes and
+local infrastructure. The backend session includes Public API (`:8010`), Admin API
+(`:8011`), Runtime Control (`:8030`), Worker, Scheduler, and the optional Testenv API:
 
 ```bash
 cd testenv/azents
