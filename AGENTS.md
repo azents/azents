@@ -119,7 +119,7 @@ $ pnpm run dev --filter=@azents/admin-web
 
 The azents project uses the Living Spec system:
 
-- **Requirements** (`docs/azents/requirements/`) — confirmed user needs and acceptance criteria for one development snapshot. Implemented Requirements are immutable.
+- **Requirements** (`docs/azents/requirements/`) — confirmed user or system outcomes and acceptance criteria for one development snapshot. Implemented Requirements are immutable.
 - **SPEC.md** (`docs/azents/spec/`) — current system behavior. Update when code changes.
 - **ADR** (`docs/azents/adr/`) — append-only decision history. Implemented/adopted ADRs are immutable.
 - **Design** (`docs/azents/design/`) — development-time design documents. Do not rewrite implemented design documents as living specs; current behavior belongs in spec docs.
@@ -136,7 +136,7 @@ Always read `docs/azents/spec/` first for current behavior. Read Requirements, A
 When modifying azents-scoped areas:
 
 - Update related spec files directly in the same PR when needed.
-- For new feature design, confirm a Requirements document before creating its same-basename ADR or Design.
+- For new technical feature design, confirm a Requirements document before creating its same-basename ADR or Design.
 - When a large feature is split into stacked phases, run spec review once in a separate phase right before QA.
 - For material architecture or product-contract decisions, record the accepted
   decision, rejected options, and risks in the development snapshot ADR.
