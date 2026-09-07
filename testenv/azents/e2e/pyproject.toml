@@ -13,7 +13,7 @@ dependencies = [
     "docker==7.2.0",
     "cryptography==50.0.1",
     "python-on-whales==0.81.0",
-    "selenium==4.47.0",
+    "selenium==4.48.0",
     "redis==8.1.0",
     # local dependencies
     "az-common",
