@@ -1,0 +1,41 @@
+{
+  "sectionTag": "Use Cases",
+  "headline": "Still assigning this to a human?",
+  "subheadline": "Here's what changes when an agent takes over.",
+  "design": {
+    "title": "Design",
+    "agent": "Reference Research Agent",
+    "tagline": "Automated research — designers focus on creating",
+    "description": "Your design team spends hours browsing Dribbble, Behance, and competitor apps. Azents crawls them automatically and builds mood boards in minutes.",
+    "before": "An intern screenshots 50+ pages manually over 2 hours",
+    "after": "50 curated results in 30 seconds",
+    "timeSaved": "8h / week"
+  },
+  "marketing": {
+    "title": "Marketing",
+    "agent": "Community Monitoring Agent",
+    "tagline": "Real-time brand monitoring across every channel",
+    "description": "After launch, who's watching Reddit, X, ProductHunt, and HackerNews? Azents monitors in real time and surfaces what actually matters.",
+    "before": "An intern manually collects mentions from Reddit and X all day",
+    "after": "Real-time sentiment dashboard + instant alerts",
+    "timeSaved": "4h / day"
+  },
+  "operations": {
+    "title": "Operations",
+    "agent": "Meeting Notes Agent",
+    "tagline": "Automated documentation the moment a meeting ends",
+    "description": "Writing notes, tracking decisions, listing action items — important but tedious. Azents handles everything from recording to structured docs.",
+    "before": "30 minutes writing notes after every 1-hour meeting",
+    "after": "Summary, decisions, and action items in Notion instantly",
+    "timeSaved": "3h / week"
+  },
+  "engineering": {
+    "title": "Engineering",
+    "agent": "Code Review Agent",
+    "tagline": "Instant first-pass review on every new PR",
+    "description": "Review backlogs, stale docs, repetitive boilerplate — Azents removes the bottlenecks slowing your engineering team down.",
+    "before": "PRs pile up waiting for a senior reviewer",
+    "after": "Bugs, security issues, style violations — first-pass review posted instantly",
+    "timeSaved": "Half day / PR"
+  }
+}

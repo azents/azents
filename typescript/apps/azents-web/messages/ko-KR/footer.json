@@ -1,0 +1,14 @@
+{
+  "product": "제품",
+  "company": "회사",
+  "legal": "법적 고지",
+  "features": "기능",
+  "pricing": "요금제 (추후 공개)",
+  "docs": "문서",
+  "about": "소개",
+  "blog": "블로그",
+  "careers": "채용",
+  "privacy": "개인정보처리방침",
+  "terms": "이용약관",
+  "copyright": "© {year} Azents. All rights reserved."
+}

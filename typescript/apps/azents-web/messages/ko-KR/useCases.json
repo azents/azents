@@ -1,0 +1,41 @@
+{
+  "sectionTag": "사용 사례",
+  "headline": "이런 일, 아직도 사람이 하고 있나요?",
+  "subheadline": "에이전트에게 맡기면 이렇게 바뀝니다",
+  "design": {
+    "title": "디자인",
+    "agent": "레퍼런스 리서치 에이전트",
+    "tagline": "리서치는 에이전트가, 디자이너는 창작에만 집중",
+    "description": "Dribbble, Behance, 경쟁사 앱 — 레퍼런스 찾는 데만 반나절. Azents이 자동으로 크롤링해서 몇 분 안에 무드보드를 완성합니다.",
+    "before": "인턴이 2시간 동안 50개 넘는 페이지를 수동 캡처",
+    "after": "30초 만에 큐레이션된 50개 결과",
+    "timeSaved": "주 8시간"
+  },
+  "marketing": {
+    "title": "마케팅",
+    "agent": "커뮤니티 모니터링 에이전트",
+    "tagline": "브랜드 반응을 모든 채널에서 실시간 모니터링",
+    "description": "출시 후 Reddit, X, 블라인드, ProductHunt를 누가 모니터링하나요? Azents이 실시간으로 추적하고 중요한 반응만 골라 알려줍니다.",
+    "before": "인턴이 하루 종일 Reddit, X를 돌며 댓글을 수동 수집",
+    "after": "실시간 감성 분석 대시보드 + 즉시 알림",
+    "timeSaved": "일 4시간"
+  },
+  "operations": {
+    "title": "운영",
+    "agent": "회의록 에이전트",
+    "tagline": "회의 종료 즉시 요약 문서 자동 생성",
+    "description": "회의록 쓰기, 결정사항 정리, 액션 아이템 추적 — 중요하지만 반복적인 업무. Azents이 녹음부터 문서화까지 자동으로 처리합니다.",
+    "before": "1시간 회의 끝나고 30분 동안 회의록 작성",
+    "after": "요약, 결정사항, 액션 아이템이 Notion에 바로 반영",
+    "timeSaved": "주 3시간"
+  },
+  "engineering": {
+    "title": "엔지니어링",
+    "agent": "코드 리뷰 에이전트",
+    "tagline": "PR 오픈 즉시 자동 코드 리뷰 완료",
+    "description": "리뷰 대기, 방치된 문서, 반복 보일러플레이트 — Azents이 개발팀의 병목을 없앱니다.",
+    "before": "시니어 리뷰어 기다리느라 PR이 쌓임",
+    "after": "버그, 보안, 스타일 위반 — 1차 리뷰 즉시 완료",
+    "timeSaved": "PR당 반나절"
+  }
+}
