@@ -103,6 +103,10 @@ export function ToolkitForm({
   onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
+  const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
+    event.stopPropagation();
+    onSubmit(event);
+  };
 
   if (formState.type === "LOADING") {
     return (
@@ -136,7 +140,7 @@ export function ToolkitForm({
 
         <Title order={3}>{isEdit ? t("editTitle") : t("createTitle")}</Title>
 
-        <form onSubmit={onSubmit}>
+        <form onSubmit={handleSubmit}>
           <Stack gap="md">
             <Select
               label={t("toolLabel")}
