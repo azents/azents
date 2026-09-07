@@ -1,46 +1,125 @@
 .modalContent {
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .modalBody {
-  overflow-x: hidden;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.bodyStack,
-.readyContent {
+.pickerLayout {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--mantine-spacing-sm);
   min-width: 0;
+}
+
+.stateSlot,
+.directoryBrowser {
+  min-width: 0;
+  min-height: 0;
+}
+
+.stateSlot {
+  overflow: hidden;
+}
+
+.statusViewport {
+  max-height: 27.5rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.directoryBrowser {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--mantine-spacing-sm);
+}
+
+.directoryToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--mantine-spacing-sm);
+  align-items: end;
+}
+
+.currentPath {
+  min-width: 0;
+}
+
+.directoryActions {
+  flex: 0 0 auto;
 }
 
 .directoryList {
   max-height: 27.5rem;
+  min-width: 0;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+}
+
+.directoryItems {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+  min-width: 0;
+}
+
+.directoryRow {
+  display: flex;
+  box-sizing: border-box;
+  gap: var(--mantine-spacing-xs);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.directoryOpenButton {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--mantine-spacing-sm);
+  align-items: center;
+  min-width: 0;
+}
+
+.directoryIcon,
+.directorySelectButton {
+  flex: 0 0 auto;
+}
+
+.directoryName {
+  min-width: 0;
 }
 
 @media (max-width: 47.99em) {
   .modalContent {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     height: calc(100dvh - var(--mantine-spacing-xl));
     max-height: calc(100dvh - var(--mantine-spacing-xl));
-    overflow: hidden;
   }
 
-  .modalBody,
-  .bodyStack,
-  .readyContent {
-    display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
+  .pickerLayout {
+    height: 100%;
   }
 
+  .directoryBrowser,
+  .statusViewport,
   .directoryList {
-    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     max-height: none;
+  }
+}
+
+@media (max-width: 35.99em) {
+  .directoryToolbar {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .directoryActions {
+    justify-content: space-between;
   }
 }
