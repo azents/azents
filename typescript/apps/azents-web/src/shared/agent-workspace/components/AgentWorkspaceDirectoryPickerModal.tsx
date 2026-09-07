@@ -12,7 +12,6 @@ import {
   Modal,
   Paper,
   rem,
-  ScrollArea,
   Stack,
   Text,
   Tooltip,
@@ -256,14 +255,11 @@ export function AgentWorkspaceDirectoryPickerModal({
             </Tooltip>
           </Group>
         </Group>
-        <ScrollArea
+        <div
+          aria-label={t("projectPickerTitle")}
           className={classes.directoryList}
-          classNames={{ viewport: classes.directoryViewport }}
           data-testid="agent-workspace-picker-directory-list"
-          offsetScrollbars="y"
-          overscrollBehavior="contain"
-          scrollbars="y"
-          type="auto"
+          tabIndex={0}
         >
           <Stack gap="xs" style={{ minWidth: 0, width: "100%" }}>
             {parent ? (
@@ -342,7 +338,7 @@ export function AgentWorkspaceDirectoryPickerModal({
               </Text>
             ) : null}
           </Stack>
-        </ScrollArea>
+        </div>
       </Stack>
     );
   };
