@@ -447,27 +447,27 @@ async def test_target_validation_failure_never_starts_storage() -> None:
         runtime=_runtime(storage, transfer),
     )
 
-    with client_tool_execution_context(
-        call_id="outer-call",
-        name=RUN_TOOL_TO_FILE_NAME,
+    with (
+        client_tool_execution_context(
+            call_id="outer-call",
+            name=RUN_TOOL_TO_FILE_NAME,
+        ),
+        pytest.raises(FunctionToolError) as error,
     ):
-        try:
-            await tool.handler(
-                json.dumps(
-                    {
-                        "tool_name": "service__target",
-                        "arguments": "{}",
-                        "directory": "/tmp/result",
-                        "overwrite": False,
-                    }
-                )
+        await tool.handler(
+            json.dumps(
+                {
+                    "tool_name": "service__target",
+                    "arguments": "{}",
+                    "directory": "/tmp/result",
+                    "overwrite": False,
+                }
             )
-        except Exception as exc:
-            assert str(exc) == (
-                "Input validation failed.\nNo Runtime output was stored."
-            )
-        else:
-            raise AssertionError("Target validation failure must raise")
+        )
+
+    assert str(error.value) == (
+        "Input validation failed.\nNo Runtime output was stored."
+    )
 
     assert transfer.requests == []
     assert storage.files == {}
