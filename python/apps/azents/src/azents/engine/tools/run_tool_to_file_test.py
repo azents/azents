@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import List, Literal
 from unittest.mock import AsyncMock
@@ -339,18 +340,36 @@ def _runtime(
     )
 
 
+@dataclass(frozen=True)
+class _BindingFixture:
+    """Late-bound Tool binding and its observable invoker."""
+
+    binding: LateBoundClientToolInvoker
+    invoker: _Invoker
+
+
+@dataclass(frozen=True)
+class _CallResult:
+    """Higher-order Tool result and its observable collaborators."""
+
+    returned: FunctionToolResult
+    storage: _Storage
+    transfer: _Transfer
+    invoker: _Invoker
+
+
 def _binding(
     result: UnboundedClientToolResult,
     *,
     wire_dialect: Literal["json_function", "plaintext_custom"] = "json_function",
-) -> tuple[LateBoundClientToolInvoker, _Invoker]:
+) -> _BindingFixture:
     binding = LateBoundClientToolInvoker()
     invoker = _Invoker(result)
     binding.bind(
         invoker=invoker,
         wire_dialects=MappingProxyType({"service__target": wire_dialect}),
     )
-    return binding, invoker
+    return _BindingFixture(binding=binding, invoker=invoker)
 
 
 async def _call(
@@ -361,12 +380,12 @@ async def _call(
     overwrite: bool = False,
     arguments: str = '{"value": 1}',
     wire_dialect: Literal["json_function", "plaintext_custom"] = "json_function",
-) -> tuple[FunctionToolResult, _Storage, _Transfer, _Invoker]:
+) -> _CallResult:
     storage = storage or _Storage()
     transfer = transfer or _Transfer(storage)
-    binding, invoker = _binding(result, wire_dialect=wire_dialect)
+    binding_fixture = _binding(result, wire_dialect=wire_dialect)
     tool = make_run_tool_to_file_tool(
-        binding=binding,
+        binding=binding_fixture.binding,
         runtime=_runtime(storage, transfer),
     )
     with client_tool_execution_context(
@@ -384,20 +403,25 @@ async def _call(
             )
         )
     assert isinstance(returned, FunctionToolResult)
-    return returned, storage, transfer, invoker
+    return _CallResult(
+        returned=returned,
+        storage=storage,
+        transfer=transfer,
+        invoker=binding_fixture.invoker,
+    )
 
 
 async def test_saves_full_text_without_engine_cap() -> None:
     """Store target text exactly and keep it out of the success result."""
     html = "<html>" + ("x" * 35_000) + "</html>"
 
-    returned, storage, transfer, invoker = await _call(result=_target_result(html))
+    result = await _call(result=_target_result(html))
 
-    assert storage.files["/tmp/result/output.txt"] == html.encode()
-    assert "/tmp/result/manifest.json" in storage.files
-    assert html not in str(returned)
-    assert len(transfer.requests) == 2
-    assert invoker.calls == [
+    assert result.storage.files["/tmp/result/output.txt"] == html.encode()
+    assert "/tmp/result/manifest.json" in result.storage.files
+    assert html not in str(result.returned)
+    assert len(result.transfer.requests) == 2
+    assert result.invoker.calls == [
         PreparedClientToolInvocation(
             call_id="outer-call",
             name="service__target",
@@ -416,7 +440,8 @@ async def test_target_validation_failure_never_starts_storage() -> None:
     )
     storage = _Storage()
     transfer = _Transfer(storage)
-    binding, _ = _binding(returned)
+    _binding_fixture = _binding(returned)
+    binding = _binding_fixture.binding
     tool = make_run_tool_to_file_tool(
         binding=binding,
         runtime=_runtime(storage, transfer),
@@ -452,7 +477,9 @@ async def test_manifest_preflight_failure_never_invokes_target() -> None:
     """Convert Runtime lookup failure to a Tool error before target execution."""
     storage = _ManifestPreflightFailureStorage()
     transfer = _Transfer(storage)
-    binding, invoker = _binding(_target_result("unused"))
+    _binding_fixture = _binding(_target_result("unused"))
+    binding = _binding_fixture.binding
+    invoker = _binding_fixture.invoker
     tool = make_run_tool_to_file_tool(
         binding=binding,
         runtime=_runtime(storage, transfer),
@@ -491,7 +518,8 @@ async def test_failed_part_returns_normal_capped_output_and_notice() -> None:
         storage,
         failed_destinations={"/tmp/result/output.txt"},
     )
-    binding, _ = _binding(_target_result(text))
+    _binding_fixture = _binding(_target_result(text))
+    binding = _binding_fixture.binding
     tool = make_run_tool_to_file_tool(
         binding=binding,
         runtime=_runtime(storage, transfer),
@@ -545,12 +573,14 @@ async def test_stores_generated_file_without_publishing_it() -> None:
         body=b"png",
     )
 
-    returned, storage, _, _ = await _call(
+    _call_result = await _call(
         result=_target_result(
             [],
             pending_generated_files=(generated,),
         )
     )
+    returned = _call_result.returned
+    storage = _call_result.storage
 
     assert storage.files["/tmp/result/image.png"] == b"png"
     assert returned.generated_files == []
@@ -648,7 +678,10 @@ async def test_mixed_output_uses_authorized_sources_and_manifest_order() -> None
     ]
     storage = _Storage()
     transfer = _Transfer(storage)
-    binding, _ = _binding(_target_result(output, pending_generated_files=(generated,)))
+    _binding_fixture = _binding(
+        _target_result(output, pending_generated_files=(generated,))
+    )
+    binding = _binding_fixture.binding
     tool = make_run_tool_to_file_tool(
         binding=binding,
         runtime=_runtime(
@@ -704,10 +737,11 @@ async def test_preserves_existing_destination_with_numeric_suffix() -> None:
     storage = _Storage()
     storage.files["/tmp/result/output.txt"] = b"old"
 
-    _, returned_storage, _, _ = await _call(
+    _call_result = await _call(
         result=_target_result("new"),
         storage=storage,
     )
+    returned_storage = _call_result.storage
 
     assert returned_storage.files["/tmp/result/output.txt"] == b"old"
     assert returned_storage.files["/tmp/result/output-1.txt"] == b"new"
@@ -721,11 +755,13 @@ async def test_manifest_failure_keeps_stored_files_and_reports_target_success() 
         failed_destinations={"/tmp/result/manifest.json"},
     )
 
-    returned, returned_storage, _, _ = await _call(
+    _call_result = await _call(
         result=_target_result("saved"),
         storage=storage,
         transfer=transfer,
     )
+    returned = _call_result.returned
+    returned_storage = _call_result.storage
 
     assert returned_storage.files["/tmp/result/output.txt"] == b"saved"
     assert isinstance(returned.output, list)
@@ -747,11 +783,13 @@ async def test_collision_lookup_failure_returns_failed_part_and_notice() -> None
     storage = _CollisionFailureStorage()
     transfer = _Transfer(storage)
 
-    returned, _, _, invoker = await _call(
+    _call_result = await _call(
         result=_target_result("target output"),
         storage=storage,
         transfer=transfer,
     )
+    returned = _call_result.returned
+    invoker = _call_result.invoker
 
     assert isinstance(returned.output, list)
     rendered = json.dumps(returned.output)
@@ -768,11 +806,14 @@ async def test_collision_lookup_failure_returns_failed_part_and_notice() -> None
 
 async def test_plaintext_custom_arguments_are_forwarded_without_rewriting() -> None:
     """Pass raw target text through the selected plaintext-custom dialect."""
-    returned, storage, _, invoker = await _call(
+    _call_result = await _call(
         result=_target_result("stored"),
         arguments="raw plaintext input",
         wire_dialect="plaintext_custom",
     )
+    returned = _call_result.returned
+    storage = _call_result.storage
+    invoker = _call_result.invoker
 
     assert isinstance(returned, FunctionToolResult)
     assert storage.files["/tmp/result/output.txt"] == b"stored"
@@ -829,7 +870,9 @@ async def test_cancel_handler_forwards_to_active_target_once() -> None:
 
 async def test_unknown_target_fails_before_invocation_or_transfer() -> None:
     """Reject names outside the same-turn visible target registry."""
-    binding, invoker = _binding(_target_result("unused"))
+    _binding_fixture = _binding(_target_result("unused"))
+    binding = _binding_fixture.binding
+    invoker = _binding_fixture.invoker
     storage = _Storage()
     transfer = _Transfer(storage)
     tool = make_run_tool_to_file_tool(
@@ -861,7 +904,8 @@ async def test_unknown_target_fails_before_invocation_or_transfer() -> None:
 
 def test_description_and_schema_are_concise() -> None:
     """Expose the approved name, description, and four input fields."""
-    binding, _ = _binding(_target_result("ok"))
+    _binding_fixture = _binding(_target_result("ok"))
+    binding = _binding_fixture.binding
     tool = make_run_tool_to_file_tool(
         binding=binding,
         runtime=_runtime(_Storage(), _Transfer(_Storage())),

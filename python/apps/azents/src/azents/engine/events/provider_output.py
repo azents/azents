@@ -8,7 +8,7 @@ import hashlib
 import uuid
 import warnings
 from io import BytesIO
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from azcommon.result import Failure
 from azcommon.types import JSONValue
@@ -50,13 +50,29 @@ _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_ENCODED_IMAGE_CHARS = ((_MAX_DECODED_IMAGE_BYTES + 2) // 3) * 4
 _MAX_IMAGE_DIMENSION = 8192
 _MAX_IMAGE_PIXELS = 4096 * 4096
-_IMAGE_MEDIA_TYPES: dict[str, tuple[str, str]] = {
-    "JPEG": ("image/jpeg", "jpg"),
-    "PNG": ("image/png", "png"),
-    "WEBP": ("image/webp", "webp"),
-    "GIF": ("image/gif", "gif"),
-}
 _PROVIDER_OUTPUT_NAMESPACE = uuid.UUID("67ca5840-937d-51cb-bff0-ff385172230c")
+
+
+class _ImageData(NamedTuple):
+    """Encoded image data and its optional declared media type."""
+
+    encoded: str
+    media_hint: str | None
+
+
+class _DetectedImageType(NamedTuple):
+    """Verified image media type and filename extension."""
+
+    media_type: str
+    extension: str
+
+
+_IMAGE_MEDIA_TYPES: dict[str, _DetectedImageType] = {
+    "JPEG": _DetectedImageType(media_type="image/jpeg", extension="jpg"),
+    "PNG": _DetectedImageType(media_type="image/png", extension="png"),
+    "WEBP": _DetectedImageType(media_type="image/webp", extension="webp"),
+    "GIF": _DetectedImageType(media_type="image/gif", extension="gif"),
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -765,40 +781,46 @@ def generated_image_output(
     output_index: int,
 ) -> GeneratedFileOutput:
     """Decode and validate one client or provider generated image."""
-    encoded, media_hint = _split_image_data_url(encoded_result)
-    if len(encoded) > _MAX_ENCODED_IMAGE_CHARS:
+    image_data = _split_image_data_url(encoded_result)
+    if len(image_data.encoded) > _MAX_ENCODED_IMAGE_CHARS:
         raise ModelCallError("Generated image result exceeds the size limit.")
     try:
-        body = base64.b64decode(encoded, validate=True)
+        body = base64.b64decode(image_data.encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ModelCallError("Generated image result is not valid Base64.") from exc
     if len(body) > _MAX_DECODED_IMAGE_BYTES:
         raise ModelCallError("Generated image result exceeds the size limit.")
-    media_type, extension = _detect_image_media_type(body)
-    if media_hint is not None and media_hint != media_type:
+    detected = _detect_image_media_type(body)
+    if (
+        image_data.media_hint is not None
+        and image_data.media_hint != detected.media_type
+    ):
         raise ModelCallError("Generated image result has an invalid media type.")
     sha256 = hashlib.sha256(body).hexdigest()
     return GeneratedFileOutput(
         output_index=output_index,
-        filename=f"generated-image-{sha256[:12]}.{extension}",
-        media_type=media_type,
+        filename=f"generated-image-{sha256[:12]}.{detected.extension}",
+        media_type=detected.media_type,
         sha256=sha256,
         body=body,
     )
 
 
-def _split_image_data_url(value: str) -> tuple[str, str | None]:
+def _split_image_data_url(value: str) -> _ImageData:
     prefix = "data:"
     marker = ";base64,"
     if not value.startswith(prefix):
-        return value, None
+        return _ImageData(encoded=value, media_hint=None)
     header, separator, encoded = value.partition(marker)
     if not separator or not encoded:
         raise ModelCallError("Generated image data URL is invalid.")
-    return encoded, header.removeprefix(prefix)
+    return _ImageData(
+        encoded=encoded,
+        media_hint=header.removeprefix(prefix),
+    )
 
 
-def _detect_image_media_type(body: bytes) -> tuple[str, str]:
+def _detect_image_media_type(body: bytes) -> _DetectedImageType:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -824,10 +846,10 @@ def _detect_image_media_type(body: bytes) -> tuple[str, str]:
         raise ModelCallError(
             "Generated image result is corrupt or unsupported."
         ) from exc
-    detected = _IMAGE_MEDIA_TYPES.get(image_format or "")
-    if detected is None:
+    image_type = _IMAGE_MEDIA_TYPES.get(image_format or "")
+    if image_type is None:
         raise ModelCallError("Generated image result is corrupt or unsupported.")
-    return detected
+    return image_type
 
 
 def _deterministic_id(

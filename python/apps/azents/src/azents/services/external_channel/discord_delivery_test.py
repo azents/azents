@@ -150,16 +150,28 @@ class _FileTransport:
         return self.result
 
 
-def _client(session: _SDKSession) -> tuple[DiscordDeliveryClient, _FileTransport]:
+@dataclass(frozen=True)
+class _ClientFixture:
+    """Discord delivery client and its file transport."""
+
+    client: DiscordDeliveryClient
+    transport: _FileTransport
+
+
+def _client(session: _SDKSession) -> _ClientFixture:
     files = _FileTransport()
-    return DiscordDeliveryClient(_SDKFactory(session), files), files
+    return _ClientFixture(
+        client=DiscordDeliveryClient(_SDKFactory(session), files),
+        transport=files,
+    )
 
 
 @pytest.mark.asyncio
 async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> None:
     """Text delivery uses one public SDK operation with the stable nonce."""
     session = _SDKSession()
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
     operation_key = ProviderOperationKey.from_seed("delivery-1")
     components: list[dict[str, object]] = [{"type": 1, "components": []}]
     embeds: list[dict[str, object]] = [{"description": "progress"}]
@@ -197,7 +209,8 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
 async def test_create_message_can_forward_the_exact_created_message() -> None:
     """The opt-in flow creates first and forwards the typed SDK result second."""
     session = _SDKSession()
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
     operation_key = ProviderOperationKey.from_seed("terminal-part-1")
 
     result = await client.create_message(
@@ -246,7 +259,8 @@ async def test_forward_failure_preserves_created_thread_message_identity() -> No
     session = _SDKSession(
         forward_message_error=DiscordSDKUnavailable(),
     )
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     result = await client.create_message(
         bot_token="discord-secret",
@@ -270,7 +284,8 @@ async def test_forward_permission_failure_keeps_classification_and_identity() ->
     session = _SDKSession(
         forward_message_error=DiscordSDKPermissionDenied(),
     )
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     result = await client.create_message(
         bot_token="discord-secret",
@@ -292,7 +307,8 @@ async def test_forward_permission_failure_keeps_classification_and_identity() ->
 async def test_forward_requires_an_explicit_parent_before_create() -> None:
     """An incomplete forwarding payload cannot create the Thread message."""
     session = _SDKSession()
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     result = await client.create_message(
         bot_token="discord-secret",
@@ -314,7 +330,8 @@ async def test_ensure_thread_creates_or_reuses_one_sdk_thread() -> None:
     """Thread provisioning reads once and creates only when absent."""
     created = DiscordSDKThread("444", "222", "111", "Azents")
     session = _SDKSession(created_thread=created)
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     result = await client.ensure_thread(
         bot_token="discord-secret",
@@ -352,7 +369,8 @@ async def test_ensure_thread_reconciles_ambiguous_sdk_create_without_replay() ->
         created_thread=created,
         create_thread_error=DiscordSDKUnavailable(),
     )
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     result = await client.ensure_thread(
         bot_token="discord-secret",
@@ -375,7 +393,8 @@ async def test_ensure_thread_reconciles_ambiguous_sdk_create_without_replay() ->
 async def test_thread_title_read_update_and_message_delete_use_sdk() -> None:
     """Title and exact message mutations remain one-attempt SDK operations."""
     session = _SDKSession(thread=DiscordSDKThread("444", "222", "111", "Old"))
-    client, _ = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
 
     title = await client.read_thread_title(
         bot_token="discord-secret", guild_id="111", channel_id="444"
@@ -436,7 +455,9 @@ async def test_bound_delivery_workflow_reuses_one_sdk_factory_open() -> None:
 async def test_file_message_delegates_only_to_g2_transport() -> None:
     """Streaming file delivery bypasses the SDK only through exact gap G2."""
     session = _SDKSession()
-    client, transport = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
+    transport = _client_fixture.transport
 
     result = await client.create_file_message(
         bot_token="discord-secret",
@@ -458,7 +479,9 @@ async def test_file_message_delegates_only_to_g2_transport() -> None:
 async def test_file_message_can_forward_the_exact_created_message() -> None:
     """A multipart Thread message is forwarded only after its exact create."""
     session = _SDKSession()
-    client, transport = _client(session)
+    _client_fixture = _client(session)
+    client = _client_fixture.client
+    transport = _client_fixture.transport
 
     result = await client.create_file_message(
         bot_token="discord-secret",
