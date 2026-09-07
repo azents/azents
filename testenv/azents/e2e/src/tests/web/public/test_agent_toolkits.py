@@ -88,7 +88,13 @@ def _login_main_web(
 def _assert_visible_text(driver: WebDriver, text: str) -> None:
     """Wait for exact visible text."""
     _wait(driver).until(
-        ec.visibility_of_element_located((By.XPATH, f"//*[normalize-space()={text!r}]"))
+        lambda current_driver: any(
+            element.is_displayed()
+            for element in current_driver.find_elements(
+                By.XPATH,
+                f"//*[normalize-space()={text!r}]",
+            )
+        )
     )
 
 
