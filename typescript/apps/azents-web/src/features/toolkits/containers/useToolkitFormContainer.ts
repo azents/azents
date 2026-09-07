@@ -336,6 +336,7 @@ export function useToolkitFormContainer(
       setMutationState({ type: "IDLE", error: null });
       if (agentId) {
         await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+        await utils.toolkit.listAgentManagement.fetch({ handle, agentId });
       }
       onComplete?.();
     },
@@ -362,6 +363,9 @@ export function useToolkitFormContainer(
         );
       }
       await Promise.all(invalidations);
+      if (agentId) {
+        await utils.toolkit.listAgentManagement.fetch({ handle, agentId });
+      }
       onComplete?.();
     },
     onError: (error) => {
