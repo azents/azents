@@ -396,6 +396,7 @@ class ExternalChannelInteractionProcessor:
                 connection_id=configuration.id,
                 provider_parent_channel_id=claim.provider_parent_channel_id,
                 provider_thread_resource_key=None,
+                expected_binding_id=None,
                 principal_id=interaction.principal_id,
             )
             result = await self.slack_client.open_interaction_view(
@@ -496,6 +497,7 @@ class ExternalChannelInteractionProcessor:
                 connection_id=configuration.id,
                 provider_parent_channel_id=provider_parent_channel_id,
                 provider_thread_resource_key=provider_thread_resource_key,
+                expected_binding_id=None,
                 principal_id=interaction.principal_id,
             )
             if (
@@ -586,6 +588,7 @@ class ExternalChannelInteractionProcessor:
                     connection_id=configuration.id,
                     provider_parent_channel_id=metadata.provider_parent_channel_id,
                     provider_thread_resource_key=None,
+                    expected_binding_id=None,
                     principal_id=interaction.principal_id,
                 )
                 cleanup_plans = (

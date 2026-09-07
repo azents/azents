@@ -19,6 +19,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
+  - python/apps/azents/src/azents/services/external_channel/discord_settings.py
+  - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
+  - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
@@ -34,8 +37,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-16
-spec_version: 24
+last_verified_at: 2026-09-07
+spec_version: 25
 ---
 
 # External Channel Authorization
@@ -213,6 +216,15 @@ setting generation; thread operations require an exact connected Binding. Open a
 an Agent grant, or a same-Session grant for the proven target may authorize the
 operation, while blocks always win. A Session grant cannot establish an unrelated new
 parent setting, and an unproven thread scope never falls back to parent mutation.
+
+Discord connected-setting controls additionally bind the originating authenticated
+interaction, operation category, current setting or Binding identity, and revision
+fence. The selected String Select value comes from the newly signed interaction and
+must belong to that operation's closed value set. Thread controls re-prove that the
+signed Binding owns the exact Discord delivery Thread before mutation. A successful
+response may expose `View session` only from the authorized route's exact connected
+Binding, current Agent, and current Workspace; parent settings omit navigation when
+there is no single parent Binding.
 
 ## Revocation
 

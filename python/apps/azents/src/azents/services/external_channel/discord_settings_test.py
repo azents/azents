@@ -40,6 +40,7 @@ from azents.services.external_channel.discord_settings_scope import (
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
+    ExternalChannelParticipationSessionNavigation,
     ExternalChannelParticipationSettings,
     ExternalChannelParticipationSettingsMutation,
 )
@@ -166,6 +167,14 @@ def _binding(
     )
 
 
+def _session_navigation() -> ExternalChannelParticipationSessionNavigation:
+    return ExternalChannelParticipationSessionNavigation(
+        workspace_handle="workspace",
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+
 def _service(
     *,
     origin: ExternalChannelInteraction,
@@ -175,6 +184,7 @@ def _service(
     repository.lock_interaction.return_value = origin
     config = MagicMock(spec=Config)
     config.auth = SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
+    config.web_url = "https://azents.example"
     service = DiscordSettingsResponseService(
         session_manager=_session_manager,
         repository=repository,
@@ -218,12 +228,82 @@ def test_settings_origin_accepts_one_exact_authenticated_scope() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parent_settings_render_current_selects_without_session() -> None:
+    """A parent without one exact Binding omits only Session navigation."""
+    current = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Agent One",
+        session_navigation=None,
+        setting=_setting(
+            location=ExternalChannelConversationLocation.THREADS,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        ),
+        claim=None,
+        resource=None,
+        binding=None,
+    )
+    participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
+    service, _ = _service(origin=_origin(), participation=participation)
+
+    response = await service.initial_response(
+        origin_interaction_id="interaction-1",
+        context=_CONTEXT,
+    )
+
+    assert response.response["type"] == 4
+    data = _object_dict(response.response["data"])
+    assert data["flags"] == 64
+    rows = _object_dict_list(data["components"])
+    assert len(rows) == 2
+    location_select = _object_dict_list(rows[0]["components"])[0]
+    response_select = _object_dict_list(rows[1]["components"])[0]
+    assert _object_dict_list(location_select["options"]) == [
+        {"label": "This channel", "value": "channel", "default": False},
+        {"label": "Threads", "value": "threads", "default": True},
+    ]
+    assert _object_dict_list(response_select["options"]) == [
+        {"label": "When mentioned", "value": "mention_only", "default": False},
+        {"label": "Every message", "value": "all_messages", "default": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setup_settings_retain_location_buttons() -> None:
+    """First-time setup remains a deferred two-button decision."""
+    current = ExternalChannelParticipationSettings(
+        target="setup",
+        agent_name="Agent One",
+        session_navigation=None,
+        setting=None,
+        claim=_claim(),
+        resource=None,
+        binding=None,
+    )
+    participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
+    service, _ = _service(origin=_origin(), participation=participation)
+
+    response = await service.initial_response(
+        origin_interaction_id="interaction-1",
+        context=_CONTEXT,
+    )
+
+    data = _object_dict(response.response["data"])
+    rows = _object_dict_list(data["components"])
+    buttons = _object_dict_list(rows[0]["components"])
+    assert [(button["type"], button["label"]) for button in buttons] == [
+        (2, "Answer in this channel"),
+        (2, "Answer in threads"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() -> None:
     """A setup control commits only its current claim generation and source revision."""
     claim = _claim()
     setup = ExternalChannelParticipationSettings(
         target="setup",
         agent_name="Agent One",
+        session_navigation=None,
         setting=None,
         claim=claim,
         resource=None,
@@ -232,6 +312,7 @@ async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() 
     committed = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=None,
         setting=_setting(),
         claim=None,
         resource=None,
@@ -256,6 +337,7 @@ async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() 
             binding_id=None,
             binding_version=None,
         ),
+        selected_value=None,
         context=_CONTEXT,
         now=_NOW,
     )
@@ -277,6 +359,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     current = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=None,
         setting=_setting(),
         claim=None,
         resource=None,
@@ -285,6 +368,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     updated = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=None,
         setting=_setting(location=ExternalChannelConversationLocation.THREADS),
         claim=None,
         resource=None,
@@ -304,7 +388,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     response = await service.component_response(
         interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
-            action="parent_threads",
+            action="parent_location",
             origin_interaction_id="interaction-1",
             setup_claim_id=None,
             claim_generation=None,
@@ -314,6 +398,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
             binding_id=None,
             binding_version=None,
         ),
+        selected_value="threads",
         context=_CONTEXT,
         now=_NOW,
     )
@@ -334,10 +419,11 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
         provider_thread_resource_key="discord:guild-1:thread-1",
         principal_id="principal-1",
     )
-    binding = _binding()
+    binding = _binding().model_copy(update={"id": _THREAD_BINDING_ID})
     current = ExternalChannelParticipationSettings(
         target="thread",
         agent_name="Agent One",
+        session_navigation=_session_navigation(),
         setting=None,
         claim=None,
         resource=_resource(),
@@ -346,10 +432,13 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
     updated = ExternalChannelParticipationSettings(
         target="thread",
         agent_name="Agent One",
+        session_navigation=_session_navigation(),
         setting=None,
         claim=None,
         resource=_resource(),
-        binding=_binding(response_mode=ExternalChannelResponseMode.ALL_MESSAGES),
+        binding=_binding(
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES
+        ).model_copy(update={"id": _THREAD_BINDING_ID}),
     )
     participation = SimpleNamespace(
         resolve_settings=AsyncMock(return_value=current),
@@ -368,23 +457,24 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
     response = await service.component_response(
         interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
-            action="thread_all_messages",
-            origin_interaction_id="interaction-1",
+            action="thread_response_mode",
+            origin_interaction_id=_THREAD_INTERACTION_ID,
             setup_claim_id=None,
             claim_generation=None,
             source_revision=None,
             setting_id=None,
             settings_generation=None,
-            binding_id="binding-1",
+            binding_id=_THREAD_BINDING_ID,
             binding_version=discord_binding_version(_NOW),
         ),
+        selected_value="all_messages",
         context=context,
         now=_NOW,
     )
 
     call = participation.mutate_thread_settings.await_args.kwargs
     assert call["resource_id"] == "resource-1"
-    assert call["binding_id"] == "binding-1"
+    assert call["binding_id"] == _THREAD_BINDING_ID
     assert call["expected_binding_updated_at"] == _NOW
     assert call["response_mode"] is ExternalChannelResponseMode.ALL_MESSAGES
     assert response.response["type"] == 7
@@ -396,6 +486,7 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
     current = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=None,
         setting=_setting(generation=2),
         claim=None,
         resource=None,
@@ -410,7 +501,7 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
     response = await service.component_response(
         interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
-            action="parent_all_messages",
+            action="parent_response_mode",
             origin_interaction_id="interaction-1",
             setup_claim_id=None,
             claim_generation=None,
@@ -420,12 +511,54 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
             binding_id=None,
             binding_version=None,
         ),
+        selected_value="all_messages",
         context=_CONTEXT,
         now=_NOW,
     )
 
     assert response.response["type"] == 4
     assert "changed before submission" in str(response.response)
+    participation.mutate_parent_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalid_select_value_returns_notice_without_mutation() -> None:
+    """A signed scope cannot authorize a value outside its closed Select options."""
+    current = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Agent One",
+        session_navigation=None,
+        setting=_setting(),
+        claim=None,
+        resource=None,
+        binding=None,
+    )
+    participation = SimpleNamespace(
+        resolve_settings=AsyncMock(return_value=current),
+        mutate_parent_settings=AsyncMock(),
+    )
+    service, _ = _service(origin=_origin(), participation=participation)
+
+    response = await service.component_response(
+        interaction_id="component-interaction-1",
+        scope=DiscordSettingsScope(
+            action="parent_location",
+            origin_interaction_id="interaction-1",
+            setup_claim_id=None,
+            claim_generation=None,
+            source_revision=None,
+            setting_id="setting-1",
+            settings_generation=1,
+            binding_id=None,
+            binding_version=None,
+        ),
+        selected_value="unknown",
+        context=_CONTEXT,
+        now=_NOW,
+    )
+
+    assert response.response["type"] == 4
+    assert "selection is invalid" in str(response.response)
     participation.mutate_parent_settings.assert_not_awaited()
 
 
@@ -437,6 +570,7 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
     current = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=_session_navigation(),
         setting=_setting(),
         claim=None,
         resource=None,
@@ -445,6 +579,7 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
     updated = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
+        session_navigation=_session_navigation(),
         setting=_setting(response_mode=ExternalChannelResponseMode.ALL_MESSAGES),
         claim=None,
         resource=None,
@@ -474,29 +609,57 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
             binding_id=None,
             binding_version=None,
         ),
+        selected_value=None,
         context=_CONTEXT,
         now=_NOW,
     )
 
     data = _object_dict(opened.response["data"])
     rows = _object_dict_list(data["components"])
-    response_buttons = _object_dict_list(rows[1]["components"])
-    all_messages_custom_id = response_buttons[1]["custom_id"]
-    assert isinstance(all_messages_custom_id, str)
+    assert len(rows) == 3
+    location_select = _object_dict_list(rows[0]["components"])[0]
+    response_select = _object_dict_list(rows[1]["components"])[0]
+    navigation_button = _object_dict_list(rows[2]["components"])[0]
+    assert location_select["placeholder"] == "Where to respond"
+    assert _object_dict_list(location_select["options"]) == [
+        {"label": "This channel", "value": "channel", "default": True},
+        {"label": "Threads", "value": "threads", "default": False},
+    ]
+    response_custom_id = response_select["custom_id"]
+    assert response_select["type"] == 3
+    assert response_select["placeholder"] == "When to respond"
+    assert navigation_button == {
+        "type": 2,
+        "style": 5,
+        "label": "View session",
+        "url": "https://azents.example/w/workspace/agents/agent-1/sessions/session-1",
+    }
+    assert isinstance(response_custom_id, str)
     mutation_scope = parse_discord_settings_custom_id(
-        custom_id=all_messages_custom_id,
+        custom_id=response_custom_id,
         secret="settings-secret",
     )
+    assert mutation_scope.action == "parent_response_mode"
     assert mutation_scope.origin_interaction_id == "component-interaction-1"
 
     saved = await service.component_response(
         interaction_id="mutation-interaction-1",
         scope=mutation_scope,
+        selected_value="all_messages",
         context=_CONTEXT,
         now=_NOW,
     )
 
     assert saved.response["type"] == 7
+    saved_data = _object_dict(saved.response["data"])
+    assert "flags" not in saved_data
+    saved_rows = _object_dict_list(saved_data["components"])
+    saved_response_select = _object_dict_list(saved_rows[1]["components"])[0]
+    assert _object_dict_list(saved_response_select["options"]) == [
+        {"label": "When mentioned", "value": "mention_only", "default": False},
+        {"label": "Every message", "value": "all_messages", "default": True},
+    ]
+    assert _object_dict_list(saved_rows[2]["components"])[0] == navigation_button
     assert repository.lock_interaction.await_args.kwargs["interaction_id"] == (
         "component-interaction-1"
     )
@@ -517,6 +680,7 @@ async def test_binding_open_renders_bounded_thread_controls() -> None:
     current = ExternalChannelParticipationSettings(
         target="thread",
         agent_name="Agent One",
+        session_navigation=_session_navigation(),
         setting=None,
         claim=None,
         resource=_resource(),
@@ -538,20 +702,30 @@ async def test_binding_open_renders_bounded_thread_controls() -> None:
             binding_id=None,
             binding_version=None,
         ),
+        selected_value=None,
         context=context,
         now=_NOW,
     )
 
     data = _object_dict(opened.response["data"])
     rows = _object_dict_list(data["components"])
-    response_buttons = _object_dict_list(rows[0]["components"])
-    for button in response_buttons:
-        custom_id = button["custom_id"]
-        assert isinstance(custom_id, str)
-        scope = parse_discord_settings_custom_id(
-            custom_id=custom_id,
-            secret="settings-secret",
-        )
-        assert len(custom_id) == 90
-        assert scope.origin_interaction_id == _THREAD_INTERACTION_ID
-        assert scope.binding_id == _THREAD_BINDING_ID
+    assert len(rows) == 2
+    response_select = _object_dict_list(rows[0]["components"])[0]
+    custom_id = response_select["custom_id"]
+    assert response_select["type"] == 3
+    assert response_select["placeholder"] == "When to respond"
+    assert isinstance(custom_id, str)
+    scope = parse_discord_settings_custom_id(
+        custom_id=custom_id,
+        secret="settings-secret",
+    )
+    assert len(custom_id) == 90
+    assert scope.action == "thread_response_mode"
+    assert scope.origin_interaction_id == _THREAD_INTERACTION_ID
+    assert scope.binding_id == _THREAD_BINDING_ID
+    assert _object_dict_list(rows[1]["components"])[0] == {
+        "type": 2,
+        "style": 5,
+        "label": "View session",
+        "url": "https://azents.example/w/workspace/agents/agent-1/sessions/session-1",
+    }

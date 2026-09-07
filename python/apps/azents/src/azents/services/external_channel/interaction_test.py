@@ -470,6 +470,7 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
     setup_settings = ExternalChannelParticipationSettings(
         target="setup",
         agent_name="Research Agent",
+        session_navigation=None,
         setting=None,
         claim=claim,
         resource=None,
@@ -478,6 +479,7 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
     committed_settings = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Research Agent",
+        session_navigation=None,
         setting=ExternalChannelParticipationSetting.model_construct(
             id="setting-1",
             location=ExternalChannelConversationLocation.THREADS,

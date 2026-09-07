@@ -12,6 +12,7 @@ from testcontainers.core.container import DockerContainer
 from support.discord_provider_fake import (
     STATE,
     DiscordHTTPHandler,
+    _settings_control_evidence,
 )
 
 _DISCORD_VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
@@ -544,6 +545,86 @@ def test_discord_fake_hands_off_delivered_message_components_transiently(
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     assert custom_id not in str(evidence)
     assert "Private setup guidance." not in str(evidence)
+
+
+def test_discord_fake_records_only_safe_settings_select_evidence() -> None:
+    """Expose control roles, defaults, and relative Session navigation only."""
+    assert _settings_control_evidence(
+        {
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "signed-location",
+                            "placeholder": "Where to respond",
+                            "options": [
+                                {
+                                    "label": "This channel",
+                                    "value": "channel",
+                                    "default": False,
+                                },
+                                {
+                                    "label": "Threads",
+                                    "value": "threads",
+                                    "default": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "signed-response-mode",
+                            "placeholder": "When to respond",
+                            "options": [
+                                {
+                                    "label": "When mentioned",
+                                    "value": "mention_only",
+                                    "default": True,
+                                },
+                                {
+                                    "label": "Every message",
+                                    "value": "all_messages",
+                                    "default": False,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 5,
+                            "label": "View session",
+                            "url": (
+                                "https://azents.example/w/workspace/agents/"
+                                "agent-1/sessions/session-1"
+                            ),
+                        }
+                    ],
+                },
+            ]
+        }
+    ) == [
+        {"kind": "select", "setting": "location", "default": "threads"},
+        {
+            "kind": "select",
+            "setting": "response_mode",
+            "default": "mention_only",
+        },
+        {
+            "kind": "link",
+            "target": "session",
+            "path": "/w/workspace/agents/agent-1/sessions/session-1",
+        },
+    ]
 
 
 def test_discord_fake_correlates_transient_components_by_channel(

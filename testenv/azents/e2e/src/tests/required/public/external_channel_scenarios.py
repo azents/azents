@@ -587,8 +587,9 @@ def _open_discord_settings(
     guild_id: str,
     channel_id: str,
     user_id: str,
+    parent_channel_id: str | None = None,
 ) -> None:
-    """Open parent settings through the capability-proven Discord command."""
+    """Open settings through the capability-proven Discord command."""
     command_id = _string(
         wait_until(
             lambda: _discord_command_id(
@@ -601,6 +602,12 @@ def _open_discord_settings(
         )
     )
     command_name, command_type = _DISCORD_COMMAND_CONTRACTS["azents_settings"]
+    channel: dict[str, object] = {
+        "id": channel_id,
+        "type": 0 if parent_channel_id is None else 11,
+    }
+    if parent_channel_id is not None:
+        channel["parent_id"] = parent_channel_id
     response = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -609,7 +616,7 @@ def _open_discord_settings(
             "application_id": application_id,
             "guild_id": guild_id,
             "channel_id": channel_id,
-            "channel": {"id": channel_id, "type": 0},
+            "channel": channel,
             "member": {"user": {"id": user_id}},
             "data": {
                 "id": command_id,
@@ -621,6 +628,59 @@ def _open_discord_settings(
     )
     response.raise_for_status()
     assert response.json() == {"status": 200, "response_type": 4}
+
+
+def _select_discord_setting(
+    *,
+    discord_provider_fake_url: str,
+    interaction_id: str,
+    application_id: str,
+    guild_id: str,
+    channel_id: str,
+    parent_channel_id: str | None,
+    user_id: str,
+    custom_id: str,
+    value: str,
+) -> None:
+    """Commit one signed Discord settings Select through the real callback."""
+    channel: dict[str, object] = {
+        "id": channel_id,
+        "type": 0 if parent_channel_id is None else 11,
+    }
+    if parent_channel_id is not None:
+        channel["parent_id"] = parent_channel_id
+    response = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": interaction_id,
+            "type": 3,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "channel": channel,
+            "member": {"user": {"id": user_id}},
+            "message": {"id": f"message-{interaction_id}"},
+            "data": {"custom_id": custom_id, "values": [value]},
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    response_payload = response.json()
+    interaction = next(
+        (
+            item
+            for item in reversed(
+                _objects(
+                    _discord_provider_state(discord_provider_fake_url)["interactions"]
+                )
+            )
+            if item.get("interaction_id") == interaction_id
+        ),
+        None,
+    )
+    assert response_payload == {"status": 200, "response_type": 7}, (
+        None if interaction is None else interaction.get("settings_error_kind")
+    )
 
 
 def _select_discord_setup_location(
@@ -6505,11 +6565,13 @@ def test_discord_message_command_selector_and_component_journey(
         7,
     ]
     operations = _objects(state["operations"])[before_operation_count:]
-    thread_channel_id = next(
-        operation["thread_channel_id"]
-        for operation in operations
-        if operation.get("event") == "thread_create"
-        and operation.get("outcome") == "delivered"
+    thread_channel_id = _string(
+        next(
+            operation["thread_channel_id"]
+            for operation in operations
+            if operation.get("event") == "thread_create"
+            and operation.get("outcome") == "delivered"
+        )
     )
     deliveries = _objects(state["deliveries"])[before_delivery_count:]
     assert any(
@@ -6601,6 +6663,123 @@ def test_discord_message_command_selector_and_component_journey(
         "activity_tracker",
     ]
     assert _successful_session_presence_states(activation_state) == ["joined"]
+    initial_response_mode = selected_channel.response_mode
+    selected_response_mode = (
+        ExternalChannelResponseMode.MENTION_ONLY
+        if initial_response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+        else ExternalChannelResponseMode.ALL_MESSAGES
+    )
+
+    _open_discord_settings(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000007",
+        application_id=_DISCORD_SELECTOR_APPLICATION_ID,
+        guild_id=_DISCORD_GUILD_ID,
+        channel_id=thread_channel_id,
+        parent_channel_id=_DISCORD_CHANNEL_ID,
+        user_id="600000000000000002",
+    )
+    opened_settings = _object(
+        wait_until(
+            lambda: next(
+                (
+                    interaction
+                    for interaction in _objects(
+                        _discord_provider_state(discord_provider_fake_url)[
+                            "interactions"
+                        ]
+                    )
+                    if interaction.get("interaction_id") == "700000000000000007"
+                ),
+                None,
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord connected-thread settings interaction was not recorded",
+        )
+    )
+    assert "settings_controls" in opened_settings, opened_settings
+    assert opened_settings["settings_controls"] == [
+        {
+            "kind": "select",
+            "setting": "response_mode",
+            "default": initial_response_mode.value,
+        },
+        {
+            "kind": "link",
+            "target": "session",
+            "path": expected_session_path,
+        },
+    ]
+    response_mode_custom_id = _string(
+        wait_until(
+            lambda: _discord_settings_component_id(
+                discord_provider_fake_url,
+                action_code="tr",
+                channel_id=thread_channel_id,
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord thread settings did not expose a response-mode Select",
+        )
+    )
+    _select_discord_setting(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000008",
+        application_id=_DISCORD_SELECTOR_APPLICATION_ID,
+        guild_id=_DISCORD_GUILD_ID,
+        channel_id=thread_channel_id,
+        parent_channel_id=_DISCORD_CHANNEL_ID,
+        user_id="600000000000000002",
+        custom_id=response_mode_custom_id,
+        value=selected_response_mode.value,
+    )
+
+    def updated_thread_settings() -> dict[str, object] | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_ids[1],
+            session_id=selected_session.id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) != 1
+            or projection.items[0].response_mode is not selected_response_mode
+        ):
+            return None
+        state = _discord_provider_state(discord_provider_fake_url)
+        return (
+            state
+            if any(
+                interaction.get("interaction_id") == "700000000000000008"
+                and interaction.get("response_type") == 7
+                and interaction.get("settings_controls")
+                == [
+                    {
+                        "kind": "select",
+                        "setting": "response_mode",
+                        "default": selected_response_mode.value,
+                    },
+                    {
+                        "kind": "link",
+                        "target": "session",
+                        "path": expected_session_path,
+                    },
+                ]
+                for interaction in _objects(state["interactions"])
+            )
+            else None
+        )
+
+    assert wait_until(
+        updated_thread_settings,
+        timeout=15,
+        interval=0.2,
+        message=(
+            "Discord response-mode Select did not commit and refresh the "
+            "connected-thread settings surface"
+        ),
+    )
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered

@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,8 @@ from azents.core.enums import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    ExternalChannelAgentRoute,
+    ExternalChannelBinding,
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
     ExternalChannelSetupClaim,
@@ -41,7 +43,11 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationError,
     ExternalChannelParticipationService,
+    ExternalChannelParticipationSessionNavigation,
+    _AuthorizedSettingsActor,
     _CommittedLocation,
+    _session_navigation,
+    _thread_conversation_scope,
 )
 from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
@@ -165,10 +171,99 @@ def _service(
         repository=cast(Any, repository),
         management_repository=cast(Any, MagicMock()),
         agent_repository=cast(Any, MagicMock()),
+        workspace_repository=cast(Any, MagicMock()),
         ingestion_replay_service=cast(Any, replay or MagicMock()),
         conversation_lock=cast(Any, _Lock()),
         participation_lock=cast(Any, _Lock()),
     )
+
+
+def test_session_navigation_requires_the_authorized_route_binding() -> None:
+    """Project one exact Session target and omit unrelated or absent Bindings."""
+    actor = _AuthorizedSettingsActor(
+        route=ExternalChannelAgentRoute.model_construct(
+            id="route-1",
+            agent_id="agent-1",
+        ),
+        agent_name="Agent One",
+        workspace_handle="workspace",
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        route_id="route-1",
+        agent_session_id="session-1",
+    )
+
+    assert _session_navigation(actor=actor, binding=binding) == (
+        ExternalChannelParticipationSessionNavigation(
+            workspace_handle="workspace",
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+    )
+    assert (
+        _session_navigation(
+            actor=actor,
+            binding=binding.model_copy(update={"route_id": "route-2"}),
+        )
+        is None
+    )
+    assert _session_navigation(actor=actor, binding=None) is None
+
+
+def test_slack_thread_settings_use_channel_and_thread_timestamp_lock_scope() -> None:
+    """Reuse the same Slack conversation identity as trigger ingestion."""
+    scope = _thread_conversation_scope(
+        connection_id="connection-1",
+        connection_provider=ExternalChannelProvider.SLACK,
+        provider_parent_channel_id="channel-1",
+        resource=ExternalChannelResource.model_construct(
+            labels={"thread_ts": "1.000000"},
+        ),
+    )
+
+    assert scope == ExternalChannelConversationScope(
+        connection_id="connection-1",
+        kind=ExternalChannelConversationScopeKind.THREAD,
+        provider_channel_id="channel-1",
+        provider_thread_key="1.000000",
+    )
+
+
+def test_discord_thread_settings_use_delivery_channel_lock_scope() -> None:
+    """Reuse the Discord thread channel identity used by trigger ingestion."""
+    scope = _thread_conversation_scope(
+        connection_id="connection-1",
+        connection_provider=ExternalChannelProvider.DISCORD,
+        provider_parent_channel_id="parent-1",
+        resource=ExternalChannelResource.model_construct(
+            labels={
+                "thread_id": "thread-1",
+                "delivery_channel_id": "thread-1",
+            },
+        ),
+    )
+
+    assert scope == ExternalChannelConversationScope(
+        connection_id="connection-1",
+        kind=ExternalChannelConversationScopeKind.THREAD,
+        provider_channel_id="thread-1",
+        provider_thread_key="thread-1",
+    )
+
+
+def test_thread_settings_reject_resources_without_provider_lock_identity() -> None:
+    """Reject resources that cannot reproduce their canonical ingestion scope."""
+    with pytest.raises(
+        ExternalChannelParticipationError,
+        match="thread settings are unavailable",
+    ):
+        _thread_conversation_scope(
+            connection_id="connection-1",
+            connection_provider=ExternalChannelProvider.DISCORD,
+            provider_parent_channel_id="parent-1",
+            resource=ExternalChannelResource.model_construct(labels={}),
+        )
 
 
 @pytest.mark.asyncio
@@ -179,6 +274,8 @@ async def test_thread_settings_never_fall_back_to_parent_scope() -> None:
         return_value=SimpleNamespace(
             id="connection-1",
             status=ExternalChannelConnectionStatus.ACTIVE,
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="tenant-1",
         )
     )
     repository.get_resource_by_provider_key = AsyncMock(return_value=None)
@@ -193,10 +290,48 @@ async def test_thread_settings_never_fall_back_to_parent_scope() -> None:
             connection_id="connection-1",
             provider_parent_channel_id="channel-1",
             provider_thread_resource_key="slack:tenant-1:channel-1:1.000000",
+            expected_binding_id=None,
             principal_id="principal-1",
         )
 
     repository.get_active_participation_setting.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_discord_thread_settings_resolve_by_delivery_channel() -> None:
+    """A Discord interaction finds a provisioned thread through retained labels."""
+    repository = MagicMock()
+    repository.get_connection_configuration = AsyncMock(
+        return_value=SimpleNamespace(
+            id="connection-1",
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            provider=ExternalChannelProvider.DISCORD,
+            provider_tenant_id="guild-1",
+        )
+    )
+    repository.get_discord_resource_by_delivery_channel = AsyncMock(return_value=None)
+    repository.get_resource_by_provider_key = AsyncMock()
+    service = _service(repository=repository)
+
+    with pytest.raises(
+        ExternalChannelParticipationError,
+        match="thread settings are unavailable",
+    ):
+        await service.resolve_settings(
+            connection_id="connection-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_resource_key="discord:guild-1:thread-1",
+            expected_binding_id=None,
+            principal_id="principal-1",
+        )
+
+    repository.get_discord_resource_by_delivery_channel.assert_awaited_once_with(
+        ANY,
+        connection_id="connection-1",
+        guild_id="guild-1",
+        delivery_channel_id="thread-1",
+    )
+    repository.get_resource_by_provider_key.assert_not_awaited()
 
 
 @pytest.mark.asyncio

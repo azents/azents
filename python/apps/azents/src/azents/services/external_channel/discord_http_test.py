@@ -543,11 +543,13 @@ def _selector_component_body() -> bytes:
 
 
 def _settings_component_body() -> bytes:
-    """Build one signed settings component callback."""
+    """Build one signed settings Select callback."""
     custom_id = build_discord_settings_custom_id(
         secret="settings-secret",
-        action="open",
+        action="parent_response_mode",
         origin_interaction_id="origin-interaction-1",
+        setting_id="setting-1",
+        settings_generation=1,
     )
     return json.dumps(
         {
@@ -558,7 +560,7 @@ def _settings_component_body() -> bytes:
             "channel_id": "channel-1",
             "channel": {"id": "channel-1", "type": 0},
             "member": {"user": {"id": "user-1"}},
-            "data": {"custom_id": custom_id},
+            "data": {"custom_id": custom_id, "values": ["all_messages"]},
         },
         separators=(",", ":"),
     ).encode()
@@ -788,6 +790,7 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         service.settings_response_service,
     )
     assert settings_response.component_calls[0]["interaction_id"] == "interaction-row-1"
+    assert settings_response.component_calls[0]["selected_value"] == "all_messages"
 
 
 @pytest.mark.asyncio

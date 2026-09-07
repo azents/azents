@@ -315,6 +315,7 @@ class DiscordHTTPAdmissionService:
         response = await self._complete_settings_component(
             interaction_id=admission.interaction.id,
             scope=scope,
+            selected_value=envelope.selected_value,
             context=context,
             received_at=received_at,
         )
@@ -336,6 +337,7 @@ class DiscordHTTPAdmissionService:
         response = await self._complete_settings_component(
             interaction_id=handoff.interaction_id,
             scope=handoff.scope,
+            selected_value=None,
             context=handoff.context,
             received_at=handoff.received_at,
         )
@@ -357,6 +359,7 @@ class DiscordHTTPAdmissionService:
         *,
         interaction_id: str,
         scope: DiscordSettingsScope,
+        selected_value: str | None,
         context: DiscordSettingsContext,
         received_at: datetime.datetime,
     ) -> DiscordSettingsResponse:
@@ -365,6 +368,7 @@ class DiscordHTTPAdmissionService:
             response = await self.settings_response_service.component_response(
                 interaction_id=interaction_id,
                 scope=scope,
+                selected_value=selected_value,
                 context=context,
                 now=received_at,
             )
