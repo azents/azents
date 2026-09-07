@@ -17,7 +17,7 @@ from .data import (
 )
 
 CURRENT_ALLOCATOR_VERSION = 1
-MAX_CONNECTION_GENERATION = 2**53 - 1
+MAX_CONNECTION_GENERATION = 2**63 - 1
 
 
 class RuntimeConnectionGenerationRepository:

@@ -1,10 +1,8 @@
 """Migration tests for durable Runtime connection-generation authority."""
 
-import pytest
 import sqlalchemy as sa
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
 
 _PARENT_REVISION = "4ab7015e39b5"
 _REVISION = "fa67b82b0b53"
@@ -205,30 +203,3 @@ def test_subject_created_after_foundation_is_not_preallocated(
             )
         )
         assert count == 0
-
-
-def test_foundation_rejects_generation_above_safe_integer_max(
-    alembic_runner: MigrationContext,
-    alembic_engine: Engine,
-) -> None:
-    """The database enforces the numeric domain shared with Redis and browsers."""
-    alembic_runner.migrate_up_to(_REVISION)
-    with alembic_engine.connect() as connection:
-        transaction = connection.begin()
-        try:
-            with pytest.raises(IntegrityError):
-                connection.execute(
-                    sa.text(
-                        """
-                        INSERT INTO runtime_connection_generations (
-                          connection_kind, subject_id, high_water_generation,
-                          accepted_generation
-                        ) VALUES (
-                          'provider', 'unsafe-generation-provider',
-                          9007199254740992, 0
-                        )
-                        """
-                    )
-                )
-        finally:
-            transaction.rollback()

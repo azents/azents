@@ -44,6 +44,7 @@ Reference local deployment currently mounts a persistent Valkey data volume, whi
 - [x] `redis-260907/ADR-D1` — Use one durable per-subject connection-generation high-water relation.
 - [x] `redis-260907/ADR-D2` — Use one-shot volatile candidates with DB-only allocation, preflight, and acceptance transactions.
 - [x] `redis-260907/ADR-D3` — Seed migration-time Home subjects into a safe numeric band and use a strict namespace cutover.
+- [x] `redis-260907/ADR-D4` — Represent JSON-exposed connection generations as canonical decimal strings.
 
 ### Agent-owned implementation details
 
@@ -103,7 +104,7 @@ Each migration-time subject receives `high_water_generation = max(2^48 - 1, acce
 
 Subjects created after the cutover are not seeded into the legacy-safe band. `AFTER INSERT` triggers on the Provider and Agent Runtime subject tables create the matching `0/0` generation row inside the subject-creation transaction, so the first allocation receives generation one. The migration installs these triggers before releasing the table locks, closing the race with subject-creation transactions that began before the migration but insert only after it commits. Allocation never infers migration membership from timestamps and never lazily creates a missing row; any missing generation row is an allocator integrity error and fails closed. Generation rows survive subject disablement, Runtime stop or removal, connection expiry, and subject-row deletion so an identity never re-enters through a lower initialization rule.
 
-PostgreSQL stores allocated and accepted generations as signed `BIGINT`, but the allocator's application maximum is JavaScript's exact-integer ceiling, `2^53 - 1` (`9007199254740991`). Existing protobuf `uint64`, Redis JSON/Lua numeric comparison, public JSON numbers, and TypeScript safe-integer contracts remain unchanged and exact throughout the allocator domain. Exhaustion fails closed without wraparound, reset, random fallback, or representation change.
+PostgreSQL stores allocated and accepted generations as signed `BIGINT`. The allocator fails closed at `2^63 - 1` without wraparound, reset, random fallback, or generation reuse. The existing protobuf remains `uint64`; Redis and public JSON representation are decided separately in D4.
 
 Runtime Control uses a one-time strict non-overlapping cutover. Home scales Runtime Control to zero and confirms legacy endpoints are absent before applying the migration and deploying the new version. The cutover procedure temporarily disables Runtime Control HPA and PDB constraints that would prevent zero replicas, then restores normal rolling deployment configuration after the new version is active.
 
@@ -121,8 +122,26 @@ Before the first new-band acceptance, deployment may return to the legacy releas
 - A rolling mixed-version transition was rejected because legacy and new replicas would issue from different authorities and operate different namespaces concurrently.
 - Permanently changing Runtime Control to a `Recreate` deployment strategy was rejected because the outage is a one-time Home migration procedure, not the desired behavior for later releases.
 - Reusing or synchronously deleting the legacy namespace was rejected because correctness must not depend on retained Redis state or its cleanup.
-- Using numeric generations up to signed `BIGINT` maximum was rejected because Redis Lua/cjson and browser JavaScript cannot exactly compare that full range.
-- Changing JSON generations to decimal strings was rejected because the `2^53 - 1` allocator ceiling preserves exact current numeric contracts without a public compatibility migration.
+- Limiting the allocator to JavaScript's safe-integer range was rejected because string-safe JSON representation preserves the full positive signed `BIGINT` domain without turning a browser limitation into durable authority.
+
+### redis-260907/ADR-D4: Represent JSON-exposed connection generations as canonical decimal strings
+
+**Affected requirements:** `redis-260907/REQ-2`, `REQ-3`, `REQ-7`, `REQ-8`
+
+Provider and Runner connection generations remain positive integers in PostgreSQL, Python, and existing protobuf `uint64` fields. Every JSON contract that stores, transports, or exposes one of those connection generations represents it as a canonical decimal string.
+
+Redis-internal Runtime coordination records use a fixed-width 19-digit zero-padded decimal string. Equality uses exact string comparison, and ordering uses lexicographic comparison because every valid value has equal width. Lua never decodes or re-encodes a connection generation as a JSON number. Python converts between the internal fixed-width representation and validated positive signed `BIGINT` integers at the store boundary.
+
+Public and browser-facing JSON uses an unpadded canonical decimal string. This covers Runtime raw-state diagnostics, Terminal WebSocket messages, and any other OpenAPI or JSON schema discovered by the implementation audit to carry a Provider or Runner connection generation. TypeScript treats the value as an opaque string and performs exact equality rather than numeric arithmetic.
+
+The coordinated application cutover changes OpenAPI schemas and generated clients from numeric to string generation fields. It does not add numeric-and-string unions, duplicate legacy fields, version negotiation, or permanent compatibility parsing. The strict deployment and fresh Runtime coordination namespace from D3 update producers and consumers together.
+
+**Rejected alternatives:**
+
+- Keeping JSON numbers was rejected because Redis Lua cjson cannot re-encode the migration band exactly and JavaScript cannot exactly represent the full allocator domain.
+- Limiting all generations to Redis cjson's 14-digit output range was rejected because it would make one volatile serializer a durable allocator constraint and materially reduce the future fencing domain.
+- Changing only values above a threshold to strings was rejected because a union type would add a permanent value-dependent compatibility mode.
+- Removing generation from Runtime and Terminal JSON contracts was rejected because exact diagnostics and Terminal authority checks remain useful and would require a broader interface redesign.
 
 
 ## Consequences
@@ -134,7 +153,7 @@ Before the first new-band acceptance, deployment may return to the legacy releas
 - Registration can consume generations without returning them, and gaps are expected.
 - A promoted registration that loses final acceptance can briefly interrupt routing, but it cannot grant stale authority.
 - Migration-time Home subjects normally resume at generation `2^48`, while later identities start at one.
-- Generation storage widens to `BIGINT`, but public JSON, protobuf, Redis numeric encoding, and TypeScript contracts remain unchanged within the `2^53 - 1` allocator ceiling.
+- Generation storage widens to `BIGINT`; protobuf remains `uint64`; Redis uses fixed-width decimal strings; public JSON and TypeScript use unpadded opaque decimal strings.
 - Runtime Control requires one planned non-overlapping cutover and a fresh coordination namespace; legacy Redis state becomes ignored disposable data.
 
 ## Risks
@@ -147,4 +166,5 @@ Before the first new-band acceptance, deployment may return to the legacy releas
 - The migration must serialize its subject snapshot against concurrent Provider or Runtime creation so a legacy-capable subject cannot be omitted.
 - Subject-creation triggers become part of the allocator integrity boundary and must be present before the cutover marker permits new Runtime Control readiness.
 - Every persisted field that directly stores a Provider or Runner connection generation must accept the new band, while unrelated desired, configuration, owner, and stream generations retain their existing domains.
+- Every Redis Lua and JSON boundary that carries a Provider or Runner connection generation must preserve the canonical string representation; an unnoticed numeric conversion could corrupt fencing.
 - Runtime Control must fail readiness on missing or incompatible cutover authority, and operators must not restart a legacy image after first new-band acceptance.
