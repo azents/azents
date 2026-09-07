@@ -39,7 +39,21 @@
     "baseRef": "Ref de base : {ref}",
     "cleanup": {
       "title": "Nettoyage des worktrees",
-      "phase": "Phase : {phase}",
+      "phase": {
+        "discovering": "Recherche des worktrees inactifs…",
+        "processing": "Nettoyage des worktrees inactifs…",
+        "completed": "Nettoyage des worktrees terminé",
+        "failed": "Le nettoyage des worktrees nécessite votre attention",
+        "cancelled": "Le nettoyage des worktrees a été annulé",
+        "unknown": "L’état du nettoyage des worktrees est indisponible"
+      },
+      "outcome": {
+        "removed": "Supprimé",
+        "alreadyAbsent": "Déjà absent",
+        "protected": "Conservé car utilisé",
+        "failed": "Échec",
+        "unresolved": "Non vérifié"
+      },
       "examined": "{count} examinés",
       "removed": "{count} supprimés",
       "protected": "{count} protégés",

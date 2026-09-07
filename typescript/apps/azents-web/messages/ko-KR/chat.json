@@ -39,7 +39,21 @@
     "baseRef": "기준 ref: {ref}",
     "cleanup": {
       "title": "워크트리 정리",
-      "phase": "단계: {phase}",
+      "phase": {
+        "discovering": "사용하지 않는 Worktree를 찾는 중…",
+        "processing": "사용하지 않는 Worktree를 정리하는 중…",
+        "completed": "Worktree 정리가 완료되었습니다",
+        "failed": "Worktree 정리 결과를 확인해 주세요",
+        "cancelled": "Worktree 정리가 취소되었습니다",
+        "unknown": "Worktree 정리 상태를 확인할 수 없습니다"
+      },
+      "outcome": {
+        "removed": "삭제됨",
+        "alreadyAbsent": "이미 없음",
+        "protected": "사용 중이라 유지됨",
+        "failed": "실패",
+        "unresolved": "확인되지 않음"
+      },
       "examined": "{count}개 검사",
       "removed": "{count}개 제거",
       "protected": "{count}개 보호",

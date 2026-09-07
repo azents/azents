@@ -142,8 +142,8 @@ export const CleanupMixedResultOnNarrowScreen = {
     await userEvent.click(
       canvas.getByRole("button", { name: /cleanup worktrees/i }),
     );
-    await expect(canvas.getByText("already_absent")).toBeVisible();
-    await expect(canvas.getByText("failed")).toBeVisible();
+    await expect(canvas.getByText("Already absent")).toBeVisible();
+    await expect(canvas.getAllByText("Failed").length).toBeGreaterThan(0);
   },
 } satisfies Story;
 
