@@ -262,6 +262,7 @@ export function HomePageContent({
 
             <div
               className={classes.productWindow}
+              role="group"
               aria-label={t("product.windowAria")}
             >
               <div className={classes.windowBar}>
