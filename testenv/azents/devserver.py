@@ -209,15 +209,15 @@ def up(
     _start_devserver(env, reload=reload)
     typer.echo(f"devserver started in tmux session '{SESSION_NAME}'")
 
-    ok, reason = wait_for_ready(
+    readiness = wait_for_ready(
         public_port=public_port,
         admin_port=admin_port,
         runtime_control_port=runtime_control_port,
         timeout=timeout,
         session_alive=lambda: tmux.has_session(SESSION_NAME),
     )
-    if not ok:
-        typer.echo(f"error: devserver not ready: {reason}", err=True)
+    if not readiness.ready:
+        typer.echo(f"error: devserver not ready: {readiness.reason}", err=True)
         typer.echo("--- last 50 lines of devserver.log ---", err=True)
         typer.echo(tail_log(50), err=True)
         if tmux.has_session(SESSION_NAME):

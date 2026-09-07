@@ -165,6 +165,43 @@ class _SettingsMetadata:
     binding_updated_at: datetime.datetime | None
 
 
+@dataclass(frozen=True)
+class _ProcessingInteractionScope:
+    """Authenticated processing interaction and its active connection."""
+
+    interaction: ExternalChannelInteraction
+    configuration: ExternalChannelConnectionConfiguration
+
+
+@dataclass(frozen=True)
+class _SelectorOwners:
+    """Validated connection and resource that own one selector."""
+
+    configuration: ExternalChannelConnectionConfiguration
+    resource: ExternalChannelResource
+
+
+@dataclass(frozen=True)
+class _SelectorScope:
+    """Validated scope required to open one selector."""
+
+    interaction: ExternalChannelInteraction
+    configuration: ExternalChannelConnectionConfiguration
+    resource: ExternalChannelResource
+    selector: ExternalChannelInteraction
+
+
+@dataclass(frozen=True)
+class _SelectorSubmissionScope:
+    """Validated scope required to process one selector submission."""
+
+    interaction: ExternalChannelInteraction
+    configuration: ExternalChannelConnectionConfiguration
+    resource: ExternalChannelResource
+    selector: ExternalChannelInteraction
+    metadata: _SelectorMetadata
+
+
 @dataclass
 class ExternalChannelInteractionProcessor:
     """Open or submit one selector interaction after durable scope checks."""
@@ -246,10 +283,14 @@ class ExternalChannelInteractionProcessor:
             return
         if handoff.trigger_id is None:
             raise ValueError("Slack selector interaction is unavailable.")
-        interaction, configuration, resource, selector = await self._load_scope(
+        scope = await self._load_scope(
             handoff,
             now=now,
         )
+        interaction = scope.interaction
+        configuration = scope.configuration
+        resource = scope.resource
+        selector = scope.selector
         principal_id = interaction.principal_id
         assert principal_id is not None
         catalog = await self.selector_service.project_catalog(
@@ -302,13 +343,11 @@ class ExternalChannelInteractionProcessor:
             or handoff.selector_navigation not in {"search", "previous", "next"}
         ):
             raise ValueError("Slack selector navigation is unavailable.")
-        (
-            interaction,
-            configuration,
-            _,
-            selector,
-            metadata,
-        ) = await self._load_submission_scope(handoff, now=now)
+        scope = await self._load_submission_scope(handoff, now=now)
+        interaction = scope.interaction
+        configuration = scope.configuration
+        selector = scope.selector
+        metadata = scope.metadata
         if handoff.selector_navigation == "search":
             offset = 0
         elif handoff.selector_navigation == "previous":
@@ -359,16 +398,14 @@ class ExternalChannelInteractionProcessor:
         now: datetime.datetime,
     ) -> None:
         """Revalidate a signed modal submission before applying one selection."""
-        (
-            interaction,
-            configuration,
-            _,
-            selector,
-            metadata,
-        ) = await self._load_submission_scope(
+        scope = await self._load_submission_scope(
             handoff,
             now=now,
         )
+        interaction = scope.interaction
+        configuration = scope.configuration
+        selector = scope.selector
+        metadata = scope.metadata
         assert interaction.principal_id is not None
         assert handoff.selected_route_id is not None
         selection = await self.selector_service.select_route(
@@ -463,9 +500,11 @@ class ExternalChannelInteractionProcessor:
         """Open one current setup, parent, or connected-thread settings modal."""
         if handoff.trigger_id is None:
             raise SlackInteractionTriggerExpired
-        interaction, configuration = await self._load_processing_interaction(
+        scope = await self._load_processing_interaction(
             handoff,
         )
+        interaction = scope.interaction
+        configuration = scope.configuration
         assert interaction.principal_id is not None
         provider_parent_channel_id = handoff.provider_parent_channel_id
         locator = None
@@ -550,9 +589,11 @@ class ExternalChannelInteractionProcessor:
             metadata=handoff.settings_metadata,
             secret=self.config.auth.jwt.secret_key,
         )
-        interaction, configuration = await self._load_processing_interaction(
+        scope = await self._load_processing_interaction(
             handoff,
         )
+        interaction = scope.interaction
+        configuration = scope.configuration
         if (
             interaction.principal_id is None
             or interaction.principal_id != metadata.principal_id
@@ -714,7 +755,9 @@ class ExternalChannelInteractionProcessor:
             ),
             secret=self.config.auth.jwt.secret_key,
         )
-        interaction, configuration = await self._load_processing_interaction(handoff)
+        scope = await self._load_processing_interaction(handoff)
+        interaction = scope.interaction
+        configuration = scope.configuration
         deleted_task: ScheduledTask | None = None
         try:
             if handoff.handler == "scheduled_task_edit_open":
@@ -790,10 +833,7 @@ class ExternalChannelInteractionProcessor:
     async def _load_processing_interaction(
         self,
         handoff: ExternalChannelInteractionHandoff,
-    ) -> tuple[
-        ExternalChannelInteraction,
-        ExternalChannelConnectionConfiguration,
-    ]:
+    ) -> _ProcessingInteractionScope:
         """Reload one authenticated processing interaction and its connection."""
         async with self.session_manager() as session:
             interaction = await self.repository.lock_interaction(
@@ -815,7 +855,10 @@ class ExternalChannelInteractionProcessor:
                 ExternalChannelConnectionStatus.DEGRADED,
             }:
                 raise ValueError("Slack interaction connection is unavailable.")
-            return interaction, configuration
+            return _ProcessingInteractionScope(
+                interaction=interaction,
+                configuration=configuration,
+            )
 
     def _slack_credentials(
         self,
@@ -844,12 +887,7 @@ class ExternalChannelInteractionProcessor:
         handoff: ExternalChannelInteractionHandoff,
         *,
         now: datetime.datetime,
-    ) -> tuple[
-        ExternalChannelInteraction,
-        ExternalChannelConnectionConfiguration,
-        ExternalChannelResource,
-        ExternalChannelInteraction,
-    ]:
+    ) -> _SelectorScope:
         """Reload trusted interaction and selector owners before provider I/O."""
         async with self.session_manager() as session:
             interaction = await self.repository.lock_interaction(
@@ -872,27 +910,26 @@ class ExternalChannelInteractionProcessor:
                 session,
                 interaction_id=selector_id,
             )
-            configuration, resource = await self._selector_owners(
+            owners = await self._selector_owners(
                 session,
                 selector=selector,
                 principal_id=interaction.principal_id,
                 now=now,
             )
             assert selector is not None
-            return interaction, configuration, resource, selector
+            return _SelectorScope(
+                interaction=interaction,
+                configuration=owners.configuration,
+                resource=owners.resource,
+                selector=selector,
+            )
 
     async def _load_submission_scope(
         self,
         handoff: ExternalChannelInteractionHandoff,
         *,
         now: datetime.datetime,
-    ) -> tuple[
-        ExternalChannelInteraction,
-        ExternalChannelConnectionConfiguration,
-        ExternalChannelResource,
-        ExternalChannelInteraction,
-        _SelectorMetadata,
-    ]:
+    ) -> _SelectorSubmissionScope:
         """Join one transient submission to its signed selector interaction."""
         assert handoff.selector_metadata is not None
         metadata = _parse_selector_metadata(
@@ -920,7 +957,7 @@ class ExternalChannelInteractionProcessor:
                 session,
                 interaction_id=metadata.selector_interaction_id,
             )
-            configuration, resource = await self._selector_owners(
+            owners = await self._selector_owners(
                 session,
                 selector=selector,
                 principal_id=interaction.principal_id,
@@ -933,7 +970,7 @@ class ExternalChannelInteractionProcessor:
             )
             if (
                 opened is None
-                or opened.connection_id != configuration.id
+                or opened.connection_id != owners.configuration.id
                 or opened.principal_id != interaction.principal_id
                 or opened.status
                 not in {
@@ -945,13 +982,19 @@ class ExternalChannelInteractionProcessor:
             verify_selector_metadata(
                 metadata=handoff.selector_metadata,
                 secret=self.config.auth.jwt.secret_key,
-                connection_id=configuration.id,
-                resource_id=resource.id,
+                connection_id=owners.configuration.id,
+                resource_id=owners.resource.id,
                 selector_interaction_id=selector.id,
                 interaction_id=opened.id,
                 principal_id=interaction.principal_id,
             )
-            return interaction, configuration, resource, selector, metadata
+            return _SelectorSubmissionScope(
+                interaction=interaction,
+                configuration=owners.configuration,
+                resource=owners.resource,
+                selector=selector,
+                metadata=metadata,
+            )
 
     async def _selector_owners(
         self,
@@ -960,7 +1003,7 @@ class ExternalChannelInteractionProcessor:
         selector: ExternalChannelInteraction | None,
         principal_id: str,
         now: datetime.datetime,
-    ) -> tuple[ExternalChannelConnectionConfiguration, ExternalChannelResource]:
+    ) -> _SelectorOwners:
         if (
             selector is None
             or selector.principal_id != principal_id
@@ -996,7 +1039,10 @@ class ExternalChannelInteractionProcessor:
             or resource.connection_id != configuration.id
         ):
             raise ValueError("Slack selector interaction is unavailable.")
-        return configuration, resource
+        return _SelectorOwners(
+            configuration=configuration,
+            resource=resource,
+        )
 
 
 def build_settings_metadata(
@@ -1524,14 +1570,13 @@ def verify_selector_metadata(
 ) -> int:
     """Verify opaque metadata integrity and all durable scope bindings."""
     parsed = _parse_selector_metadata(metadata=metadata, secret=secret)
-    expected = {
-        "connection_id": connection_id,
-        "resource_id": resource_id,
-        "selector_interaction_id": selector_interaction_id,
-        "interaction_id": interaction_id,
-        "principal_id": principal_id,
-    }
-    if any(getattr(parsed, key) != value for key, value in expected.items()):
+    if (
+        parsed.connection_id != connection_id
+        or parsed.resource_id != resource_id
+        or parsed.selector_interaction_id != selector_interaction_id
+        or parsed.interaction_id != interaction_id
+        or parsed.principal_id != principal_id
+    ):
         raise ValueError("Slack selector metadata scope is invalid.")
     return parsed.offset
 

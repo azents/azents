@@ -470,9 +470,22 @@ def _body(
     ).encode()
 
 
-def _signature(private_key: Ed25519PrivateKey, body: bytes) -> tuple[str, str]:
+class _DiscordRequestSignature(NamedTuple):
+    """Headers that authenticate one Discord HTTP request."""
+
+    timestamp: str
+    value: str
+
+
+def _signature(
+    private_key: Ed25519PrivateKey,
+    body: bytes,
+) -> _DiscordRequestSignature:
     timestamp = str(int(_NOW.timestamp()))
-    return timestamp, private_key.sign(timestamp.encode() + body).hex()
+    return _DiscordRequestSignature(
+        timestamp=timestamp,
+        value=private_key.sign(timestamp.encode() + body).hex(),
+    )
 
 
 def _message_command_body() -> bytes:
@@ -623,13 +636,13 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
         scheduled_task_channel=SimpleNamespace(),
     )
     body = _body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -676,13 +689,13 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
         scheduled_task_channel=SimpleNamespace(),
     )
     body = _message_command_body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -724,13 +737,13 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
         scheduled_task_channel=SimpleNamespace(),
     )
     body = _selector_component_body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -765,13 +778,13 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         scheduled_task_channel=SimpleNamespace(),
     )
     body = _settings_component_body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -811,13 +824,13 @@ async def test_setup_component_acknowledges_before_resolving_dispatcher() -> Non
         dispatcher=dispatcher,
     )
     body = _setup_component_body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -851,13 +864,13 @@ async def test_duplicate_setup_component_does_not_schedule_background_work() -> 
         dispatcher=dispatcher,
     )
     body = _setup_component_body()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -884,7 +897,7 @@ async def test_setup_component_without_token_fails_before_mutation_claim() -> No
         dispatcher=dispatcher,
     )
     body = _setup_component_body(interaction_token=None)
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     with pytest.raises(
         DiscordInteractionInvalidPayload,
@@ -893,8 +906,8 @@ async def test_setup_component_without_token_fails_before_mutation_claim() -> No
         await service.handle(
             selector="opaque-selector",
             raw_body=body,
-            timestamp=timestamp,
-            signature=signature,
+            timestamp=request_signature.timestamp,
+            signature=request_signature.value,
             received_at=_NOW,
         )
 
@@ -1007,13 +1020,13 @@ async def test_scheduled_task_confirm_delete_prepares_notice_after_ack() -> None
             binding_id="binding-1",
         )
     )
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -1051,13 +1064,13 @@ async def test_ping_skips_durable_interaction_admission() -> None:
         {"id": "ping-1", "type": 1, "application_id": "app-1"},
         separators=(",", ":"),
     ).encode()
-    timestamp, signature = _signature(private_key, body)
+    request_signature = _signature(private_key, body)
 
     result = await service.handle(
         selector="opaque-selector",
         raw_body=body,
-        timestamp=timestamp,
-        signature=signature,
+        timestamp=request_signature.timestamp,
+        signature=request_signature.value,
         received_at=_NOW,
     )
 
@@ -1078,33 +1091,33 @@ async def test_unsupported_or_cross_scope_interactions_fail_before_admission() -
         scheduled_task_channel=SimpleNamespace(),
     )
     unsupported = _body(interaction_type=99)
-    unsupported_timestamp, unsupported_signature = _signature(private_key, unsupported)
+    unsupported_signature = _signature(private_key, unsupported)
     with pytest.raises(DiscordInteractionInvalidPayload, match="not supported"):
         await service.handle(
             selector="opaque-selector",
             raw_body=unsupported,
-            timestamp=unsupported_timestamp,
-            signature=unsupported_signature,
+            timestamp=unsupported_signature.timestamp,
+            signature=unsupported_signature.value,
             received_at=_NOW,
         )
     cross_app = _body(application_id="app-2")
-    cross_app_timestamp, cross_app_signature = _signature(private_key, cross_app)
+    cross_app_signature = _signature(private_key, cross_app)
     with pytest.raises(DiscordInteractionUnauthorized):
         await service.handle(
             selector="opaque-selector",
             raw_body=cross_app,
-            timestamp=cross_app_timestamp,
-            signature=cross_app_signature,
+            timestamp=cross_app_signature.timestamp,
+            signature=cross_app_signature.value,
             received_at=_NOW,
         )
     cross_guild = _body(guild_id="guild-2")
-    cross_guild_timestamp, cross_guild_signature = _signature(private_key, cross_guild)
+    cross_guild_signature = _signature(private_key, cross_guild)
     with pytest.raises(DiscordInteractionUnauthorized):
         await service.handle(
             selector="opaque-selector",
             raw_body=cross_guild,
-            timestamp=cross_guild_timestamp,
-            signature=cross_guild_signature,
+            timestamp=cross_guild_signature.timestamp,
+            signature=cross_guild_signature.value,
             received_at=_NOW,
         )
 
