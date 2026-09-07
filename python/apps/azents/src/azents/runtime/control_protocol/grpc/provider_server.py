@@ -908,16 +908,7 @@ async def _outbound_messages(
                         if task is inbound_task
                         else "provider-command-relay"
                     )
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        _LOGGER.exception(
-                            "Runtime Provider stream task failed",
-                            extra={"task_name": task_name},
-                        )
-                        raise
+                    await task
                     _LOGGER.info(
                         "Runtime Provider stream task ended",
                         extra={"task_name": task_name},

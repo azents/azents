@@ -6,6 +6,7 @@ runner loads `.env` into `context.env` and fills missing `os.environ` entries.
 """
 
 import base64
+import binascii
 import textwrap
 
 from .base import Check, CheckResult, RunContext, Status
@@ -91,7 +92,7 @@ class RequiredEnvVars(Check):
             )
         try:
             decoded = base64.b64decode(key, validate=True)
-        except Exception:
+        except binascii.Error:
             return CheckResult(
                 status=Status.FAIL,
                 message="AZ_CREDENTIAL_ENCRYPTION_KEY is not valid base64",
