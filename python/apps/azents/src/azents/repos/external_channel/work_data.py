@@ -44,7 +44,6 @@ class ChannelActionEffectPlan:
     work_cycle_id: str
     expected_desired_progress_revision: int | None
     dependencies: tuple[int, ...]
-    provider_message_key_effect_index: int | None
     projection_host_kind: Literal["standalone", "reply"] | None
 
 

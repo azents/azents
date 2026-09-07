@@ -44,8 +44,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-05
-spec_version: 55
+last_verified_at: 2026-09-07
+spec_version: 56
 ---
 
 # External Channel Delivery and Channel Work
@@ -357,22 +357,24 @@ Session title and Agent execution.
   same accepted binding transaction. Hidden cycles omit the Embed until promoted. A
   Scheduled Task-owned Tracker instead contains
   `◉ Agent is running a scheduled task…` followed by the task title on the next line.
-  A state-only conversational progress change updates the current Tracker host in
-  place, or creates one notification-suppressed standalone Tracker when none exists.
+  A state-only conversational progress change with unchanged tasks updates the current
+  Tracker host in place, or creates one notification-suppressed standalone Tracker
+  when none exists.
   A message-only Action delivers the reply without changing Tracker presentation.
-  When one Action contains both a Discord reply and changed progress, every reply part
-  is delivered first without Tracker presentation. Confirmed reply delivery permits
-  removal of the previous Tracker: standalone hosts are deleted, while reply hosts
-  keep their conversational content and have only Tracker Embeds and controls cleared.
-  Confirmed removal then permits a partial edit that attaches the complete current
-  Tracker to the final reply part without replacing its content or attachments. The
-  normal successful path therefore exposes at most one Tracker, while temporary
-  absence is allowed between removal and attachment. Creation and update both send a
-  `View session` link derived from the current canonical Workspace, Agent, and Session
-  target. Conversational Tracker creation and update also derive one signed
-  `Conversation settings` action from the current Binding. Scheduled Task Trackers
-  retain only Session navigation and task controls and keep their existing standalone
-  notification behavior.
+  When an explicitly supplied ordered task snapshot differs from the canonical
+  pre-transition tasks, every reply part is attempted first and Tracker relocation
+  then removes the previous host: standalone hosts are deleted, while reply hosts keep
+  their conversational content and have only Tracker Embeds and controls cleared.
+  Confirmed removal permits notification-suppressed standalone creation with the
+  complete latest Tracker. Creation is not gated on reply delivery. An identical task
+  replacement or title-only progress change updates the current standalone or reply
+  host in place. The normal successful relocation path therefore exposes at most one
+  Tracker, while temporary absence is allowed between removal and creation. Creation
+  and update both send a `View session` link derived from the current canonical
+  Workspace, Agent, and Session target. Conversational Tracker creation and update
+  also derive one signed `Conversation settings` action from the current Binding.
+  Scheduled Task Trackers retain only Session navigation and task controls and keep
+  their existing standalone notification behavior.
 - Slack and Discord create no separate settings-only follow-up control. Every visible
   conversational Tracker is the recurring signed settings entry point. Initial hidden
   checking Work creates neither Tracker nor settings surface; canonical unfinished Todo
@@ -387,9 +389,11 @@ The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, retained provider identity, and whether each Tracker part
 is hosted by a standalone message or a conversational reply. Every progress effect is
 revalidated against its exact desired revision before provider I/O; a newer canonical
-snapshot makes an older pending progress effect not attempted. Process-local effect
-dependencies require delivered reply parts and confirmed previous-host removal before
-a reply attachment executes. Failed or ambiguous Tracker mutations never roll back
+snapshot makes an older pending progress effect not attempted. For changed Discord
+tasks, process-local effect dependencies require confirmed previous-host removal before
+silent standalone Tracker creation when a current host exists; otherwise creation
+proceeds directly. Reply delivery does not gate relocation. Failed or
+ambiguous Tracker mutations never roll back
 canonical Work or a delivered reply, create no durable retry work, and converge only
 through a later explicit complete progress update. A matching Slack deletion event or
 confirmed `message_not_found` result clears the corresponding standalone identity. A
@@ -555,6 +559,10 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 56) — Made changed complete task snapshots relocate
+  Discord Trackers through current-host removal and silent standalone creation,
+  retained current host position for unchanged tasks, and removed final-reply identity
+  attachment from process-local effects.
 - **2026-09-05** (spec_version 55) — Moved Discord conversational Trackers to
   messages that accompany changed progress: replies deliver first, the previous
   standalone or reply-hosted Tracker is removed, and a partial edit attaches the
