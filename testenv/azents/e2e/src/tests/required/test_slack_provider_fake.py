@@ -358,6 +358,74 @@ def test_slack_fake_serves_bounded_parent_and_thread_history_pages(
     assert "Private provider history" not in rendered
 
 
+def test_slack_fake_blocks_one_targeted_delivery_operation(
+    slack_fake_url: str,
+) -> None:
+    """Hold a selected delivery until the test releases its provider boundary."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/barrier",
+        json={"operation": "chat.update", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    responses: list[requests.Response] = []
+
+    def update_message() -> None:
+        responses.append(
+            requests.post(
+                f"{slack_fake_url}/api/chat.update",
+                json={
+                    "channel": "C-E2E",
+                    "ts": "1721600000.000100",
+                    "text": "Private progress update",
+                },
+                timeout=10,
+            )
+        )
+
+    thread = threading.Thread(target=update_message)
+    thread.start()
+    for _ in range(50):
+        barrier = requests.get(
+            f"{slack_fake_url}/__testenv/barrier",
+            timeout=5,
+        ).json()
+        if barrier["reached"]:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("Slack delivery barrier was not reached.")
+    assert responses == []
+    assert barrier == {
+        "operation": "chat.update",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+    requests.post(
+        f"{slack_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert responses[0].status_code == 200
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["deliveries"] == [
+        {
+            "operation": "chat.update",
+            "channel": "C-E2E",
+            "thread_ts": None,
+            "message_ts": "1721600000.000100",
+            "outcome": "delivered",
+            "approval_request_id": None,
+        }
+    ]
+    assert "Private progress update" not in str(evidence)
+
+
 def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     slack_fake_url: str,
 ) -> None:

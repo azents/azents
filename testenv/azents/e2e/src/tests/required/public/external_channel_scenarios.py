@@ -3156,6 +3156,11 @@ def test_provider_native_channel_work_progress_journey(
         },
         timeout=5,
     ).raise_for_status()
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/barrier",
+        json={"operation": "chat.update", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
     token, _, handle, agent_id = _create_agent(
         public_api_client,
         admin_api_client,
@@ -3200,6 +3205,12 @@ def test_provider_native_channel_work_progress_journey(
         )
 
     request.addfinalizer(disconnect_connection)
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{slack_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
         connection_id=setup.connection.id,
@@ -3343,6 +3354,73 @@ def test_provider_native_channel_work_progress_journey(
     )
     binding_id = active_projection.items[0].id
 
+    barrier_state = _object(
+        wait_until(
+            lambda: (
+                state
+                if (
+                    state := requests.get(
+                        f"{slack_provider_fake_url}/__testenv/barrier",
+                        timeout=5,
+                    ).json()
+                ).get("reached")
+                is True
+                else None
+            ),
+            timeout=90,
+            interval=0.2,
+            message="Initial Slack Plan update did not reach the provider barrier",
+        )
+    )
+    assert barrier_state == {
+        "operation": "chat.update",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+
+    def rich_management_projection() -> ManagedBindingListResponse | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].work is not None
+            and projection.items[0].work.title == "Investigating error logs…"
+            and len(projection.items[0].work.tasks) == 4
+        ):
+            return projection
+        return None
+
+    projection = _required(
+        wait_until(
+            rich_management_projection,
+            timeout=20,
+            interval=0.2,
+            message="Canonical Channel Work was not updated by the model action",
+        )
+    )
+    work = projection.items[0].work
+    assert work is not None
+    assert "deliveries" not in projection.items[0].model_dump(by_alias=True)
+    assert [task.status for task in work.tasks] == [
+        ExternalChannelWorkTaskStatus.IN_PROGRESS,
+        ExternalChannelWorkTaskStatus.COMPLETED,
+        ExternalChannelWorkTaskStatus.FAILED,
+        ExternalChannelWorkTaskStatus.PENDING,
+    ]
+    assert work.tasks[0].details == "Comparing recent application errors."
+    assert work.tasks[0].sources[0].label == "Error log dashboard"
+    assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
+
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
     wait_until(
         lambda: _matching_progress_request_evidence(
             openai_proxy_url,
@@ -3392,43 +3470,6 @@ def test_provider_native_channel_work_progress_journey(
     assert "delivery_id" not in result_output
     assert "action_id" not in result_output
     assert "credentials" not in result_output
-
-    def rich_management_projection() -> ManagedBindingListResponse | None:
-        projection = external_api.external_channel_v1_list_session_channels(
-            agent_id=agent_id,
-            session_id=session_id,
-            handle=handle,
-            _headers=headers,
-        )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].work is not None
-            and projection.items[0].work.title == "Investigating error logs…"
-            and len(projection.items[0].work.tasks) == 4
-        ):
-            return projection
-        return None
-
-    projection = _required(
-        wait_until(
-            rich_management_projection,
-            timeout=20,
-            interval=0.2,
-            message="Canonical Channel Work was not updated by the model action",
-        )
-    )
-    work = projection.items[0].work
-    assert work is not None
-    assert "deliveries" not in projection.items[0].model_dump(by_alias=True)
-    assert [task.status for task in work.tasks] == [
-        ExternalChannelWorkTaskStatus.IN_PROGRESS,
-        ExternalChannelWorkTaskStatus.COMPLETED,
-        ExternalChannelWorkTaskStatus.FAILED,
-        ExternalChannelWorkTaskStatus.PENDING,
-    ]
-    assert work.tasks[0].details == "Comparing recent application errors."
-    assert work.tasks[0].sources[0].label == "Error log dashboard"
-    assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
 
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = _int_dict(provider_state["request_counts"])
