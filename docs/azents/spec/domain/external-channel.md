@@ -65,8 +65,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-05
-spec_version: 69
+last_verified_at: 2026-09-06
+spec_version: 70
 ---
 
 # External Channel
@@ -162,7 +162,7 @@ contain multiple independent bindings.
 | Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. Slack `location=channel` may fan source threads into one parent owner. Discord parent-channel messages use the parent owner, while every existing Discord Thread keeps an exact independent owner and participation state. Parent participation can select the routed Agent and the response mode copied after an explicit Thread invocation, but it never makes an unbound Thread participate. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, nullable Slack presence anchor and initiator, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, nullable awaiting-input Run identity, finish timestamp, and ordered current provider projection parts. Slack and Discord cycles begin visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` or `request_input` progress update with unfinished tasks promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
+| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, nullable Slack presence anchor and initiator, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, nullable awaiting-input Run identity, finish timestamp, and ordered current provider projection parts. Slack and Discord cycles begin visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` or `request_input` progress update with unfinished tasks promotes hidden to visible monotonically. Projection parts retain the ordered part identity, desired revision, provider identity, projection status, and `standalone | reply` Tracker host kind required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -355,12 +355,12 @@ contain multiple independent bindings.
   `pending`, `in_progress`, `complete`, and `error`. Nested Plan tasks omit a
   standalone block `type` and may contain literal rich-text details/output and
   labeled HTTP or HTTPS sources. The payload sends no Slack `plan_id`.
-- Channel Work desired state is a versioned provider-neutral complete snapshot.
-  The canonical payload is schema version `1` Toolkit State at
+- Channel Work is Toolkit State schema version `5` at
   `external_channel/channel_work:{binding_id}` and retains a stable
-  `work_cycle_id` across progress rendering and provider-effect settlement.
-  A serialized desired snapshot is limited to 64 KiB and is rejected atomically
-  before canonical state changes when it exceeds that bound.
+  `work_cycle_id` across progress rendering and provider-effect settlement. Its
+  nested desired progress is an independent schema-version-`2` provider-neutral
+  complete snapshot. A serialized desired snapshot is limited to 64 KiB and is
+  rejected atomically before canonical state changes when it exceeds that bound.
   Slack-specific blocks and revision-derived `block_id` values are created only
   at the provider presentation boundary. Slack streaming is not used; retained
   `chat.postMessage` and `chat.update` mutations apply complete snapshots.
@@ -532,6 +532,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-09-06** (spec_version 70) — Corrected the current Channel Work state and
+  nested desired-progress schema versions and completed the projection-part field
+  summary with ordered identity and Tracker host kind.
 - **2026-09-05** (spec_version 69) — Added standalone-versus-reply Tracker host
   ownership to Channel Work projection parts so Discord can move one conversational
   Tracker without deleting reply content.
