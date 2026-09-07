@@ -56,39 +56,40 @@ export function useAgentToolkitManagementContainer({
     useState<AgentToolkitManagementItemResponse | null>(null);
   const query = trpc.toolkit.listAgentManagement.useQuery({ handle, agentId });
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
-  const invalidate = useCallback((): void => {
-    void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+  const invalidate = useCallback(async (): Promise<void> => {
+    await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
   }, [agentId, handle, utils.toolkit.listAgentManagement]);
   const attachMutation = trpc.toolkit.attachToAgent.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE" });
       setSelectedToolkitId(null);
-      invalidate();
+      await invalidate();
+      setEditor({ type: "CLOSED" });
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
   });
   const detachMutation = trpc.toolkit.detachFromAgent.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE" });
-      invalidate();
+      await invalidate();
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
   });
   const updateMutation = trpc.toolkit.updateAgentConfig.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE" });
-      invalidate();
+      await invalidate();
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
   });
   const deleteMutation = trpc.toolkit.removeAgentConfig.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE" });
       setDeleteTarget(null);
-      invalidate();
+      await invalidate();
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
@@ -118,7 +119,7 @@ export function useAgentToolkitManagementContainer({
   );
   const closeEditor = useCallback((): void => {
     setEditor({ type: "CLOSED" });
-    invalidate();
+    void invalidate();
   }, [invalidate]);
 
   return {
@@ -155,16 +156,11 @@ export function useAgentToolkitManagementContainer({
     onAttach: () => {
       if (selectedToolkitId) {
         setMutationState({ type: "IDLE" });
-        attachMutation.mutate(
-          {
-            handle,
-            agentId,
-            toolkitId: selectedToolkitId,
-          },
-          {
-            onSuccess: () => setEditor({ type: "CLOSED" }),
-          },
-        );
+        attachMutation.mutate({
+          handle,
+          agentId,
+          toolkitId: selectedToolkitId,
+        });
       }
     },
     onDetach: (agentToolkitId) => {

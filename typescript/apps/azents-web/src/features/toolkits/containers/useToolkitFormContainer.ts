@@ -332,10 +332,10 @@ export function useToolkitFormContainer(
     },
   });
   const createAgentMutation = trpc.toolkit.createAgentConfig.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE", error: null });
       if (agentId) {
-        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+        await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
       }
       onComplete?.();
     },
@@ -344,18 +344,24 @@ export function useToolkitFormContainer(
     },
   });
   const updateAgentMutation = trpc.toolkit.updateAgentConfig.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setMutationState({ type: "IDLE", error: null });
+      const invalidations: Array<Promise<unknown>> = [];
       if (agentId) {
-        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+        invalidations.push(
+          utils.toolkit.listAgentManagement.invalidate({ handle, agentId }),
+        );
       }
       if (agentId && toolkitId) {
-        void utils.toolkit.getAgentConfig.invalidate({
-          handle,
-          agentId,
-          toolkitConfigId: toolkitId,
-        });
+        invalidations.push(
+          utils.toolkit.getAgentConfig.invalidate({
+            handle,
+            agentId,
+            toolkitConfigId: toolkitId,
+          }),
+        );
       }
+      await Promise.all(invalidations);
       onComplete?.();
     },
     onError: (error) => {
