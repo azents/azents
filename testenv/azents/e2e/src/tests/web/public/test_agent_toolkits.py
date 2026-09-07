@@ -103,7 +103,10 @@ def _fill_text_input(driver: WebDriver, label: str, value: str) -> None:
     """Replace the value of a Mantine text input by its visible label."""
     field = _wait(driver).until(
         ec.element_to_be_clickable(
-            (By.XPATH, f"//label[normalize-space()={label!r}]/following::input[1]")
+            (
+                By.XPATH,
+                f"//label[normalize-space(text())={label!r}]/following::input[1]",
+            )
         )
     )
     field.send_keys(Keys.CONTROL, "a")
@@ -240,7 +243,10 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _assert_visible_text(browser_driver, "Add Toolkit")
     tool_input = _wait(browser_driver).until(
         ec.element_to_be_clickable(
-            (By.XPATH, "//label[normalize-space()='Tool']/following::input[1]")
+            (
+                By.XPATH,
+                "//label[normalize-space(text())='Tool']/following::input[1]",
+            )
         )
     )
     tool_input.click()
@@ -290,7 +296,10 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Add Toolkit")
     tool_input = _wait(browser_driver).until(
         ec.element_to_be_clickable(
-            (By.XPATH, "//label[normalize-space()='Tool']/following::input[1]")
+            (
+                By.XPATH,
+                "//label[normalize-space(text())='Tool']/following::input[1]",
+            )
         )
     )
     tool_input.click()
@@ -316,7 +325,10 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Add Toolkit")
     tool_input = _wait(browser_driver).until(
         ec.element_to_be_clickable(
-            (By.XPATH, "//label[normalize-space()='Tool']/following::input[1]")
+            (
+                By.XPATH,
+                "//label[normalize-space(text())='Tool']/following::input[1]",
+            )
         )
     )
     tool_input.click()
