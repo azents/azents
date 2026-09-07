@@ -344,6 +344,20 @@ class ExternalChannelRepository:
         rdb = await session.get(RDBExternalChannelConnection, connection_id)
         return self._as(ExternalChannelConnection, rdb)
 
+    async def lock_connection_for_interaction_admission(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnection | None:
+        """Lock one connection before mutating its interaction principal."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelConnection, rdb)
+
     async def get_connection_configuration(
         self,
         session: AsyncSession,

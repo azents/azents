@@ -79,6 +79,10 @@ class ExternalChannelAdmissionService:
     ) -> ExternalChannelInteractionAdmission:
         """Commit one interaction and its authenticated provider actor together."""
         async with self.session_manager() as session:
+            await self.repository.lock_connection_for_interaction_admission(
+                session,
+                connection_id=create.connection_id,
+            )
             persisted_principal = await self.repository.create_principal_idempotent(
                 session,
                 principal,
