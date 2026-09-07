@@ -22,6 +22,13 @@ _MAX_CONFIGURED_FILE_BYTES = 8 * 1024 * 1024
 _MAX_SCENARIO_SEQUENCE_LENGTH = 10
 _MAX_RETRY_AFTER_SECONDS = 300
 _APPROVAL_PATH = re.compile(r"/external-channel/access/([^/?\s]+)")
+_BARRIER_OPERATIONS = frozenset(
+    {
+        "chat.update",
+        "conversations.history",
+        "conversations.replies",
+    }
+)
 
 
 class _UploadAllocation(NamedTuple):
@@ -390,17 +397,17 @@ class FakeState:
             return 1
 
     def configure_operation_barrier(self, payload: Mapping[str, object]) -> None:
-        """Arm one exact/history provider operation barrier."""
+        """Arm one exact provider operation barrier."""
         operation = payload.get("operation")
         occurrence = payload.get("occurrence")
         if (
-            operation not in {"conversations.history", "conversations.replies"}
+            operation not in _BARRIER_OPERATIONS
             or not isinstance(occurrence, int)
             or isinstance(occurrence, bool)
             or occurrence < 1
         ):
             raise ValueError(
-                "Barrier requires a Slack history operation and positive occurrence."
+                "Barrier requires a supported Slack operation and positive occurrence."
             )
         with self.lock:
             self._operation_barrier_operation = _string(operation)
@@ -429,7 +436,7 @@ class FakeState:
         self._operation_barrier_release.set()
 
     def wait_for_operation_barrier(self, operation: str) -> bool:
-        """Hold one targeted history operation until explicitly released."""
+        """Hold one targeted provider operation until explicitly released."""
         with self.lock:
             if (
                 self._operation_barrier_operation != operation
@@ -658,6 +665,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             method="POST",
             metadata=_body_metadata(body),
         )
+        if not self.state.wait_for_operation_barrier(operation):
+            self._close_connection()
+            return
         if operation == "auth.test":
             self._auth_test()
             return
