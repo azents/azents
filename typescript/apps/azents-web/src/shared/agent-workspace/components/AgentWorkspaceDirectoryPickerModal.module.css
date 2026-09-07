@@ -13,9 +13,9 @@
 
 .directoryList {
   max-height: 27.5rem;
-}
-
-.directoryViewport {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
 }

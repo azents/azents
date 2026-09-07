@@ -142,21 +142,15 @@ export const MobileOverflow = {
     const scrollArea = page.getByTestId(
       "agent-workspace-picker-directory-list",
     );
-    const viewport = scrollArea.querySelector<HTMLElement>(
-      "[data-scrollarea-viewport]",
-    );
 
     await expect(dialog.getBoundingClientRect().bottom).toBeLessThanOrEqual(
       window.innerHeight,
     );
-    await expect(viewport).not.toBeNull();
-    if (!viewport) {
-      return;
-    }
-
-    await expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight);
-    viewport.scrollTop = viewport.scrollHeight;
-    await fireEvent.scroll(viewport);
-    await expect(viewport.scrollTop).toBeGreaterThan(0);
+    await expect(scrollArea.scrollHeight).toBeGreaterThan(
+      scrollArea.clientHeight,
+    );
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+    await fireEvent.scroll(scrollArea);
+    await expect(scrollArea.scrollTop).toBeGreaterThan(0);
   },
 } satisfies Story;
