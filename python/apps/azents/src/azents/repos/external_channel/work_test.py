@@ -1443,8 +1443,8 @@ def _moving_tasks() -> list[ChannelWorkTask]:
     ]
 
 
-async def test_discord_message_with_progress_moves_tracker_to_final_reply() -> None:
-    """Discord plans reply, remove, then attach against the reply identity."""
+async def test_discord_task_change_recreates_tracker_after_reply() -> None:
+    """Discord plans reply, removal, then standalone creation for changed tasks."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="discord:111:555",
@@ -1463,25 +1463,24 @@ async def test_discord_message_with_progress_moves_tracker_to_final_reply() -> N
     assert [effect.provider.target.operation for effect in transition.effects] == [
         ExternalChannelDeliveryOperation.REPLY,
         ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
     ]
-    reply, remove, attach = transition.effects
+    reply, remove, create = transition.effects
     assert reply.dependencies == ()
-    assert remove.dependencies == (0,)
+    assert remove.dependencies == ()
     assert remove.provider.target.request_payload["provider_message_key"] == (
         "discord:111:555"
     )
     assert remove.provider.target.request_payload["tracker_host_kind"] == "standalone"
-    assert attach.dependencies == (0, 1)
-    assert attach.provider_message_key_effect_index == 0
-    assert attach.projection_host_kind == "reply"
-    assert "provider_message_key" not in attach.provider.target.request_payload
-    assert attach.provider.target.request_payload["tracker_host_kind"] == "reply"
+    assert create.dependencies == (1,)
+    assert create.projection_host_kind == "standalone"
+    assert "provider_message_key" not in create.provider.target.request_payload
+    assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
     assert updated.projection_parts == [projection]
 
 
-async def test_discord_message_with_progress_attaches_without_current_tracker() -> None:
-    """A missing Tracker needs only the delivered reply before attachment."""
+async def test_discord_task_change_creates_when_current_tracker_is_missing() -> None:
+    """A missing Tracker needs only standalone creation for changed tasks."""
     work = _work(desired=True)
 
     transition, _, _ = await _commit_action(
@@ -1495,22 +1494,23 @@ async def test_discord_message_with_progress_attaches_without_current_tracker() 
 
     assert [effect.provider.target.operation for effect in transition.effects] == [
         ExternalChannelDeliveryOperation.REPLY,
-        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
     ]
-    attach = transition.effects[1]
-    assert attach.dependencies == (0,)
-    assert attach.provider_message_key_effect_index == 0
-    assert attach.projection_host_kind == "reply"
+    create = transition.effects[1]
+    assert create.dependencies == ()
+    assert create.projection_host_kind == "standalone"
+    assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
 
 
-async def test_discord_state_only_update_preserves_reply_tracker_host() -> None:
-    """State-only progress edits the existing reply without relocating it."""
+async def test_discord_identical_tasks_preserve_reply_tracker_host() -> None:
+    """An identical task replacement edits the current reply host in place."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="discord:111:555",
         host_kind="reply",
     )
     work = _work(desired=True, projection_parts=[projection])
+    work.tasks = _moving_tasks()
 
     transition, _, _ = await _commit_action(
         work,
@@ -1528,12 +1528,41 @@ async def test_discord_state_only_update_preserves_reply_tracker_host() -> None:
         is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
     )
     assert effect.dependencies == ()
-    assert effect.provider_message_key_effect_index is None
     assert effect.projection_host_kind == "reply"
     assert effect.provider.target.request_payload["provider_message_key"] == (
         "discord:111:555"
     )
     assert effect.provider.target.request_payload["tracker_host_kind"] == "reply"
+
+
+async def test_discord_task_change_recreates_reply_host_as_standalone() -> None:
+    """A changed task snapshot detaches a reply host before standalone creation."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:555",
+        host_kind="reply",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Refreshing the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+    ]
+    remove, create = transition.effects
+    assert remove.projection_host_kind == "reply"
+    assert remove.provider.target.request_payload["tracker_host_kind"] == "reply"
+    assert create.dependencies == (0,)
+    assert create.projection_host_kind == "standalone"
+    assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
 
 
 async def test_slack_message_with_progress_keeps_standalone_tracker() -> None:
@@ -1714,7 +1743,6 @@ async def test_reply_tracker_attachment_settles_known_host_identity() -> None:
         work_cycle_id=current.work_cycle_id,
         expected_desired_progress_revision=current.desired_progress_revision,
         dependencies=(),
-        provider_message_key_effect_index=0,
         projection_host_kind="reply",
     )
 
@@ -1782,7 +1810,6 @@ async def test_reply_tracker_cleanup_preserves_host_kind_after_detach() -> None:
         work_cycle_id=current.work_cycle_id,
         expected_desired_progress_revision=current.desired_progress_revision,
         dependencies=(),
-        provider_message_key_effect_index=None,
         projection_host_kind="reply",
     )
 
@@ -1820,7 +1847,6 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
         work_cycle_id="work-1",
         expected_desired_progress_revision=None,
         dependencies=(),
-        provider_message_key_effect_index=None,
         projection_host_kind=None,
     )
 
@@ -1887,7 +1913,6 @@ async def test_direct_effect_revalidation_rejects_stale_progress_revision() -> N
         work_cycle_id="work-1",
         expected_desired_progress_revision=2,
         dependencies=(),
-        provider_message_key_effect_index=None,
         projection_host_kind="standalone",
     )
 

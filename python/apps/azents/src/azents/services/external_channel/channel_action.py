@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, NotRequired, TypedDict, assert_never
@@ -129,14 +129,6 @@ from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 RuntimeTargetResolver = Callable[[], Awaitable[ServerToRuntimeTarget]]
-
-
-@dataclass(frozen=True)
-class _ExecutedDirectEffect:
-    """One public effect outcome with its process-local provider identity."""
-
-    outcome: ProviderEffectOutcome
-    provider_message_key: str | None
 
 
 async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -352,7 +344,6 @@ class ExternalChannelActionService:
         reply_delivered = (
             mode is not ExternalChannelActionMode.FINISH or reply_requested
         )
-        executed_effects: list[_ExecutedDirectEffect] = []
         outcomes: list[ProviderEffectOutcome] = []
         for effect_index, effect in enumerate(transition.effects):
             operation = effect.provider.target.operation
@@ -372,8 +363,7 @@ class ExternalChannelActionService:
                     ),
                 )
             elif any(
-                dependency >= effect_index
-                or executed_effects[dependency].outcome.status != "delivered"
+                dependency >= effect_index or outcomes[dependency].status != "delivered"
                 for dependency in effect.dependencies
             ):
                 skipped = ProviderEffectOutcome(
@@ -387,66 +377,20 @@ class ExternalChannelActionService:
                     ),
                 )
             if skipped is not None:
-                executed = _ExecutedDirectEffect(
-                    outcome=skipped,
-                    provider_message_key=None,
-                )
+                outcome = skipped
             else:
-                resolved_effect = effect
-                source_index = effect.provider_message_key_effect_index
-                if source_index is not None:
-                    if source_index >= effect_index:
-                        raise AssertionError(
-                            "Provider identity dependencies must reference "
-                            "earlier effects."
-                        )
-                    provider_message_key = executed_effects[
-                        source_index
-                    ].provider_message_key
-                    if provider_message_key is None:
-                        executed = _ExecutedDirectEffect(
-                            outcome=ProviderEffectOutcome(
-                                operation=operation,
-                                part=effect.part,
-                                status="not_attempted",
-                                reason="provider_identity_unavailable",
-                                detail=(
-                                    "The delivered reply identity required for "
-                                    "Activity Tracker relocation is unavailable."
-                                ),
-                            ),
-                            provider_message_key=None,
-                        )
-                    else:
-                        resolved_effect = _effect_with_provider_message_key(
-                            effect,
-                            provider_message_key=provider_message_key,
-                        )
-                        executed = await self._execute_direct_effect(
-                            resolved_effect,
-                            file_storage=file_storage,
-                            agent_id=agent_id,
-                            session_id=session_id,
-                            authority=authority,
-                            provider_delivery_service=provider_delivery_service,
-                            resolve_runtime_target=resolve_runtime_target,
-                        )
-                else:
-                    executed = await self._execute_direct_effect(
-                        resolved_effect,
-                        file_storage=file_storage,
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        authority=authority,
-                        provider_delivery_service=provider_delivery_service,
-                        resolve_runtime_target=resolve_runtime_target,
-                    )
-            executed_effects.append(executed)
-            outcomes.append(executed.outcome)
-            if operation is ExternalChannelDeliveryOperation.REPLY:
-                reply_delivered = (
-                    reply_delivered and executed.outcome.status == "delivered"
+                outcome = await self._execute_direct_effect(
+                    effect,
+                    file_storage=file_storage,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    authority=authority,
+                    provider_delivery_service=provider_delivery_service,
+                    resolve_runtime_target=resolve_runtime_target,
                 )
+            outcomes.append(outcome)
+            if operation is ExternalChannelDeliveryOperation.REPLY:
+                reply_delivered = reply_delivered and outcome.status == "delivered"
         awaiting_input = False
         state_revision = transition.state_revision
         if (
@@ -487,7 +431,7 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ProviderEffectOutcome:
         """Revalidate, execute, and apply one process-local provider effect."""
-        executed = await self._execute_direct_effect(
+        return await self._execute_direct_effect(
             effect,
             file_storage=file_storage,
             agent_id=agent_id,
@@ -496,7 +440,6 @@ class ExternalChannelActionService:
             provider_delivery_service=provider_delivery_service,
             resolve_runtime_target=resolve_runtime_target,
         )
-        return executed.outcome
 
     async def _execute_direct_effect(
         self,
@@ -508,25 +451,20 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None,
         provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         resolve_runtime_target: RuntimeTargetResolver | None,
-    ) -> _ExecutedDirectEffect:
-        """Execute one effect while retaining its process-local provider identity."""
+    ) -> ProviderEffectOutcome:
+        """Execute one effect and return its public outcome."""
         async with self.session_manager() as session:
             current = await self.repository.revalidate_direct_effect(
                 session,
                 effect=effect,
             )
         if current is None:
-            return _ExecutedDirectEffect(
-                outcome=ProviderEffectOutcome(
-                    operation=effect.provider.target.operation,
-                    part=effect.part,
-                    status="not_attempted",
-                    reason="provider_authority_unavailable",
-                    detail=(
-                        "Current External Channel provider authority is unavailable."
-                    ),
-                ),
-                provider_message_key=None,
+            return ProviderEffectOutcome(
+                operation=effect.provider.target.operation,
+                part=effect.part,
+                status="not_attempted",
+                reason="provider_authority_unavailable",
+                detail=("Current External Channel provider authority is unavailable."),
             )
         result = await self._deliver(
             current,
@@ -544,15 +482,12 @@ class ExternalChannelActionService:
                 outcome=result,
             )
             await session.commit()
-        return _ExecutedDirectEffect(
-            outcome=ProviderEffectOutcome(
-                operation=current.target.operation,
-                part=effect.part,
-                status=result.status,
-                reason=result.error_kind,
-                detail=result.error_summary,
-            ),
-            provider_message_key=result.provider_message_key,
+        return ProviderEffectOutcome(
+            operation=current.target.operation,
+            part=effect.part,
+            status=result.status,
+            reason=result.error_kind,
+            detail=result.error_summary,
         )
 
     async def execute_direct_control(
@@ -595,7 +530,6 @@ class ExternalChannelActionService:
                         work_cycle_id=work_id,
                         expected_desired_progress_revision=desired_revision,
                         dependencies=(),
-                        provider_message_key_effect_index=None,
                         projection_host_kind=_tracker_host_kind(
                             current.target.request_payload
                         ),
@@ -685,7 +619,6 @@ class ExternalChannelActionService:
                         work_cycle_id=work_id,
                         expected_desired_progress_revision=desired_revision,
                         dependencies=(),
-                        provider_message_key_effect_index=None,
                         projection_host_kind=_tracker_host_kind(
                             current.target.request_payload
                         ),
@@ -1770,21 +1703,6 @@ def _tracker_host_kind(
 ) -> Literal["standalone", "reply"]:
     """Return the persisted Tracker host kind with standalone compatibility."""
     return "reply" if payload.get("tracker_host_kind") == "reply" else "standalone"
-
-
-def _effect_with_provider_message_key(
-    effect: ChannelActionEffectPlan,
-    *,
-    provider_message_key: str,
-) -> ChannelActionEffectPlan:
-    """Bind one earlier delivered message identity to a dependent effect."""
-    payload = dict(effect.provider.target.request_payload)
-    payload["provider_message_key"] = provider_message_key
-    target = replace(effect.provider.target, request_payload=payload)
-    return replace(
-        effect,
-        provider=replace(effect.provider, target=target),
-    )
 
 
 def _provider_mutation_outcome(

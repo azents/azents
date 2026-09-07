@@ -17,14 +17,14 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-04 | 161 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-06 | 70 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 71 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-03 | 9 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-05 | 107 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-07 | 108 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-04 | 79 |
 
@@ -39,7 +39,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-05 | 55 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 56 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-06 | 58 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
@@ -155,6 +155,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | 2026-08-28 |
 | [Discord Activity Tracker Conversation Settings Access Requirements](requirements/discord-260829-tracker-settings-access.md) | discord-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Moving Activity Tracker Requirements](requirements/discord-260905-moving-activity-tracker.md) | discord-260905 | 2026-09-05 | 2026-09-05 |
+| [Discord Task-Change Tracker Relocation Requirements](requirements/discord-260907-task-change-tracker-relocation.md) | discord-260907 | 2026-09-07 | 2026-09-07 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -567,6 +568,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord Quiet Work Presence Decisions](adr/discord-260828-quiet-work-presence.md)
 - [Discord Activity Tracker Conversation Settings Access Decisions](adr/discord-260829-tracker-settings-access.md)
 - [Discord Moving Activity Tracker Decisions](adr/discord-260905-moving-activity-tracker.md)
+- [Discord Task-Change Tracker Relocation Decisions](adr/discord-260907-task-change-tracker-relocation.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)

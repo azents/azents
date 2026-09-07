@@ -60,8 +60,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-05
-spec_version: 107
+last_verified_at: 2026-09-07
+spec_version: 108
 ---
 
 # Toolkit
@@ -870,11 +870,14 @@ supports at most 49 tasks, and its complete desired progress snapshot must fit t
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
 projects the complete latest Tracker; every continue invalidates older awaiting
 settlement, while message-only continuation leaves progress and Tracker position
-unchanged. For Discord, a same-Action reply plus progress change delivers every reply
-part first, removes the current standalone or reply-hosted Tracker, and then attaches
-the Tracker to the final reply through a content-preserving edit. Failed or ambiguous
-reply/removal dependencies leave attachment not attempted, and later progress changes
-repair the best-effort projection without durable retry work. `request_input` requires a
+unchanged. For Discord, an explicitly supplied complete ordered task snapshot is
+compared with the canonical pre-transition tasks. A changed snapshot attempts any
+reply parts first, removes or detaches the current Tracker, and then creates the
+complete latest Tracker as a notification-suppressed standalone message. Replacement
+creation depends on confirmed current-host removal but not on reply delivery. An
+identical task replacement or title-only change updates the current standalone or
+reply host in place. Later progress changes repair failed or ambiguous best-effort
+projection without durable retry work. `request_input` requires a
 participant-visible message, preserves active Work, and establishes binding-scoped
 awaiting state only after every reply part is confirmed delivered. Failed, unknown, or
 stale delivery stays ready. Newly created same-binding human input or `continue`
@@ -918,6 +921,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 108) — Replaced reply-plus-progress Tracker movement
+  with exact task-snapshot-change relocation to a silent standalone Discord message,
+  retained current hosts for unchanged tasks, and removed transient reply-result
+  identity substitution while preserving remove-before-create dependencies.
 - **2026-09-05** (spec_version 107) — Added the Engine-assembled,
   Runtime-owned `run_tool_to_file` direct Tool and its same-call visible target,
   shared invocation, prompt-placement, failure, and output-suppression contracts.

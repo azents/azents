@@ -2011,6 +2011,37 @@ class _Handler(BaseHTTPRequestHandler):
                         "binding": binding,
                         "message": "I found a release that matches the incident.",
                         "title": "Investigating error logs…",
+                        "todo_update": [
+                            {
+                                "id": "inspect",
+                                "title": "Inspect recent failures",
+                                "status": "completed",
+                                "output": "The failing release was identified.",
+                                "sources": [
+                                    {
+                                        "url": "https://example.com/logs",
+                                        "label": "Error log dashboard",
+                                    }
+                                ],
+                            },
+                            {
+                                "id": "verify",
+                                "title": "Verify the affected release",
+                                "status": "completed",
+                                "output": "Release 2026.07.23 contains the regression.",
+                            },
+                            {
+                                "id": "trace",
+                                "title": "Trace the unavailable dependency",
+                                "status": "failed",
+                                "output": "The dependency trace was unavailable.",
+                            },
+                            {
+                                "id": "summarize",
+                                "title": "Summarize the incident",
+                                "status": "in_progress",
+                            },
+                        ],
                     },
                 )
                 return

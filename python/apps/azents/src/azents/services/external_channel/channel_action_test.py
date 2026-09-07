@@ -29,7 +29,6 @@ from azents.repos.external_channel.work_data import (
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
-    _ExecutedDirectEffect,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.data import DiscordConnectionConfiguration
@@ -172,7 +171,6 @@ def _effect(
         work_cycle_id="work-1",
         expected_desired_progress_revision=None,
         dependencies=(),
-        provider_message_key_effect_index=None,
         projection_host_kind=None,
     )
 
@@ -350,9 +348,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
         reason=None,
         detail=None,
     )
-    execute_direct_effect = AsyncMock(
-        return_value=_ExecutedDirectEffect(delivered, None)
-    )
+    execute_direct_effect = AsyncMock(return_value=delivered)
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
@@ -425,9 +421,7 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
         reason="provider_rejected",
         detail="The provider rejected the request.",
     )
-    execute_direct_effect = AsyncMock(
-        return_value=_ExecutedDirectEffect(failed_reply, None)
-    )
+    execute_direct_effect = AsyncMock(return_value=failed_reply)
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
@@ -506,9 +500,7 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            _execute_direct_effect=AsyncMock(
-                return_value=_ExecutedDirectEffect(delivered, None)
-            ),
+            _execute_direct_effect=AsyncMock(return_value=delivered),
         ),
         ExternalChannelActionService,
     )
@@ -579,9 +571,7 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
             spec=ExternalChannelActionService,
             session_manager=session_manager,
             repository=repository,
-            _execute_direct_effect=AsyncMock(
-                return_value=_ExecutedDirectEffect(failed, None)
-            ),
+            _execute_direct_effect=AsyncMock(return_value=failed),
         ),
         ExternalChannelActionService,
     )
@@ -611,22 +601,20 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tracker_relocation_resolves_reply_identity_after_cleanup() -> None:
-    """A dependent attach receives the delivered final reply identity."""
+async def test_tracker_recreation_needs_only_cleanup() -> None:
+    """Standalone recreation depends only on confirmed old-host cleanup."""
     session = SimpleNamespace(commit=AsyncMock())
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     remove = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
-        dependencies=(0,),
         projection_host_kind="standalone",
     )
-    attach = replace(
-        _effect(ExternalChannelDeliveryOperation.PROGRESS_UPDATE),
-        dependencies=(0, 1),
-        provider_message_key_effect_index=0,
-        projection_host_kind="reply",
+    create = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_CREATE),
+        dependencies=(1,),
+        projection_host_kind="standalone",
     )
-    attach.provider.target.request_payload.pop("provider_message_key", None)
+    create.provider.target.request_payload.pop("provider_message_key", None)
     repository = SimpleNamespace(
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
@@ -634,7 +622,7 @@ async def test_tracker_relocation_resolves_reply_identity_after_cleanup() -> Non
                 work_id="work-1",
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=5,
-                effects=(reply, remove, attach),
+                effects=(reply, remove, create),
             )
         )
     )
@@ -643,23 +631,19 @@ async def test_tracker_relocation_resolves_reply_identity_after_cleanup() -> Non
     async def execute_effect(
         effect: ChannelActionEffectPlan,
         **_: object,
-    ) -> _ExecutedDirectEffect:
+    ) -> ProviderEffectOutcome:
         captured.append(effect)
         operation = effect.provider.target.operation
-        provider_message_key = (
-            "slack:C1:999.000"
-            if operation is ExternalChannelDeliveryOperation.REPLY
-            else None
-        )
-        return _ExecutedDirectEffect(
-            ProviderEffectOutcome(
-                operation=operation,
-                part=effect.part,
-                status="delivered",
-                reason=None,
-                detail=None,
+        return ProviderEffectOutcome(
+            operation=operation,
+            part=effect.part,
+            status=(
+                "failed"
+                if operation is ExternalChannelDeliveryOperation.REPLY
+                else "delivered"
             ),
-            provider_message_key,
+            reason=None,
+            detail=None,
         )
 
     @asynccontextmanager
@@ -695,30 +679,26 @@ async def test_tracker_relocation_resolves_reply_identity_after_cleanup() -> Non
     )
 
     assert [outcome.status for outcome in result.outcomes] == [
-        "delivered",
+        "failed",
         "delivered",
         "delivered",
     ]
-    assert captured[2].provider.target.request_payload["provider_message_key"] == (
-        "slack:C1:999.000"
-    )
+    assert "provider_message_key" not in (captured[2].provider.target.request_payload)
 
 
 @pytest.mark.asyncio
-async def test_tracker_relocation_skips_attach_when_cleanup_fails() -> None:
-    """Failed old-host cleanup preserves the one-visible-Tracker contract."""
+async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
+    """Failed old-host cleanup prevents standalone replacement creation."""
     session = SimpleNamespace(commit=AsyncMock())
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     remove = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
-        dependencies=(0,),
         projection_host_kind="standalone",
     )
-    attach = replace(
-        _effect(ExternalChannelDeliveryOperation.PROGRESS_UPDATE),
-        dependencies=(0, 1),
-        provider_message_key_effect_index=0,
-        projection_host_kind="reply",
+    create = replace(
+        _effect(ExternalChannelDeliveryOperation.PROGRESS_CREATE),
+        dependencies=(1,),
+        projection_host_kind="standalone",
     )
     repository = SimpleNamespace(
         commit_direct_action=AsyncMock(
@@ -727,29 +707,23 @@ async def test_tracker_relocation_skips_attach_when_cleanup_fails() -> None:
                 work_id="work-1",
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=5,
-                effects=(reply, remove, attach),
+                effects=(reply, remove, create),
             )
         )
     )
-    delivered_reply = _ExecutedDirectEffect(
-        ProviderEffectOutcome(
-            operation=ExternalChannelDeliveryOperation.REPLY,
-            part=0,
-            status="delivered",
-            reason=None,
-            detail=None,
-        ),
-        "slack:C1:999.000",
+    delivered_reply = ProviderEffectOutcome(
+        operation=ExternalChannelDeliveryOperation.REPLY,
+        part=0,
+        status="delivered",
+        reason=None,
+        detail=None,
     )
-    failed_cleanup = _ExecutedDirectEffect(
-        ProviderEffectOutcome(
-            operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            part=0,
-            status="failed",
-            reason="provider_rejected",
-            detail="Cleanup failed.",
-        ),
-        None,
+    failed_cleanup = ProviderEffectOutcome(
+        operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        part=0,
+        status="failed",
+        reason="provider_rejected",
+        detail="Cleanup failed.",
     )
     execute_effect = AsyncMock(side_effect=[delivered_reply, failed_cleanup])
 

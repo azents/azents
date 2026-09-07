@@ -1311,7 +1311,6 @@ class ExternalChannelWorkRepository:
                 part: int,
                 expected_desired_progress_revision: int | None,
                 dependencies: tuple[int, ...],
-                provider_message_key_effect_index: int | None,
                 projection_host_kind: ChannelWorkTrackerHostKind | None,
             ) -> int:
                 effect_index = len(effects)
@@ -1351,15 +1350,11 @@ class ExternalChannelWorkRepository:
                             expected_desired_progress_revision
                         ),
                         dependencies=dependencies,
-                        provider_message_key_effect_index=(
-                            provider_message_key_effect_index
-                        ),
                         projection_host_kind=projection_host_kind,
                     )
                 )
                 return effect_index
 
-            reply_effect_indices: list[int] = []
             if message is not None:
                 for part, payload in enumerate(
                     _reply_parts(
@@ -1369,16 +1364,13 @@ class ExternalChannelWorkRepository:
                         files=files,
                     )
                 ):
-                    reply_effect_indices.append(
-                        append_effect(
-                            ExternalChannelDeliveryOperation.REPLY,
-                            payload,
-                            part=part,
-                            expected_desired_progress_revision=None,
-                            dependencies=(),
-                            provider_message_key_effect_index=None,
-                            projection_host_kind=None,
-                        )
+                    append_effect(
+                        ExternalChannelDeliveryOperation.REPLY,
+                        payload,
+                        part=part,
+                        expected_desired_progress_revision=None,
+                        dependencies=(),
+                        projection_host_kind=None,
                     )
 
             projection_parts = {
@@ -1402,6 +1394,9 @@ class ExternalChannelWorkRepository:
                         "A title-only update requires existing Channel Work."
                     )
                 if progress_changed:
+                    tasks_changed = (
+                        requested_tasks is not None and requested_tasks != work.tasks
+                    )
                     next_tasks = (
                         requested_tasks
                         if requested_tasks is not None
@@ -1454,15 +1449,14 @@ class ExternalChannelWorkRepository:
                         desired_pages = tuple(
                             (page.text, page.embeds) for page in rendered_discord.pages
                         )
-                    move_discord_tracker = (
+                    recreate_discord_tracker = (
                         connection.provider is ExternalChannelProvider.DISCORD
-                        and bool(reply_effect_indices)
+                        and tasks_changed
                     )
-                    reply_dependencies = tuple(reply_effect_indices)
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)
-                        if move_discord_tracker:
-                            dependencies = reply_dependencies
+                        if recreate_discord_tracker:
+                            dependencies: tuple[int, ...] = ()
                             if (
                                 part is not None
                                 and part.provider_message_key is not None
@@ -1485,11 +1479,10 @@ class ExternalChannelWorkRepository:
                                     expected_desired_progress_revision=(
                                         work.desired_progress_revision
                                     ),
-                                    dependencies=reply_dependencies,
-                                    provider_message_key_effect_index=None,
+                                    dependencies=(),
                                     projection_host_kind=part.host_kind,
                                 )
-                                dependencies = (*dependencies, cleanup_index)
+                                dependencies = (cleanup_index,)
                             payload = _provider_payload(
                                 connection.provider,
                                 resource.labels,
@@ -1499,19 +1492,16 @@ class ExternalChannelWorkRepository:
                                 ),
                             )
                             payload["embeds"] = presentation
-                            payload["tracker_host_kind"] = "reply"
+                            payload["tracker_host_kind"] = "standalone"
                             append_effect(
-                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
                                 payload,
                                 part=part_ordinal,
                                 expected_desired_progress_revision=(
                                     work.desired_progress_revision
                                 ),
                                 dependencies=dependencies,
-                                provider_message_key_effect_index=(
-                                    reply_effect_indices[-1]
-                                ),
-                                projection_host_kind="reply",
+                                projection_host_kind="standalone",
                             )
                             continue
 
@@ -1586,7 +1576,6 @@ class ExternalChannelWorkRepository:
                                 work.desired_progress_revision
                             ),
                             dependencies=(),
-                            provider_message_key_effect_index=None,
                             projection_host_kind=host_kind,
                         )
                     for part_ordinal, part in sorted(projection_parts.items()):
@@ -1614,7 +1603,6 @@ class ExternalChannelWorkRepository:
                                     work.desired_progress_revision
                                 ),
                                 dependencies=(),
-                                provider_message_key_effect_index=None,
                                 projection_host_kind=part.host_kind,
                             )
             else:
@@ -1645,7 +1633,6 @@ class ExternalChannelWorkRepository:
                                 work.desired_progress_revision
                             ),
                             dependencies=(),
-                            provider_message_key_effect_index=None,
                             projection_host_kind=part.host_kind,
                         )
             result = ChannelActionTransition(
