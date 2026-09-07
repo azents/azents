@@ -40,6 +40,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/features/session-channels/**
+  - typescript/apps/azents-web/src/shared/lib/discord-thread-auto-archive-duration*
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/(workspace)/integrations/slack/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.module.css

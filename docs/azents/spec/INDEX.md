@@ -23,7 +23,7 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-07 | 109 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-03 | 13 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-04 | 79 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-07 | 80 |
 
 ## Flow Specs
 
