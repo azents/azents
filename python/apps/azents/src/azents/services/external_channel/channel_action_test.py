@@ -1242,7 +1242,7 @@ async def test_discord_scheduled_tracker_keeps_session_navigation_only(
         }
     ]
     if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
-        assert call.kwargs["suppress_notifications"] is False
+        assert call.kwargs["suppress_notifications"] is True
     assert call.kwargs["suppress_embeds"] is False
 
 
@@ -1436,6 +1436,7 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     assert result.status == "delivered"
     create_call = create_message.await_args
     assert create_call is not None
+    assert create_call.kwargs["suppress_notifications"] is False
     assert create_call.kwargs["content"] == ""
     assert create_call.kwargs["suppress_embeds"] is False
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
@@ -1510,6 +1511,7 @@ async def test_discord_deletion_keeps_only_multi_app_agent_content() -> None:
     assert result.status == "delivered"
     create_call = create_message.await_args
     assert create_call is not None
+    assert create_call.kwargs["suppress_notifications"] is False
     assert create_call.kwargs["content"] == "**Research Agent**"
     assert create_call.kwargs["suppress_embeds"] is False
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]

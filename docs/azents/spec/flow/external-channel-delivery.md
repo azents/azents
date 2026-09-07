@@ -45,7 +45,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-09-07
-spec_version: 58
+spec_version: 59
 ---
 
 # External Channel Delivery and Channel Work
@@ -384,8 +384,10 @@ Session title and Agent execution.
   `View session` link derived from the current canonical Workspace, Agent, and Session
   target. Conversational Tracker creation and update also derive one signed
   `Conversation settings` action from the current Binding. Scheduled Task Trackers
-  retain only Session navigation and task controls and keep their existing standalone
-  notification behavior.
+  retain only Session navigation and task controls; their standalone
+  `PROGRESS_CREATE` messages are notification-suppressed, while registration,
+  deletion, progress replies, and terminal results retain their existing notification
+  behavior.
 - Slack and Discord create no separate settings-only follow-up control. Every visible
   conversational Tracker is the recurring signed settings entry point. Initial hidden
   checking Work creates neither Tracker nor settings surface; canonical unfinished Todo
@@ -571,6 +573,10 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 59) — Made Discord Scheduled Task
+  `PROGRESS_CREATE` Tracker messages notification-suppressed without changing
+  registration, deletion, progress reply, terminal result, update, or cleanup
+  delivery.
 - **2026-09-07** (spec_version 58) — Applied the Discord connection-level
   URL-preview policy across Channel Action, Scheduled Task, multipart file, and
   Tracker create, update, and cleanup mutations while preserving intentional Embeds.
