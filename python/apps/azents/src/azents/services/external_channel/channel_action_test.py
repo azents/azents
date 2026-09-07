@@ -140,6 +140,7 @@ def _target(
             if provider is ExternalChannelProvider.SLACK
             else DiscordConnectionConfiguration(
                 target_guild_id="111",
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             )
         ),
@@ -1016,6 +1017,94 @@ async def test_discord_tracker_delivery_includes_session_navigation(
     ]
     if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
         assert call.kwargs["suppress_notifications"] is True
+    assert call.kwargs["suppress_embeds"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("suppress_url_previews", "explicit_embed", "expected"),
+    [
+        (True, False, True),
+        (False, False, False),
+        (True, True, False),
+    ],
+)
+async def test_discord_connection_controls_automatic_url_preview_suppression(
+    suppress_url_previews: bool,
+    explicit_embed: bool,
+    expected: bool,
+) -> None:
+    """Connection policy suppresses only automatic URL preview embeds."""
+    create_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    if not explicit_embed:
+        target.request_payload.pop("embeds")
+        target.request_payload.pop("components", None)
+    target = replace(
+        target,
+        provider_configuration=DiscordConnectionConfiguration(
+            target_guild_id="111",
+            suppress_url_previews=suppress_url_previews,
+            thread_auto_archive_duration_minutes=1440,
+        ),
+    )
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(create_message=create_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-url-preview"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    call = create_message.await_args
+    assert call is not None
+    assert call.kwargs["suppress_embeds"] is expected
+
+
+@pytest.mark.asyncio
+async def test_discord_tracker_update_applies_url_preview_suppression() -> None:
+    """Tracker edits retain the current automatic URL-preview policy."""
+    update_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    target.request_payload["embeds"] = []
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(update_message=update_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-progress-url-preview"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    call = update_message.await_args
+    assert call is not None
+    assert call.kwargs["suppress_embeds"] is True
+    assert call.kwargs["embeds"] == []
 
 
 @pytest.mark.asyncio
@@ -1048,6 +1137,7 @@ async def test_discord_reply_host_tracker_update_preserves_message_content() -> 
     call = update_message.await_args
     assert call is not None
     assert call.kwargs["content"] is None
+    assert call.kwargs["suppress_embeds"] is False
     assert call.kwargs["embeds"] == target.request_payload["embeds"]
 
 
@@ -1091,6 +1181,7 @@ async def test_discord_reply_host_tracker_delete_detaches_presentation() -> None
         channel_id="333",
         message_id="555",
         content=None,
+        suppress_embeds=True,
         components=[],
         embeds=[],
     )
@@ -1152,6 +1243,7 @@ async def test_discord_scheduled_tracker_keeps_session_navigation_only(
     ]
     if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
         assert call.kwargs["suppress_notifications"] is False
+    assert call.kwargs["suppress_embeds"] is False
 
 
 @pytest.mark.asyncio
@@ -1239,6 +1331,7 @@ async def test_discord_terminal_thread_reply_forwards_to_exact_parent() -> None:
     assert create_call is not None
     assert create_call.kwargs["forward_to_parent"] is True
     assert create_call.kwargs["parent_channel_id"] == "222"
+    assert create_call.kwargs["suppress_embeds"] is True
 
 
 @pytest.mark.asyncio
@@ -1295,6 +1388,7 @@ async def test_discord_terminal_thread_files_forward_to_exact_parent() -> None:
     assert create_call is not None
     assert create_call.kwargs["forward_to_parent"] is True
     assert create_call.kwargs["parent_channel_id"] == "222"
+    assert create_call.kwargs["suppress_embeds"] is True
 
 
 @pytest.mark.asyncio
@@ -1343,6 +1437,7 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     create_call = create_message.await_args
     assert create_call is not None
     assert create_call.kwargs["content"] == ""
+    assert create_call.kwargs["suppress_embeds"] is False
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
     assert create_call.kwargs["components"] == [
         {
@@ -1416,6 +1511,7 @@ async def test_discord_deletion_keeps_only_multi_app_agent_content() -> None:
     create_call = create_message.await_args
     assert create_call is not None
     assert create_call.kwargs["content"] == "**Research Agent**"
+    assert create_call.kwargs["suppress_embeds"] is False
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
 
 

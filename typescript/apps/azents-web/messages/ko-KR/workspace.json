@@ -1115,6 +1115,9 @@
       "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
       "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다.",
       "discordThreadAutoArchiveDuration": "스레드 자동 보관 기간",
+      "discordSuppressUrlPreviews": "URL 미리보기 숨기기",
+      "discordSuppressUrlPreviewsDescription": "일반 메시지의 자동 링크 미리보기 카드를 숨깁니다. 명시적으로 보내는 Discord Embed는 계속 표시됩니다.",
+      "discordSuppressUrlPreviewsSaved": "URL 미리보기 설정을 저장했습니다.",
       "discordThreadAutoArchiveDurationOptions": {
         "oneHour": "1시간",
         "oneDay": "1일",
@@ -1915,6 +1918,9 @@
     "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
     "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다.",
     "discordThreadAutoArchiveDuration": "스레드 자동 보관 기간",
+    "discordSuppressUrlPreviews": "URL 미리보기 숨기기",
+    "discordSuppressUrlPreviewsDescription": "일반 메시지의 자동 링크 미리보기 카드를 숨깁니다. 명시적으로 보내는 Discord Embed는 계속 표시됩니다.",
+    "discordSuppressUrlPreviewsSaved": "URL 미리보기 설정을 저장했습니다.",
     "discordThreadAutoArchiveDurationOptions": {
       "oneHour": "1시간",
       "oneDay": "1일",

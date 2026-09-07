@@ -92,6 +92,10 @@ class DiscordConnectionConfiguration(BaseModel):
         default=ExternalChannelProvider.DISCORD
     )
     target_guild_id: str = Field(description="Target Discord Guild snowflake")
+    suppress_url_previews: bool = Field(
+        default=True,
+        description="Suppress automatic URL preview embeds in outbound messages",
+    )
     thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes = (
         Field(
             description="Automatic archive duration for newly created Discord Threads"
@@ -111,7 +115,8 @@ def decode_discord_connection_configuration(
     """Decode one persisted Discord connection configuration."""
     if provider_config is None:
         raise ValueError("Discord connection configuration is unavailable.")
-    return DiscordConnectionConfiguration.model_validate(provider_config)
+    normalized = {"suppress_url_previews": True, **provider_config}
+    return DiscordConnectionConfiguration.model_validate(normalized)
 
 
 def decode_provider_connection_configuration(

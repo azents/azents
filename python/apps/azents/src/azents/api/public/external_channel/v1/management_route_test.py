@@ -494,6 +494,7 @@ def test_discord_creation_is_available_without_a_rollout_flag(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -522,6 +523,7 @@ def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() ->
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -552,6 +554,7 @@ def test_discord_multi_app_creation_succeeds_after_mode_aware_enablement() -> No
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -595,6 +598,7 @@ def test_discord_replacement_is_available_without_a_rollout_flag(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -638,6 +642,7 @@ def test_discord_replacement_returns_redacted_status(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -734,6 +739,7 @@ def test_discord_setup_returns_safe_structured_provider_errors(
                 "configuration": {
                     "provider": "discord",
                     "target_guild_id": "guild-1",
+                    "suppress_url_previews": True,
                     "thread_auto_archive_duration_minutes": 1440,
                 },
                 "credentials": {
@@ -781,6 +787,7 @@ def test_discord_setup_failure_log_never_serializes_exception_text(
                 "configuration": {
                     "provider": "discord",
                     "target_guild_id": "guild-1",
+                    "suppress_url_previews": True,
                     "thread_auto_archive_duration_minutes": 1440,
                 },
                 "credentials": {
@@ -818,6 +825,7 @@ def test_member_cannot_replace_workspace_discord_multi_app() -> None:
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
@@ -1227,6 +1235,48 @@ def test_update_multi_discord_thread_duration_uses_generation_fence() -> None:
         2026, 8, 20, tzinfo=datetime.UTC
     )
     assert call.kwargs["setting"].thread_auto_archive_duration_minutes == 4320
+
+
+def test_update_dedicated_discord_url_preview_suppression() -> None:
+    """The dedicated presentation route needs no replacement credential."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_discord_url_preview_suppression.return_value = _connection()
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/connection-1/discord/url-preview-suppression",
+        json={"suppress_url_previews": False},
+    )
+
+    assert response.status_code == 200
+    call = service.update_discord_url_preview_suppression.await_args
+    assert call.kwargs["connection_id"] == "connection-1"
+    assert call.kwargs["setting"].suppress_url_previews is False
+
+
+def test_update_multi_discord_url_preview_suppression_uses_generation_fence() -> None:
+    """The Workspace presentation route forwards the management generation."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_multi_discord_url_preview_suppression.return_value = (
+        _multi_connection()
+    )
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).put(
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+        "connection-1/url-preview-suppression",
+        json={
+            "suppress_url_previews": False,
+            "expected_generation": "2026-09-07T00:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    call = service.update_multi_discord_url_preview_suppression.await_args
+    assert call.kwargs["connection_id"] == "connection-1"
+    assert call.kwargs["expected_generation"] == datetime.datetime(
+        2026, 9, 7, tzinfo=datetime.UTC
+    )
+    assert call.kwargs["setting"].suppress_url_previews is False
 
 
 @pytest.mark.parametrize("duration", [0, 59, 61, 2880, 10081])

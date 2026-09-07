@@ -1,6 +1,7 @@
 import type { DiscordThreadAutoArchiveDurationMinutes } from "@azents/public-client";
 
 export const DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION: DiscordThreadAutoArchiveDurationMinutes = 1440;
+export const DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS = true;
 
 export function isDiscordThreadAutoArchiveDuration(
   value: unknown,
@@ -22,6 +23,21 @@ export function discordThreadAutoArchiveDurationFromConfiguration(
   return isDiscordThreadAutoArchiveDuration(value)
     ? value
     : DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION;
+}
+
+export function discordSuppressUrlPreviewsFromConfiguration(
+  providerConfiguration: unknown,
+): boolean {
+  if (
+    typeof providerConfiguration !== "object" ||
+    providerConfiguration === null ||
+    !("suppress_url_previews" in providerConfiguration)
+  ) {
+    return DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS;
+  }
+  return typeof providerConfiguration.suppress_url_previews === "boolean"
+    ? providerConfiguration.suppress_url_previews
+    : DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS;
 }
 
 export function discordThreadAutoArchiveDurationFromSelectValue(

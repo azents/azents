@@ -205,7 +205,9 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_replace_multi_slack_channel_default**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_replace_multi_slack_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Slack Channel Default
 *ExternalChannelV1Api* | [**external_channel_v1_revoke_access_grant**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
 *ExternalChannelV1Api* | [**external_channel_v1_set_discord_thread_duration**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_set_discord_thread_duration) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/thread-auto-archive-duration | Set Discord Thread Duration
+*ExternalChannelV1Api* | [**external_channel_v1_set_discord_url_previews**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_set_discord_url_previews) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/url-preview-suppression | Set Discord Url Previews
 *ExternalChannelV1Api* | [**external_channel_v1_set_multi_discord_thread_duration**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_set_multi_discord_thread_duration) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/thread-auto-archive-duration | Set Multi Discord Thread Duration
+*ExternalChannelV1Api* | [**external_channel_v1_set_multi_discord_url_previews**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_set_multi_discord_url_previews) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression | Set Multi Discord Url Previews
 *ExternalChannelV1Api* | [**external_channel_v1_setup_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord | Setup Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
@@ -462,6 +464,7 @@ Class | Method | HTTP request | Description
  - [DiscordConnectionSetupRequest](azentspublicclient/docs/DiscordConnectionSetupRequest.md)
  - [DiscordThreadAutoArchiveDurationMinutes](azentspublicclient/docs/DiscordThreadAutoArchiveDurationMinutes.md)
  - [DiscordThreadAutoArchiveDurationRequest](azentspublicclient/docs/DiscordThreadAutoArchiveDurationRequest.md)
+ - [DiscordUrlPreviewSuppressionRequest](azentspublicclient/docs/DiscordUrlPreviewSuppressionRequest.md)
  - [DockerContainerProfileSpecV1](azentspublicclient/docs/DockerContainerProfileSpecV1.md)
  - [DockerContainerProfileSpecV2](azentspublicclient/docs/DockerContainerProfileSpecV2.md)
  - [DockerContainerResources](azentspublicclient/docs/DockerContainerResources.md)
@@ -600,6 +603,7 @@ Class | Method | HTTP request | Description
  - [ModelToolCallingCapabilities](azentspublicclient/docs/ModelToolCallingCapabilities.md)
  - [MultiChannelDefaultRequest](azentspublicclient/docs/MultiChannelDefaultRequest.md)
  - [MultiDiscordThreadAutoArchiveDurationRequest](azentspublicclient/docs/MultiDiscordThreadAutoArchiveDurationRequest.md)
+ - [MultiDiscordUrlPreviewSuppressionRequest](azentspublicclient/docs/MultiDiscordUrlPreviewSuppressionRequest.md)
  - [MultiRouteCreateRequest](azentspublicclient/docs/MultiRouteCreateRequest.md)
  - [MyJoinRequestResponse](azentspublicclient/docs/MyJoinRequestResponse.md)
  - [MySystemRolesResponse](azentspublicclient/docs/MySystemRolesResponse.md)

@@ -30,6 +30,7 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
     _set_discord_thread_auto_archive_duration,
+    _set_discord_url_preview_suppression,
 )
 from azents.repos.external_channel.management_data import (
     ManagedBinding,
@@ -634,6 +635,7 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
         app_id="app-1",
         configuration=DiscordConnectionConfiguration(
             target_guild_id="guild-1",
+            suppress_url_previews=True,
             thread_auto_archive_duration_minutes=1440,
         ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
@@ -712,6 +714,7 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         app_id="discord-app-1",
         configuration=DiscordConnectionConfiguration(
             target_guild_id="guild-1",
+            suppress_url_previews=True,
             thread_auto_archive_duration_minutes=1440,
         ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
@@ -728,6 +731,7 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         provider_config={
             "provider": "discord",
             "target_guild_id": "guild-1",
+            "suppress_url_previews": True,
             "thread_auto_archive_duration_minutes": 1440,
         },
     )
@@ -792,6 +796,7 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         app_id="discord-app-1",
         configuration=DiscordConnectionConfiguration(
             target_guild_id="guild-1",
+            suppress_url_previews=True,
             thread_auto_archive_duration_minutes=1440,
         ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
@@ -807,6 +812,7 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         provider_config={
             "provider": "discord",
             "target_guild_id": "guild-1",
+            "suppress_url_previews": True,
             "thread_auto_archive_duration_minutes": 1440,
         },
     )
@@ -854,6 +860,7 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
             app_id="discord-app-1",
             configuration=DiscordConnectionConfiguration(
                 target_guild_id="guild-1",
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
@@ -914,6 +921,7 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
         provider_config={
             "provider": "discord",
             "target_guild_id": "guild-1",
+            "suppress_url_previews": True,
             "thread_auto_archive_duration_minutes": 1440,
         },
     )
@@ -924,6 +932,7 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     assert result.provider_config == {
         "provider": "discord",
         "target_guild_id": "guild-1",
+        "suppress_url_previews": True,
         "thread_auto_archive_duration_minutes": 1440,
     }
     assert connection.provider_app_id == "discord-app-1"
@@ -952,6 +961,7 @@ def test_discord_thread_duration_update_preserves_unknown_configuration() -> Non
             provider_config={
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
                 "thread_auto_archive_duration_minutes": 1440,
                 "future_policy": {"enabled": True},
             },
@@ -967,7 +977,38 @@ def test_discord_thread_duration_update_preserves_unknown_configuration() -> Non
     assert connection.provider_config == {
         "provider": "discord",
         "target_guild_id": "guild-1",
+        "suppress_url_previews": True,
         "thread_auto_archive_duration_minutes": 10080,
+        "future_policy": {"enabled": True},
+    }
+
+
+def test_discord_url_preview_update_preserves_unknown_configuration() -> None:
+    """A presentation-only update replaces one key without narrowing JSON."""
+    connection = require_instance(
+        MagicMock(
+            spec=RDBExternalChannelConnection,
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+                "suppress_url_previews": True,
+                "thread_auto_archive_duration_minutes": 1440,
+                "future_policy": {"enabled": True},
+            },
+        ),
+        RDBExternalChannelConnection,
+    )
+
+    _set_discord_url_preview_suppression(
+        connection,
+        suppress_url_previews=False,
+    )
+
+    assert connection.provider_config == {
+        "provider": "discord",
+        "target_guild_id": "guild-1",
+        "suppress_url_previews": False,
+        "thread_auto_archive_duration_minutes": 1440,
         "future_policy": {"enabled": True},
     }
 

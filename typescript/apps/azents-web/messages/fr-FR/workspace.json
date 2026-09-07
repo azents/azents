@@ -1115,6 +1115,9 @@
       "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
       "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur.",
       "discordThreadAutoArchiveDuration": "Durée d’archivage automatique du fil",
+      "discordSuppressUrlPreviews": "Masquer les aperçus d’URL",
+      "discordSuppressUrlPreviewsDescription": "Masque les cartes d’aperçu automatiques des liens dans les messages ordinaires. Les embeds Discord explicites restent affichés.",
+      "discordSuppressUrlPreviewsSaved": "Le paramètre d’aperçu des URL a été enregistré.",
       "discordThreadAutoArchiveDurationOptions": {
         "oneHour": "1 heure",
         "oneDay": "1 jour",
@@ -1915,6 +1918,9 @@
     "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
     "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur.",
     "discordThreadAutoArchiveDuration": "Durée d’archivage automatique du fil",
+    "discordSuppressUrlPreviews": "Masquer les aperçus d’URL",
+    "discordSuppressUrlPreviewsDescription": "Masque les cartes d’aperçu automatiques des liens dans les messages ordinaires. Les embeds Discord explicites restent affichés.",
+    "discordSuppressUrlPreviewsSaved": "Le paramètre d’aperçu des URL a été enregistré.",
     "discordThreadAutoArchiveDurationOptions": {
       "oneHour": "1 heure",
       "oneDay": "1 jour",

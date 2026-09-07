@@ -86,23 +86,24 @@ class DiscordFileMessageTransport:
         content: str,
         files: tuple[DiscordOutboundFile, ...],
         nonce: str,
+        suppress_embeds: bool,
     ) -> DiscordDeliveryResult:
         """Create one exact-length multipart message through approved gap G2."""
         if not files:
             return _rejected_result()
         try:
-            stream = _DiscordMultipartStream(
-                payload={
-                    "content": content,
-                    "nonce": nonce,
-                    "enforce_nonce": True,
-                    "attachments": [
-                        {"id": str(index), "filename": file.filename}
-                        for index, file in enumerate(files)
-                    ],
-                },
-                files=files,
-            )
+            payload: dict[str, object] = {
+                "content": content,
+                "nonce": nonce,
+                "enforce_nonce": True,
+                "attachments": [
+                    {"id": str(index), "filename": file.filename}
+                    for index, file in enumerate(files)
+                ],
+            }
+            if suppress_embeds:
+                payload["flags"] = 1 << 2
+            stream = _DiscordMultipartStream(payload=payload, files=files)
             response = await self.http_client.post(
                 f"{discord_api_base_url()}/channels/{channel_id}/messages",
                 headers={"Authorization": f"Bot {bot_token}", **stream.headers},
@@ -144,6 +145,7 @@ class DiscordFileMessageTransportProtocol(Protocol):
         content: str,
         files: tuple[DiscordOutboundFile, ...],
         nonce: str,
+        suppress_embeds: bool,
     ) -> DiscordDeliveryResult:
         """Create one streamed multipart file message."""
         ...
@@ -329,6 +331,7 @@ class DiscordDeliveryClient:
         content: str,
         operation_key: ProviderOperationKey,
         suppress_notifications: bool,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
         forward_to_parent: bool = False,
@@ -346,6 +349,7 @@ class DiscordDeliveryClient:
                     content=content,
                     nonce=discord_delivery_nonce(operation_key),
                     suppress_notifications=suppress_notifications,
+                    suppress_embeds=suppress_embeds,
                     components=components,
                     embeds=embeds,
                 )
@@ -401,6 +405,7 @@ class DiscordDeliveryClient:
         content: str,
         files: tuple[DiscordOutboundFile, ...],
         operation_key: ProviderOperationKey,
+        suppress_embeds: bool,
         forward_to_parent: bool,
         parent_channel_id: str | None,
     ) -> DiscordDeliveryResult:
@@ -414,6 +419,7 @@ class DiscordDeliveryClient:
             content=content,
             files=files,
             nonce=discord_delivery_nonce(operation_key),
+            suppress_embeds=suppress_embeds,
         )
         if created.status != "delivered" or not forward_to_parent:
             return created
@@ -468,6 +474,7 @@ class DiscordDeliveryClient:
         channel_id: str,
         message_id: str,
         content: str | None,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
@@ -479,6 +486,7 @@ class DiscordDeliveryClient:
                     channel_id=channel_id,
                     message_id=message_id,
                     content=content,
+                    suppress_embeds=suppress_embeds,
                     components=components,
                     embeds=embeds,
                 )

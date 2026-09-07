@@ -1115,6 +1115,9 @@
       "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
       "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。",
       "discordThreadAutoArchiveDuration": "スレッドの自動アーカイブ期間",
+      "discordSuppressUrlPreviews": "URLプレビューを非表示",
+      "discordSuppressUrlPreviewsDescription": "通常メッセージの自動リンクプレビューカードを非表示にします。明示的なDiscord Embedは引き続き表示されます。",
+      "discordSuppressUrlPreviewsSaved": "URLプレビュー設定を保存しました。",
       "discordThreadAutoArchiveDurationOptions": {
         "oneHour": "1時間",
         "oneDay": "1日",
@@ -1915,6 +1918,9 @@
     "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
     "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。",
     "discordThreadAutoArchiveDuration": "スレッドの自動アーカイブ期間",
+    "discordSuppressUrlPreviews": "URLプレビューを非表示",
+    "discordSuppressUrlPreviewsDescription": "通常メッセージの自動リンクプレビューカードを非表示にします。明示的なDiscord Embedは引き続き表示されます。",
+    "discordSuppressUrlPreviewsSaved": "URLプレビュー設定を保存しました。",
     "discordThreadAutoArchiveDurationOptions": {
       "oneHour": "1時間",
       "oneDay": "1日",

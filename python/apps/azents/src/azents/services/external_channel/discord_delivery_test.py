@@ -183,6 +183,7 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
         content="Reply",
         operation_key=operation_key,
         suppress_notifications=False,
+        suppress_embeds=False,
         components=components,
         embeds=embeds,
     )
@@ -198,6 +199,7 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
                 "content": "Reply",
                 "nonce": operation_key.value,
                 "suppress_notifications": False,
+                "suppress_embeds": False,
                 "components": components,
                 "embeds": embeds,
             },
@@ -220,6 +222,7 @@ async def test_create_message_can_forward_the_exact_created_message() -> None:
         content="Terminal result",
         operation_key=operation_key,
         suppress_notifications=False,
+        suppress_embeds=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -239,6 +242,7 @@ async def test_create_message_can_forward_the_exact_created_message() -> None:
                 "content": "Terminal result",
                 "nonce": operation_key.value,
                 "suppress_notifications": False,
+                "suppress_embeds": False,
                 "components": None,
                 "embeds": None,
             },
@@ -269,6 +273,7 @@ async def test_forward_failure_preserves_created_thread_message_identity() -> No
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-2"),
         suppress_notifications=False,
+        suppress_embeds=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -294,6 +299,7 @@ async def test_forward_permission_failure_keeps_classification_and_identity() ->
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-permission"),
         suppress_notifications=False,
+        suppress_embeds=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -317,6 +323,7 @@ async def test_forward_requires_an_explicit_parent_before_create() -> None:
         content="Terminal result",
         operation_key=ProviderOperationKey.from_seed("terminal-part-3"),
         suppress_notifications=False,
+        suppress_embeds=False,
         forward_to_parent=True,
     )
 
@@ -442,6 +449,7 @@ async def test_bound_delivery_workflow_reuses_one_sdk_factory_open() -> None:
             content="Reply",
             operation_key=ProviderOperationKey.from_seed("delivery-workflow"),
             suppress_notifications=False,
+            suppress_embeds=False,
         )
 
     assert factory.opens == 1
@@ -466,6 +474,7 @@ async def test_file_message_delegates_only_to_g2_transport() -> None:
         content="file",
         files=(),
         operation_key=ProviderOperationKey.from_seed("file-1"),
+        suppress_embeds=False,
         forward_to_parent=False,
         parent_channel_id=None,
     )
@@ -490,6 +499,7 @@ async def test_file_message_can_forward_the_exact_created_message() -> None:
         content="file",
         files=(),
         operation_key=ProviderOperationKey.from_seed("file-terminal"),
+        suppress_embeds=False,
         forward_to_parent=True,
         parent_channel_id="222",
     )
@@ -522,7 +532,9 @@ async def test_g2_multipart_stream_preserves_exact_length_and_nonce() -> None:
         body = await request.aread()
         assert request.headers["Content-Length"] == str(len(body))
         payload = body.split(b"\r\n\r\n", 1)[1].split(b"\r\n", 1)[0]
-        assert json.loads(payload)["nonce"] == "nonce-1"
+        payload_json = json.loads(payload)
+        assert payload_json["nonce"] == "nonce-1"
+        assert payload_json["flags"] == 1 << 2
         assert b"abc" in body
         return httpx.Response(200, json={"id": "777", "channel_id": "333"})
 
@@ -537,6 +549,7 @@ async def test_g2_multipart_stream_preserves_exact_length_and_nonce() -> None:
             content="file",
             files=(DiscordOutboundFile("a.txt", "text/plain", 3, content),),
             nonce="nonce-1",
+            suppress_embeds=True,
         )
 
     assert result.provider_message_key == "discord:111:777"
@@ -563,6 +576,7 @@ async def test_g2_midstream_source_failure_is_ambiguous() -> None:
             content="file",
             files=(DiscordOutboundFile("a.txt", "text/plain", 2, content),),
             nonce="nonce-1",
+            suppress_embeds=False,
         )
 
     assert result.status == "unknown"

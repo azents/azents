@@ -195,6 +195,7 @@ class DiscordSDKSession(Protocol):
         content: str,
         nonce: str,
         suppress_notifications: bool,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -208,6 +209,7 @@ class DiscordSDKSession(Protocol):
         channel_id: str,
         message_id: str,
         content: str | None,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -625,6 +627,7 @@ class _DiscordPySession:
         content: str,
         nonce: str,
         suppress_notifications: bool,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -663,9 +666,10 @@ class _DiscordPySession:
                         "Discord text message payload is unavailable."
                     )
                 params.payload["enforce_nonce"] = True
-                if suppress_notifications:
+                if suppress_notifications or suppress_embeds:
                     flags = discord.MessageFlags()
-                    flags.suppress_notifications = True
+                    flags.suppress_notifications = suppress_notifications
+                    flags.suppress_embeds = suppress_embeds
                     params.payload["flags"] = flags.value
                 payload: object = await self._http.send_message(
                     int(channel_id),
@@ -752,6 +756,7 @@ class _DiscordPySession:
         channel_id: str,
         message_id: str,
         content: str | None,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -772,6 +777,13 @@ class _DiscordPySession:
                     embeds=_sdk_embeds(embeds) or [],
                 )
             with parameters as params:
+                if params.payload is None:
+                    raise DiscordSDKUnavailable(
+                        "Discord message update payload is unavailable."
+                    )
+                flags = discord.MessageFlags()
+                flags.suppress_embeds = suppress_embeds
+                params.payload["flags"] = flags.value
                 payload: object = await self._http.edit_message(
                     int(channel_id),
                     int(message_id),

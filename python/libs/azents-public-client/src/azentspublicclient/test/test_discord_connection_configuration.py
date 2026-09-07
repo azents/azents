@@ -37,6 +37,7 @@ class TestDiscordConnectionConfiguration(unittest.TestCase):
             return DiscordConnectionConfiguration(
                 provider = 'discord',
                 target_guild_id = '',
+                suppress_url_previews = True,
                 thread_auto_archive_duration_minutes = 60
             )
         else:

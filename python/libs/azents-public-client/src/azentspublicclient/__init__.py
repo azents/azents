@@ -196,6 +196,7 @@ __all__ = [
     "DiscordConnectionSetupRequest",
     "DiscordThreadAutoArchiveDurationMinutes",
     "DiscordThreadAutoArchiveDurationRequest",
+    "DiscordUrlPreviewSuppressionRequest",
     "DockerContainerProfileSpecV1",
     "DockerContainerProfileSpecV2",
     "DockerContainerResources",
@@ -334,6 +335,7 @@ __all__ = [
     "ModelToolCallingCapabilities",
     "MultiChannelDefaultRequest",
     "MultiDiscordThreadAutoArchiveDurationRequest",
+    "MultiDiscordUrlPreviewSuppressionRequest",
     "MultiRouteCreateRequest",
     "MyJoinRequestResponse",
     "MySystemRolesResponse",
@@ -710,6 +712,7 @@ from azentspublicclient.models.discord_connection_credentials import DiscordConn
 from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest as DiscordConnectionSetupRequest
 from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes as DiscordThreadAutoArchiveDurationMinutes
 from azentspublicclient.models.discord_thread_auto_archive_duration_request import DiscordThreadAutoArchiveDurationRequest as DiscordThreadAutoArchiveDurationRequest
+from azentspublicclient.models.discord_url_preview_suppression_request import DiscordUrlPreviewSuppressionRequest as DiscordUrlPreviewSuppressionRequest
 from azentspublicclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
 from azentspublicclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2 as DockerContainerProfileSpecV2
 from azentspublicclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
@@ -848,6 +851,7 @@ from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffor
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest as MultiChannelDefaultRequest
 from azentspublicclient.models.multi_discord_thread_auto_archive_duration_request import MultiDiscordThreadAutoArchiveDurationRequest as MultiDiscordThreadAutoArchiveDurationRequest
+from azentspublicclient.models.multi_discord_url_preview_suppression_request import MultiDiscordUrlPreviewSuppressionRequest as MultiDiscordUrlPreviewSuppressionRequest
 from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest as MultiRouteCreateRequest
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
 from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse as MySystemRolesResponse

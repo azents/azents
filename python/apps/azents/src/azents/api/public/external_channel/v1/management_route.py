@@ -59,6 +59,7 @@ from azents.services.external_channel.discord_api import (
 )
 from azents.services.external_channel.management import (
     DiscordThreadAutoArchiveDurationSetting,
+    DiscordUrlPreviewSuppressionSetting,
     ExternalChannelAccessPolicyInput,
     ExternalChannelDecisionInput,
     ExternalChannelManagementGenerationChanged,
@@ -149,11 +150,22 @@ class DiscordThreadAutoArchiveDurationRequest(DiscordThreadAutoArchiveDurationSe
     """Required full-value Discord Thread automatic archive request."""
 
 
+class DiscordUrlPreviewSuppressionRequest(DiscordUrlPreviewSuppressionSetting):
+    """Required full-value Discord automatic URL-preview request."""
+
+
 class MultiDiscordThreadAutoArchiveDurationRequest(
     GenerationFenceRequest,
     DiscordThreadAutoArchiveDurationSetting,
 ):
     """Generation-fenced Discord Multi App Thread policy request."""
+
+
+class MultiDiscordUrlPreviewSuppressionRequest(
+    GenerationFenceRequest,
+    DiscordUrlPreviewSuppressionSetting,
+):
+    """Generation-fenced Discord Multi App URL-preview policy request."""
 
 
 @router.get("/workspaces/{handle}/external-channels/multi")
@@ -392,6 +404,32 @@ async def set_multi_discord_thread_duration(
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
         return await service.update_multi_discord_thread_auto_archive_duration(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            expected_generation=request_body.expected_generation,
+            setting=request_body,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.put(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "url-preview-suppression"
+)
+async def set_multi_discord_url_previews(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    request_body: MultiDiscordUrlPreviewSuppressionRequest,
+) -> ManagedMultiConnection:
+    """Replace one Discord Multi App URL-preview policy without reactivation."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.update_multi_discord_url_preview_suppression(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
             expected_generation=request_body.expected_generation,
@@ -1297,6 +1335,31 @@ async def set_discord_thread_duration(
     """Replace one dedicated Discord Thread policy without reactivation."""
     try:
         return await service.update_discord_thread_auto_archive_duration(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            connection_id=connection_id,
+            setting=request_body,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/"
+    "discord/url-preview-suppression"
+)
+async def set_discord_url_previews(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    connection_id: str,
+    request_body: DiscordUrlPreviewSuppressionRequest,
+) -> ManagedConnection:
+    """Replace one dedicated Discord URL-preview policy without reactivation."""
+    try:
+        return await service.update_discord_url_preview_suppression(
             workspace_id=member.workspace_id,
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
