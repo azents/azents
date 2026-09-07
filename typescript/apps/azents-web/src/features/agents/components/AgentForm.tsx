@@ -507,7 +507,11 @@ export function AgentForm({
           )}
 
           {showCapabilities && formState.type === "EDIT" && (
-            <AgentToolkitSection handle={handle} agentId={formState.agent.id} />
+            <AgentToolkitSection
+              handle={handle}
+              agentId={formState.agent.id}
+              managementAvailable={formState.agent.toolkit_management_available}
+            />
           )}
 
           {showAdmins && isEdit && (

@@ -37,10 +37,17 @@ import type {
 export interface ToolkitFormContainerProps {
   handle: string;
   toolkitId?: string;
+  agentId?: string;
+  embedded?: boolean;
+  onComplete?: () => void;
+  initialToolkitType?: string;
 }
 
 export interface ToolkitFormContainerOutput {
   handle: string;
+  agentId?: string;
+  embedded: boolean;
+  toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
   scopeListState: ScopeListState;
@@ -62,6 +69,7 @@ export interface ToolkitFormContainerOutput {
   onDisconnectOauth: () => void;
   onAddScope: () => void;
   onDeleteScope: (scopeId: string) => void;
+  onCancel: () => void;
 }
 
 /** Default config initial value by tool. */
@@ -153,21 +161,37 @@ function normalizeCredentials(
 export function useToolkitFormContainer(
   props: ToolkitFormContainerProps,
 ): ToolkitFormContainerOutput {
-  const { handle, toolkitId } = props;
+  const {
+    handle,
+    toolkitId,
+    agentId,
+    embedded = false,
+    onComplete,
+    initialToolkitType,
+  } = props;
   const router = useRouter();
   const utils = trpc.useUtils();
   const isEditMode = toolkitId != null;
-  const backPath = `/w/${handle}/toolkits`;
+  const backPath =
+    agentId == null
+      ? `/w/${handle}/toolkits`
+      : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`;
   const form = useForm<ToolkitFormValues>({
     mode: "controlled",
     initialValues: {
-      toolkitType: "",
-      slug: "",
+      toolkitType: initialToolkitType ?? "",
+      slug: initialToolkitType ?? "",
       name: "",
       description: "",
       prompt: "",
-      config: { allowed_domains: [], denied_domains: [] },
-      credentials: null,
+      config:
+        initialToolkitType == null
+          ? { allowed_domains: [], denied_domains: [] }
+          : (DEFAULT_CONFIGS[initialToolkitType] ?? {}),
+      credentials:
+        initialToolkitType == null
+          ? null
+          : (DEFAULT_CREDENTIALS[initialToolkitType] ?? null),
       enabled: true,
       alwaysExposeTools: false,
     },
@@ -193,14 +217,20 @@ export function useToolkitFormContainer(
   });
 
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
-  const toolkitQuery = trpc.toolkit.getConfig.useQuery(
+  const workspaceToolkitQuery = trpc.toolkit.getConfig.useQuery(
     { handle, toolkitId: toolkitId ?? "" },
-    { enabled: isEditMode },
+    { enabled: isEditMode && agentId == null },
+  );
+  const agentToolkitQuery = trpc.toolkit.getAgentConfig.useQuery(
+    { handle, agentId: agentId ?? "", toolkitConfigId: toolkitId ?? "" },
+    { enabled: isEditMode && agentId != null },
   );
   const scopesQuery = trpc.toolkit.listScopes.useQuery(
     { handle, toolkitId: toolkitId ?? "" },
-    { enabled: isEditMode },
+    { enabled: isEditMode && agentId == null },
   );
+  const toolkitQuery =
+    agentId == null ? workspaceToolkitQuery : agentToolkitQuery;
 
   const toolkitListState: ToolkitListState = useMemo(() => {
     if (definitionsQuery.isLoading) {
@@ -215,6 +245,23 @@ export function useToolkitFormContainer(
     definitionsQuery.isError,
     definitionsQuery.isLoading,
   ]);
+  useEffect(() => {
+    if (
+      initialToolkitType == null ||
+      toolkitListState.type !== "READY" ||
+      form.getValues().name
+    ) {
+      return;
+    }
+    const definition = toolkitListState.toolkits.find(
+      (toolkit) => toolkit.slug === initialToolkitType,
+    );
+    if (definition) {
+      form.setFieldValue("name", definition.name);
+      form.setFieldValue("description", definition.description);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
+  }, [initialToolkitType, toolkitListState]);
 
   const formState: ToolkitConfigFormState = useMemo(() => {
     if (!isEditMode) {
@@ -235,7 +282,7 @@ export function useToolkitFormContainer(
   ]);
 
   const scopeListState: ScopeListState = useMemo(() => {
-    if (!isEditMode) {
+    if (!isEditMode || agentId != null) {
       return { type: "READY", scopes: [] };
     }
     if (scopesQuery.isLoading) {
@@ -246,6 +293,7 @@ export function useToolkitFormContainer(
     }
     return { type: "READY", scopes: scopesQuery.data?.items ?? [] };
   }, [
+    agentId,
     isEditMode,
     scopesQuery.data,
     scopesQuery.isError,
@@ -256,7 +304,11 @@ export function useToolkitFormContainer(
     onSuccess: () => {
       setMutationState({ type: "IDLE", error: null });
       void utils.toolkit.listConfigs.invalidate({ handle });
-      router.push(backPath);
+      if (embedded) {
+        onComplete?.();
+      } else {
+        router.push(backPath);
+      }
     },
     onError: (error) => {
       setMutationState({ type: "IDLE", error: error.message });
@@ -269,7 +321,42 @@ export function useToolkitFormContainer(
       if (toolkitId) {
         void utils.toolkit.getConfig.invalidate({ handle, toolkitId });
       }
-      router.push(backPath);
+      if (embedded) {
+        onComplete?.();
+      } else {
+        router.push(backPath);
+      }
+    },
+    onError: (error) => {
+      setMutationState({ type: "IDLE", error: error.message });
+    },
+  });
+  const createAgentMutation = trpc.toolkit.createAgentConfig.useMutation({
+    onSuccess: () => {
+      setMutationState({ type: "IDLE", error: null });
+      if (agentId) {
+        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+      }
+      onComplete?.();
+    },
+    onError: (error) => {
+      setMutationState({ type: "IDLE", error: error.message });
+    },
+  });
+  const updateAgentMutation = trpc.toolkit.updateAgentConfig.useMutation({
+    onSuccess: () => {
+      setMutationState({ type: "IDLE", error: null });
+      if (agentId) {
+        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+      }
+      if (agentId && toolkitId) {
+        void utils.toolkit.getAgentConfig.invalidate({
+          handle,
+          agentId,
+          toolkitConfigId: toolkitId,
+        });
+      }
+      onComplete?.();
     },
     onError: (error) => {
       setMutationState({ type: "IDLE", error: error.message });
@@ -290,6 +377,8 @@ export function useToolkitFormContainer(
     },
   });
   const connectOauthMutation = trpc.toolkit.connectOauth.useMutation();
+  const connectAgentOauthMutation =
+    trpc.toolkit.connectAgentOauth.useMutation();
   const disconnectOauthMutation = trpc.toolkit.disconnectOauth.useMutation({
     onSuccess: () => {
       if (formState.type === "EDIT") {
@@ -300,11 +389,60 @@ export function useToolkitFormContainer(
       }
     },
   });
+  const disconnectAgentOauthMutation =
+    trpc.toolkit.disconnectAgentOauth.useMutation({
+      onSuccess: () => {
+        if (agentId && toolkitId) {
+          void utils.toolkit.getAgentConfig.invalidate({
+            handle,
+            agentId,
+            toolkitConfigId: toolkitId,
+          });
+          void utils.toolkit.listAgentManagement.invalidate({
+            handle,
+            agentId,
+          });
+        }
+      },
+    });
 
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
       setMutationState({ type: "SUBMITTING" });
       const credentials = normalizeCredentials(values.credentials ?? null);
+
+      if (agentId) {
+        if (isEditMode && toolkitId) {
+          updateAgentMutation.mutate({
+            handle,
+            agentId,
+            toolkitConfigId: toolkitId,
+            slug: values.slug,
+            name: values.name,
+            description: values.description ?? null,
+            prompt: values.prompt ?? null,
+            config: values.config,
+            ...(credentials != null && { credentials }),
+            enabled: values.enabled,
+            alwaysExposeTools: values.alwaysExposeTools,
+          });
+          return;
+        }
+        createAgentMutation.mutate({
+          handle,
+          agentId,
+          toolkitType: values.toolkitType,
+          slug: values.slug,
+          name: values.name,
+          description: values.description,
+          prompt: values.prompt,
+          config: values.config,
+          ...(credentials != null && { credentials }),
+          enabled: values.enabled,
+          alwaysExposeTools: values.alwaysExposeTools,
+        });
+        return;
+      }
 
       if (isEditMode && toolkitId) {
         updateMutation.mutate({
@@ -335,7 +473,16 @@ export function useToolkitFormContainer(
         alwaysExposeTools: values.alwaysExposeTools,
       });
     },
-    [createMutation, handle, isEditMode, toolkitId, updateMutation],
+    [
+      agentId,
+      createAgentMutation,
+      createMutation,
+      handle,
+      isEditMode,
+      toolkitId,
+      updateAgentMutation,
+      updateMutation,
+    ],
   );
   const onSubmit: FormEventHandler<HTMLFormElement> = form.onSubmit(submitForm);
 
@@ -382,24 +529,67 @@ export function useToolkitFormContainer(
     if (formState.type !== "EDIT") {
       return;
     }
+    if (agentId) {
+      connectAgentOauthMutation.mutate(
+        {
+          handle,
+          agentId,
+          toolkitConfigId: formState.config.id,
+        },
+        {
+          onSuccess: (data) => {
+            window.open(
+              data.authorization_url,
+              "mcp-oauth-popup",
+              "width=1024,height=768",
+            );
+          },
+        },
+      );
+      return;
+    }
     connectOauthMutation.mutate(
       { handle, toolkitConfigId: formState.config.id },
       {
         onSuccess: (data) => {
-          window.open(data.authorization_url, "_blank", "noopener,noreferrer");
+          window.open(
+            data.authorization_url,
+            "mcp-oauth-popup",
+            "width=1024,height=768",
+          );
         },
       },
     );
-  }, [connectOauthMutation, formState, handle]);
+  }, [
+    agentId,
+    connectAgentOauthMutation,
+    connectOauthMutation,
+    formState,
+    handle,
+  ]);
   const onDisconnectOauth = useCallback((): void => {
     if (formState.type !== "EDIT") {
+      return;
+    }
+    if (agentId) {
+      disconnectAgentOauthMutation.mutate({
+        handle,
+        agentId,
+        toolkitConfigId: formState.config.id,
+      });
       return;
     }
     disconnectOauthMutation.mutate({
       handle,
       toolkitConfigId: formState.config.id,
     });
-  }, [disconnectOauthMutation, formState, handle]);
+  }, [
+    agentId,
+    disconnectAgentOauthMutation,
+    disconnectOauthMutation,
+    formState,
+    handle,
+  ]);
 
   const handleOauthCallbackMessage = useCallback(
     (event: MessageEvent<unknown>): void => {
@@ -411,12 +601,28 @@ export function useToolkitFormContainer(
       ) {
         return;
       }
-      void utils.toolkit.getConfig.invalidate({
-        handle,
-        toolkitId: formState.config.id,
-      });
+      if (agentId) {
+        void utils.toolkit.getAgentConfig.invalidate({
+          handle,
+          agentId,
+          toolkitConfigId: formState.config.id,
+        });
+        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+      } else {
+        void utils.toolkit.getConfig.invalidate({
+          handle,
+          toolkitId: formState.config.id,
+        });
+      }
     },
-    [formState, handle, utils.toolkit.getConfig],
+    [
+      agentId,
+      formState,
+      handle,
+      utils.toolkit.getAgentConfig,
+      utils.toolkit.getConfig,
+      utils.toolkit.listAgentManagement,
+    ],
   );
   useWindowEvent("message", handleOauthCallbackMessage);
 
@@ -500,12 +706,14 @@ export function useToolkitFormContainer(
   const toolOptions = useMemo(
     () =>
       toolkitListState.type === "READY"
-        ? toolkitListState.toolkits.map((toolkit) => ({
-            value: toolkit.slug,
-            label: toolkit.name,
-          }))
+        ? toolkitListState.toolkits
+            .filter((toolkit) => agentId == null || toolkit.slug !== "shell")
+            .map((toolkit) => ({
+              value: toolkit.slug,
+              label: toolkit.name,
+            }))
         : [],
-    [toolkitListState],
+    [agentId, toolkitListState],
   );
   const currentToolSlug = form.getValues().toolkitType;
   const showOauthConnection =
@@ -532,6 +740,9 @@ export function useToolkitFormContainer(
 
   return {
     handle,
+    ...(agentId != null && { agentId }),
+    embedded,
+    toolkitTypeLocked: initialToolkitType != null,
     formState,
     mutationState,
     scopeListState,
@@ -542,8 +753,11 @@ export function useToolkitFormContainer(
     currentToolSlug,
     showOauthConnection,
     oauthConnectionPending: {
-      connect: connectOauthMutation.isPending,
-      disconnect: disconnectOauthMutation.isPending,
+      connect:
+        connectOauthMutation.isPending || connectAgentOauthMutation.isPending,
+      disconnect:
+        disconnectOauthMutation.isPending ||
+        disconnectAgentOauthMutation.isPending,
     },
     onSubmit,
     onToolSelect,
@@ -553,5 +767,12 @@ export function useToolkitFormContainer(
     onDisconnectOauth,
     onAddScope,
     onDeleteScope,
+    onCancel: () => {
+      if (embedded) {
+        onComplete?.();
+      } else {
+        router.push(backPath);
+      }
+    },
   };
 }

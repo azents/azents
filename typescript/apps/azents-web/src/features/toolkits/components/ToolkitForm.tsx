@@ -50,6 +50,9 @@ import type { FormEventHandler } from "react";
 
 export interface ToolkitFormProps {
   handle: string;
+  agentId?: string;
+  embedded: boolean;
+  toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
   scopeListState: ScopeListState;
@@ -71,10 +74,14 @@ export interface ToolkitFormProps {
   onDisconnectOauth: () => void;
   onAddScope: () => void;
   onDeleteScope: (scopeId: string) => void;
+  onCancel: () => void;
 }
 
 export function ToolkitForm({
   handle,
+  agentId,
+  embedded,
+  toolkitTypeLocked,
   formState,
   mutationState,
   scopeListState,
@@ -93,6 +100,7 @@ export function ToolkitForm({
   onDisconnectOauth,
   onAddScope,
   onDeleteScope,
+  onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
 
@@ -115,14 +123,16 @@ export function ToolkitForm({
   }
 
   return (
-    <Container size="md" py="xl">
+    <Container size="md" py={embedded ? 0 : "xl"} px={embedded ? 0 : "md"}>
       <Stack gap="lg">
-        <Anchor component={Link} href={backPath} size="sm">
-          <Group gap={4}>
-            <IconArrowLeft size={14} />
-            {t("backToList")}
-          </Group>
-        </Anchor>
+        {!embedded && (
+          <Anchor component={Link} href={backPath} size="sm">
+            <Group gap={4}>
+              <IconArrowLeft size={14} />
+              {t("backToList")}
+            </Group>
+          </Anchor>
+        )}
 
         <Title order={3}>{isEdit ? t("editTitle") : t("createTitle")}</Title>
 
@@ -133,7 +143,7 @@ export function ToolkitForm({
               placeholder={t("toolPlaceholder")}
               data={toolOptions}
               required
-              disabled={isEdit}
+              disabled={isEdit || toolkitTypeLocked}
               value={form.getValues().toolkitType || null}
               onChange={onToolSelect}
               error={form.errors.toolkitType}
@@ -141,7 +151,11 @@ export function ToolkitForm({
 
             <TextInput
               label={t("slugLabel")}
-              description={t("slugDescription")}
+              description={
+                agentId == null
+                  ? t("slugDescription")
+                  : t("agentSlugDescription")
+              }
               placeholder={t("slugPlaceholder")}
               required
               key={form.key("slug")}
@@ -196,6 +210,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -218,6 +233,7 @@ export function ToolkitForm({
                     : null
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -235,6 +251,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -252,6 +269,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -269,6 +287,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -286,6 +305,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -303,6 +323,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -320,6 +341,7 @@ export function ToolkitForm({
                   formState.config.has_credentials === true
                 }
                 handle={handle}
+                {...(agentId != null && { agentId })}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,
                 })}
@@ -416,7 +438,7 @@ export function ToolkitForm({
             />
 
             {/* Scope section (edit mode only) */}
-            {isEdit && (
+            {isEdit && agentId == null && (
               <ToolkitScopeSection
                 scopeListState={scopeListState}
                 onAddScope={onAddScope}
@@ -429,7 +451,7 @@ export function ToolkitForm({
             )}
 
             <Group justify="flex-end">
-              <Button component={Link} href={backPath} variant="default">
+              <Button type="button" variant="default" onClick={onCancel}>
                 {t("cancel")}
               </Button>
               <Button
