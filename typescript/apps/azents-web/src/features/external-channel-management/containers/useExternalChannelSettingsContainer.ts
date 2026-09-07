@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import {
+  DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
   DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+  discordSuppressUrlPreviewsFromConfiguration,
   discordThreadAutoArchiveDurationFromConfiguration,
 } from "@/shared/lib/discord-thread-auto-archive-duration";
 import { trpc } from "@/trpc/client";
@@ -48,6 +50,8 @@ export interface ExternalChannelSettingsContainerOutput {
     DiscordThreadAutoArchiveDurationMinutes
   >;
   discordThreadDurationSavedConnectionId: string | null;
+  discordUrlPreviewDrafts: Record<string, boolean>;
+  discordUrlPreviewSavedConnectionId: string | null;
   defaultResponseMode: ExternalChannelResponseMode;
   defaultResponseModeDraft: ExternalChannelResponseMode;
   defaultResponseModeSaving: boolean;
@@ -78,6 +82,11 @@ export interface ExternalChannelSettingsContainerOutput {
     duration: DiscordThreadAutoArchiveDurationMinutes,
   ) => void;
   onSaveDiscordThreadDuration: (connection: ManagedConnection) => void;
+  onDiscordUrlPreviewChange: (
+    connectionId: string,
+    suppressUrlPreviews: boolean,
+  ) => void;
+  onSaveDiscordUrlPreview: (connection: ManagedConnection) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
   onRemoveBlock: (block: ManagedBlock) => void;
 }
@@ -121,6 +130,13 @@ export function useExternalChannelSettingsContainer({
     discordThreadDurationSavedConnectionId,
     setDiscordThreadDurationSavedConnectionId,
   ] = useState<string | null>(null);
+  const [discordUrlPreviewDrafts, setDiscordUrlPreviewDrafts] = useState<
+    Record<string, boolean>
+  >({});
+  const [
+    discordUrlPreviewSavedConnectionId,
+    setDiscordUrlPreviewSavedConnectionId,
+  ] = useState<string | null>(null);
   const [defaultResponseModeDraft, setDefaultResponseModeDraft] =
     useState<ExternalChannelResponseMode | null>(null);
   const [defaultResponseModeError, setDefaultResponseModeError] = useState<
@@ -159,6 +175,7 @@ export function useExternalChannelSettingsContainer({
     setActionError(null);
     setActionTarget(target);
     setDiscordThreadDurationSavedConnectionId(null);
+    setDiscordUrlPreviewSavedConnectionId(null);
     return true;
   };
   const failAction = (error: unknown): void => {
@@ -254,6 +271,18 @@ export function useExternalChannelSettingsContainer({
         try {
           await invalidate("update");
           setDiscordThreadDurationSavedConnectionId(variables.connectionId);
+        } finally {
+          clearAction();
+        }
+      },
+      onError: (error) => failAction(error),
+    });
+  const discordUrlPreviewMutation =
+    trpc.externalChannel.setDiscordUrlPreviewSuppression.useMutation({
+      onSuccess: async (_, variables) => {
+        try {
+          await invalidate("update");
+          setDiscordUrlPreviewSavedConnectionId(variables.connectionId);
         } finally {
           clearAction();
         }
@@ -362,6 +391,8 @@ export function useExternalChannelSettingsContainer({
     actionsBusy: actionTarget !== null,
     discordThreadDurationDrafts,
     discordThreadDurationSavedConnectionId,
+    discordUrlPreviewDrafts,
+    discordUrlPreviewSavedConnectionId,
     defaultResponseMode,
     defaultResponseModeDraft: effectiveDefaultResponseMode,
     defaultResponseModeSaving: defaultResponseModeMutation.isPending,
@@ -413,6 +444,7 @@ export function useExternalChannelSettingsContainer({
         targetGuildId: "",
         threadAutoArchiveDurationMinutes:
           DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+        suppressUrlPreviews: DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
         botToken: "",
       });
     },
@@ -434,6 +466,9 @@ export function useExternalChannelSettingsContainer({
             discordThreadAutoArchiveDurationFromConfiguration(
               connection.provider_config,
             ),
+          suppressUrlPreviews: discordSuppressUrlPreviewsFromConfiguration(
+            connection.provider_config,
+          ),
           botToken: "",
         });
         return;
@@ -511,6 +546,7 @@ export function useExternalChannelSettingsContainer({
           credentials,
           threadAutoArchiveDurationMinutes:
             discordDialogState.threadAutoArchiveDurationMinutes,
+          suppressUrlPreviews: discordDialogState.suppressUrlPreviews,
         });
         return;
       }
@@ -521,6 +557,7 @@ export function useExternalChannelSettingsContainer({
         credentials,
         threadAutoArchiveDurationMinutes:
           discordDialogState.threadAutoArchiveDurationMinutes,
+        suppressUrlPreviews: discordDialogState.suppressUrlPreviews,
       });
     },
     onValidate: (connection) => {
@@ -571,6 +608,26 @@ export function useExternalChannelSettingsContainer({
         ...queryInput,
         connectionId: connection.id,
         threadAutoArchiveDurationMinutes: duration,
+      });
+    },
+    onDiscordUrlPreviewChange: (connectionId, suppressUrlPreviews) => {
+      setDiscordUrlPreviewDrafts((current) => ({
+        ...current,
+        [connectionId]: suppressUrlPreviews,
+      }));
+      setDiscordUrlPreviewSavedConnectionId(null);
+    },
+    onSaveDiscordUrlPreview: (connection) => {
+      const suppressUrlPreviews =
+        discordUrlPreviewDrafts[connection.id] ??
+        discordSuppressUrlPreviewsFromConfiguration(connection.provider_config);
+      if (!beginAction(connection.id)) {
+        return;
+      }
+      discordUrlPreviewMutation.mutate({
+        ...queryInput,
+        connectionId: connection.id,
+        suppressUrlPreviews,
       });
     },
     onRevokeGrant: (grant) => {

@@ -34,7 +34,9 @@ import {
   externalChannelV1ReplaceMultiSlackChannelDefault,
   externalChannelV1RevokeAccessGrant,
   externalChannelV1SetDiscordThreadDuration,
+  externalChannelV1SetDiscordUrlPreviews,
   externalChannelV1SetMultiDiscordThreadDuration,
+  externalChannelV1SetMultiDiscordUrlPreviews,
   externalChannelV1SetupDiscordConnection,
   externalChannelV1SetupMultiDiscordConnection,
   externalChannelV1SetupMultiSlackConnection,
@@ -240,6 +242,7 @@ export const externalChannelRouter = router({
         credentials: discordCredentialsSchema,
         threadAutoArchiveDurationMinutes:
           discordThreadAutoArchiveDurationSchema,
+        suppressUrlPreviews: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -253,6 +256,7 @@ export const externalChannelRouter = router({
               target_guild_id: input.credentials.targetGuildId,
               thread_auto_archive_duration_minutes:
                 input.threadAutoArchiveDurationMinutes,
+              suppress_url_previews: input.suppressUrlPreviews,
             },
             credentials: { bot_token: input.credentials.botToken },
           },
@@ -305,6 +309,7 @@ export const externalChannelRouter = router({
         credentials: discordCredentialsSchema,
         threadAutoArchiveDurationMinutes:
           discordThreadAutoArchiveDurationSchema,
+        suppressUrlPreviews: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -318,6 +323,7 @@ export const externalChannelRouter = router({
               target_guild_id: input.credentials.targetGuildId,
               thread_auto_archive_duration_minutes:
                 input.threadAutoArchiveDurationMinutes,
+              suppress_url_previews: input.suppressUrlPreviews,
             },
             credentials: { bot_token: input.credentials.botToken },
           },
@@ -351,6 +357,35 @@ export const externalChannelRouter = router({
             expected_generation: input.expectedGeneration,
             thread_auto_archive_duration_minutes:
               input.threadAutoArchiveDurationMinutes,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  setMultiDiscordUrlPreviewSuppression: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        connectionId: z.string().min(1),
+        expectedGeneration: z.string().min(1),
+        suppressUrlPreviews: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetMultiDiscordUrlPreviews({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            connection_id: input.connectionId,
+          },
+          body: {
+            expected_generation: input.expectedGeneration,
+            suppress_url_previews: input.suppressUrlPreviews,
           },
           throwOnError: true,
         });
@@ -743,6 +778,7 @@ export const externalChannelRouter = router({
         credentials: discordCredentialsSchema,
         threadAutoArchiveDurationMinutes:
           discordThreadAutoArchiveDurationSchema,
+        suppressUrlPreviews: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -756,6 +792,7 @@ export const externalChannelRouter = router({
               target_guild_id: input.credentials.targetGuildId,
               thread_auto_archive_duration_minutes:
                 input.threadAutoArchiveDurationMinutes,
+              suppress_url_previews: input.suppressUrlPreviews,
             },
             credentials: { bot_token: input.credentials.botToken },
           },
@@ -839,6 +876,7 @@ export const externalChannelRouter = router({
         credentials: discordCredentialsSchema,
         threadAutoArchiveDurationMinutes:
           discordThreadAutoArchiveDurationSchema,
+        suppressUrlPreviews: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -856,6 +894,7 @@ export const externalChannelRouter = router({
               target_guild_id: input.credentials.targetGuildId,
               thread_auto_archive_duration_minutes:
                 input.threadAutoArchiveDurationMinutes,
+              suppress_url_previews: input.suppressUrlPreviews,
             },
             credentials: { bot_token: input.credentials.botToken },
           },
@@ -890,6 +929,33 @@ export const externalChannelRouter = router({
             thread_auto_archive_duration_minutes:
               input.threadAutoArchiveDurationMinutes,
           },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  setDiscordUrlPreviewSuppression: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        connectionId: z.string().min(1),
+        suppressUrlPreviews: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetDiscordUrlPreviews({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            connection_id: input.connectionId,
+          },
+          body: { suppress_url_previews: input.suppressUrlPreviews },
           throwOnError: true,
         });
         return data;

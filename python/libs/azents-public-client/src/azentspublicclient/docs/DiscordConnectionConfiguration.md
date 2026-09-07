@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider** | **str** |  | [optional] [default to 'discord']
 **target_guild_id** | **str** | Target Discord Guild snowflake | 
+**suppress_url_previews** | **bool** | Suppress automatic URL preview embeds in outbound messages | [optional] [default to True]
 **thread_auto_archive_duration_minutes** | [**DiscordThreadAutoArchiveDurationMinutes**](DiscordThreadAutoArchiveDurationMinutes.md) | Automatic archive duration for newly created Discord Threads | 
 
 ## Example

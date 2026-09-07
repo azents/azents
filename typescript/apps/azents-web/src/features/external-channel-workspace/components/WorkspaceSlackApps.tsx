@@ -18,6 +18,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -36,6 +37,7 @@ import {
 import { useTranslations } from "next-intl";
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
 import {
+  discordSuppressUrlPreviewsFromConfiguration,
   discordThreadAutoArchiveDurationFromConfiguration,
   discordThreadAutoArchiveDurationFromSelectValue,
 } from "@/shared/lib/discord-thread-auto-archive-duration";
@@ -294,6 +296,20 @@ function DiscordCredentialFields({
           disabled={false}
           onChange={(threadAutoArchiveDurationMinutes) =>
             onChange({ ...draft, threadAutoArchiveDurationMinutes })
+          }
+        />
+      )}
+      {showThreadDuration && (
+        <Switch
+          data-testid="discord-suppress-url-previews"
+          label={t("discordSuppressUrlPreviews")}
+          description={t("discordSuppressUrlPreviewsDescription")}
+          checked={draft.suppressUrlPreviews}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              suppressUrlPreviews: event.currentTarget.checked,
+            })
           }
         />
       )}
@@ -874,6 +890,42 @@ export function WorkspaceSlackApps(
                           )
                       }
                       onClick={props.onSaveDiscordThreadDuration}
+                    >
+                      {t("save")}
+                    </Button>
+                  </Group>
+                  <Switch
+                    label={t("discordSuppressUrlPreviews")}
+                    description={t("discordSuppressUrlPreviewsDescription")}
+                    checked={props.discordUrlPreviewDraft}
+                    disabled={props.busy}
+                    onChange={(event) =>
+                      props.onDiscordUrlPreviewChange(
+                        event.currentTarget.checked,
+                      )
+                    }
+                  />
+                  <Group justify="flex-end" gap="xs">
+                    {props.discordUrlPreviewSaved &&
+                      props.discordUrlPreviewDraft ===
+                        discordSuppressUrlPreviewsFromConfiguration(
+                          props.selectedConnection.provider_config,
+                        ) && (
+                        <Text size="sm" c="teal">
+                          {t("discordSuppressUrlPreviewsSaved")}
+                        </Text>
+                      )}
+                    <Button
+                      size="xs"
+                      loading={props.busy}
+                      disabled={
+                        props.busy ||
+                        props.discordUrlPreviewDraft ===
+                          discordSuppressUrlPreviewsFromConfiguration(
+                            props.selectedConnection.provider_config,
+                          )
+                      }
+                      onClick={props.onSaveDiscordUrlPreview}
                     >
                       {t("save")}
                     </Button>

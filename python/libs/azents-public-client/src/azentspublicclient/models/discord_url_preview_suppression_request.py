@@ -17,32 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes
+from pydantic import BaseModel, ConfigDict, StrictBool
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class DiscordConnectionConfiguration(BaseModel):
+class DiscordUrlPreviewSuppressionRequest(BaseModel):
     """
-    Validated non-secret configuration for one Discord App connection.
+    Required full-value Discord automatic URL-preview request.
     """ # noqa: E501
-    provider: Optional[StrictStr] = 'discord'
-    target_guild_id: StrictStr = Field(description="Target Discord Guild snowflake")
-    suppress_url_previews: Optional[StrictBool] = Field(default=True, description="Suppress automatic URL preview embeds in outbound messages")
-    thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes = Field(description="Automatic archive duration for newly created Discord Threads")
+    suppress_url_previews: StrictBool
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "target_guild_id", "suppress_url_previews", "thread_auto_archive_duration_minutes"]
-
-    @field_validator('provider')
-    def provider_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['discord']):
-            raise ValueError("must be one of enum values ('discord')")
-        return value
+    __properties: ClassVar[List[str]] = ["suppress_url_previews"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -62,7 +48,7 @@ class DiscordConnectionConfiguration(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of DiscordConnectionConfiguration from a JSON string"""
+        """Create an instance of DiscordUrlPreviewSuppressionRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -94,7 +80,7 @@ class DiscordConnectionConfiguration(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of DiscordConnectionConfiguration from a dict"""
+        """Create an instance of DiscordUrlPreviewSuppressionRequest from a dict"""
         if obj is None:
             return None
 
@@ -102,10 +88,7 @@ class DiscordConnectionConfiguration(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "provider": obj.get("provider") if obj.get("provider") is not None else 'discord',
-            "target_guild_id": obj.get("target_guild_id"),
-            "suppress_url_previews": obj.get("suppress_url_previews") if obj.get("suppress_url_previews") is not None else True,
-            "thread_auto_archive_duration_minutes": obj.get("thread_auto_archive_duration_minutes")
+            "suppress_url_previews": obj.get("suppress_url_previews")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

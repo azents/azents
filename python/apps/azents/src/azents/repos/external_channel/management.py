@@ -106,6 +106,18 @@ def _set_discord_thread_auto_archive_duration(
     connection.provider_config = provider_config
 
 
+def _set_discord_url_preview_suppression(
+    connection: RDBExternalChannelConnection,
+    *,
+    suppress_url_previews: bool,
+) -> None:
+    """Replace only the validated Discord URL-preview policy JSON key."""
+    decode_discord_connection_configuration(connection.provider_config)
+    provider_config = dict(connection.provider_config or {})
+    provider_config["suppress_url_previews"] = suppress_url_previews
+    connection.provider_config = provider_config
+
+
 class ExternalChannelConnectionRow(NamedTuple):
     """Connection and its owning Agent route."""
 
@@ -569,6 +581,33 @@ class ExternalChannelManagementRepository:
         ):
             return None
         _set_discord_thread_auto_archive_duration(connection, duration=duration)
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return await self.get_managed_multi_connection(
+            session,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            provider=ExternalChannelProvider.DISCORD,
+        )
+
+    async def update_multi_discord_url_preview_suppression(
+        self,
+        session: AsyncSession,
+        *,
+        connection: RDBExternalChannelConnection,
+        suppress_url_previews: bool,
+    ) -> ManagedMultiConnection | None:
+        """Update only one locked Discord Multi App's URL-preview policy."""
+        if (
+            connection.provider is not ExternalChannelProvider.DISCORD
+            or connection.app_mode is not ExternalChannelAppMode.MULTI
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            return None
+        _set_discord_url_preview_suppression(
+            connection,
+            suppress_url_previews=suppress_url_previews,
+        )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
@@ -1278,6 +1317,39 @@ class ExternalChannelManagementRepository:
         ):
             return None
         _set_discord_thread_auto_archive_duration(connection, duration=duration)
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return _connection(connection, route)
+
+    async def update_discord_url_preview_suppression(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        suppress_url_previews: bool,
+    ) -> ManagedConnection | None:
+        """Update only one dedicated Discord connection's URL-preview policy."""
+        row = await self.get_connection(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if row is None:
+            return None
+        connection, route = row
+        if (
+            connection.provider is not ExternalChannelProvider.DISCORD
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            return None
+        _set_discord_url_preview_suppression(
+            connection,
+            suppress_url_previews=suppress_url_previews,
+        )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)

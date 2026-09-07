@@ -25,6 +25,7 @@ export interface DiscordMultiConnectionDraft {
   appId: string;
   targetGuildId: string;
   threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
+  suppressUrlPreviews: boolean;
   botToken: string;
 }
 

@@ -285,10 +285,24 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_set_discord_url_previews(self) -> None:
+        """Test case for external_channel_v1_set_discord_url_previews
+
+        Set Discord Url Previews
+        """
+        pass
+
     def test_external_channel_v1_set_multi_discord_thread_duration(self) -> None:
         """Test case for external_channel_v1_set_multi_discord_thread_duration
 
         Set Multi Discord Thread Duration
+        """
+        pass
+
+    def test_external_channel_v1_set_multi_discord_url_previews(self) -> None:
+        """Test case for external_channel_v1_set_multi_discord_url_previews
+
+        Set Multi Discord Url Previews
         """
         pass
 

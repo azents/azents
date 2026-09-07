@@ -45,7 +45,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-09-07
-spec_version: 57
+spec_version: 58
 ---
 
 # External Channel Delivery and Channel Work
@@ -192,6 +192,16 @@ fence for that live operation, not durable replay authority. Credential, permiss
 missing-message, rate-limit, and confirmed provider rejection outcomes are `failed`;
 network, timeout, invalid success payload, and server ambiguity are `unknown`. An
 unknown write is not replayed automatically.
+
+Every Discord outbound create and relevant edit reads the current connection's
+`suppress_url_previews` policy at delivery time. The default policy adds Discord's
+`SUPPRESS_EMBEDS` flag to ordinary text and multipart file messages, including
+Channel Action and Scheduled Task publication. A message carrying an explicit
+Azents-authored Discord Embed clears or omits that flag so functional presence,
+Tracker, setup, registration, deletion, and other intentional Embed presentations
+remain visible. Message-flag composition retains notification suppression alongside
+URL-preview suppression, and detaching an Embed from a reply reapplies the current
+connection policy to its remaining conversational content.
 
 ## Provider File Download
 
@@ -561,6 +571,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 58) — Applied the Discord connection-level
+  URL-preview policy across Channel Action, Scheduled Task, multipart file, and
+  Tracker create, update, and cleanup mutations while preserving intentional Embeds.
 - **2026-09-07** (spec_version 57) — Changed message-free Discord task updates to
   edit the current Tracker host in place, while retaining remove-before-silent-create
   relocation for task changes accompanied by a conversational message.

@@ -50,6 +50,7 @@ def test_provider_plan_and_effect_outcome_exclude_durable_identifiers() -> None:
         capabilities=None,
         provider_configuration=DiscordConnectionConfiguration(
             target_guild_id="111",
+            suppress_url_previews=True,
             thread_auto_archive_duration_minutes=1440,
         ),
         workspace_handle="workspace",

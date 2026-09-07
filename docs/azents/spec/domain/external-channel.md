@@ -54,10 +54,12 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/url-preview-suppression
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
@@ -66,7 +68,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-07
-spec_version: 72
+spec_version: 73
 ---
 
 # External Channel
@@ -78,8 +80,11 @@ External Channels connect provider conversations to Azents Agents without treati
 Slack and Discord are supported providers. A Slack connection uses a manually
 configured Slack App and selects either signed HTTP callbacks or Socket Mode. A Discord
 connection uses a customer-owned Discord App, its Bot Token, one target Guild, a signed
-interaction callback, and a Gateway session. A provider-neutral External Channel
-Gateway runtime owns both Slack Socket Mode and Discord Gateway connections. Both
+interaction callback, a Gateway session, and connection-level outbound URL-preview
+policy. URL-preview suppression defaults on for both Single and Multi Apps and remains
+connection state rather than being copied into Sessions or bindings. A provider-neutral
+External Channel Gateway runtime owns both Slack Socket Mode and Discord Gateway
+connections. Both
 providers have an immutable App mode. A Single App is managed by one Agent's
 administrators and has exactly one
 Agent route. A Multi App is managed by Workspace Owners and Managers and may have zero
@@ -539,6 +544,10 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 73) — Added connection-level Discord automatic
+  URL-preview suppression for Single and Multi Apps, defaulted it on for existing and
+  new connections, kept it out of Session and binding state, and exposed credential-free
+  configuration-only updates.
 - **2026-09-07** (spec_version 72) — Kept message-free Discord task changes on the
   current Tracker host, preserved silent standalone relocation for task changes that
   accompany a message, and retained missing-host creation.

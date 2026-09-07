@@ -37,6 +37,7 @@ export type DiscordConnectionDialogState =
       appId: string;
       targetGuildId: string;
       threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
+      suppressUrlPreviews: boolean;
       botToken: string;
     }
   | {
@@ -45,6 +46,7 @@ export type DiscordConnectionDialogState =
       appId: string;
       targetGuildId: string;
       threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
+      suppressUrlPreviews: boolean;
       botToken: string;
     }
   | null;

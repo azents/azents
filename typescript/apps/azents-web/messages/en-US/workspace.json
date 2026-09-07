@@ -1115,6 +1115,9 @@
       "discordGuideChannelPermissionsLabel": "Permissions to verify per channel",
       "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role.",
       "discordThreadAutoArchiveDuration": "Thread auto-archive duration",
+      "discordSuppressUrlPreviews": "Suppress URL previews",
+      "discordSuppressUrlPreviewsDescription": "Hide automatic link preview cards in ordinary messages. Explicit Discord embeds are still shown.",
+      "discordSuppressUrlPreviewsSaved": "URL preview setting saved.",
       "discordThreadAutoArchiveDurationOptions": {
         "oneHour": "1 hour",
         "oneDay": "1 day",
@@ -1915,6 +1918,9 @@
     "discordGuideChannelPermissionsLabel": "Permissions to verify per channel",
     "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role.",
     "discordThreadAutoArchiveDuration": "Thread auto-archive duration",
+    "discordSuppressUrlPreviews": "Suppress URL previews",
+    "discordSuppressUrlPreviewsDescription": "Hide automatic link preview cards in ordinary messages. Explicit Discord embeds are still shown.",
+    "discordSuppressUrlPreviewsSaved": "URL preview setting saved.",
     "discordThreadAutoArchiveDurationOptions": {
       "oneHour": "1 hour",
       "oneDay": "1 day",

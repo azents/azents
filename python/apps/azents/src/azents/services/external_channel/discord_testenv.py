@@ -237,6 +237,7 @@ class _DiscordTestenvSDKSession:
         content: str,
         nonce: str,
         suppress_notifications: bool,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -249,6 +250,7 @@ class _DiscordTestenvSDKSession:
                     "content": content,
                     "nonce": nonce,
                     "suppress_notifications": suppress_notifications,
+                    "suppress_embeds": suppress_embeds,
                     "components": components,
                     "embeds": embeds,
                 },
@@ -262,6 +264,7 @@ class _DiscordTestenvSDKSession:
         channel_id: str,
         message_id: str,
         content: str | None,
+        suppress_embeds: bool,
         components: list[dict[str, object]] | None,
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
@@ -273,6 +276,7 @@ class _DiscordTestenvSDKSession:
                     "channel_id": channel_id,
                     "message_id": message_id,
                     "content": content,
+                    "suppress_embeds": suppress_embeds,
                     "components": components,
                     "embeds": embeds,
                 },

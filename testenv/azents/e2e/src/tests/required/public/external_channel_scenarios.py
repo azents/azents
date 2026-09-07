@@ -4059,6 +4059,28 @@ def run_connection_management_web_surface_uses_redacted_operational_state(
     assert _BOT_TOKEN not in browser_driver.page_source
     assert _SIGNING_SECRET not in browser_driver.page_source
 
+    browser_driver.find_element(
+        By.XPATH,
+        "//button[normalize-space()='Connect a Discord App']",
+    ).click()
+    preview_switch = wait.until(
+        ec.presence_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                (
+                    '[data-testid="discord-suppress-url-previews"] '
+                    'input[type="checkbox"], '
+                    'input[data-testid="discord-suppress-url-previews"]'
+                ),
+            )
+        )
+    )
+    assert preview_switch.is_selected()
+    browser_driver.find_element(
+        By.XPATH,
+        "//button[normalize-space()='Cancel']",
+    ).click()
+
     default_mode = wait.until(
         ec.visibility_of_element_located(
             (By.CSS_SELECTOR, '[data-testid="external-default-response-mode"]')
@@ -4185,6 +4207,7 @@ def test_discord_single_activation_and_interaction_journey(
             app_id=_DISCORD_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=_DISCORD_GUILD_ID,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
@@ -4437,6 +4460,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             app_id=application_id,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=guild_id,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
@@ -5031,6 +5055,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             app_id=application_id,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=guild_id,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
@@ -5420,6 +5445,10 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             delivery.get("operation") in {"create_message", "update_message"}
             for delivery in late_tracker_deliveries
         )
+        assert all(
+            delivery.get("suppress_embeds") is False
+            for delivery in late_tracker_deliveries
+        )
         assert not any(
             delivery.get("outcome") in {"delivered", "created", "duplicate"}
             and delivery.get("safe_category") == "conversation_settings"
@@ -5626,6 +5655,9 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     )
     assert recreated_tracker_message_id != quiet_tracker_message_id
     assert reply_index < remove_index < create_index < task_only_update_index
+    assert relocation_deliveries[reply_index].get("suppress_embeds") is True
+    assert relocation_deliveries[create_index].get("suppress_embeds") is False
+    assert relocation_deliveries[task_only_update_index].get("suppress_embeds") is False
     assert not any(
         delivery.get("safe_category") == "activity_tracker"
         and delivery.get("message_id") != recreated_tracker_message_id
@@ -5946,6 +5978,7 @@ def test_discord_configured_message_durably_provisions_conversation(
             app_id=application_id,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=guild_id,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
@@ -6255,6 +6288,7 @@ def test_discord_message_command_selector_and_component_journey(
             app_id=_DISCORD_SELECTOR_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=_DISCORD_GUILD_ID,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
@@ -6605,6 +6639,7 @@ def test_discord_multi_management_and_lifecycle_journey(
             app_id=_DISCORD_MULTI_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=_DISCORD_GUILD_ID,
+                suppress_url_previews=True,
                 thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),

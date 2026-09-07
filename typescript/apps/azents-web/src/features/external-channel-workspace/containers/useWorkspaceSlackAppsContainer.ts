@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
   DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+  discordSuppressUrlPreviewsFromConfiguration,
   discordThreadAutoArchiveDurationFromConfiguration,
 } from "@/shared/lib/discord-thread-auto-archive-duration";
 import { trpc } from "@/trpc/client";
@@ -34,6 +36,7 @@ const EMPTY_DISCORD_DRAFT: DiscordMultiConnectionDraft = {
   targetGuildId: "",
   threadAutoArchiveDurationMinutes:
     DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+  suppressUrlPreviews: DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
   botToken: "",
 };
 
@@ -64,6 +67,8 @@ export interface WorkspaceSlackAppsContainerOutput {
   discordEditDraft: DiscordMultiConnectionDraft;
   discordThreadDurationDraft: DiscordThreadAutoArchiveDurationMinutes;
   discordThreadDurationSaved: boolean;
+  discordUrlPreviewDraft: boolean;
+  discordUrlPreviewSaved: boolean;
   agentId: string;
   providerChannelId: string;
   defaultRouteId: string;
@@ -96,6 +101,8 @@ export interface WorkspaceSlackAppsContainerOutput {
   onCreateDiscord: () => void;
   onSaveDiscordConnection: () => void;
   onSaveDiscordThreadDuration: () => void;
+  onDiscordUrlPreviewChange: (suppressUrlPreviews: boolean) => void;
+  onSaveDiscordUrlPreview: () => void;
   onValidate: () => void;
   onPreviewRouteRemoval: (routeId: string) => void;
   onRemoveRoute: () => void;
@@ -167,6 +174,10 @@ export function useWorkspaceSlackAppsContainer({
     );
   const [discordThreadDurationSaved, setDiscordThreadDurationSaved] =
     useState(false);
+  const [discordUrlPreviewDraft, setDiscordUrlPreviewDraft] = useState(
+    DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
+  );
+  const [discordUrlPreviewSaved, setDiscordUrlPreviewSaved] = useState(false);
   const [agentId, setAgentId] = useState("");
   const [providerChannelId, setProviderChannelId] = useState("");
   const [defaultRouteId, setDefaultRouteId] = useState("");
@@ -292,10 +303,19 @@ export function useWorkspaceSlackAppsContainer({
           ? detailQuery.data.provider_config.target_guild_id
           : "",
       threadAutoArchiveDurationMinutes,
+      suppressUrlPreviews: discordSuppressUrlPreviewsFromConfiguration(
+        detailQuery.data.provider_config,
+      ),
       botToken: "",
     });
     setDiscordThreadDurationDraft(threadAutoArchiveDurationMinutes);
     setDiscordThreadDurationSaved(false);
+    setDiscordUrlPreviewDraft(
+      discordSuppressUrlPreviewsFromConfiguration(
+        detailQuery.data.provider_config,
+      ),
+    );
+    setDiscordUrlPreviewSaved(false);
   }, [detailQuery.data]);
 
   useEffect((): void => {
@@ -365,6 +385,15 @@ export function useWorkspaceSlackAppsContainer({
         setActionError(null);
         await refresh();
         setDiscordThreadDurationSaved(true);
+      },
+      onError: (error) => void fail(error),
+    });
+  const discordUrlPreviewMutation =
+    trpc.externalChannel.setMultiDiscordUrlPreviewSuppression.useMutation({
+      onSuccess: async () => {
+        setActionError(null);
+        await refresh();
+        setDiscordUrlPreviewSaved(true);
       },
       onError: (error) => void fail(error),
     });
@@ -441,6 +470,7 @@ export function useWorkspaceSlackAppsContainer({
     updateMutation.isPending ||
     updateDiscordMutation.isPending ||
     discordThreadDurationMutation.isPending ||
+    discordUrlPreviewMutation.isPending ||
     validateMutation.isPending ||
     addRouteMutation.isPending ||
     removeRouteMutation.isPending ||
@@ -495,6 +525,8 @@ export function useWorkspaceSlackAppsContainer({
     discordEditDraft,
     discordThreadDurationDraft,
     discordThreadDurationSaved,
+    discordUrlPreviewDraft,
+    discordUrlPreviewSaved,
     agentId,
     providerChannelId,
     defaultRouteId,
@@ -528,6 +560,7 @@ export function useWorkspaceSlackAppsContainer({
       setDefaultMutation(null);
       setActionError(null);
       setDiscordThreadDurationSaved(false);
+      setDiscordUrlPreviewSaved(false);
     },
     onSetupDraftChange: setSetupDraft,
     onEditDraftChange: setEditDraft,
@@ -536,6 +569,10 @@ export function useWorkspaceSlackAppsContainer({
     onDiscordThreadDurationChange: (duration) => {
       setDiscordThreadDurationDraft(duration);
       setDiscordThreadDurationSaved(false);
+    },
+    onDiscordUrlPreviewChange: (suppressUrlPreviews) => {
+      setDiscordUrlPreviewDraft(suppressUrlPreviews);
+      setDiscordUrlPreviewSaved(false);
     },
     onAgentIdChange: setAgentId,
     onProviderChannelIdChange: setProviderChannelId,
@@ -564,6 +601,7 @@ export function useWorkspaceSlackAppsContainer({
         },
         threadAutoArchiveDurationMinutes:
           discordSetupDraft.threadAutoArchiveDurationMinutes,
+        suppressUrlPreviews: discordSetupDraft.suppressUrlPreviews,
       });
     },
     onSaveConnection: () => {
@@ -598,6 +636,7 @@ export function useWorkspaceSlackAppsContainer({
         },
         threadAutoArchiveDurationMinutes:
           discordEditDraft.threadAutoArchiveDurationMinutes,
+        suppressUrlPreviews: discordEditDraft.suppressUrlPreviews,
       });
     },
     onSaveDiscordThreadDuration: () => {
@@ -615,6 +654,23 @@ export function useWorkspaceSlackAppsContainer({
         connectionId: selectedConnectionId,
         expectedGeneration: generation,
         threadAutoArchiveDurationMinutes: discordThreadDurationDraft,
+      });
+    },
+    onSaveDiscordUrlPreview: () => {
+      if (
+        selectedConnectionId === null ||
+        generation === null ||
+        selectedProvider !== "discord"
+      ) {
+        return;
+      }
+      setActionError(null);
+      setDiscordUrlPreviewSaved(false);
+      discordUrlPreviewMutation.mutate({
+        handle,
+        connectionId: selectedConnectionId,
+        expectedGeneration: generation,
+        suppressUrlPreviews: discordUrlPreviewDraft,
       });
     },
     onValidate: () => {

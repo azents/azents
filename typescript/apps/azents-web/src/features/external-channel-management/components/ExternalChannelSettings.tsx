@@ -45,6 +45,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
 import {
+  discordSuppressUrlPreviewsFromConfiguration,
   discordThreadAutoArchiveDurationFromConfiguration,
   discordThreadAutoArchiveDurationFromSelectValue,
 } from "@/shared/lib/discord-thread-auto-archive-duration";
@@ -408,18 +409,24 @@ function ConnectionRow({
   actionsBusy,
   discordThreadDurationDraft,
   discordThreadDurationSaved,
+  discordUrlPreviewDraft,
+  discordUrlPreviewSaved,
   onValidate,
   onEdit,
   onDisconnect,
   onUpdateAccessPolicy,
   onDiscordThreadDurationChange,
   onSaveDiscordThreadDuration,
+  onDiscordUrlPreviewChange,
+  onSaveDiscordUrlPreview,
 }: {
   connection: ManagedConnection;
   busy: boolean;
   actionsBusy: boolean;
   discordThreadDurationDraft: DiscordThreadAutoArchiveDurationMinutes;
   discordThreadDurationSaved: boolean;
+  discordUrlPreviewDraft: boolean;
+  discordUrlPreviewSaved: boolean;
   onValidate: (connection: ManagedConnection) => void;
   onEdit: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
@@ -431,12 +438,16 @@ function ConnectionRow({
     duration: DiscordThreadAutoArchiveDurationMinutes,
   ) => void;
   onSaveDiscordThreadDuration: () => void;
+  onDiscordUrlPreviewChange: (suppressUrlPreviews: boolean) => void;
+  onSaveDiscordUrlPreview: () => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
   const currentDiscordThreadDuration =
     discordThreadAutoArchiveDurationFromConfiguration(
       connection.provider_config,
     );
+  const currentDiscordUrlPreviewSuppression =
+    discordSuppressUrlPreviewsFromConfiguration(connection.provider_config);
 
   return (
     <Paper
@@ -566,6 +577,37 @@ function ConnectionRow({
                     discordThreadDurationDraft === currentDiscordThreadDuration
                   }
                   onClick={onSaveDiscordThreadDuration}
+                >
+                  {t("saveChanges")}
+                </Button>
+              </Group>
+              <Divider />
+              <Switch
+                label={t("discordSuppressUrlPreviews")}
+                description={t("discordSuppressUrlPreviewsDescription")}
+                checked={discordUrlPreviewDraft}
+                disabled={actionsBusy}
+                onChange={(event) =>
+                  onDiscordUrlPreviewChange(event.currentTarget.checked)
+                }
+              />
+              <Group justify="flex-end" gap="xs">
+                {discordUrlPreviewSaved &&
+                  discordUrlPreviewDraft ===
+                    currentDiscordUrlPreviewSuppression && (
+                    <Text size="sm" c="teal">
+                      {t("discordSuppressUrlPreviewsSaved")}
+                    </Text>
+                  )}
+                <Button
+                  size="xs"
+                  loading={busy}
+                  disabled={
+                    actionsBusy ||
+                    discordUrlPreviewDraft ===
+                      currentDiscordUrlPreviewSuppression
+                  }
+                  onClick={onSaveDiscordUrlPreview}
                 >
                   {t("saveChanges")}
                 </Button>
@@ -1139,6 +1181,21 @@ function DiscordConnectionDialog({
               }
             />
           )}
+          {state.type === "SETUP" && (
+            <Switch
+              data-testid="discord-suppress-url-previews"
+              label={t("discordSuppressUrlPreviews")}
+              description={t("discordSuppressUrlPreviewsDescription")}
+              checked={state.suppressUrlPreviews}
+              disabled={saving}
+              onChange={(event) =>
+                onChange({
+                  ...state,
+                  suppressUrlPreviews: event.currentTarget.checked,
+                })
+              }
+            />
+          )}
           <PasswordInput
             label={t("discordBotToken")}
             value={state.botToken}
@@ -1174,6 +1231,8 @@ export function ExternalChannelSettings({
   actionsBusy,
   discordThreadDurationDrafts,
   discordThreadDurationSavedConnectionId,
+  discordUrlPreviewDrafts,
+  discordUrlPreviewSavedConnectionId,
   defaultResponseMode,
   defaultResponseModeDraft,
   defaultResponseModeSaving,
@@ -1196,6 +1255,8 @@ export function ExternalChannelSettings({
   onUpdateAccessPolicy,
   onDiscordThreadDurationChange,
   onSaveDiscordThreadDuration,
+  onDiscordUrlPreviewChange,
+  onSaveDiscordUrlPreview,
   onRevokeGrant,
   onRemoveBlock,
 }: ExternalChannelSettingsContainerOutput): React.ReactElement {
@@ -1372,6 +1433,15 @@ export function ExternalChannelSettings({
                     discordThreadDurationSaved={
                       discordThreadDurationSavedConnectionId === connection.id
                     }
+                    discordUrlPreviewDraft={
+                      discordUrlPreviewDrafts[connection.id] ??
+                      discordSuppressUrlPreviewsFromConfiguration(
+                        connection.provider_config,
+                      )
+                    }
+                    discordUrlPreviewSaved={
+                      discordUrlPreviewSavedConnectionId === connection.id
+                    }
                     onValidate={onValidate}
                     onEdit={onOpenEdit}
                     onUpdateAccessPolicy={onUpdateAccessPolicy}
@@ -1380,6 +1450,15 @@ export function ExternalChannelSettings({
                     }
                     onSaveDiscordThreadDuration={() =>
                       onSaveDiscordThreadDuration(connection)
+                    }
+                    onDiscordUrlPreviewChange={(suppressUrlPreviews) =>
+                      onDiscordUrlPreviewChange(
+                        connection.id,
+                        suppressUrlPreviews,
+                      )
+                    }
+                    onSaveDiscordUrlPreview={() =>
+                      onSaveDiscordUrlPreview(connection)
                     }
                     onDisconnect={(selected) =>
                       openConfirm({

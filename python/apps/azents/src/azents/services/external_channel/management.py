@@ -163,6 +163,14 @@ class DiscordThreadAutoArchiveDurationSetting(BaseModel):
     thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes
 
 
+class DiscordUrlPreviewSuppressionSetting(BaseModel):
+    """Canonical full-value Discord automatic URL-preview setting."""
+
+    model_config = ConfigDict(frozen=True)
+
+    suppress_url_previews: bool
+
+
 class ManagedAgentAccess(NamedTuple):
     """Current Agent-level access grants and blocks."""
 
@@ -628,6 +636,35 @@ class ExternalChannelManagementService:
                     session,
                     connection=connection,
                     duration=setting.thread_auto_archive_duration_minutes,
+                )
+            )
+            if managed is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return managed
+
+    async def update_multi_discord_url_preview_suppression(
+        self,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        expected_generation: datetime.datetime,
+        setting: DiscordUrlPreviewSuppressionSetting,
+    ) -> ManagedMultiConnection:
+        """Replace one Multi App URL-preview policy without reactivation."""
+        async with self.session_manager() as session:
+            connection = await self._lock_multi_connection_generation(
+                session,
+                workspace_id=workspace_id,
+                connection_id=connection_id,
+                provider=ExternalChannelProvider.DISCORD,
+                expected_generation=expected_generation,
+            )
+            managed = (
+                await self.repository.update_multi_discord_url_preview_suppression(
+                    session,
+                    connection=connection,
+                    suppress_url_previews=setting.suppress_url_previews,
                 )
             )
             if managed is None:
@@ -1210,6 +1247,35 @@ class ExternalChannelManagementService:
                     connection_id=connection_id,
                     duration=setting.thread_auto_archive_duration_minutes,
                 )
+            )
+            if connection is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return connection
+
+    async def update_discord_url_preview_suppression(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        connection_id: str,
+        setting: DiscordUrlPreviewSuppressionSetting,
+    ) -> ManagedConnection:
+        """Replace one dedicated URL-preview policy without reactivation."""
+        await self._require_owned_connection(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            connection_id=connection_id,
+        )
+        async with self.session_manager() as session:
+            connection = await self.repository.update_discord_url_preview_suppression(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                connection_id=connection_id,
+                suppress_url_previews=setting.suppress_url_previews,
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)

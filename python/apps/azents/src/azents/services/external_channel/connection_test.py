@@ -35,12 +35,37 @@ from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
     SlackConnectionCredentials,
+    decode_discord_connection_configuration,
 )
 from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
 )
 from azents.testing.types import require_instance
+
+
+def test_discord_persisted_configuration_defaults_url_preview_suppression() -> None:
+    """Existing connection JSON adopts the connection-level default."""
+    configuration = decode_discord_connection_configuration(
+        {
+            "provider": "discord",
+            "target_guild_id": "guild-1",
+            "thread_auto_archive_duration_minutes": 1440,
+        }
+    )
+
+    assert configuration.suppress_url_previews is True
+
+
+def test_discord_new_configuration_defaults_url_preview_suppression() -> None:
+    """New connection input adopts the connection-level default."""
+    configuration = DiscordConnectionConfiguration(
+        target_guild_id="guild-1",
+        thread_auto_archive_duration_minutes=1440,
+    )
+
+    assert configuration.suppress_url_previews is True
+
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 
@@ -334,6 +359,7 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
         app_id="discord-app-1",
         configuration=DiscordConnectionConfiguration(
             target_guild_id="guild-1",
+            suppress_url_previews=True,
             thread_auto_archive_duration_minutes=1440,
         ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
@@ -352,6 +378,7 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
     assert repository.create.provider_config == {
         "provider": "discord",
         "target_guild_id": "guild-1",
+        "suppress_url_previews": True,
         "thread_auto_archive_duration_minutes": 1440,
     }
     assert "discord-bot-token" not in repr(repository.create)

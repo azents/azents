@@ -831,6 +831,7 @@ class ExternalChannelActionService:
                         content=control.text,
                         operation_key=operation_key,
                         suppress_notifications=False,
+                        suppress_embeds=False,
                         components=control.components,
                         embeds=control.embeds,
                     )
@@ -881,6 +882,7 @@ class ExternalChannelActionService:
                         content=control.text,
                         operation_key=operation_key,
                         suppress_notifications=False,
+                        suppress_embeds=False,
                         components=control.components,
                         embeds=control.embeds,
                     )
@@ -916,6 +918,7 @@ class ExternalChannelActionService:
                         content=_discord_agent_content(target, text),
                         operation_key=operation_key,
                         suppress_notifications=False,
+                        suppress_embeds=False,
                         components=render_scheduled_task_discord_controls(
                             edit_url=edit_url,
                             delete_locator=delete_locator,
@@ -937,6 +940,7 @@ class ExternalChannelActionService:
                         content=_discord_agent_content(target, text),
                         operation_key=operation_key,
                         suppress_notifications=False,
+                        suppress_embeds=False,
                         embeds=embeds,
                     )
                 text = payload.get("text")
@@ -1034,6 +1038,7 @@ class ExternalChannelActionService:
                             for file in files
                         ),
                         operation_key=operation_key,
+                        suppress_embeds=configuration.suppress_url_previews,
                         forward_to_parent=forward_to_parent,
                         parent_channel_id=(
                             forward_parent_channel_id
@@ -1049,6 +1054,7 @@ class ExternalChannelActionService:
                         content=_discord_agent_content(target, text),
                         operation_key=operation_key,
                         suppress_notifications=False,
+                        suppress_embeds=configuration.suppress_url_previews,
                         forward_to_parent=forward_to_parent,
                         parent_channel_id=(
                             forward_parent_channel_id
@@ -1066,6 +1072,9 @@ class ExternalChannelActionService:
                         target.operation
                         is ExternalChannelDeliveryOperation.PROGRESS_CREATE
                         and payload.get("tracker_kind") != "scheduled_task"
+                    ),
+                    suppress_embeds=(
+                        configuration.suppress_url_previews and not embeds
                     ),
                     components=components,
                     embeds=embeds,
@@ -1112,6 +1121,9 @@ class ExternalChannelActionService:
                         if host_kind == "reply"
                         else _discord_agent_content(target, text)
                     ),
+                    suppress_embeds=(
+                        configuration.suppress_url_previews and not embeds
+                    ),
                     components=components,
                     embeds=embeds,
                 )
@@ -1129,6 +1141,7 @@ class ExternalChannelActionService:
                         channel_id=delivery_channel_id,
                         message_id=message_id,
                         content=None,
+                        suppress_embeds=configuration.suppress_url_previews,
                         components=[],
                         embeds=[],
                     )

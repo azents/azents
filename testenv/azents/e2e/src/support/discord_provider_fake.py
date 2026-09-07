@@ -776,6 +776,7 @@ class FakeState:
         safe_category: str | None = None,
         session_path: str | None = None,
         action_ids: list[str] | None = None,
+        suppress_embeds: bool | None = None,
     ) -> None:
         """Record sanitized provider mutation evidence."""
         delivery: dict[str, object] = {
@@ -794,6 +795,8 @@ class FakeState:
             delivery["session_path"] = session_path
         if action_ids:
             delivery["action_ids"] = action_ids
+        if suppress_embeds is not None:
+            delivery["suppress_embeds"] = suppress_embeds
         with self.lock:
             self.deliveries.append(delivery)
 
@@ -1644,6 +1647,20 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if operation != "create_message"
             else None
         )
+        suppress_embeds_value = arguments.get("suppress_embeds")
+        suppress_embeds = (
+            suppress_embeds_value
+            if operation != "delete_message"
+            and "suppress_embeds" in arguments
+            and isinstance(suppress_embeds_value, bool)
+            else None
+        )
+        if (
+            operation != "delete_message"
+            and "suppress_embeds" in arguments
+            and suppress_embeds is None
+        ):
+            raise ValueError("Discord SDK suppress_embeds is invalid.")
         scenario = self._operation(
             operation,
             metadata={
@@ -1751,6 +1768,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 if operation != "delete_message"
                 else None
             ),
+            suppress_embeds=suppress_embeds,
         )
         self.state.record_operation(
             "message",

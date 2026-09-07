@@ -187,6 +187,7 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
         content="hello",
         nonce="nonce-1",
         suppress_notifications=False,
+        suppress_embeds=False,
         components=None,
         embeds=None,
     )
@@ -195,6 +196,7 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
         channel_id="300",
         message_id="401",
         content="updated",
+        suppress_embeds=False,
         components=[],
         embeds=[],
     )
@@ -219,7 +221,7 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
 
 @pytest.mark.asyncio
 async def test_private_create_can_suppress_notifications() -> None:
-    """Silent standalone Trackers set Discord's notification-suppression flag."""
+    """Create combines notification and automatic Embed suppression flags."""
     http = _PrivateHTTP()
     http.get_channel.return_value = _channel()
     http.send_message.return_value = _message(message_id="401")
@@ -231,13 +233,14 @@ async def test_private_create_can_suppress_notifications() -> None:
         content="Tracker",
         nonce="nonce-silent",
         suppress_notifications=True,
+        suppress_embeds=True,
         components=None,
-        embeds=[{"description": "progress"}],
+        embeds=None,
     )
 
     call = http.send_message.await_args
     assert call is not None
-    assert call.kwargs["params"].payload["flags"] == 1 << 12
+    assert call.kwargs["params"].payload["flags"] == (1 << 12) | (1 << 2)
 
 
 @pytest.mark.asyncio
@@ -253,6 +256,7 @@ async def test_private_update_can_omit_reply_content() -> None:
         channel_id="300",
         message_id="401",
         content=None,
+        suppress_embeds=False,
         components=[],
         embeds=[],
     )
@@ -261,6 +265,7 @@ async def test_private_update_can_omit_reply_content() -> None:
     assert call is not None
     payload = call.kwargs["params"].payload
     assert "content" not in payload
+    assert payload["flags"] == 0
     assert payload["components"] == []
     assert payload["embeds"] == []
 
@@ -510,6 +515,7 @@ async def test_private_message_mutation_rejects_cross_guild_channel() -> None:
             content="hello",
             nonce="nonce-1",
             suppress_notifications=False,
+            suppress_embeds=False,
             components=None,
             embeds=None,
         )
