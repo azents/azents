@@ -29,8 +29,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-09-03
-spec_version: 9
+last_verified_at: 2026-09-07
+spec_version: 10
 ---
 
 # Scheduled Task Domain Spec
@@ -233,6 +233,10 @@ A Task may target one exact connected Slack or Discord Binding.
   presentation remains available.
 - A started cycle owns its own progress Tracker state. It reuses lower-level
   External Channel provider primitives but never reuses Channel Work state.
+- Discord creates Scheduled Task progress Trackers with notification suppression.
+  Missing-host recovery creation uses the same silent path, while updates edit the
+  retained Tracker. Registration, deletion, progress replies, and terminal results
+  retain their existing notification behavior.
 - Progress messages and Tracker updates are immediate one-attempt effects.
 - Terminal result publication occurs only after the canonical Session result
   commits.
@@ -288,6 +292,9 @@ and result text.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 10) — Made Discord Scheduled Task progress Tracker
+  creation notification-suppressed while preserving registration, deletion, reply,
+  terminal-result, update, cleanup, and Slack behavior.
 - **2026-08-21** (spec_version 8) — Made Scheduled Task creation normalize empty
   `at`, `cron`, and `timezone` strings to omitted values before canonical schedule
   validation.

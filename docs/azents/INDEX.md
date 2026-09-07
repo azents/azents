@@ -22,7 +22,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
-| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-03 | 9 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-07 | 10 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-07 | 109 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
@@ -39,7 +39,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 58 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-06 | 58 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
@@ -364,6 +364,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Sandbox System Redesign Historical Requirements Reconstruction](requirements/sandbox-260525-sandbox-redesign.md) | sandbox-260525 | 2026-05-25 | - |
 | [Scheduled Tasks Discussion Historical Requirements Reconstruction](requirements/scheduled-260331-scheduled-tasks.md) | scheduled-260331 | 2026-03-31 | - |
 | [Agent Scheduled Tasks Requirements](requirements/scheduled-260816-agent-scheduled-tasks.md) | scheduled-260816 | 2026-08-16 | 2026-08-17 |
+| [Silent Discord Scheduled Task Tracker Requirements](requirements/scheduled-260907-silent-discord-tracker.md) | scheduled-260907 | 2026-09-07 | 2026-09-07 |
 | [Use Default OpenAI SDK HTTP Retries Historical Requirements Reconstruction](requirements/sdk-260716-openai-sdk-http-retries.md) | sdk-260716 | 2026-07-16 | - |
 | [Tool Search and a Bounded Model-Visible Tool Working Set Historical Requirements Reconstruction](requirements/search-260717-search-bounded-working-set.md) | search-260717 | 2026-07-17 | - |
 | [Reset the Tool Search Working Set on Successful Compaction Historical Requirements Reconstruction](requirements/search-260720-search-working-set-on-compaction.md) | search-260720 | 2026-07-20 | - |
@@ -778,6 +779,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Sandbox System Redesign](adr/sandbox-260525-sandbox-redesign.md)
 - [Scheduled Tasks Discussion](adr/scheduled-260331-scheduled-tasks.md)
 - [Agent Scheduled Tasks](adr/scheduled-260816-agent-scheduled-tasks.md)
+- [Silent Discord Scheduled Task Tracker Decisions](adr/scheduled-260907-silent-discord-tracker.md)
 - [Use Default OpenAI SDK HTTP Retries](adr/sdk-260716-openai-sdk-http-retries.md)
 - [Tool Search and a Bounded Model-Visible Tool Working Set](adr/search-260717-search-bounded-working-set.md)
 - [Reset the Tool Search Working Set on Successful Compaction](adr/search-260720-search-working-set-on-compaction.md)

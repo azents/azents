@@ -1071,7 +1071,6 @@ class ExternalChannelActionService:
                     suppress_notifications=(
                         target.operation
                         is ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                        and payload.get("tracker_kind") != "scheduled_task"
                     ),
                     suppress_embeds=(
                         configuration.suppress_url_previews and not embeds
