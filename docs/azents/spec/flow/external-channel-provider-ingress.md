@@ -23,6 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
+  - python/apps/azents/src/azents/services/external_channel/discord_settings.py
+  - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
   - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
   - python/apps/azents/src/azents/services/external_channel/discord_endpoint.py
   - python/apps/azents/src/azents/services/external_channel/discord_testenv.py
@@ -54,6 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
+  - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
@@ -68,8 +71,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-06
-spec_version: 58
+last_verified_at: 2026-09-07
+spec_version: 59
 ---
 
 # External Channel Provider Ingress
@@ -210,6 +213,23 @@ but unsupported. Each supported callback revalidates the current setup source re
 selected route, participation-setting or Binding generation, actor, and parent/thread scope.
 Stale or unprovable scope returns a bounded current-state or unsupported result without
 falling back to a parent mutation.
+
+All connected Discord settings entry points converge on one ephemeral settings
+renderer. Parent settings expose separate single-value String Selects for response
+location and response mode; connected-thread settings expose only response mode.
+Each Select marks the current canonical value as its default. A valid selection is
+authenticated by the Discord interaction signature, validated against the operation
+category in its signed component scope, committed immediately, and answered with a
+type-7 update containing the complete settings surface rebuilt from committed state.
+First-time setup retains its two location buttons, deferred acknowledgement, and
+source-continuation handoff.
+
+Connected-thread controls sign the exact Binding identity and revision. Discord
+revalidation resolves that Binding's Resource and proves its retained Guild and
+delivery-channel identity against the interaction Thread; it never falls back to the
+parent setting. Thread mutation acquires the same provider conversation identity used
+by ingestion: Slack uses the parent channel plus `thread_ts`, while Discord uses the
+delivery Thread channel as both the channel and thread key.
 
 Block actions open a paged/searchable modal from the current available route catalog.
 Private metadata is signed and binds connection, resource, interaction, initiating

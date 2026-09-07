@@ -612,9 +612,15 @@ class FakeState:
                 data = response_object.get("data")
                 if isinstance(data, dict):
                     data_object = data
+                    settings_error_kind = _settings_error_kind(data_object)
+                    if settings_error_kind is not None:
+                        evidence["settings_error_kind"] = settings_error_kind
                     components = data_object.get("components")
                     if isinstance(components, list):
                         evidence["component_count"] = len(components)
+                        settings_controls = _settings_control_evidence(data_object)
+                        if settings_controls:
+                            evidence["settings_controls"] = settings_controls
                     evidence["has_content"] = isinstance(
                         data_object.get("content"), str
                     )
@@ -662,6 +668,9 @@ class FakeState:
                 components = data_object.get("components")
                 if isinstance(components, list):
                     completion["completed_component_count"] = len(components)
+                    settings_controls = _settings_control_evidence(data_object)
+                    if settings_controls:
+                        completion["completed_settings_controls"] = settings_controls
             for evidence in reversed(self.interactions):
                 if evidence.get("interaction_id") == interaction_id:
                     evidence.update(completion)
@@ -2372,6 +2381,91 @@ def _session_action_ids(body: dict[str, object]) -> list[str]:
             ):
                 action_ids.append("azents_conversation_settings_open")
     return action_ids
+
+
+def _settings_control_evidence(
+    body: dict[str, object],
+) -> list[dict[str, str]]:
+    """Return safe connected-settings control roles and current defaults."""
+    components = body.get("components")
+    if not isinstance(components, list):
+        return []
+    controls: list[dict[str, str]] = []
+    for raw_row in components:
+        if not isinstance(raw_row, dict):
+            continue
+        row_components = raw_row.get("components")
+        if not isinstance(row_components, list) or len(row_components) != 1:
+            continue
+        raw_component = row_components[0]
+        if not isinstance(raw_component, dict):
+            continue
+        placeholder = raw_component.get("placeholder")
+        setting = {
+            "Where to respond": "location",
+            "When to respond": "response_mode",
+        }.get(placeholder)
+        if raw_component.get("type") == 3 and setting is not None:
+            options = raw_component.get("options")
+            if not isinstance(options, list):
+                continue
+            defaults = [
+                option.get("value")
+                for option in options
+                if isinstance(option, dict) and option.get("default") is True
+            ]
+            if len(defaults) != 1 or not isinstance(defaults[0], str):
+                continue
+            allowed = (
+                {"channel", "threads"}
+                if setting == "location"
+                else {"mention_only", "all_messages"}
+            )
+            if defaults[0] not in allowed:
+                continue
+            controls.append(
+                {
+                    "kind": "select",
+                    "setting": setting,
+                    "default": defaults[0],
+                }
+            )
+            continue
+        if (
+            raw_component.get("type") == 2
+            and raw_component.get("style") == 5
+            and raw_component.get("label") == "View session"
+        ):
+            path = _session_path({"components": [raw_row]})
+            if path is not None:
+                controls.append(
+                    {
+                        "kind": "link",
+                        "target": "session",
+                        "path": path,
+                    }
+                )
+    return controls
+
+
+def _settings_error_kind(body: dict[str, object]) -> str | None:
+    """Classify bounded settings failures without retaining response content."""
+    content = body.get("content")
+    if not isinstance(content, str):
+        return None
+    for fragment, kind in (
+        ("changed before submission", "stale"),
+        ("control is unavailable", "control_unavailable"),
+        ("selection is invalid", "invalid_selection"),
+        ("thread settings are unavailable", "thread_unavailable"),
+        ("settings actor is unavailable", "actor_unavailable"),
+        ("settings actor is not authorized", "actor_unauthorized"),
+        ("settings Agent is unavailable", "agent_unavailable"),
+        ("settings Workspace is unavailable", "workspace_unavailable"),
+    ):
+        if fragment in content:
+            return kind
+    return None
 
 
 def _multipart_file_evidence(raw_body: bytes) -> _MultipartFileEvidence:

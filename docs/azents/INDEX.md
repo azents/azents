@@ -38,10 +38,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 45 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-06 | 58 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-07 | 59 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
@@ -388,6 +388,7 @@ Design documents are accumulated records and are not listed individually in this
 | [New Session Scope Selection and Pinned Directory Order Requirements](requirements/session-260807-session-scope-and-pinned-directory.md) | session-260807 | 2026-08-07 | 2026-08-07 |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
+| [Discord Conversation Settings Select Controls Requirements](requirements/settings-260907-discord-select-controls.md) | settings-260907 | 2026-09-07 | 2026-09-07 |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
 | [ShellEnvironment Historical Requirements Reconstruction](requirements/shell-260315-shell-environment.md) | shell-260315 | 2026-03-15 | 2026-03-23 |
 | [New signup is controlled by email-bound signup token redeem Historical Requirements Reconstruction](requirements/signup-260617-signup-token-registration.md) | signup-260617 | 2026-06-17 | 2026-06-17 |
@@ -803,6 +804,7 @@ Design documents are accumulated records and are not listed individually in this
 - [New Session Scope Selection and Pinned Directory Order Decisions](adr/session-260807-session-scope-and-pinned-directory.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
+- [Discord Conversation Settings Select Controls Decisions](adr/settings-260907-discord-select-controls.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)
 - [ShellEnvironment Historical Decision Reconstruction](adr/shell-260315-shell-environment.md)
 - [New signup is controlled by email-bound signup token redeem](adr/signup-260617-signup-token-registration.md)

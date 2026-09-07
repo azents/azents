@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,9 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_session_presence import (
+    build_external_channel_session_url,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteraction
@@ -22,8 +25,9 @@ from azents.services.external_channel.discord_settings_scope import (
     DiscordSettingsScope,
     build_discord_settings_custom_id,
     discord_binding_version,
-    settings_action_location,
-    settings_action_response_mode,
+    settings_selected_location,
+    settings_selected_response_mode,
+    settings_setup_location,
 )
 from azents.services.external_channel.ingestion_replay import (
     external_channel_replay_deadline,
@@ -81,7 +85,7 @@ class DiscordSettingsResponseService:
     ) -> DiscordSettingsResponse:
         """Render current setup, parent, or thread settings for a command actor."""
         try:
-            settings = await self._resolve(context)
+            settings = await self._resolve(context, expected_binding_id=None)
         except ExternalChannelParticipationError as error:
             return DiscordSettingsResponse(
                 response=_notice_response(str(error)),
@@ -92,6 +96,8 @@ class DiscordSettingsResponseService:
                 settings=settings,
                 origin_interaction_id=origin_interaction_id,
                 secret=self.config.auth.jwt.secret_key,
+                web_url=self.config.web_url,
+                response_type=4,
             ),
             cleanup_plans=(),
         )
@@ -101,12 +107,14 @@ class DiscordSettingsResponseService:
         *,
         interaction_id: str,
         scope: DiscordSettingsScope,
+        selected_value: str | None,
         context: DiscordSettingsContext,
         now: datetime.datetime,
     ) -> DiscordSettingsResponse:
         """Revalidate one signed component and commit its canonical mutation."""
         try:
             if scope.action == "open_binding":
+                _require_button_interaction(selected_value)
                 return await self._binding_open_response(
                     scope=scope,
                     context=context,
@@ -123,8 +131,14 @@ class DiscordSettingsResponseService:
                 if scope.action in {"setup_channel", "setup_threads"}
                 else context
             )
-            settings = await self._resolve(effective_context)
+            settings = await self._resolve(
+                effective_context,
+                expected_binding_id=(
+                    scope.binding_id if scope.action == "thread_response_mode" else None
+                ),
+            )
             if scope.action in {"setup_channel", "setup_threads"}:
+                _require_button_interaction(selected_value)
                 return await self._select_setup_location(
                     scope=scope,
                     settings=settings,
@@ -133,29 +147,29 @@ class DiscordSettingsResponseService:
                 )
             await self._validate_origin(scope=scope, context=context)
             if scope.action == "open":
+                _require_button_interaction(selected_value)
                 return DiscordSettingsResponse(
                     response=_settings_response(
                         settings=settings,
                         origin_interaction_id=scope.origin_interaction_id,
                         secret=self.config.auth.jwt.secret_key,
+                        web_url=self.config.web_url,
+                        response_type=4,
                     ),
                     cleanup_plans=(),
                 )
-            if scope.action in {
-                "parent_channel",
-                "parent_threads",
-                "parent_mention_only",
-                "parent_all_messages",
-            }:
+            if scope.action in {"parent_location", "parent_response_mode"}:
                 return await self._mutate_parent(
                     scope=scope,
+                    selected_value=selected_value,
                     settings=settings,
                     context=context,
                     now=now,
                 )
-            if scope.action in {"thread_mention_only", "thread_all_messages"}:
+            if scope.action == "thread_response_mode":
                 return await self._mutate_thread(
                     scope=scope,
+                    selected_value=selected_value,
                     settings=settings,
                     context=context,
                     now=now,
@@ -175,7 +189,10 @@ class DiscordSettingsResponseService:
         interaction_id: str,
     ) -> DiscordSettingsResponse:
         """Open settings from a shared joined-presence Binding control."""
-        settings = await self._resolve(context)
+        settings = await self._resolve(
+            context,
+            expected_binding_id=scope.origin_interaction_id,
+        )
         if (
             settings.binding is None
             or settings.binding.id != scope.origin_interaction_id
@@ -188,6 +205,8 @@ class DiscordSettingsResponseService:
                 settings=settings,
                 origin_interaction_id=interaction_id,
                 secret=self.config.auth.jwt.secret_key,
+                web_url=self.config.web_url,
+                response_type=4,
             ),
             cleanup_plans=(),
         )
@@ -202,7 +221,7 @@ class DiscordSettingsResponseService:
     ) -> DiscordSettingsResponse:
         """Commit a setup choice and independently continue its canonical source."""
         claim = settings.claim
-        location = settings_action_location(scope.action)
+        location = settings_setup_location(scope.action)
         if (
             settings.target != "setup"
             or claim is None
@@ -223,7 +242,7 @@ class DiscordSettingsResponseService:
             now=now,
             deadline=external_channel_replay_deadline(now=now),
         )
-        committed = await self._resolve(context)
+        committed = await self._resolve(context, expected_binding_id=None)
         return DiscordSettingsResponse(
             response=_confirmation_response(committed),
             cleanup_plans=(
@@ -237,6 +256,7 @@ class DiscordSettingsResponseService:
         self,
         *,
         scope: DiscordSettingsScope,
+        selected_value: str | None,
         settings: ExternalChannelParticipationSettings,
         context: DiscordSettingsContext,
         now: datetime.datetime,
@@ -252,10 +272,18 @@ class DiscordSettingsResponseService:
             raise ExternalChannelParticipationError(
                 "External Channel settings changed before submission."
             )
-        location = settings_action_location(scope.action) or setting.location
-        response_mode = (
-            settings_action_response_mode(scope.action) or setting.response_mode
-        )
+        if scope.action == "parent_location":
+            location = settings_selected_location(selected_value)
+            response_mode = setting.response_mode
+        elif scope.action == "parent_response_mode":
+            location = setting.location
+            response_mode = settings_selected_response_mode(selected_value)
+        else:
+            raise AssertionError("Discord parent settings action is not exhaustive.")
+        if location is None or response_mode is None:
+            raise ExternalChannelParticipationError(
+                "Discord conversation settings selection is invalid."
+            )
         mutation = await self.participation_service.mutate_parent_settings(
             connection_id=context.connection_id,
             provider_parent_channel_id=context.provider_parent_channel_id,
@@ -268,7 +296,13 @@ class DiscordSettingsResponseService:
             deadline=external_channel_replay_deadline(now=now),
         )
         return DiscordSettingsResponse(
-            response=_confirmation_response(mutation.settings),
+            response=_settings_response(
+                settings=mutation.settings,
+                origin_interaction_id=scope.origin_interaction_id,
+                secret=self.config.auth.jwt.secret_key,
+                web_url=self.config.web_url,
+                response_type=7,
+            ),
             cleanup_plans=mutation.cleanup_plans,
         )
 
@@ -276,6 +310,7 @@ class DiscordSettingsResponseService:
         self,
         *,
         scope: DiscordSettingsScope,
+        selected_value: str | None,
         settings: ExternalChannelParticipationSettings,
         context: DiscordSettingsContext,
         now: datetime.datetime,
@@ -283,7 +318,7 @@ class DiscordSettingsResponseService:
         """Apply one signed connected-thread response-mode mutation."""
         resource = settings.resource
         binding = settings.binding
-        response_mode = settings_action_response_mode(scope.action)
+        response_mode = settings_selected_response_mode(selected_value)
         if (
             settings.target != "thread"
             or resource is None
@@ -308,18 +343,27 @@ class DiscordSettingsResponseService:
             deadline=external_channel_replay_deadline(now=now),
         )
         return DiscordSettingsResponse(
-            response=_confirmation_response(mutation.settings),
+            response=_settings_response(
+                settings=mutation.settings,
+                origin_interaction_id=scope.origin_interaction_id,
+                secret=self.config.auth.jwt.secret_key,
+                web_url=self.config.web_url,
+                response_type=7,
+            ),
             cleanup_plans=mutation.cleanup_plans,
         )
 
     async def _resolve(
         self,
         context: DiscordSettingsContext,
+        *,
+        expected_binding_id: str | None,
     ) -> ExternalChannelParticipationSettings:
         settings = await self.participation_service.resolve_settings(
             connection_id=context.connection_id,
             provider_parent_channel_id=context.provider_parent_channel_id,
             provider_thread_resource_key=context.provider_thread_resource_key,
+            expected_binding_id=expected_binding_id,
             principal_id=context.principal_id,
         )
         if (
@@ -375,29 +419,39 @@ def _origin_matches(
     )
 
 
+def _require_button_interaction(selected_value: str | None) -> None:
+    """Reject Select values attached to button-only settings actions."""
+    if selected_value is not None:
+        raise ExternalChannelParticipationError(
+            "Discord conversation settings selection is invalid."
+        )
+
+
 def _settings_response(
     *,
     settings: ExternalChannelParticipationSettings,
     origin_interaction_id: str,
     secret: str,
+    web_url: str,
+    response_type: Literal[4, 7],
 ) -> dict[str, object]:
     title = (
         "Conversation setup" if settings.target == "setup" else "Conversation settings"
     )
     description = _settings_description(settings)
-    return {
-        "type": 4,
-        "data": {
-            "flags": 64,
-            "content": description,
-            "embeds": [{"title": title, "description": description, "color": 0x5865F2}],
-            "components": _settings_components(
-                settings=settings,
-                origin_interaction_id=origin_interaction_id,
-                secret=secret,
-            ),
-        },
+    data: dict[str, object] = {
+        "content": description,
+        "embeds": [{"title": title, "description": description, "color": 0x5865F2}],
+        "components": _settings_components(
+            settings=settings,
+            origin_interaction_id=origin_interaction_id,
+            secret=secret,
+            session_url=_settings_session_url(settings=settings, web_url=web_url),
+        ),
     }
+    if response_type == 4:
+        data["flags"] = 64
+    return {"type": response_type, "data": data}
 
 
 def _settings_components(
@@ -405,6 +459,7 @@ def _settings_components(
     settings: ExternalChannelParticipationSettings,
     origin_interaction_id: str,
     secret: str,
+    session_url: str | None,
 ) -> list[dict[str, object]]:
     if settings.target == "setup":
         claim = settings.claim
@@ -438,89 +493,139 @@ def _settings_components(
                 ),
             )
         ]
+    rows: list[dict[str, object]] = []
     if settings.target == "parent":
         setting = settings.setting
         if setting is None:
             raise AssertionError("Discord parent settings are incomplete.")
-        return [
-            _button_row(
-                (
-                    "Use channel",
-                    1,
-                    build_discord_settings_custom_id(
-                        secret=secret,
-                        action="parent_channel",
-                        origin_interaction_id=origin_interaction_id,
-                        setting_id=setting.id,
-                        settings_generation=setting.settings_generation,
-                    ),
-                ),
-                (
-                    "Use threads",
-                    2,
-                    build_discord_settings_custom_id(
-                        secret=secret,
-                        action="parent_threads",
-                        origin_interaction_id=origin_interaction_id,
-                        setting_id=setting.id,
-                        settings_generation=setting.settings_generation,
-                    ),
-                ),
-            ),
-            _button_row(
-                (
-                    "Mentions only",
-                    2,
-                    build_discord_settings_custom_id(
-                        secret=secret,
-                        action="parent_mention_only",
-                        origin_interaction_id=origin_interaction_id,
-                        setting_id=setting.id,
-                        settings_generation=setting.settings_generation,
-                    ),
-                ),
-                (
-                    "All messages",
-                    4,
-                    build_discord_settings_custom_id(
-                        secret=secret,
-                        action="parent_all_messages",
-                        origin_interaction_id=origin_interaction_id,
-                        setting_id=setting.id,
-                        settings_generation=setting.settings_generation,
-                    ),
-                ),
-            ),
-        ]
-    binding = settings.binding
-    if binding is None:
-        raise AssertionError("Discord thread settings are incomplete.")
-    return [
-        _button_row(
+        rows.extend(
             (
-                "Mentions only",
-                2,
-                build_discord_settings_custom_id(
-                    secret=secret,
-                    action="thread_mention_only",
-                    origin_interaction_id=origin_interaction_id,
-                    binding_id=binding.id,
-                    binding_updated_at=binding.updated_at,
+                _select_row(
+                    custom_id=build_discord_settings_custom_id(
+                        secret=secret,
+                        action="parent_location",
+                        origin_interaction_id=origin_interaction_id,
+                        setting_id=setting.id,
+                        settings_generation=setting.settings_generation,
+                    ),
+                    placeholder="Where to respond",
+                    options=(
+                        (
+                            "This channel",
+                            "channel",
+                            setting.location
+                            is ExternalChannelConversationLocation.CHANNEL,
+                        ),
+                        (
+                            "Threads",
+                            "threads",
+                            setting.location
+                            is ExternalChannelConversationLocation.THREADS,
+                        ),
+                    ),
                 ),
-            ),
-            (
-                "All messages",
-                4,
-                build_discord_settings_custom_id(
-                    secret=secret,
-                    action="thread_all_messages",
-                    origin_interaction_id=origin_interaction_id,
-                    binding_id=binding.id,
-                    binding_updated_at=binding.updated_at,
+                _select_row(
+                    custom_id=build_discord_settings_custom_id(
+                        secret=secret,
+                        action="parent_response_mode",
+                        origin_interaction_id=origin_interaction_id,
+                        setting_id=setting.id,
+                        settings_generation=setting.settings_generation,
+                    ),
+                    placeholder="When to respond",
+                    options=_response_mode_options(setting.response_mode),
                 ),
-            ),
+            )
         )
-    ]
+    else:
+        binding = settings.binding
+        if binding is None:
+            raise AssertionError("Discord thread settings are incomplete.")
+        rows.append(
+            _select_row(
+                custom_id=build_discord_settings_custom_id(
+                    secret=secret,
+                    action="thread_response_mode",
+                    origin_interaction_id=origin_interaction_id,
+                    binding_id=binding.id,
+                    binding_updated_at=binding.updated_at,
+                ),
+                placeholder="When to respond",
+                options=_response_mode_options(binding.response_mode),
+            )
+        )
+    if session_url is not None:
+        rows.append(
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "View session",
+                        "url": session_url,
+                    }
+                ],
+            }
+        )
+    return rows
+
+
+def _select_row(
+    *,
+    custom_id: str,
+    placeholder: str,
+    options: tuple[tuple[str, str, bool], ...],
+) -> dict[str, object]:
+    return {
+        "type": 1,
+        "components": [
+            {
+                "type": 3,
+                "custom_id": custom_id,
+                "placeholder": placeholder,
+                "min_values": 1,
+                "max_values": 1,
+                "options": [
+                    {"label": label, "value": value, "default": default}
+                    for label, value, default in options
+                ],
+            }
+        ],
+    }
+
+
+def _response_mode_options(
+    response_mode: ExternalChannelResponseMode,
+) -> tuple[tuple[str, str, bool], ...]:
+    return (
+        (
+            "When mentioned",
+            "mention_only",
+            response_mode is ExternalChannelResponseMode.MENTION_ONLY,
+        ),
+        (
+            "Every message",
+            "all_messages",
+            response_mode is ExternalChannelResponseMode.ALL_MESSAGES,
+        ),
+    )
+
+
+def _settings_session_url(
+    *,
+    settings: ExternalChannelParticipationSettings,
+    web_url: str,
+) -> str | None:
+    navigation = settings.session_navigation
+    if navigation is None:
+        return None
+    return build_external_channel_session_url(
+        web_url,
+        navigation.workspace_handle,
+        navigation.agent_id,
+        navigation.session_id,
+    )
 
 
 def _button_row(

@@ -21,12 +21,9 @@ DiscordSettingsAction = Literal[
     "open_binding",
     "setup_channel",
     "setup_threads",
-    "parent_channel",
-    "parent_threads",
-    "parent_mention_only",
-    "parent_all_messages",
-    "thread_mention_only",
-    "thread_all_messages",
+    "parent_location",
+    "parent_response_mode",
+    "thread_response_mode",
 ]
 
 
@@ -72,7 +69,7 @@ def build_discord_settings_custom_id(
     binding_updated_at: datetime.datetime | None = None,
 ) -> str:
     """Build one signed component ID from opaque durable IDs and generations."""
-    thread_action = action in {"thread_mention_only", "thread_all_messages"}
+    thread_action = action == "thread_response_mode"
     fields: list[str] = [
         _DISCORD_SETTINGS_PREFIX,
         _action_code(action),
@@ -87,12 +84,7 @@ def build_discord_settings_custom_id(
         _require_positive_int(claim_generation)
         _require_positive_int(source_revision)
         fields.extend((setup_claim_id, str(claim_generation), str(source_revision)))
-    elif action in {
-        "parent_channel",
-        "parent_threads",
-        "parent_mention_only",
-        "parent_all_messages",
-    }:
+    elif action in {"parent_location", "parent_response_mode"}:
         setting_id = _identifier(setting_id)
         _require_positive_int(settings_generation)
         fields.extend((setting_id, str(settings_generation)))
@@ -127,7 +119,7 @@ def parse_discord_settings_custom_id(
         signature, _signature(secret=secret, fields=unsigned_fields)
     ):
         raise ValueError("Discord settings scope is invalid.")
-    thread_action = action in {"thread_mention_only", "thread_all_messages"}
+    thread_action = action == "thread_response_mode"
     origin_interaction_id = (
         _expanded_identifier(unsigned_fields[2])
         if thread_action
@@ -162,12 +154,7 @@ def parse_discord_settings_custom_id(
             binding_id=None,
             binding_version=None,
         )
-    if action in {
-        "parent_channel",
-        "parent_threads",
-        "parent_mention_only",
-        "parent_all_messages",
-    }:
+    if action in {"parent_location", "parent_response_mode"}:
         if len(extra) != 2:
             raise ValueError("Discord settings scope is invalid.")
         return DiscordSettingsScope(
@@ -210,24 +197,35 @@ def discord_binding_version(updated_at: datetime.datetime) -> str:
     return _binding_version(updated_at)
 
 
-def settings_action_location(
+def settings_setup_location(
     action: DiscordSettingsAction,
 ) -> ExternalChannelConversationLocation | None:
-    """Return the parent location selected by one component action."""
-    if action in {"setup_channel", "parent_channel"}:
+    """Return the setup location selected by one button action."""
+    if action == "setup_channel":
         return ExternalChannelConversationLocation.CHANNEL
-    if action in {"setup_threads", "parent_threads"}:
+    if action == "setup_threads":
         return ExternalChannelConversationLocation.THREADS
     return None
 
 
-def settings_action_response_mode(
-    action: DiscordSettingsAction,
+def settings_selected_location(
+    value: str | None,
+) -> ExternalChannelConversationLocation | None:
+    """Return one validated parent location Select value."""
+    if value == "channel":
+        return ExternalChannelConversationLocation.CHANNEL
+    if value == "threads":
+        return ExternalChannelConversationLocation.THREADS
+    return None
+
+
+def settings_selected_response_mode(
+    value: str | None,
 ) -> ExternalChannelResponseMode | None:
-    """Return the concrete response mode selected by one component action."""
-    if action in {"parent_mention_only", "thread_mention_only"}:
+    """Return one validated response-mode Select value."""
+    if value == "mention_only":
         return ExternalChannelResponseMode.MENTION_ONLY
-    if action in {"parent_all_messages", "thread_all_messages"}:
+    if value == "all_messages":
         return ExternalChannelResponseMode.ALL_MESSAGES
     return None
 
@@ -238,12 +236,9 @@ def _action_code(action: DiscordSettingsAction) -> str:
         "open_binding": "ob",
         "setup_channel": "sc",
         "setup_threads": "st",
-        "parent_channel": "pc",
-        "parent_threads": "pt",
-        "parent_mention_only": "pm",
-        "parent_all_messages": "pa",
-        "thread_mention_only": "tm",
-        "thread_all_messages": "ta",
+        "parent_location": "pl",
+        "parent_response_mode": "pr",
+        "thread_response_mode": "tr",
     }[action]
 
 
@@ -253,12 +248,9 @@ def _action_from_code(code: str) -> DiscordSettingsAction:
         "ob": "open_binding",
         "sc": "setup_channel",
         "st": "setup_threads",
-        "pc": "parent_channel",
-        "pt": "parent_threads",
-        "pm": "parent_mention_only",
-        "pa": "parent_all_messages",
-        "tm": "thread_mention_only",
-        "ta": "thread_all_messages",
+        "pl": "parent_location",
+        "pr": "parent_response_mode",
+        "tr": "thread_response_mode",
     }
     try:
         return actions[code]

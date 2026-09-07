@@ -4,10 +4,16 @@ import datetime
 
 import pytest
 
+from azents.core.enums import (
+    ExternalChannelConversationLocation,
+    ExternalChannelResponseMode,
+)
 from azents.services.external_channel.discord_settings_scope import (
     DiscordSettingsScope,
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
+    settings_selected_location,
+    settings_selected_response_mode,
 )
 
 _UPDATED_AT = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
@@ -46,7 +52,7 @@ def test_parent_settings_scope_round_trips_with_current_generation() -> None:
     """Authenticate the durable command origin, setting identity, and generation."""
     custom_id = build_discord_settings_custom_id(
         secret="secret",
-        action="parent_all_messages",
+        action="parent_response_mode",
         origin_interaction_id="interaction-1",
         setting_id="setting-1",
         settings_generation=3,
@@ -57,7 +63,7 @@ def test_parent_settings_scope_round_trips_with_current_generation() -> None:
         custom_id=custom_id,
         secret="secret",
     ) == DiscordSettingsScope(
-        action="parent_all_messages",
+        action="parent_response_mode",
         origin_interaction_id="interaction-1",
         setup_claim_id=None,
         claim_generation=None,
@@ -73,7 +79,7 @@ def test_thread_settings_scope_round_trips_with_binding_revision() -> None:
     """Authenticate one connected Binding and its compact revision fence."""
     custom_id = build_discord_settings_custom_id(
         secret="secret",
-        action="thread_mention_only",
+        action="thread_response_mode",
         origin_interaction_id=_ORIGIN_INTERACTION_ID,
         binding_id=_BINDING_ID,
         binding_updated_at=_UPDATED_AT,
@@ -92,6 +98,40 @@ def test_thread_settings_scope_round_trips_with_binding_revision() -> None:
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("channel", ExternalChannelConversationLocation.CHANNEL),
+        ("threads", ExternalChannelConversationLocation.THREADS),
+        ("invalid", None),
+        (None, None),
+    ],
+)
+def test_settings_location_select_values_are_closed(
+    value: str | None,
+    expected: ExternalChannelConversationLocation | None,
+) -> None:
+    """Map only the two provider-visible parent location values."""
+    assert settings_selected_location(value) is expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("mention_only", ExternalChannelResponseMode.MENTION_ONLY),
+        ("all_messages", ExternalChannelResponseMode.ALL_MESSAGES),
+        ("invalid", None),
+        (None, None),
+    ],
+)
+def test_settings_response_mode_select_values_are_closed(
+    value: str | None,
+    expected: ExternalChannelResponseMode | None,
+) -> None:
+    """Map only the two provider-visible response-mode values."""
+    assert settings_selected_response_mode(value) is expected
+
+
+@pytest.mark.parametrize(
     ("origin_interaction_id", "binding_id"),
     [
         ("interaction-1", _BINDING_ID),
@@ -107,7 +147,7 @@ def test_thread_settings_scope_requires_canonical_internal_ids(
     with pytest.raises(ValueError, match="scope is invalid"):
         build_discord_settings_custom_id(
             secret="secret",
-            action="thread_all_messages",
+            action="thread_response_mode",
             origin_interaction_id=origin_interaction_id,
             binding_id=binding_id,
             binding_updated_at=_UPDATED_AT,
