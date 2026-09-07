@@ -14,7 +14,7 @@ export function LocaleSwitcher(): React.ReactElement {
   const { locale, setLocale } = useLocale();
 
   return (
-    <Menu shadow="md" width={160} id="locale-switcher-menu">
+    <Menu shadow="md" width={160}>
       <Menu.Target>
         <Button
           variant="subtle"

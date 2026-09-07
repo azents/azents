@@ -3,8 +3,14 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { cookies } from "next/headers";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
+import {
+  parseColorMode,
+  parseColorModePreference,
+} from "@/shared/lib/color-mode";
 import { isSupportedLocale, type SupportedLocale } from "@/shared/lib/locale";
+import { ColorModeProvider } from "@/shared/providers/color-mode";
 import { LocaleProvider } from "@/shared/providers/locale";
 import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { Metadata } from "next";
@@ -12,16 +18,7 @@ import type { Metadata } from "next";
 import "@mantine/core/styles.css";
 import "../globals.css";
 
-/**
- * Root layout dedicated to landing page.
- *
- * Sets forceColorScheme="dark" on both ColorSchemeScript and MantineProvider to
- * ensure data-mantine-color-scheme="dark" on html element and body background
- * for complete dark mode.
- *
- * Color mode is isolated with separate root layout from (app) route group.
- */
-
+/** Landing page metadata localized through next-intl. */
 export async function generateMetadata(): Promise<Metadata> {
   const messages = await getMessages();
   const metadata = messages.metadata;
@@ -65,12 +62,25 @@ export default async function LandingLayout({
 }): Promise<React.ReactElement> {
   const locale = await getLocale();
   const messages = await getMessages();
+  const cookieStore = await cookies();
 
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
     : "en-US";
-
   const htmlLang = supportedLocale.split("-")[0];
+
+  const preferenceCookie = cookieStore.get("color-mode-preference");
+  const resolvedModeCookie = cookieStore.get("color-mode-resolved");
+  const initialPreference = preferenceCookie
+    ? parseColorModePreference(preferenceCookie.value)
+    : "dark";
+  const initialResolvedMode = resolvedModeCookie
+    ? parseColorMode(resolvedModeCookie.value)
+    : initialPreference === "light"
+      ? "light"
+      : "dark";
+  const colorScheme =
+    initialPreference === "system" ? "auto" : initialResolvedMode;
 
   return (
     <html
@@ -79,12 +89,19 @@ export default async function LandingLayout({
       suppressHydrationWarning
     >
       <head>
-        <ColorSchemeScript forceColorScheme="dark" />
+        <ColorSchemeScript defaultColorScheme={colorScheme} />
       </head>
       <body className={GeistSans.className}>
         <NextIntlClientProvider messages={messages}>
-          <AppMantineProvider forceColorScheme="dark">
-            <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>
+          <AppMantineProvider defaultColorScheme={colorScheme}>
+            <LocaleProvider locale={supportedLocale}>
+              <ColorModeProvider
+                initialPreference={initialPreference}
+                initialResolvedMode={initialResolvedMode}
+              >
+                {children}
+              </ColorModeProvider>
+            </LocaleProvider>
           </AppMantineProvider>
         </NextIntlClientProvider>
       </body>
