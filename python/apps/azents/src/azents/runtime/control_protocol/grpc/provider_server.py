@@ -380,8 +380,6 @@ class RuntimeProviderControlGrpcServicer(
             commands_by_request_id.clear()
             for task in (inbound_task, command_task):
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
             await self._control_protocol.revoke_provider(
                 provider_id=accepted.provider_id,
                 generation=accepted.generation,
@@ -391,6 +389,9 @@ class RuntimeProviderControlGrpcServicer(
                 generation=accepted.generation,
                 disconnected_at=datetime.now(UTC),
             )
+            for task in (inbound_task, command_task):
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             _LOGGER.info(
                 "Runtime Provider stream closed",
                 extra={

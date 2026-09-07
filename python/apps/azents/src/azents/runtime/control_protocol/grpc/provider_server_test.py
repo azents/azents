@@ -139,6 +139,8 @@ class FakeProviderCredentialBridge:
     )
     create_calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
     heartbeat_calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
+    disconnect_calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
+    disconnected: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
 
     async def authenticate_credential(
         self,
@@ -175,8 +177,10 @@ class FakeProviderCredentialBridge:
         """Keep test Provider command delivery authorized."""
         return True
 
-    async def disconnect_connection(self, **_: object) -> bool:
-        """Accept a test Provider stream closure."""
+    async def disconnect_connection(self, **kwargs: object) -> bool:
+        """Accept and expose a test Provider stream closure."""
+        self.disconnect_calls.append(kwargs)
+        self.disconnected.set()
         return True
 
 
@@ -234,6 +238,34 @@ class QueueIterator:
         return message
 
 
+class CancellationDelayedControlProtocolService(RuntimeControlProtocolService):
+    """Delay command-task cancellation until the test releases cleanup."""
+
+    def __init__(self, store: InMemoryRuntimeCoordinationStore) -> None:
+        """Initialize observable cancellation barriers."""
+        super().__init__(store)
+        self.claim_started = asyncio.Event()
+        self.release_cancellation = asyncio.Event()
+
+    async def claim_next_provider_request(
+        self,
+        *,
+        provider_id: str,
+        generation: int,
+        consumer_id: str,
+        block_ms: int,
+    ) -> None:
+        """Block a Provider claim and delay its cancellation completion."""
+        del provider_id, generation, consumer_id, block_ms
+        self.claim_started.set()
+        blocked = asyncio.Event()
+        try:
+            await blocked.wait()
+        except asyncio.CancelledError:
+            await self.release_cancellation.wait()
+            raise
+
+
 class FakeGrpcContext(
     BaseFakeGrpcContext[
         runtime_provider_control_pb2.ProviderMessage,
@@ -287,6 +319,35 @@ async def test_provider_grpc_registers_and_acks_heartbeat() -> None:
     assert accepted.register_accepted.provider_id == "provider-1"
     assert accepted.register_accepted.generation == 1
     assert heartbeat_ack.heartbeat_ack.monotonic_sequence == 7
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_disconnects_before_command_task_cleanup() -> None:
+    """Revoke connection authority before a blocked relay task finishes cleanup."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = CancellationDelayedControlProtocolService(store)
+    bridge = FakeProviderCredentialBridge()
+    servicer = _servicer(service, FakeReportSink(), bridge=bridge)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    await asyncio.wait_for(service.claim_started.wait(), timeout=1)
+    await inbound.put(None)
+    stream_finished = asyncio.ensure_future(anext(stream))
+    try:
+        await asyncio.wait_for(bridge.disconnected.wait(), timeout=1)
+    finally:
+        service.release_cancellation.set()
+
+    with pytest.raises(StopAsyncIteration):
+        await stream_finished
+    assert len(bridge.disconnect_calls) == 1
+    disconnect_call = bridge.disconnect_calls[0]
+    assert disconnect_call["authentication"] == bridge.authentication
+    assert disconnect_call["generation"] == accepted.register_accepted.generation
+    assert isinstance(disconnect_call["disconnected_at"], datetime)
 
 
 @pytest.mark.asyncio

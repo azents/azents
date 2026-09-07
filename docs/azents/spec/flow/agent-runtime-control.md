@@ -61,8 +61,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-06
-spec_version: 74
+last_verified_at: 2026-09-07
+spec_version: 75
 ---
 
 # Agent Runtime Control
@@ -450,7 +450,7 @@ current lifecycle desired generation plus the retained positive sequence and dig
 
 Runner operation cancellation is an ordered request on the same generation-scoped stream as the original operation. Control records `cancel_requested_at`, transitions non-final metadata to `cancel_requested`, and appends `operation.cancel` after the operation request. Start authorization atomically claims an active operation as running, so cancellation may win before handler creation. A Runner whose start claim is denied emits the operation's terminal cancellation result instead of silently dropping the request. Pending work is removed from the owner queue; active work is cancelled through its handler task. Final operation metadata and reply cursors remain authoritative, and a late Runner final cannot overwrite an already accepted terminal result.
 
-Connection heartbeat and revoke operations are generation-fenced. In Redis-backed coordination, heartbeat refresh and revoke are atomic compare-and-set/delete operations against the current connection generation. Reading an expired connection must not delete the key because a newer reconnect may have replaced it concurrently. When a Runner stream closes, Control records `stream_closed` durable state only if revoking that same generation succeeds; stale close handling must not overwrite a newer Runner generation.
+Connection heartbeat and revoke operations are generation-fenced. In Redis-backed coordination, heartbeat refresh and revoke are atomic compare-and-set/delete operations against the current connection generation. Reading an expired connection must not delete the key because a newer reconnect may have replaced it concurrently. When a Provider stream closes, Control revokes the live connection and durable connection authority before waiting for stream-local relay-task cancellation, so a blocked claim cannot leave Runtime Profile availability stale; generation fencing prevents stale close cleanup from revoking a newer Provider connection. When a Runner stream closes, Control records `stream_closed` durable state only if revoking that same generation succeeds; stale close handling must not overwrite a newer Runner generation.
 
 The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
 
@@ -823,6 +823,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-07 (spec_version=75)** — Made Provider stream closure revoke live and
+  durable connection authority before waiting for stream-local relay cleanup, preventing
+  a blocked claim from retaining stale Runtime Profile availability.
 - **2026-09-06 (spec_version=74)** — Added local all-in-one devserver
   composition that starts Runtime Control before Worker dependencies and keeps
   the trusted transfer coordinator under the shared local shutdown lifecycle.
