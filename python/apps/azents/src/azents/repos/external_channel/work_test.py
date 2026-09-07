@@ -1535,8 +1535,8 @@ async def test_discord_identical_tasks_preserve_reply_tracker_host() -> None:
     assert effect.provider.target.request_payload["tracker_host_kind"] == "reply"
 
 
-async def test_discord_task_change_recreates_reply_host_as_standalone() -> None:
-    """A changed task snapshot detaches a reply host before standalone creation."""
+async def test_discord_task_only_change_preserves_reply_tracker_host() -> None:
+    """A message-free task change edits the current reply host in place."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="discord:111:555",
@@ -1553,14 +1553,71 @@ async def test_discord_task_change_recreates_reply_host_as_standalone() -> None:
         tasks=_moving_tasks(),
     )
 
-    assert [effect.provider.target.operation for effect in transition.effects] == [
-        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-    ]
-    remove, create = transition.effects
-    assert remove.projection_host_kind == "reply"
-    assert remove.provider.target.request_payload["tracker_host_kind"] == "reply"
-    assert create.dependencies == (0,)
+    assert len(transition.effects) == 1
+    update = transition.effects[0]
+    assert (
+        update.provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    )
+    assert update.dependencies == ()
+    assert update.projection_host_kind == "reply"
+    assert update.provider.target.request_payload["provider_message_key"] == (
+        "discord:111:555"
+    )
+    assert update.provider.target.request_payload["tracker_host_kind"] == "reply"
+
+
+async def test_discord_task_only_change_preserves_standalone_tracker_host() -> None:
+    """A message-free task change edits the current standalone host in place."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:555",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Refreshing the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert len(transition.effects) == 1
+    update = transition.effects[0]
+    assert (
+        update.provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    )
+    assert update.dependencies == ()
+    assert update.projection_host_kind == "standalone"
+    assert update.provider.target.request_payload["provider_message_key"] == (
+        "discord:111:555"
+    )
+    assert update.provider.target.request_payload["tracker_host_kind"] == "standalone"
+
+
+async def test_discord_task_only_change_creates_when_tracker_is_missing() -> None:
+    """A message-free task change creates only when no current host exists."""
+    work = _work(desired=True)
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Refreshing the plan…",
+        tasks=_moving_tasks(),
+    )
+
+    assert len(transition.effects) == 1
+    create = transition.effects[0]
+    assert (
+        create.provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    )
+    assert create.dependencies == ()
     assert create.projection_host_kind == "standalone"
     assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
 

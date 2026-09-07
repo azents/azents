@@ -1452,6 +1452,7 @@ class ExternalChannelWorkRepository:
                     recreate_discord_tracker = (
                         connection.provider is ExternalChannelProvider.DISCORD
                         and tasks_changed
+                        and message is not None
                     )
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)

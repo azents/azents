@@ -17,14 +17,14 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-04 | 161 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 71 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 72 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-03 | 9 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-07 | 108 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-07 | 109 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-04 | 79 |
 
@@ -39,7 +39,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 56 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 57 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-06 | 58 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
@@ -445,6 +445,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Always-Visible Toolkit Tools Requirements](requirements/toolkit-260818-always-visible-tools.md) | toolkit-260818 | 2026-08-18 | 2026-08-18 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
+| [Discord Task-Only Tracker Edit Requirements](requirements/tracker-260907-task-only-edit.md) | tracker-260907 | 2026-09-07 | 2026-09-07 |
 | [Runtime File Transfer Requirements](requirements/transfer-260725-runtime-file-transfer.md) | transfer-260725 | 2026-07-25 | 2026-07-28 |
 | [Runtime Transfer Lifespan Recovery Requirements](requirements/transfer-260728-runtime-transfer-lifespan-recovery.md) | transfer-260728 | 2026-07-28 | 2026-07-28 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
@@ -858,6 +859,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Always-Visible Toolkit Tools](adr/toolkit-260818-always-visible-tools.md)
 - [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
 - [Discord Todo Work Activity Tracker Visibility Decisions](adr/tracker-260829-todo-work-visibility.md)
+- [Discord Task-Only Tracker Edit Decisions](adr/tracker-260907-task-only-edit.md)
 - [Runtime File Transfer](adr/transfer-260725-runtime-file-transfer.md)
 - [Runtime Transfer Lifespan Recovery](adr/transfer-260728-runtime-transfer-lifespan-recovery.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)

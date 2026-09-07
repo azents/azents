@@ -2181,6 +2181,40 @@ class _Handler(BaseHTTPRequestHandler):
                             "mode": "continue",
                             "binding": binding,
                             "title": "Investigating error logs…",
+                            "todo_update": [
+                                {
+                                    "id": "inspect",
+                                    "title": "Inspect recent failures",
+                                    "status": "completed",
+                                    "output": "The failing release was identified.",
+                                    "sources": [
+                                        {
+                                            "url": "https://example.com/logs",
+                                            "label": "Error log dashboard",
+                                        }
+                                    ],
+                                },
+                                {
+                                    "id": "verify",
+                                    "title": "Verify the affected release",
+                                    "status": "completed",
+                                    "output": (
+                                        "Release 2026.07.23 contains the regression."
+                                    ),
+                                },
+                                {
+                                    "id": "trace",
+                                    "title": "Trace the unavailable dependency",
+                                    "status": "failed",
+                                    "output": "The dependency trace was unavailable.",
+                                },
+                                {
+                                    "id": "summarize",
+                                    "title": "Summarize the incident",
+                                    "status": "pending",
+                                    "details": "Preparing the incident summary.",
+                                },
+                            ],
                         },
                     )
                     return
