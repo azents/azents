@@ -85,6 +85,11 @@ const mobileOverflowState = {
   })),
 } satisfies ProjectDirectoryPickerState;
 
+const emptyState = {
+  ...readyState,
+  entries: [],
+} satisfies ProjectDirectoryPickerState;
+
 const meta = {
   component: AgentWorkspaceDirectoryPickerModal,
   decorators: [
@@ -125,6 +130,21 @@ export const Ready = {
   },
 } satisfies Story;
 
+export const Empty = {
+  args: {
+    state: emptyState,
+  },
+} satisfies Story;
+
+export const Error = {
+  args: {
+    state: {
+      type: "ERROR",
+      message: "The Agent Workspace could not be loaded.",
+    },
+  },
+} satisfies Story;
+
 export const MobileOverflow = {
   args: {
     state: mobileOverflowState,
@@ -139,9 +159,11 @@ export const MobileOverflow = {
     const dialog = await page.findByRole("dialog", {
       name: "Select Project folder",
     });
+    const toolbar = page.getByTestId("agent-workspace-picker-toolbar");
     const scrollArea = page.getByTestId(
       "agent-workspace-picker-directory-list",
     );
+    const toolbarTop = toolbar.getBoundingClientRect().top;
 
     await expect(dialog.getBoundingClientRect().bottom).toBeLessThanOrEqual(
       window.innerHeight,
@@ -152,5 +174,7 @@ export const MobileOverflow = {
     scrollArea.scrollTop = scrollArea.scrollHeight;
     await fireEvent.scroll(scrollArea);
     await expect(scrollArea.scrollTop).toBeGreaterThan(0);
+    await expect(toolbar.getBoundingClientRect().top).toBe(toolbarTop);
+    await expect(window.getComputedStyle(scrollArea).overflowY).toBe("auto");
   },
 } satisfies Story;

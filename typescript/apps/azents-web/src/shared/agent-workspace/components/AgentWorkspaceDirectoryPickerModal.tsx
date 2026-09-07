@@ -15,6 +15,7 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import {
   IconBrandGit,
@@ -74,9 +75,20 @@ export function AgentWorkspaceDirectoryPickerModal({
   const t = useTranslations(translationNamespace);
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
 
+  const closePicker = (): void => {
+    setRestartConfirmOpen(false);
+    onClose();
+  };
+
+  const renderStatusViewport = (
+    content: React.ReactNode,
+  ): React.ReactElement => (
+    <div className={classes.statusViewport}>{content}</div>
+  );
+
   const renderCapabilityContent = (): React.ReactElement | null => {
     if (state.type === "RUNTIME_FREE") {
-      return (
+      return renderStatusViewport(
         <Alert color="blue" title={t("workspacePanel.runtimeFreeTitle")}>
           <Stack gap="sm">
             <Text size="sm">{t("workspacePanel.runtimeFreeDescription")}</Text>
@@ -85,20 +97,20 @@ export function AgentWorkspaceDirectoryPickerModal({
                 component={Link}
                 href={runtimeSettingsHref}
                 size="xs"
-                onClick={onClose}
+                onClick={closePicker}
               >
                 {t("workspacePanel.addRuntime")}
               </Button>
             ) : null}
           </Stack>
-        </Alert>
+        </Alert>,
       );
     }
     if (state.type === "REMOVING") {
-      return (
+      return renderStatusViewport(
         <Alert color="yellow" title={t("workspacePanel.removingTitle")}>
           {t("workspacePanel.removingDescription")}
-        </Alert>
+        </Alert>,
       );
     }
     return null;
@@ -118,7 +130,7 @@ export function AgentWorkspaceDirectoryPickerModal({
       (lifecycle === null && workspace.type === "CONNECTING");
 
     if (isTransitioning) {
-      return (
+      return renderStatusViewport(
         <Stack gap="md">
           {lifecycleStatus}
           <Center py="xl">
@@ -137,7 +149,7 @@ export function AgentWorkspaceDirectoryPickerModal({
               </Button>
             </Stack>
           </Center>
-        </Stack>
+        </Stack>,
       );
     }
 
@@ -145,7 +157,7 @@ export function AgentWorkspaceDirectoryPickerModal({
       workspace.type === "CONTROL_UNAVAILABLE" ||
       workspace.type === "READ_FAILED"
     ) {
-      return (
+      return renderStatusViewport(
         <Stack gap="md">
           {lifecycleStatus}
           <Alert
@@ -175,12 +187,12 @@ export function AgentWorkspaceDirectoryPickerModal({
               </Group>
             </Stack>
           </Alert>
-        </Stack>
+        </Stack>,
       );
     }
 
     if (workspace.type !== "READY") {
-      return (
+      return renderStatusViewport(
         <Stack gap="md">
           {lifecycleStatus}
           <Alert color="blue" title={t("workspacePanel.inactiveTitle")}>
@@ -200,7 +212,7 @@ export function AgentWorkspaceDirectoryPickerModal({
               </Group>
             </Stack>
           </Alert>
-        </Stack>
+        </Stack>,
       );
     }
 
@@ -223,9 +235,15 @@ export function AgentWorkspaceDirectoryPickerModal({
         : null;
 
     return (
-      <Stack className={classes.readyContent} gap="sm">
-        <Group justify="space-between" gap="sm" wrap="nowrap">
-          <Stack gap="xs" style={{ minWidth: 0, flex: 1 }}>
+      <section
+        aria-label={t("projectPickerTitle")}
+        className={classes.directoryBrowser}
+      >
+        <header
+          className={classes.directoryToolbar}
+          data-testid="agent-workspace-picker-toolbar"
+        >
+          <Stack className={classes.currentPath} gap="xs">
             <Text c="dimmed" size="xs">
               {t("projectPickerCurrentPath")}
             </Text>
@@ -233,7 +251,7 @@ export function AgentWorkspaceDirectoryPickerModal({
               {state.currentPath}
             </Text>
           </Stack>
-          <Group gap="xs">
+          <Group className={classes.directoryActions} gap="xs" wrap="nowrap">
             <Button
               disabled={state.currentPath === workspaceRoot}
               leftSection={<IconFolderPlus size={rem(16)} />}
@@ -254,14 +272,14 @@ export function AgentWorkspaceDirectoryPickerModal({
               </ActionIcon>
             </Tooltip>
           </Group>
-        </Group>
+        </header>
         <div
           aria-label={t("projectPickerTitle")}
           className={classes.directoryList}
           data-testid="agent-workspace-picker-directory-list"
           tabIndex={0}
         >
-          <Stack gap="xs" style={{ minWidth: 0, width: "100%" }}>
+          <div className={classes.directoryItems}>
             {parent ? (
               <Button
                 fullWidth
@@ -276,60 +294,50 @@ export function AgentWorkspaceDirectoryPickerModal({
             {directoryEntries.map((entry) => (
               <Paper
                 key={entry.path}
-                data-testid={`agent-workspace-picker-directory-${entry.path}`}
+                className={classes.directoryRow}
                 withBorder
                 px="sm"
                 py="xs"
                 radius="sm"
-                style={{
-                  boxSizing: "border-box",
-                  cursor: "pointer",
-                  maxWidth: "100%",
-                  minWidth: 0,
-                  width: "100%",
-                }}
-                onClick={() => onOpenDirectory(entry.path)}
               >
-                <Group
-                  justify="space-between"
-                  wrap="nowrap"
-                  gap="xs"
-                  style={{ maxWidth: "100%", minWidth: 0, width: "100%" }}
+                <UnstyledButton
+                  className={classes.directoryOpenButton}
+                  data-testid={`agent-workspace-picker-directory-${entry.path}`}
+                  onClick={() => onOpenDirectory(entry.path)}
                 >
-                  <Group
-                    gap="sm"
-                    style={{ flex: "1 1 auto", minWidth: 0 }}
-                    wrap="nowrap"
+                  {entry.repositoryType === "git" ? (
+                    <IconBrandGit
+                      className={classes.directoryIcon}
+                      color="var(--mantine-color-grape-6)"
+                      size={rem(16)}
+                    />
+                  ) : (
+                    <IconFolder
+                      className={classes.directoryIcon}
+                      size={rem(16)}
+                    />
+                  )}
+                  <Text
+                    className={classes.directoryName}
+                    fw={500}
+                    size="sm"
+                    truncate
                   >
-                    {entry.repositoryType === "git" ? (
-                      <IconBrandGit
-                        color="var(--mantine-color-grape-6)"
-                        size={rem(16)}
-                        style={{ flex: "0 0 auto" }}
-                      />
-                    ) : (
-                      <IconFolder size={rem(16)} style={{ flex: "0 0 auto" }} />
-                    )}
-                    <Text fw={500} size="sm" truncate style={{ minWidth: 0 }}>
-                      {basename(entry.path)}
-                    </Text>
-                  </Group>
-                  <Tooltip label={t("projectPickerSelectDirectory")}>
-                    <ActionIcon
-                      data-testid={`agent-workspace-picker-select-${entry.path}`}
-                      aria-label={t("projectPickerSelectDirectory")}
-                      size={rem(30)}
-                      style={{ flex: "0 0 auto" }}
-                      variant="light"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onSelectDirectory(entry);
-                      }}
-                    >
-                      <IconFolderPlus size={rem(15)} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
+                    {basename(entry.path)}
+                  </Text>
+                </UnstyledButton>
+                <Tooltip label={t("projectPickerSelectDirectory")}>
+                  <ActionIcon
+                    data-testid={`agent-workspace-picker-select-${entry.path}`}
+                    aria-label={t("projectPickerSelectDirectory")}
+                    className={classes.directorySelectButton}
+                    size={rem(30)}
+                    variant="light"
+                    onClick={() => onSelectDirectory(entry)}
+                  >
+                    <IconFolderPlus size={rem(15)} />
+                  </ActionIcon>
+                </Tooltip>
               </Paper>
             ))}
             {directoryEntries.length === 0 ? (
@@ -337,72 +345,77 @@ export function AgentWorkspaceDirectoryPickerModal({
                 {t("projectPickerNoDirectories")}
               </Text>
             ) : null}
-          </Stack>
+          </div>
         </div>
-      </Stack>
+      </section>
     );
   };
 
+  const renderPickerContent = (): React.ReactElement | null => {
+    if (state.type === "LOADING") {
+      return renderStatusViewport(
+        <Center py="xl">
+          <Loader size="sm" />
+        </Center>,
+      );
+    }
+    if (state.type === "ERROR") {
+      return renderStatusViewport(<Alert color="red">{state.message}</Alert>);
+    }
+    return renderCapabilityContent() ?? renderServerContent();
+  };
+
   return (
-    <Modal
-      centered
-      data-testid="agent-workspace-directory-picker"
-      opened={opened}
-      size="lg"
-      title={t("projectPickerTitle")}
-      classNames={{
-        body: classes.modalBody,
-        content: classes.modalContent,
-      }}
-      onClose={onClose}
-    >
-      <Stack className={classes.bodyStack} gap="sm">
-        <Text c="dimmed" size="sm">
-          {t("projectPickerDescription")}
-        </Text>
-        {state.type === "LOADING" ? (
-          <Center py="xl">
-            <Loader size="sm" />
-          </Center>
-        ) : null}
-        {state.type === "ERROR" ? (
-          <Alert color="red">{state.message}</Alert>
-        ) : null}
-        {renderCapabilityContent()}
-        {renderServerContent()}
-        <Modal
-          centered
-          opened={restartConfirmOpen}
-          title={t("workspacePanel.restartConfirmTitle")}
-          onClose={() => setRestartConfirmOpen(false)}
-        >
-          <Stack gap="md">
-            <Text size="sm">
-              {t("workspacePanel.restartConfirmDescription")}
-            </Text>
-            <Alert color="blue">
-              {t("workspacePanel.restartPreservationNotice")}
-            </Alert>
-            <Group justify="flex-end">
-              <Button
-                variant="default"
-                onClick={() => setRestartConfirmOpen(false)}
-              >
-                {t("workspacePanel.cancel")}
-              </Button>
-              <Button
-                loading={state.type === "SERVER" ? state.isRestarting : false}
-                onClick={() => {
-                  setRestartConfirmOpen(false);
-                  onRestartRuntime();
-                }}
-              >
-                {t("workspacePanel.confirmRestart")}
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
-      </Stack>
-    </Modal>
+    <>
+      <Modal
+        centered
+        data-testid="agent-workspace-directory-picker"
+        opened={opened}
+        size="lg"
+        title={t("projectPickerTitle")}
+        classNames={{
+          body: classes.modalBody,
+          content: classes.modalContent,
+        }}
+        onClose={closePicker}
+      >
+        <div className={classes.pickerLayout}>
+          <Text c="dimmed" size="sm">
+            {t("projectPickerDescription")}
+          </Text>
+          <div className={classes.stateSlot}>{renderPickerContent()}</div>
+        </div>
+      </Modal>
+      <Modal
+        centered
+        opened={opened && restartConfirmOpen}
+        title={t("workspacePanel.restartConfirmTitle")}
+        onClose={() => setRestartConfirmOpen(false)}
+      >
+        <Stack gap="md">
+          <Text size="sm">{t("workspacePanel.restartConfirmDescription")}</Text>
+          <Alert color="blue">
+            {t("workspacePanel.restartPreservationNotice")}
+          </Alert>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setRestartConfirmOpen(false)}
+            >
+              {t("workspacePanel.cancel")}
+            </Button>
+            <Button
+              loading={state.type === "SERVER" ? state.isRestarting : false}
+              onClick={() => {
+                setRestartConfirmOpen(false);
+                onRestartRuntime();
+              }}
+            >
+              {t("workspacePanel.confirmRestart")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   );
 }
