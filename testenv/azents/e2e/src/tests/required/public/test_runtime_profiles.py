@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -515,6 +516,7 @@ async def _assert_stale_runner_action_is_fenced(
     handle: str,
     headers: dict[str, str],
     runtime_control_container: DockerContainer,
+    valkey_container: DockerContainer,
 ) -> None:
     """Replace one probe, submit one stale action, and preserve current state."""
     inflight: _InflightProbeOperation | None = None
@@ -590,9 +592,23 @@ async def _assert_stale_runner_action_is_fenced(
                 )
         elif action == "result":
             assert inflight is not None
-            assert not inflight.response_task.done(), (
-                "Public operation waiter completed before stale-result injection"
+            redis = Redis(
+                host=valkey_container.get_container_host_ip(),
+                port=int(valkey_container.get_exposed_port(6379)),
+                decode_responses=True,
             )
+            operation_key = (
+                "azents:agent-runtime:coordination:v2:operation:"
+                f"operation:{inflight.operation.request_id}"
+            )
+            try:
+                before_operation = redis.get(operation_key)
+            finally:
+                redis.close()
+            assert isinstance(before_operation, str)
+            operation_state = json.loads(before_operation)
+            assert operation_state["status"] == "running"
+            assert operation_state["final_event_cursor"] is None
             await client.append_runner_event(
                 RunnerOperationEvent(
                     request_id=inflight.operation.request_id,
@@ -610,6 +626,15 @@ async def _assert_stale_runner_action_is_fenced(
                     generation=accepted.generation,
                     heartbeat_at=datetime.now(UTC),
                 )
+            redis = Redis(
+                host=valkey_container.get_container_host_ip(),
+                port=int(valkey_container.get_exposed_port(6379)),
+                decode_responses=True,
+            )
+            try:
+                assert redis.get(operation_key) == before_operation
+            finally:
+                redis.close()
             await _assert_inflight_request_did_not_succeed(inflight)
             _assert_workspace_path_missing(
                 workspace_api,
@@ -655,6 +680,7 @@ async def _assert_stale_runner_actions_are_fenced(
     handle: str,
     headers: dict[str, str],
     runtime_control_container: DockerContainer,
+    valkey_container: DockerContainer,
 ) -> None:
     """Exercise stale heartbeat, report, result, and revoke through real gRPC."""
     for action in ("heartbeat", "report", "result", "revoke"):
@@ -669,6 +695,7 @@ async def _assert_stale_runner_actions_are_fenced(
             handle=handle,
             headers=headers,
             runtime_control_container=runtime_control_container,
+            valkey_container=valkey_container,
         )
 
 
@@ -809,6 +836,7 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
             handle=handle,
             headers=headers,
             runtime_control_container=azents_runtime_control_container,
+            valkey_container=valkey_container,
         )
     )
 
