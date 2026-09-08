@@ -15,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/repos/toolkit_operations/**
+  - python/apps/azents/src/azents/repos/github_user_installation/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
@@ -70,7 +71,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-08
-spec_version: 112
+spec_version: 113
 ---
 
 # Toolkit
@@ -976,6 +977,11 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 113) — Added the App-scoped GitHub installation
+  authority repository to the Toolkit implementation paths. The existing
+  create, update, and connection-test contract still revalidates every selected
+  installation against the current User and effective Platform App before a
+  credential mutation.
 - **2026-09-08** (spec_version 112) — Toolkit shared and Agent-owned management
   now calls completed repository operations. Provider validation and Platform
   settings resolution run outside DB transactions; final credential mutations
