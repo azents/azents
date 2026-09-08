@@ -9,6 +9,9 @@ code_paths:
   - python/apps/azents/src/azents/api/public/scheduled_task/**
   - python/apps/azents/src/azents/api/testenv/scheduler/**
   - python/apps/azents/src/azents/engine/tools/scheduled.py
+  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
+  - python/apps/azents/src/azents/core/external_channel_provider.py
+  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task.py
   - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
@@ -29,8 +32,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-09-07
-spec_version: 10
+last_verified_at: 2026-09-08
+spec_version: 11
 ---
 
 # Scheduled Task Domain Spec
@@ -237,7 +240,24 @@ A Task may target one exact connected Slack or Discord Binding.
   Missing-host recovery creation uses the same silent path, while updates edit the
   retained Tracker. Registration, deletion, progress replies, and terminal results
   retain their existing notification behavior.
+- The initial Discord Tracker Embed is titled `Scheduled Task`. Its body shows the
+  Schedule title on the first line and the existing human-readable recurring schedule
+  or one-time execution time on the next line. The objective remains omitted, and
+  later Agent-authored progress retains its explicit progress title and task list.
 - Progress messages and Tracker updates are immediate one-attempt effects.
+- Scheduled progress preparation and Tracker claim commit in one repository-owned
+  database transaction. A second completed database-only admission operation locks
+  and revalidates the current started cycle, Run, exact cycle version, and Tracker
+  desired revision before any provider or Runtime work begins. A cycle that ended
+  or was superseded before admission produces only the existing `not_attempted`
+  outcomes.
+- Admitted reply parts and the Tracker mutation execute without an active database
+  transaction, in reply-part order with the Tracker last. Tracker settlement uses
+  a fresh repository-owned transaction and the existing cycle and desired-revision
+  fences, so a later revision or terminalization cannot accept the stale provider
+  outcome. Admission authorizes the immediate one-attempt effect; without a lock
+  spanning provider I/O, a revision committed after admission may precede that
+  external call, and no retry, replay, queue, or fallback is created for that race.
 - Terminal result publication occurs only after the canonical Session result
   commits.
 - Slack exact-thread terminal parts use reply broadcast for parent surfacing.
@@ -292,6 +312,10 @@ and result text.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 11) — Split Scheduled progress into
+  repository-owned preparation and admission, transaction-free provider/Runtime
+  effects, and fresh fenced Tracker settlement while retaining one-attempt
+  ordering and explicitly recording the lock-free admission-to-call race.
 - **2026-09-07** (spec_version 10) — Made Discord Scheduled Task progress Tracker
   creation notification-suppressed while preserving registration, deletion, reply,
   terminal-result, update, cleanup, and Slack behavior.

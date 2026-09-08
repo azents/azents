@@ -49,3 +49,35 @@ async def test_rate_limiter_rejects_excess_attempt_with_ttl() -> None:
         await limiter.acquire(grant_id="grant-1", source_address="192.0.2.10")
 
     assert error.value.retry_after_seconds == 17
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_reset_opens_fresh_best_effort_window(
+    redis_url: str,
+) -> None:
+    """An empty Redis store resets abuse counting without retaining authority."""
+    redis = Redis.from_url(redis_url)
+    await redis.flushall()
+    limiter = RedisRuntimeProviderEnrollmentRateLimiter(
+        redis,
+        max_attempts=1,
+    )
+    try:
+        await limiter.acquire(
+            grant_id="grant-reset",
+            source_address="192.0.2.20",
+        )
+        with pytest.raises(RuntimeProviderEnrollmentRateLimited):
+            await limiter.acquire(
+                grant_id="grant-reset",
+                source_address="192.0.2.20",
+            )
+
+        await redis.flushall()
+
+        await limiter.acquire(
+            grant_id="grant-reset",
+            source_address="192.0.2.20",
+        )
+    finally:
+        await redis.aclose()

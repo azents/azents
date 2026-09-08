@@ -19,6 +19,8 @@ from azents.core.config import (
     ExternalChannelIngressQuiesceConfig,
 )
 from azents.core.deps import get_config
+from azents.core.external_channel_provider import DiscordConnectionCredentials
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
@@ -30,7 +32,6 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
-from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
     project_discord_message,
@@ -56,7 +57,6 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.provider_control import (
     get_external_channel_provider_control_service,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
 )

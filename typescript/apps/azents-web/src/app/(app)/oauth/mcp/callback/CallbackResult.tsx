@@ -7,7 +7,7 @@
  * then renders success/failure UI.
  */
 
-import { Alert, Text } from "@mantine/core";
+import { Alert, Anchor, Stack, Text } from "@mantine/core";
 import { IconCheck, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
@@ -15,11 +15,13 @@ import { useEffect } from "react";
 interface CallbackResultProps {
   success: boolean;
   message: string | null;
+  returnHref?: string | null;
 }
 
 export function CallbackResult({
   success,
   message,
+  returnHref = null,
 }: CallbackResultProps): React.ReactElement {
   const t = useTranslations("oauth");
 
@@ -35,20 +37,30 @@ export function CallbackResult({
 
   if (success) {
     return (
-      <Alert icon={<IconCheck size={24} />} color="green" variant="light">
-        <Text>{t("callbackSuccess")}</Text>
-      </Alert>
+      <Stack align="center">
+        <Alert icon={<IconCheck size={24} />} color="green" variant="light">
+          <Text>{t("callbackSuccess")}</Text>
+        </Alert>
+        {returnHref && (
+          <Anchor href={returnHref}>{t("returnToAgentSettings")}</Anchor>
+        )}
+      </Stack>
     );
   }
 
   return (
-    <Alert icon={<IconX size={24} />} color="red" variant="light">
-      <Text>{t("callbackError")}</Text>
-      {message && (
-        <Text size="sm" c="dimmed" mt="xs">
-          {message}
-        </Text>
+    <Stack align="center">
+      <Alert icon={<IconX size={24} />} color="red" variant="light">
+        <Text>{t("callbackError")}</Text>
+        {message && (
+          <Text size="sm" c="dimmed" mt="xs">
+            {message}
+          </Text>
+        )}
+      </Alert>
+      {returnHref && (
+        <Anchor href={returnHref}>{t("returnToAgentSettings")}</Anchor>
       )}
-    </Alert>
+    </Stack>
   );
 }

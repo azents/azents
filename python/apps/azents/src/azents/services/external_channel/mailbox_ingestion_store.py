@@ -36,6 +36,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_session_presence import (
     session_presence_payload,
     setup_required_payload,
@@ -93,7 +94,6 @@ from azents.services.external_channel.participation_state import (
     projection_with_setup_source,
     setup_source_from_projection,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector_state import (
     ExternalChannelSelectorState,
     projection_with_selector_state,
@@ -2258,8 +2258,9 @@ def _tracker_visibility(
     provider: ExternalChannelProvider,
     invocation: bool,
 ) -> Literal["hidden", "visible"]:
-    """Derive conversational Tracker eligibility from explicit invocation."""
-    del provider
+    """Keep Discord automatic activity on typing instead of a Tracker."""
+    if provider is ExternalChannelProvider.DISCORD:
+        return "hidden"
     return "visible" if invocation else "hidden"
 
 

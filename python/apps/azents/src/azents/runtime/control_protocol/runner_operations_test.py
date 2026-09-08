@@ -53,6 +53,9 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+from azents.testing.runtime_coordination import (
+    FakeRuntimeControlProtocolService,
+)
 
 
 @pytest.mark.asyncio
@@ -181,7 +184,7 @@ async def test_run_bash_cancel_check_records_cancelled_final() -> None:
         )
 
     replies = await harness.control.read_replies(
-        reply_stream_id="runner:runtime-1:generation:1:replies",
+        reply_stream_id=("runner:runtime-1:generation:0000000000000000001:replies"),
         after_cursor=None,
         limit=10,
     )
@@ -300,7 +303,7 @@ async def test_read_file_deadline_records_final_error_when_runner_drops_reply() 
         )
 
     replies = await harness.control.read_replies(
-        reply_stream_id="runner:runtime-1:generation:1:replies",
+        reply_stream_id=("runner:runtime-1:generation:0000000000000000001:replies"),
         after_cursor=None,
         limit=10,
     )
@@ -1363,7 +1366,7 @@ async def _make_harness(
     body_chunk_size_bytes: int = 1024 * 1024,
 ) -> _Harness:
     store = _ObservableStore()
-    control = RuntimeControlProtocolService(
+    control = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=_RequestIds(),
     )

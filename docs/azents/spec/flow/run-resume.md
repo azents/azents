@@ -17,7 +17,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
   - python/apps/azents/src/azents/repos/session_execution/**
+  - python/apps/azents/src/azents/runtime/control_protocol/reconciler.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
@@ -26,8 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-09-02
-spec_version: 32
+last_verified_at: 2026-09-08
+spec_version: 33
 ---
 
 # Run Resume
@@ -101,6 +103,17 @@ Canonical recovery snapshots include Agent Runtime capability/version and the ro
 state. Runtime-free Runs may resume model, transcript, managed VFS, Memory, Goal, Todo, subagent, and
 compatible remote work without ensuring a Runtime. Runtime-dependent recovery requires the captured
 managed capability and an eligible binding, then rechecks current state/version before dispatch.
+
+Runtime lifecycle Provider dispatch is not resumed from an in-memory call result. A completed
+claim-free database preflight snapshots current authority before coordination lookup. A missing
+Provider connection records `disconnected` without consuming the lifecycle claim. Only after a live
+connection exists does a second completed database operation revalidate authority, claim the
+lifecycle generation, and validate configuration; Provider I/O then runs without an active database
+transaction. A cancellation or ambiguous dispatch exception propagates without an immediate
+outcome write or result-driven replay. Later convergence uses the existing durable lifecycle claim,
+desired/Provider/configuration generation fences, current Provider evidence, and ordinary
+reconciliation retry rules. A stale post-dispatch outcome cannot overwrite a newer Runtime
+generation or capability.
 
 Before recovery promotes any pending input, `RunExecutor` ensures the selected run's VFS projection. A projection already stored on the run is returned unchanged, so package deployment changes and Toolkit attachment changes cannot alter managed Skill or import bytes during takeover. A pre-migration run with a null projection receives one at this boundary before its first post-deployment promotion.
 
@@ -325,6 +338,9 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 33) — Documented repository-owned Runtime
+  lifecycle dispatch admission/outcome boundaries and preserved
+  generation-fenced reconciliation after cancellation or ambiguous dispatch.
 - **2026-08-23** (spec_version 31) — Documented closed operation-action
   decode/dispatch at the existing owner-generation and no-reexecution recovery
   boundary.

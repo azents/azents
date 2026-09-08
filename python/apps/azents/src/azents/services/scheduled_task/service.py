@@ -44,6 +44,9 @@ from azents.repos.scheduled_task.data import (
     ScheduledTaskCreate,
     ScheduledTaskReplace,
 )
+from azents.repos.scheduled_task.presentation import (
+    render_scheduled_task_runtime_message,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import (
     InvalidScheduledTaskSchedule,
@@ -54,9 +57,6 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleSnapshot,
-)
-from azents.services.scheduled_task.rendering import (
-    render_scheduled_task_runtime_message,
 )
 
 logger = logging.getLogger(__name__)

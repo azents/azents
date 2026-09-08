@@ -1,18 +1,19 @@
 """Deterministic Discord message-part presentation tests."""
 
+from azents.core.discord_external_channel_presentation import (
+    DISCORD_DELIVERY_TEXT_LIMIT,
+    render_discord_progress,
+    render_discord_session_navigation_components,
+    render_discord_session_presence,
+    render_scheduled_task_discord_progress,
+    split_discord_markdown,
+)
 from azents.core.enums import ExternalChannelWorkTaskStatus
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkSource,
 )
 from azents.repos.external_channel.work_data import ChannelWorkTask
-from azents.services.external_channel.discord_presentation import (
-    DISCORD_DELIVERY_TEXT_LIMIT,
-    render_discord_progress,
-    render_discord_session_navigation_components,
-    render_discord_session_presence,
-    split_discord_markdown,
-)
 
 
 def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None:
@@ -165,6 +166,30 @@ def test_checking_progress_uses_one_embed_tracker() -> None:
         {
             "title": "Channel Work",
             "description": "◉ Agent is checking your message",
+            "color": 0x5865F2,
+        }
+    ]
+
+
+def test_scheduled_task_checking_progress_uses_task_title_and_schedule() -> None:
+    """Initial Scheduled Task activity presents its identity before timing."""
+    presentation = render_scheduled_task_discord_progress(
+        ExternalChannelDesiredProgress(
+            schema_version=2,
+            state="checking",
+            title=None,
+            tasks=[],
+        ),
+        scheduled_task_title="Daily report",
+        scheduled_task_schedule="Every weekday at 9:00 AM EDT",
+        work_id="work-1",
+        desired_progress_revision=1,
+    )
+
+    assert presentation.pages[0].embeds == [
+        {
+            "title": "Scheduled Task",
+            "description": "Daily report\nEvery weekday at 9:00 AM EDT",
             "color": 0x5865F2,
         }
     ]

@@ -11,6 +11,7 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelOutboundFileManifest,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectOutcome
 from azents.core.tools import (
     EmptyToNone,
     ResolveContext,
@@ -40,6 +41,12 @@ from azents.repos.scheduled_task.data import (
     MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
     ScheduledTask,
 )
+from azents.repos.scheduled_task.presentation import (
+    render_scheduled_task_compaction_snapshot,
+    render_scheduled_task_cycle_guidance,
+    render_scheduled_task_runtime_message,
+    replace_scheduled_compaction_snapshot,
+)
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
@@ -48,14 +55,7 @@ from azents.repos.scheduled_task_cycle.data import (
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectOutcome
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.rendering import (
-    render_scheduled_task_compaction_snapshot,
-    render_scheduled_task_cycle_guidance,
-    render_scheduled_task_runtime_message,
-    replace_scheduled_compaction_snapshot,
-)
 from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
 

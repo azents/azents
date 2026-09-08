@@ -11,10 +11,11 @@ from typing import Literal, Protocol
 
 import httpx
 
-from azents.core.external_channel_title import normalize_discord_thread_title
-from azents.services.external_channel.data import (
+from azents.core.external_channel_provider import (
     DiscordThreadAutoArchiveDurationMinutes,
 )
+from azents.core.external_channel_provider_effect import ProviderOperationKey
+from azents.core.external_channel_title import normalize_discord_thread_title
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
@@ -30,7 +31,6 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKThread,
     DiscordSDKUnavailable,
 )
-from azents.services.external_channel.provider_effect import ProviderOperationKey
 
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024

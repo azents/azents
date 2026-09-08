@@ -78,6 +78,13 @@ def _agent_mailbox_message_kind(value: object) -> AgentMailboxMessageKind:
     return _agent_mailbox_message_kind_adapter.validate_python(value)
 
 
+def _agent_mailbox_source_path(value: object) -> str:
+    """Validate one Agent mailbox source path."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("Agent mailbox source path is missing")
+    return value
+
+
 def _live_event_key(session_id: str) -> str:
     return f"azents:chat:{session_id}:live_events"
 
@@ -384,6 +391,9 @@ def mailbox_item_to_pending_projection(
                 type="agent_message",
                 message_kind=_agent_mailbox_message_kind(
                     item.metadata.get("message_kind")
+                ),
+                source_path=_agent_mailbox_source_path(
+                    item.metadata.get("source_path")
                 ),
                 content=item.content,
             )

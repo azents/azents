@@ -51,6 +51,39 @@ Runtime Control requires an operator-owned TLS Secret whenever the component or 
 
 The chart does not render PostgreSQL, Redis/Valkey, object storage, or other external service resources. Consumers provide those services through their own platform layer and configure this chart with endpoints and existing Kubernetes Secrets.
 
+Redis/Valkey is live coordination only. Azents requires connectivity while serving
+distributed work, but correctness does not depend on Redis persistence, backup,
+retention, replication, or restoration. An empty replacement instance is supported:
+Provider and Runner streams reconnect, active volatile operations fail closed, and
+durable PostgreSQL-backed recovery creates fresh work. Operators may still deploy
+Redis HA to reduce disruption, but no startup or recovery procedure may require old
+keys.
+
+## Runtime Control Generation-Authority Cutover
+
+The PostgreSQL connection-generation activation is a one-time non-rolling Runtime
+Control boundary. Do not let a legacy Runtime Control replica overlap the migration or
+the first new Runtime Control replica. Use three chart releases while preserving the
+consumer's complete values object:
+
+1. Deploy the current image with `server.runtimeControl.replicas=0`,
+   `server.runtimeControl.autoscaling.enabled=false`, and
+   `server.runtimeControl.pdb.enabled=false`. Verify that the Runtime Control
+   Deployment has zero available replicas and no HPA can scale it up.
+2. Deploy the new image with the same scale-zero values. A new non-Runtime-Control
+   server pod runs the normal schema upgrade while no legacy allocator is serving.
+   Verify the expected database revision and Runtime connection-generation cutover
+   marker before continuing.
+3. Deploy the new image again with the normal Runtime Control replica, autoscaling, and
+   PDB values restored. Runtime Control startup refuses to serve without the expected
+   cutover marker; Provider and Runner reconnect loops populate the fresh v2
+   coordination namespaces.
+
+After any new generation is accepted, rollback to a legacy Runtime Control image is
+forbidden. Repair or redeploy the new release and preserve PostgreSQL generation
+authority; Redis may be replaced empty. This is a release procedure, not a permanent
+Deployment strategy change.
+
 ## Render Surface
 
 The chart currently renders:

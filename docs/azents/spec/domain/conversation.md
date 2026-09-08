@@ -949,9 +949,10 @@ A tool result or provider call with visible attachments closes the preceding Act
 the normal standalone message attachment surface. The raw tool card is not duplicated inside Activity, so
 images and non-image files share the same attachment, preview, and download behavior without a
 payload-validation or image-only promotion path.
-Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
-a live entity and durable event describe the same semantic output, the durable projection replaces
-the live projection without a duplicate or disappearance.
+Live `agent_message` events and typed pending Agent-message mailbox items carry the canonical source
+SessionAgent path and use the same source-labeled internal-agent row as the durable form. When a live
+entity and durable event describe the same semantic output, the durable projection replaces the live
+projection without a duplicate or disappearance.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:

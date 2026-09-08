@@ -158,6 +158,7 @@ async def test_initial_state_sends_replay_controls_and_opaque_output() -> None:
         "replay_truncated",
         "replay_end",
     ]
+    assert controls[0]["runner_generation"] == "4"
     assert websocket.bytes[0][10:] == b"\xffreplay"
 
 

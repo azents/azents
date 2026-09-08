@@ -1,5 +1,7 @@
 """AuthService tests."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +18,9 @@ from azents.core.config import (
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.email_verification import EmailVerificationRepository
+from azents.repos.email_verification_operation import (
+    EmailVerificationOperationRepository,
+)
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
 from azents.repos.user import UserRepository
@@ -66,12 +71,17 @@ def _make_email_service() -> EmailService:
 
 def _make_auth_service(
     session_manager: SessionManager[AsyncSession],
+    *,
+    email_service: EmailService | None = None,
 ) -> AuthService:
     """Create AuthService for tests."""
-    email_service = _make_email_service()
+    resolved_email_service = email_service or _make_email_service()
     return AuthService(
-        email_service=email_service,
-        email_verification_repo=EmailVerificationRepository(),
+        email_service=resolved_email_service,
+        email_verification_operation_repository=EmailVerificationOperationRepository(
+            email_verification_repository=EmailVerificationRepository(),
+            session_manager=session_manager,
+        ),
         password_login_repo=PasswordLoginRepository(),
         user_repo=UserRepository(),
         user_email_repo=UserEmailRepository(),
@@ -80,7 +90,7 @@ def _make_auth_service(
             session_manager=session_manager,
             providers=[
                 PasswordCredentialProvider(),
-                EmailCredentialProvider(email_service=email_service),
+                EmailCredentialProvider(email_service=resolved_email_service),
             ],
             user_repo=UserRepository(),
         ),
@@ -89,6 +99,45 @@ def _make_auth_service(
         auth_config=_TEST_AUTH_CONFIG,
         email_config=None,
     )
+
+
+class _ObservedSessionManager:
+    """Record whether a repository-owned database operation is active."""
+
+    def __init__(self, delegate: SessionManager[AsyncSession]) -> None:
+        self.delegate = delegate
+        self.active = False
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[AsyncSession]:
+        self.active = True
+        try:
+            async with self.delegate() as session:
+                yield session
+        finally:
+            self.active = False
+
+
+class _TransactionAssertingEmailService(EmailService):
+    """Assert delivery occurs after the operation repository closes its session."""
+
+    def __init__(self, observed_session_manager: _ObservedSessionManager) -> None:
+        super().__init__(config=None, ses_client=None)
+        self.observed_session_manager = observed_session_manager
+        self.delivery_count = 0
+
+    async def send_verification_code(
+        self,
+        *,
+        to_email: str,
+        code: str,
+        expire_minutes: int,
+        language: str = "ko",
+    ) -> None:
+        """Record delivery only after the database operation has completed."""
+        del to_email, code, expire_minutes, language
+        assert not self.observed_session_manager.active
+        self.delivery_count += 1
 
 
 class TestAuthServiceSendCode:
@@ -108,6 +157,21 @@ class TestAuthServiceSendCode:
         assert output.csrf_token
         assert len(output.csrf_token) == 64  # hex(32) = 64 characters
 
+    async def test_send_code_delivers_email_after_repository_transaction(
+        self, rdb_session_manager: SessionManager[AsyncSession]
+    ) -> None:
+        """SMTP delivery sees no active database transaction."""
+        observed_session_manager = _ObservedSessionManager(rdb_session_manager)
+        email_service = _TransactionAssertingEmailService(observed_session_manager)
+        service = _make_auth_service(
+            observed_session_manager,
+            email_service=email_service,
+        )
+
+        await service.send_code(SendCodeInput(email="post-commit@example.com"))
+
+        assert email_service.delivery_count == 1
+
 
 class TestAuthServiceVerifyCode:
     """verify_code tests."""
@@ -120,10 +184,12 @@ class TestAuthServiceVerifyCode:
         email = "verify-new@example.com"
         send_output = await service.send_code(SendCodeInput(email=email))
 
-        async with rdb_session_manager() as session:
-            verification = await service.email_verification_repo.get_by_email_and_csrf(
-                session, email, send_output.csrf_token
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=send_output.csrf_token,
             )
+        )
         assert verification is not None
 
         result = await service.verify_code(
@@ -150,10 +216,12 @@ class TestAuthServiceVerifyCode:
             await UserRepository().create(session, UserCreate(email=email))
 
         send2 = await service.send_code(SendCodeInput(email=email))
-        async with rdb_session_manager() as session:
-            v2 = await service.email_verification_repo.get_by_email_and_csrf(
-                session, email, send2.csrf_token
+        v2 = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=send2.csrf_token,
             )
+        )
         assert v2 is not None
         result2 = await service.verify_code(
             VerifyCodeInput(email=email, code=v2.code, csrf_token=send2.csrf_token)
@@ -208,6 +276,35 @@ class TestAuthServiceVerifyCode:
         assert isinstance(result, Failure)
         assert isinstance(result.error, InvalidVerificationCode)
 
+    async def test_verify_code_duplicate_returns_existing_invalid_code_error(
+        self, rdb_session_manager: SessionManager[AsyncSession]
+    ) -> None:
+        """A second completed verification preserves the invalid-code result."""
+        service = _make_auth_service(rdb_session_manager)
+        email = "verify-duplicate@example.com"
+        async with rdb_session_manager() as session:
+            await UserRepository().create(session, UserCreate(email=email))
+        sent = await service.send_code(SendCodeInput(email=email))
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=sent.csrf_token,
+            )
+        )
+        assert verification is not None
+        input_data = VerifyCodeInput(
+            email=email,
+            code=verification.code,
+            csrf_token=sent.csrf_token,
+        )
+
+        first = await service.verify_code(input_data)
+        duplicate = await service.verify_code(input_data)
+
+        assert isinstance(first, Success)
+        assert isinstance(duplicate, Failure)
+        assert isinstance(duplicate.error, InvalidVerificationCode)
+
 
 class TestAuthServiceRefreshToken:
     """refresh_token tests."""
@@ -220,10 +317,12 @@ class TestAuthServiceRefreshToken:
         async with session_manager() as session:
             await UserRepository().create(session, UserCreate(email=email))
         send_output = await service.send_code(SendCodeInput(email=email))
-        async with session_manager() as session:
-            verification = await service.email_verification_repo.get_by_email_and_csrf(
-                session, email, send_output.csrf_token
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=send_output.csrf_token,
             )
+        )
         assert verification is not None
         result = await service.verify_code(
             VerifyCodeInput(
@@ -283,10 +382,12 @@ class TestAuthServiceLogout:
         async with rdb_session_manager() as session:
             await UserRepository().create(session, UserCreate(email=email))
         send_output = await service.send_code(SendCodeInput(email=email))
-        async with rdb_session_manager() as session:
-            verification = await service.email_verification_repo.get_by_email_and_csrf(
-                session, email, send_output.csrf_token
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=send_output.csrf_token,
             )
+        )
         assert verification is not None
         result = await service.verify_code(
             VerifyCodeInput(

@@ -5,10 +5,11 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 
 from azents.runtime.coordination.data import (
-    JsonValue,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
+    RuntimeConnectionPromotionResult,
+    RuntimeConnectionPromotionStatus,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
     RuntimeFencedMutationResult,
@@ -83,7 +84,10 @@ class InMemoryRuntimeCoordinationStore:
         self._connections: dict[
             tuple[RuntimeConnectionKind, str], RuntimeConnectionRecord
         ] = {}
-        self._connection_generations: dict[tuple[RuntimeConnectionKind, str], int] = {}
+        self._connection_candidates: dict[
+            tuple[RuntimeConnectionKind, str, int, str],
+            RuntimeConnectionRecord,
+        ] = {}
         self._system_metrics: dict[tuple[str, int], _InMemorySystemMetricsSeries] = {}
 
     async def append_operation_request_if_connection_current(
@@ -619,36 +623,76 @@ class InMemoryRuntimeCoordinationStore:
         async with self._lock:
             self._operation_metadata.pop(operation_id, None)
 
-    async def register_connection(
+    async def stage_connection_candidate(
+        self,
+        *,
+        record: RuntimeConnectionRecord,
+        publication_token: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """Stage one invisible connection publication candidate once."""
+        if not publication_token:
+            raise ValueError("Connection publication token is required")
+        async with self._lock:
+            key = (
+                record.kind,
+                record.subject_id,
+                record.generation,
+                publication_token,
+            )
+            now = datetime.now(timezone.utc)
+            existing = self._connection_candidates.get(key)
+            if existing is not None and existing.expires_at > now:
+                return False
+            self._connection_candidates[key] = dataclasses.replace(
+                record,
+                expires_at=now + timedelta(seconds=ttl_seconds),
+            )
+            return True
+
+    async def promote_connection_candidate(
         self,
         *,
         kind: RuntimeConnectionKind,
         subject_id: str,
-        connection_id: str,
-        owner_replica_id: str,
-        connected_at: datetime,
-        heartbeat_at: datetime,
+        generation: int,
+        publication_token: str,
         ttl_seconds: int,
-        metadata: dict[str, JsonValue],
-    ) -> RuntimeConnectionRecord:
-        """Register a current connection and issue a new generation."""
+    ) -> RuntimeConnectionPromotionResult:
+        """Consume and promote one exact candidate into the current connection."""
+        if not publication_token:
+            raise ValueError("Connection publication token is required")
         async with self._lock:
-            key = (kind, subject_id)
-            generation = self._connection_generations.get(key, 0) + 1
-            self._connection_generations[key] = generation
-            record = RuntimeConnectionRecord(
-                kind=kind,
-                subject_id=subject_id,
-                connection_id=connection_id,
-                owner_replica_id=owner_replica_id,
-                generation=generation,
-                connected_at=connected_at,
-                heartbeat_at=heartbeat_at,
-                expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
-                metadata=metadata,
+            candidate_key = (kind, subject_id, generation, publication_token)
+            candidate = self._connection_candidates.pop(candidate_key, None)
+            now = datetime.now(timezone.utc)
+            if candidate is None or candidate.expires_at <= now:
+                return RuntimeConnectionPromotionResult(
+                    status=RuntimeConnectionPromotionStatus.CANDIDATE_MISSING,
+                    connection=None,
+                    previous_connection=None,
+                )
+            connection_key = (kind, subject_id)
+            previous = self._connections.get(connection_key)
+            if previous is not None and previous.expires_at <= now:
+                self._connections.pop(connection_key, None)
+                previous = None
+            if previous is not None and previous.generation >= generation:
+                return RuntimeConnectionPromotionResult(
+                    status=RuntimeConnectionPromotionStatus.STALE_GENERATION,
+                    connection=None,
+                    previous_connection=previous,
+                )
+            connection = dataclasses.replace(
+                candidate,
+                expires_at=now + timedelta(seconds=ttl_seconds),
             )
-            self._connections[key] = record
-            return record
+            self._connections[connection_key] = connection
+            return RuntimeConnectionPromotionResult(
+                status=RuntimeConnectionPromotionStatus.APPLIED,
+                connection=connection,
+                previous_connection=previous,
+            )
 
     async def get_connection(
         self,

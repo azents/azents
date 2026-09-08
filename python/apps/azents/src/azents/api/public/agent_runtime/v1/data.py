@@ -21,6 +21,9 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_to_public,
+)
 from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeNetworkMode,
@@ -343,7 +346,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
     provider_observed_generation: int
     provider_connection_state: RuntimeProviderConnectionState
     runner_state: RuntimeRunnerState
-    runner_generation: int
+    runner_generation: str | None
     workspace_path: str | None
     failure_generation: int | None
     failure_code: str | None
@@ -370,7 +373,11 @@ class AgentRuntimeRawStateResponse(BaseModel):
             provider_observed_generation=data.provider_observed_generation,
             provider_connection_state=data.provider_connection_state,
             runner_state=data.runner_state,
-            runner_generation=data.runner_generation,
+            runner_generation=(
+                runtime_connection_generation_to_public(data.runner_generation)
+                if data.runner_generation > 0
+                else None
+            ),
             workspace_path=data.workspace_path,
             failure_generation=data.failure_generation,
             failure_code=data.failure_code,

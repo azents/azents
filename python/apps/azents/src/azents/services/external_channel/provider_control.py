@@ -6,12 +6,12 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
-)
-from azents.services.external_channel.provider_effect import (
+from azents.core.external_channel_provider_effect import (
     ProviderEffectPlan,
     ProviderMutationOutcome,
+)
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
 )
 
 logger = logging.getLogger(__name__)

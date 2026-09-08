@@ -67,6 +67,7 @@ class PendingMailboxAgentMessagePresentation(BaseModel):
         "followup_task",
         "agent_result",
     ]
+    source_path: str
     content: str
 
 

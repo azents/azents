@@ -152,7 +152,7 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
 from azents.services.chat.data import (
@@ -372,9 +372,6 @@ class RunExecutor:
     ]
     vfs_projection_service: Annotated[
         VfsProjectionService[AsyncSession], Depends(get_vfs_projection_service)
-    ]
-    agent_toolkit_repository: Annotated[
-        AgentToolkitRepository, Depends(AgentToolkitRepository)
     ]
     toolkit_repository: Annotated[ToolkitRepository, Depends(get_toolkit_repository)]
     agent_runtime_repository: Annotated[
@@ -642,7 +639,6 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            agent_toolkit_repository=self.agent_toolkit_repository,
             toolkit_repository=self.toolkit_repository,
             session_manager=self.session_manager,
             web_url=self.worker_config.web_url,
@@ -1301,7 +1297,6 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            agent_toolkit_repository=self.agent_toolkit_repository,
             toolkit_repository=self.toolkit_repository,
             session_manager=self.session_manager,
             web_url=self.worker_config.web_url,
