@@ -2,6 +2,7 @@
 title: "Agent-Scoped Toolkit Management Design"
 created: 2026-09-07
 updated: 2026-09-07
+implemented: 2026-09-07
 tags: [toolkit, agent, frontend, api, security, database, engine]
 document_role: primary
 document_type: design

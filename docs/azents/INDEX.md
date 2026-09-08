@@ -445,7 +445,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Always-Visible Toolkit Tools Requirements](requirements/toolkit-260818-always-visible-tools.md) | toolkit-260818 | 2026-08-18 | 2026-08-18 |
-| [Agent-Scoped Toolkit Management Requirements](requirements/toolkit-260907-agent-scoped-management.md) | toolkit-260907 | 2026-09-07 | - |
+| [Agent-Scoped Toolkit Management Requirements](requirements/toolkit-260907-agent-scoped-management.md) | toolkit-260907 | 2026-09-07 | 2026-09-07 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Task-Only Tracker Edit Requirements](requirements/tracker-260907-task-only-edit.md) | tracker-260907 | 2026-09-07 | 2026-09-07 |
