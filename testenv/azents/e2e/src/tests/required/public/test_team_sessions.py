@@ -154,6 +154,7 @@ def _write_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
     )
@@ -178,6 +179,7 @@ def _write_first_session_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "existing_project_paths": [],
             "setup_actions": [],

@@ -134,6 +134,7 @@ def _create_payload(
         action=None,
         attachments=["exchange://file-1"],
         file_parts=[],
+        requested_enabled_execution_options=[],
     )
 
 

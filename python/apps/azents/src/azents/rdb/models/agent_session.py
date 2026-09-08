@@ -139,6 +139,7 @@ class RDBAgentSession(RDBModel):
         "AND current_model_selection IS NULL "
         "AND current_model_settings IS NULL "
         "AND current_reasoning_effort IS NULL "
+        "AND current_enabled_execution_options = '[]'::jsonb "
         "AND current_effective_context_window_tokens IS NULL "
         "AND current_effective_auto_compaction_threshold_tokens IS NULL "
         "AND current_inference_resolved_at IS NULL) OR "
@@ -161,7 +162,9 @@ class RDBAgentSession(RDBModel):
         name="ck_agent_sessions_current_compaction_threshold",
     )
     CK_APPLIED_INFERENCE_PROFILE = sa.CheckConstraint(
-        "applied_model_target_label IS NOT NULL OR applied_reasoning_effort IS NULL",
+        "applied_model_target_label IS NOT NULL OR "
+        "(applied_reasoning_effort IS NULL "
+        "AND applied_enabled_execution_options = '[]'::jsonb)",
         name="ck_agent_sessions_applied_inference_profile",
     )
     UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
@@ -298,6 +301,16 @@ class RDBAgentSession(RDBModel):
     applied_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
         model_reasoning_effort_enum,
         nullable=True,
+    )
+    current_enabled_execution_options: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
+    applied_enabled_execution_options: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
     )
     current_effective_context_window_tokens: Mapped[int | None] = mapped_column(
         sa.Integer,

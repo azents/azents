@@ -78,6 +78,9 @@ class TestAgentModelSelection(unittest.TestCase):
                         responses_api = True, 
                         unsupported_media_policy = 'text_substitution', ), ),
                 model_snapshot = { },
+                supported_execution_options = [
+                    'fast'
+                    ],
                 source_metadata = { },
                 last_refreshed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )

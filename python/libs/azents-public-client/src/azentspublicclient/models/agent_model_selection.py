@@ -23,6 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.model_capabilities import ModelCapabilities
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -38,10 +39,11 @@ class AgentModelSelection(BaseModel):
     model_family: Optional[StrictStr] = None
     normalized_capabilities: ModelCapabilities = Field(description="Runtime capability snapshot")
     model_snapshot: Dict[str, Any] = Field(description="Normalized model snapshot")
+    supported_execution_options: Optional[List[ModelExecutionOptionId]] = Field(default=None, description="Directly selectable execution options supported by this model")
     source_metadata: Optional[Dict[str, Any]] = None
     last_refreshed_at: Optional[datetime] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["llm_provider_integration_id", "provider", "model_identifier", "model_display_name", "model_developer", "model_family", "normalized_capabilities", "model_snapshot", "source_metadata", "last_refreshed_at"]
+    __properties: ClassVar[List[str]] = ["llm_provider_integration_id", "provider", "model_identifier", "model_display_name", "model_developer", "model_family", "normalized_capabilities", "model_snapshot", "supported_execution_options", "source_metadata", "last_refreshed_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -127,6 +129,7 @@ class AgentModelSelection(BaseModel):
             "model_family": obj.get("model_family"),
             "normalized_capabilities": ModelCapabilities.from_dict(obj["normalized_capabilities"]) if obj.get("normalized_capabilities") is not None else None,
             "model_snapshot": obj.get("model_snapshot"),
+            "supported_execution_options": obj.get("supported_execution_options"),
             "source_metadata": obj.get("source_metadata"),
             "last_refreshed_at": obj.get("last_refreshed_at")
         })

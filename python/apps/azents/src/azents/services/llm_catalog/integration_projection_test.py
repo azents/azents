@@ -65,6 +65,7 @@ def test_project_integration_entries_requires_exact_target_projection() -> None:
                 model_developer=LLMModelDeveloper.ANTHROPIC,
                 model_family="claude",
                 normalized_capabilities=ModelCapabilities(),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata=None,
                 last_refreshed_at=fetched_at,
@@ -76,6 +77,7 @@ def test_project_integration_entries_requires_exact_target_projection() -> None:
                 model_developer=LLMModelDeveloper.ANTHROPIC,
                 model_family="unmatched",
                 normalized_capabilities=ModelCapabilities(),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata=None,
                 last_refreshed_at=fetched_at,
@@ -139,6 +141,7 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
                         responses_api=True,
                     )
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"context_window": 272000},
                 last_refreshed_at=fetched_at,
@@ -191,6 +194,7 @@ def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
                         responses_api=True,
                     )
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"context_length": 262144},
                 last_refreshed_at=fetched_at,
@@ -242,6 +246,7 @@ def test_project_openrouter_entries_does_not_require_litellm_metadata() -> None:
                         responses_api=True,
                     )
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"supported_parameters": []},
                 last_refreshed_at=fetched_at,
@@ -310,6 +315,7 @@ def test_project_xai_entries_preserves_provider_authority_and_enriches_gaps() ->
                         responses_api=True,
                     ),
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={
                     "context_window": 500000,
@@ -413,6 +419,7 @@ def test_project_xai_entries_keeps_unmatched_provider_model_selectable() -> None
                         responses_api=None,
                     ),
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"created": 1, "owned_by": "xai"},
                 last_refreshed_at=fetched_at,
@@ -461,6 +468,7 @@ def test_project_xai_entries_ignores_malformed_optional_enrichment() -> None:
                         output=[ModelModality.TEXT],
                     )
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"created": 1},
                 last_refreshed_at=fetched_at,
@@ -658,6 +666,7 @@ async def test_xai_oauth_sync_refreshes_before_listing(
                             output=[ModelModality.TEXT],
                         )
                     ),
+                    supported_execution_options=[],
                     model_snapshot={},
                     source_metadata={"context_window": 500000},
                     last_refreshed_at=now,
@@ -753,6 +762,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                         output=[ModelModality.TEXT],
                     )
                 ),
+                supported_execution_options=[],
                 model_snapshot={},
                 source_metadata={"created": 1, "owned_by": "xai"},
                 last_refreshed_at=now,

@@ -137,6 +137,10 @@ _XAI_OAUTH_REJECTED_IMAGE_PROMPT = "A deterministic rejected xAI OAuth aurora"
 _CAPTURED_MODEL_PROMPTS = {
     _PROMPT,
     _FOLLOW_UP_PROMPT,
+    "Per prompt Fast retry preserves prepared option",
+    "Per prompt fast profile",
+    "Per prompt quality profile",
+    "Per prompt quality standard profile",
     "xAI API-key image generation",
     "xAI OAuth image generation",
     "xAI OAuth image generation after 401",

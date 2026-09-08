@@ -12,6 +12,7 @@ from openai.types.responses.response_includable import ResponseIncludable
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
@@ -169,6 +170,28 @@ def _uses_input_message_instructions(
     )
 
 
+def _openai_service_tier(
+    *,
+    provider: LLMProvider | None,
+    supported: Sequence[ModelExecutionOptionId],
+    enabled: Sequence[ModelExecutionOptionId],
+) -> str | None:
+    """Translate bounded Fast intent to the provider Responses service tier."""
+    fast_supported = ModelExecutionOptionId.FAST in supported
+    fast_enabled = ModelExecutionOptionId.FAST in enabled
+    if fast_enabled and not fast_supported:
+        raise ValueError("Enabled execution option is not supported by the model.")
+    if provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+        if fast_supported or fast_enabled:
+            raise ValueError("Fast execution is not supported by this provider.")
+        return None
+    if fast_enabled:
+        return "priority"
+    if provider is LLMProvider.OPENAI and fast_supported:
+        return "default"
+    return None
+
+
 class ResponsesRequestLowerer:
     """Lower Event transcript to a provider-native Responses request."""
 
@@ -190,6 +213,8 @@ class ResponsesRequestLowerer:
         top_p: float | None = None,
         stop: list[str] | None = None,
         reasoning_effort: str | None = None,
+        supported_execution_options: Sequence[ModelExecutionOptionId],
+        enabled_execution_options: Sequence[ModelExecutionOptionId],
         hosted_tools: Sequence[BuiltinToolSpec] | None = None,
         prompt_cache_scope: str | None = None,
         model_developer: LLMModelDeveloper | None = None,
@@ -202,6 +227,10 @@ class ResponsesRequestLowerer:
         self.model = model
         self._tools = list(tools or [])
         self._extra_kwargs = dict(kwargs or {})
+        if "service_tier" in self._extra_kwargs:
+            raise ValueError(
+                "service_tier must be derived from model execution options."
+            )
         self._provider_id = provider_id
         self._credential_kwargs = dict(credential_kwargs or {})
         self._temperature = temperature
@@ -209,6 +238,8 @@ class ResponsesRequestLowerer:
         self._top_p = top_p
         self._stop = list(stop) if stop is not None else None
         self._reasoning_effort = reasoning_effort
+        self._supported_execution_options = list(supported_execution_options)
+        self._enabled_execution_options = list(enabled_execution_options)
         self._hosted_tools = list(hosted_tools or [])
         self._prompt_cache_scope = prompt_cache_scope
         self._model_developer = model_developer
@@ -378,6 +409,13 @@ class ResponsesRequestLowerer:
         if self._reasoning_effort is not None:
             kwargs["reasoning"] = {"effort": self._reasoning_effort, "summary": "auto"}
         kwargs.update(self._extra_kwargs)
+        service_tier = _openai_service_tier(
+            provider=self._provider_id,
+            supported=self._supported_execution_options,
+            enabled=self._enabled_execution_options,
+        )
+        if service_tier is not None:
+            kwargs["service_tier"] = service_tier
         if self._provider_id == LLMProvider.CHATGPT_OAUTH:
             kwargs.setdefault("store", False)
             _append_include_value(kwargs, _REASONING_ENCRYPTED_CONTENT_INCLUDE)

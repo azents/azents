@@ -39,6 +39,9 @@ class MailboxRepository:
             scheduling_mode=create.scheduling_mode,
             requested_model_target_label=create.requested_model_target_label,
             requested_reasoning_effort=create.requested_reasoning_effort,
+            requested_enabled_execution_options=[
+                option.value for option in create.requested_enabled_execution_options
+            ],
             sender_user_id=create.sender_user_id,
             idempotency_key=create.idempotency_key,
             payload=(
@@ -77,6 +80,10 @@ class MailboxRepository:
                 scheduling_mode=create.scheduling_mode,
                 requested_model_target_label=create.requested_model_target_label,
                 requested_reasoning_effort=create.requested_reasoning_effort,
+                requested_enabled_execution_options=[
+                    option.value
+                    for option in create.requested_enabled_execution_options
+                ],
                 sender_user_id=create.sender_user_id,
                 idempotency_key=idempotency_key,
                 order_group=create.order_group or mailbox_item_id,
@@ -367,6 +374,9 @@ class MailboxRepository:
             scheduling_mode=rdb.scheduling_mode,
             requested_model_target_label=rdb.requested_model_target_label,
             requested_reasoning_effort=rdb.requested_reasoning_effort,
+            requested_enabled_execution_options=(
+                rdb.requested_enabled_execution_options
+            ),
             sender_user_id=rdb.sender_user_id,
             order_group=rdb.order_group,
             order_sequence=rdb.order_sequence,

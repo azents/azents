@@ -599,6 +599,9 @@ class SessionLifecycleService:
                 activated_at=datetime.datetime.now(datetime.UTC),
                 requested_model_target_label=requested_profile.model_target_label,
                 requested_reasoning_effort=requested_profile.reasoning_effort,
+                requested_enabled_execution_options=(
+                    requested_profile.enabled_execution_options
+                ),
             )
             if run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")

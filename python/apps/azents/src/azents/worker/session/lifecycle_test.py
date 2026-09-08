@@ -15,6 +15,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.types import AgentRunState
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -315,6 +316,7 @@ class _AgentRunRepository:
         activated_at: datetime,
         requested_model_target_label: str,
         requested_reasoning_effort: ModelReasoningEffort | None,
+        requested_enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentRunState:
         """Return the test inherited run selected for activation."""
         del (
@@ -322,6 +324,7 @@ class _AgentRunRepository:
             activated_at,
             requested_model_target_label,
             requested_reasoning_effort,
+            requested_enabled_execution_options,
         )
         self.activation_run_ids.append(run_id)
         if self.activated_run is None:
@@ -378,6 +381,7 @@ def _running_run() -> AgentRunState:
         started_at=now,
         model_call_started_at=None,
         updated_at=now,
+        requested_enabled_execution_options=[],
     )
 
 
@@ -685,6 +689,7 @@ async def test_activate_pending_sets_initial_phase_before_commit() -> None:
         requested_profile=RequestedInferenceProfile(
             model_target_label="default",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
     )
 
@@ -718,6 +723,7 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
             requested_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
         )
 

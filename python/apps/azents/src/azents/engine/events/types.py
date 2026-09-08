@@ -31,6 +31,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.vfs import VfsProjection
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.action_messages import ActionMessagePayload
@@ -929,6 +930,7 @@ class AgentRunState(BaseModel):
     parent_agent_run_id: str | None
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
+    requested_enabled_execution_options: list[ModelExecutionOptionId]
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
     vfs_projection: VfsProjection | None = Field(default=None)

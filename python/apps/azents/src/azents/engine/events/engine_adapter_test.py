@@ -39,6 +39,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
@@ -290,6 +291,7 @@ class _RunRepo:
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             active_tool_calls=[],
             parent_result_delivery_state=None,
             parent_result_mailbox_item_id=None,
@@ -327,6 +329,7 @@ class _RunRepo:
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             active_tool_calls=[],
             parent_result_delivery_state=None,
             parent_result_mailbox_item_id=None,
@@ -1057,6 +1060,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt="agent prompt",
@@ -1106,6 +1110,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1264,6 +1269,23 @@ async def test_client_tool_adapter_profile_selects_json_on_openrouter() -> None:
     assert "Send one plaintext batch update request." not in instructions
 
 
+async def test_selected_model_execution_options_reach_openai_lowering() -> None:
+    """Lower prepared Fast intent from the selected model snapshot."""
+    prepared = await _prepare_profiled_model_call(
+        model_identifier="gpt-5.5",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        request_model_developer=LLMModelDeveloper.OPENAI,
+        provider=LLMProvider.OPENAI,
+        supported_execution_options=[ModelExecutionOptionId.FAST],
+        enabled_execution_options=[ModelExecutionOptionId.FAST],
+    )
+
+    native_request = prepared.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert native_request.options["service_tier"] == "priority"
+
+
 async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
     """Hide deferred tools until search and retain immutable call snapshots."""
     toolkit = _DeferredToolkit(["probe", "other"])
@@ -1274,6 +1296,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1387,6 +1410,7 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1427,6 +1451,8 @@ async def _prepare_profiled_model_call(
     model_family: str,
     request_model_developer: LLMModelDeveloper | None,
     provider: LLMProvider,
+    supported_execution_options: list[ModelExecutionOptionId] | None = None,
+    enabled_execution_options: list[ModelExecutionOptionId] | None = None,
 ) -> PreparedModelCall[NativeRequestInspection]:
     """Prepare one call from a normalized selected-model snapshot."""
     execution = _Execution()
@@ -1436,8 +1462,14 @@ async def _prepare_profiled_model_call(
     selection = make_test_model_selection(
         model_identifier=model_identifier,
         model_developer=model_developer,
-    ).model_copy(update={"model_family": model_family})
+    ).model_copy(
+        update={
+            "model_family": model_family,
+            "supported_execution_options": supported_execution_options or [],
+        }
+    )
     inference_state = SessionInferenceState(
+        enabled_execution_options=enabled_execution_options or [],
         model_target_label="default",
         model_selection=selection,
         model_settings=make_test_model_settings(),
@@ -1447,6 +1479,7 @@ async def _prepare_profiled_model_call(
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
     request = RunRequest(
+        enabled_execution_options=enabled_execution_options or [],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1519,6 +1552,7 @@ def _refreshing_imagine_client_factory(tokens: list[str]) -> XaiImagineClientFac
 def _xai_oauth_inference_state() -> SessionInferenceState:
     """Return xAI OAuth inference state with a selected integration identity."""
     return SessionInferenceState(
+        enabled_execution_options=[],
         model_target_label="planning",
         model_selection=make_test_model_selection(
             integration_id="integration-1",
@@ -1549,6 +1583,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -1634,6 +1669,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
     )
     request = RunRequest(
+        enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1732,6 +1768,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
     )
     request = RunRequest(
+        enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
         agent_prompt=None,
@@ -1770,6 +1807,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
 
     stream = adapter.run(
         RunRequest(
+            enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
             agent_prompt=None,
@@ -1820,6 +1858,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         """Receive external cancellation while consuming adapter stream."""
         async for _emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt="agent prompt",
@@ -1872,6 +1911,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
 
     stream = adapter.run(
         RunRequest(
+            enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
             agent_prompt=None,
@@ -1919,6 +1959,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt="agent prompt",
@@ -1973,6 +2014,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
     with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2033,6 +2075,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2102,6 +2145,7 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2184,6 +2228,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2302,6 +2347,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2389,6 +2435,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2514,6 +2561,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         emit
         async for emit in adapter.compact(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
@@ -2575,6 +2623,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
 
     iterator = adapter.compact(
         RunRequest(
+            enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
             agent_prompt=None,

@@ -621,6 +621,7 @@ class TestModelSelectionReadiness:
                     "inference_profile": {
                         "model_target_label": label,
                         "reasoning_effort": None,
+                        "enabled_execution_options": [],
                     },
                 },
                 timeout=10,

@@ -1635,6 +1635,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             requested_inference_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             promoted_event_ids=[],
             user_messages=[user_message],
@@ -1685,6 +1686,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
         run_id="run-001",
         poll_fn=None,

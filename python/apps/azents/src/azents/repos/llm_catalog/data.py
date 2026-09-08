@@ -40,6 +40,7 @@ class LLMCatalogEntry:
     runtime_model_identifier: str
     display_name: str
     normalized_capabilities: dict[str, Any]
+    supported_execution_options: list[str]
     lifecycle_status: LLMModelLifecycleStatus
     visibility_status: LLMCatalogEntryVisibility
     provider_integration_id: str | None
@@ -61,6 +62,7 @@ class LLMCatalogEntryCreate:
     runtime_model_identifier: str
     display_name: str
     normalized_capabilities: dict[str, Any]
+    supported_execution_options: list[str]
     lifecycle_status: LLMModelLifecycleStatus
     visibility_status: LLMCatalogEntryVisibility
     provider_integration_id: str | None

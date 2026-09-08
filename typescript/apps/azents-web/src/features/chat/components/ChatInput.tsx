@@ -82,6 +82,9 @@ function ChatInputView({
     contextUsage,
     contextUsageActiveRun,
     onApplyInferenceProfile,
+    selectableExecutionOptions,
+    executionOptionSavePending,
+    executionOptionSaveErrorVisible,
     isUploading,
     pendingFiles,
     goal,
@@ -143,6 +146,7 @@ function ChatInputView({
     handleFileChange,
     handleModelChange,
     handleEffortChange,
+    handleExecutionOptionToggle,
     handleOpenContextUsage,
     handleProfilePickerEnterTransitionEnd,
     handleDesktopProfileSectionKeyDown,
@@ -154,7 +158,11 @@ function ChatInputView({
       variant="light"
       size="compact-sm"
       radius={rem(12)}
-      disabled={inputDisabled || selectableModelOptions.length === 0}
+      disabled={
+        inputDisabled ||
+        executionOptionSavePending ||
+        selectableModelOptions.length === 0
+      }
       ref={profileTriggerRef}
       onClick={() => {
         setProfilePickerOpened(!profilePickerOpened);
@@ -204,6 +212,48 @@ function ChatInputView({
       </Text>
     </Button>
   );
+  const executionOptionControls = selectableExecutionOptions.map(
+    (definition) => {
+      const selected = inferenceProfile.enabled_execution_options.includes(
+        definition.id,
+      );
+      const disabled =
+        inputDisabled ||
+        editSendDisabled ||
+        editingMessageId !== null ||
+        executionOptionSavePending;
+      return (
+        <Button
+          key={definition.id}
+          variant={selected ? "light" : "subtle"}
+          size="compact-sm"
+          radius={rem(12)}
+          disabled={disabled}
+          loading={executionOptionSavePending && selected}
+          aria-pressed={selected}
+          aria-label={t("composerProfile.executionOptionAriaLabel", {
+            label: definition.label,
+            state: selected
+              ? t("composerProfile.enabled")
+              : t("composerProfile.disabled"),
+            costHint: definition.cost_hint,
+          })}
+          title={definition.description}
+          onClick={() => handleExecutionOptionToggle(definition.id)}
+          style={{ minHeight: rem(36), maxWidth: rem(220) }}
+        >
+          <Group gap={rem(4)} wrap="nowrap">
+            <Text size="xs" fw={600} truncate>
+              {definition.label}
+            </Text>
+            <Text size="xs" c="dimmed" truncate visibleFrom="sm">
+              {definition.cost_hint}
+            </Text>
+          </Group>
+        </Button>
+      );
+    },
+  );
   const contextUsageTrigger = contextUsageEnabled ? (
     <TokenUsageIndicator usage={contextUsage} onOpen={handleOpenContextUsage} />
   ) : null;
@@ -220,6 +270,7 @@ function ChatInputView({
           }
         }}
         onClick={() => handleModelChange(option.label)}
+        disabled={executionOptionSavePending}
         onKeyDown={(event) => {
           if (!isMobile) {
             handleDesktopProfileOptionKeyDown("model", index, event);
@@ -274,6 +325,7 @@ function ChatInputView({
           }
         }}
         onClick={() => handleEffortChange(effort)}
+        disabled={executionOptionSavePending}
         onKeyDown={(event) => {
           if (!isMobile) {
             handleDesktopProfileOptionKeyDown("effort", index, event);
@@ -549,6 +601,7 @@ function ChatInputView({
     selectedAction === null &&
     !inputDisabled &&
     !editSendDisabled &&
+    !executionOptionSavePending &&
     onApplyInferenceProfile != null;
   const stopAvailableAlongsideApply =
     isStopAvailable &&
@@ -576,6 +629,11 @@ function ChatInputView({
             {selectedAction
               ? `${selectedAction.label} action failed. Edit it or try again.`
               : "Message failed to send. Try again."}
+          </Text>
+        )}
+        {executionOptionSaveErrorVisible && (
+          <Text size="xs" c="red">
+            {t("composerProfile.executionOptionSaveFailed")}
           </Text>
         )}
         {editingMessageId && (
@@ -826,6 +884,9 @@ function ChatInputView({
               {isMobile ? (
                 <>
                   {inferenceProfileSelectionEnabled ? profileTrigger : null}
+                  {inferenceProfileSelectionEnabled
+                    ? executionOptionControls
+                    : null}
                   {contextUsageTrigger}
                   {inferenceProfileSelectionEnabled || contextUsageEnabled ? (
                     <Drawer
@@ -894,6 +955,9 @@ function ChatInputView({
                   <Popover.Target>
                     <Group gap="xs" wrap="nowrap">
                       {inferenceProfileSelectionEnabled ? profileTrigger : null}
+                      {inferenceProfileSelectionEnabled
+                        ? executionOptionControls
+                        : null}
                       {contextUsageTrigger}
                     </Group>
                   </Popover.Target>
@@ -935,6 +999,7 @@ function ChatInputView({
                   disabled={
                     inputDisabled ||
                     editSendDisabled ||
+                    executionOptionSavePending ||
                     (!inputValue.trim() &&
                       pendingFiles.length === 0 &&
                       selectedAction?.message.policy === "required")

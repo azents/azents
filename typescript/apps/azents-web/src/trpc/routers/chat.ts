@@ -82,6 +82,7 @@ const reasoningEffortSchema = z.enum([
 const inferenceProfileSchema = z.object({
   model_target_label: z.string().min(1),
   reasoning_effort: z.string().nullable(),
+  enabled_execution_options: z.array(z.literal("fast")),
 });
 
 const setupActionSchema = z.object({
@@ -837,6 +838,7 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         modelTargetLabel: z.string().min(1),
         reasoningEffort: reasoningEffortSchema.nullable(),
+        enabledExecutionOptions: z.array(z.literal("fast")),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -848,6 +850,7 @@ export const chatRouter = router({
             client_request_id: input.clientRequestId,
             model_target_label: input.modelTargetLabel,
             reasoning_effort: input.reasoningEffort,
+            enabled_execution_options: input.enabledExecutionOptions,
           },
           throwOnError: true,
         });

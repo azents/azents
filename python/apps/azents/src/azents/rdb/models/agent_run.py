@@ -76,8 +76,9 @@ class RDBAgentRun(RDBModel):
         postgresql_where=sa.text("status = 'pending'"),
     )
     CK_REQUESTED_PROFILE = sa.CheckConstraint(
-        "requested_reasoning_effort IS NULL "
-        "OR requested_model_target_label IS NOT NULL",
+        "requested_model_target_label IS NOT NULL OR "
+        "(requested_reasoning_effort IS NULL "
+        "AND requested_enabled_execution_options = '[]'::jsonb)",
         name="ck_agent_runs_requested_profile",
     )
 
@@ -109,6 +110,11 @@ class RDBAgentRun(RDBModel):
     requested_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
         model_reasoning_effort_enum,
         nullable=True,
+    )
+    requested_enabled_execution_options: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
     )
     phase: Mapped[AgentRunPhase] = mapped_column(
         agent_run_phase_enum,

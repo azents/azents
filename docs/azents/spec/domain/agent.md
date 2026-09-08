@@ -12,12 +12,14 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/10d8111b556c_add_session_auto_archive_fields.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/d0a55d801644_add_external_channel_response_modes.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/30c55c0ef241_add_agent_avatar_cleanup_jobs.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/inference_profile.py
+  - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_capabilities.py
   - python/apps/azents/src/azents/rdb/models/agent.py
@@ -103,8 +105,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-07
-spec_version: 73
+last_verified_at: 2026-09-08
+spec_version: 74
 ---
 
 # Agent Domain Spec
@@ -532,7 +534,7 @@ until completion.
 
 ## 3. Runtime Resolve
 
-Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
+Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label`, nullable `reasoning_effort`, and an explicit `enabled_execution_options` list. Execution options are immediately switchable preferences, separate from static abilities and model-scoped built-in tool settings. Saved model selections advertise `supported_execution_options`; the public selectable-option response separately projects definition text and provider-specific qualitative cost hints for the composer. Fast (`fast`) is the first option and starts disabled. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
 
 Before an inference-bearing FIFO head is atomically prepared, runtime resolution:
 
@@ -544,7 +546,9 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 6. Computes the prepared turn's effective context window from the selected foreground option's capped input limit and the lightweight option's capped input limit, then derives the automatic compaction threshold.
 7. Validates remaining Agent model parameters, applies the requested effort, and materializes user attachments.
 
-Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover; later Agent edits cannot change an already prepared turn. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
+Preparation also validates enabled execution-option IDs against the implemented registry and selected saved model support. Unknown, duplicate, or unsupported explicit selections fail before provider invocation rather than silently dropping the preference. Composer draft model switching may intersect choices with the new model's support; that client normalization does not replace server validation. Implicit inherited choices on an explicitly changed subagent target retain only supported options, while same-target and full-history inheritance preserve the prepared choice. Auxiliary title and compaction calls do not inherit premium sampling options.
+
+Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, enabled execution options, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover; later Agent edits cannot change an already prepared turn. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
 `spawn_agent` exposes only current Agent options whose `settings.subagent_enabled` is true. Each advertised entry contains the Agent-owned label, explicit effort levels, and optional bounded `subagent_guidance`, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Explicit target validation uses the same enabled-option set; missing and disabled labels fail with the same unavailable-override tool error before child creation. Omitted `model_target_label` preserves the exact concrete parent Session target even when that option is disabled, and an effort-only override retains that inherited target. If no option is enabled, inherited spawning remains available while no explicit target is advertised. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
@@ -611,6 +615,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-08** (spec_version 74) — Added model execution-option support,
+  enabled intent, and composer definitions independently of static model
+  capabilities and built-in tools.
 - **2026-09-07** (spec_version 73) — Added requester-relative enhanced Toolkit-management
   availability to saved Agent responses and documented its exact Owner-or-AgentAdmin
   authority boundary without changing Agent creation or Chat.

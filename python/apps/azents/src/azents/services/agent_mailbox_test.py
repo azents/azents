@@ -83,6 +83,7 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
         model_call_started_at=None,
         ended_at=_NOW,
         updated_at=_NOW,
+        requested_enabled_execution_options=[],
     )
 
 
@@ -115,6 +116,7 @@ class _MailboxService(MailboxService):
                 attachments=input.attachments,
                 file_parts=input.file_parts,
                 created_at=_NOW,
+                requested_enabled_execution_options=[],
             ),
             created=True,
         )

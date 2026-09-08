@@ -154,6 +154,7 @@ def _write_user_first_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "existing_project_paths": [],
             "setup_actions": [],
@@ -299,6 +300,7 @@ def test_non_owner_member_cannot_discover_or_open_user_session(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         expected_status=404,
@@ -339,6 +341,7 @@ def test_team_first_message_path_remains_on_team_list(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "existing_project_paths": [],
             "setup_actions": [],

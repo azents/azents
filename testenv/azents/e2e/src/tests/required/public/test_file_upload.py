@@ -601,6 +601,7 @@ class TestUploadMessagePath:
                     "inference_profile": {
                         "model_target_label": "default",
                         "reasoning_effort": None,
+                        "enabled_execution_options": [],
                     },
                     "attachments": [image_uri, file_uri],
                 },
