@@ -1,5 +1,6 @@
 """Migration tests for durable Runtime connection-generation authority."""
 
+import pytest
 import sqlalchemy as sa
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
@@ -203,3 +204,39 @@ def test_subject_created_after_foundation_is_not_preallocated(
             )
         )
         assert count == 0
+
+
+def test_foundation_downgrade_rejects_accepted_authority_above_integer(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Rollback cannot discard accepted authority absent from legacy projections."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_existing_subjects(connection)
+    alembic_runner.migrate_up_to(_REVISION)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_connection_generations (
+                  connection_kind,
+                  subject_id,
+                  high_water_generation,
+                  accepted_generation
+                ) VALUES (
+                  'runner',
+                  'generation-runtime',
+                  :generation,
+                  :generation
+                )
+                """
+            ),
+            {"generation": 2**31},
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="accepted Runtime connection authority or projection exceeds INTEGER",
+    ):
+        alembic_runner.migrate_down_to(_PARENT_REVISION)

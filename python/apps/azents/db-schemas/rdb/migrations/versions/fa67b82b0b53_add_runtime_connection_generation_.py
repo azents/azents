@@ -104,13 +104,19 @@ def downgrade() -> None:
             SELECT
               COALESCE((SELECT MAX(generation) FROM runtime_provider_connections), 0),
               COALESCE((SELECT MAX(provider_generation) FROM agent_runtimes), 0),
-              COALESCE((SELECT MAX(runner_generation) FROM agent_runtimes), 0)
+              COALESCE((SELECT MAX(runner_generation) FROM agent_runtimes), 0),
+              COALESCE(
+                (SELECT MAX(accepted_generation)
+                 FROM runtime_connection_generations),
+                0
+              )
             """
         )
     ).one()
     if any(int(value) > _INTEGER_MAX for value in maxima):
         raise RuntimeError(
-            "irreversible: post-cutover Runtime connection generation exceeds INTEGER"
+            "irreversible: accepted Runtime connection authority or projection "
+            "exceeds INTEGER"
         )
 
     op.drop_table("runtime_connection_generations")
