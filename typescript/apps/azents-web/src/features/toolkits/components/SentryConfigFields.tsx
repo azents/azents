@@ -74,6 +74,7 @@ interface SentryConfigFieldsProps {
   /** Existing credentials existence in edit mode */
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   /** Existing toolkit config ID in edit mode */
   toolkitConfigId?: string;
 }
@@ -83,6 +84,7 @@ export function SentryConfigFields({
   onConfigChange,
   credentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: SentryConfigFieldsProps): React.ReactElement {
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
@@ -100,12 +102,20 @@ export function SentryConfigFields({
   const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "sentry",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   const handleSkillToggle = useCallback(
     (skill: SentrySkill, checked: boolean): void => {

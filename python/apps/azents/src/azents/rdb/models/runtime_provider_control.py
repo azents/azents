@@ -277,7 +277,7 @@ class RDBRuntimeProviderConnection(RDBModel):
         nullable=True,
     )
     connection_id: Mapped[str] = mapped_column(sa.String(120), nullable=False)
-    generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     status: Mapped[RuntimeProviderConnectionStatus] = mapped_column(
         provider_connection_status_enum,
         nullable=False,

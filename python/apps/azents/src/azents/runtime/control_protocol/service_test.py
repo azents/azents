@@ -31,9 +31,6 @@ from azents.runtime.control_protocol.data import (
     RuntimeRunnerRegistration,
     RuntimeSystemMetricsAppendResult,
 )
-from azents.runtime.control_protocol.service import (
-    RuntimeControlProtocolService,
-)
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
@@ -47,6 +44,10 @@ from azents.runtime.coordination.data import (
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
+)
+from azents.testing.runtime_coordination import (
+    FakeRuntimeControlProtocolService,
+    publish_next_test_connection,
 )
 
 
@@ -97,7 +98,8 @@ class ReconnectBeforeAppendStore(InMemoryRuntimeCoordinationStore):
     ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
         if self.reconnect_before_next_append:
             self.reconnect_before_next_append = False
-            await self.register_connection(
+            await publish_next_test_connection(
+                self,
                 kind=connection_kind,
                 subject_id=connection_subject_id,
                 connection_id="replacement-connection",
@@ -121,7 +123,7 @@ class ReconnectBeforeAppendStore(InMemoryRuntimeCoordinationStore):
 async def test_register_provider_and_runner_issue_independent_generations() -> None:
     """Provider and Runner generations are independently scoped."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     now = _now()
 
     provider = await service.register_provider(
@@ -155,7 +157,7 @@ async def test_register_provider_and_runner_issue_independent_generations() -> N
 async def test_runner_system_metrics_require_current_capable_generation() -> None:
     """Metrics admission uses current generation and registration capability."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     accepted_at = _now()
     report = _system_metrics_report(sequence=1)
 
@@ -218,7 +220,7 @@ async def test_runner_system_metrics_require_current_capable_generation() -> Non
 async def test_runner_system_metrics_reject_non_monotonic_sequence() -> None:
     """Duplicate and lower sequences cannot replace an accepted metrics sample."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     now = _now()
     capable = await service.register_runner(
         dataclasses.replace(
@@ -266,7 +268,7 @@ async def test_runner_system_metrics_reject_non_monotonic_sequence() -> None:
 @pytest.mark.asyncio
 async def test_register_provider_preserves_absent_method_credential_reference() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
 
     await service.register_provider(
         dataclasses.replace(
@@ -288,7 +290,9 @@ async def test_register_provider_preserves_absent_method_credential_reference() 
 async def test_dispatch_provider_command_uses_provider_generation_fence() -> None:
     """Provider commands route through provider-scoped streams and generation groups."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-1"
+    )
     now = _now()
     accepted = await service.register_provider(
         _provider_registration(),
@@ -317,12 +321,18 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
     )
 
     assert isinstance(result, RuntimeDispatchResult)
-    assert result.request_stream_id == "provider:provider-1:generation:1:requests"
-    assert result.reply_stream_id == "provider:provider-1:generation:1:replies"
+    assert result.request_stream_id == (
+        "provider:provider-1:generation:0000000000000000001:requests"
+    )
+    assert result.reply_stream_id == (
+        "provider:provider-1:generation:0000000000000000001:replies"
+    )
     assert claimed is not None
     assert claimed.cursor is not None
-    assert claimed.stream_id == "provider:provider-1:generation:1:requests"
-    assert claimed.consumer_group == "provider-1:generation:1"
+    assert claimed.stream_id == (
+        "provider:provider-1:generation:0000000000000000001:requests"
+    )
+    assert claimed.consumer_group == "provider-1:generation:0000000000000000001"
     assert claimed.runtime_id == "runtime-1"
     assert claimed.target == RuntimeCoordinationTarget.PROVIDER
     assert claimed.payload["desired_generation"] == 3
@@ -343,7 +353,7 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
 async def test_claimed_runner_request_can_be_reclaimed_until_acked() -> None:
     """Unacked claimed requests can move to another consumer after idle timeout."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "req-2",
         request_reclaim_idle_seconds=0,
@@ -400,7 +410,9 @@ async def test_claimed_runner_request_can_be_reclaimed_until_acked() -> None:
 async def test_provider_reconnect_skips_previous_generation_requests() -> None:
     """Provider request streams are generation-scoped to avoid replay after eviction."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-1"
+    )
     now = _now()
     first = await service.register_provider(_provider_registration(), registered_at=now)
     result = await service.dispatch_provider_command(
@@ -439,7 +451,9 @@ async def test_provider_reconnect_skips_previous_generation_requests() -> None:
 async def test_dispatch_runner_operation_supports_resume_after_reply_cursor() -> None:
     """Runner operation dispatch writes metadata and reply streams support resume."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-2")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-2"
+    )
     now = _now()
     runner = await service.register_runner(_runner_registration(), registered_at=now)
 
@@ -507,7 +521,7 @@ async def test_runner_operations_share_generation_reply_stream() -> None:
     """Runner operation replies share a generation-scoped stream."""
     store = InMemoryRuntimeCoordinationStore()
     request_ids = iter(("req-1", "req-2"))
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: next(request_ids),
     )
@@ -525,7 +539,9 @@ async def test_runner_operations_share_generation_reply_stream() -> None:
 
     assert isinstance(first, RuntimeDispatchResult)
     assert isinstance(second, RuntimeDispatchResult)
-    assert first.reply_stream_id == "runner:runtime-1:generation:1:replies"
+    assert first.reply_stream_id == (
+        "runner:runtime-1:generation:0000000000000000001:replies"
+    )
     assert second.reply_stream_id == first.reply_stream_id
 
 
@@ -534,7 +550,7 @@ async def test_runner_cancel_marks_metadata_and_appends_ordered_command() -> Non
     """Runner cancellation blocks new starts and follows the original request."""
     store = InMemoryRuntimeCoordinationStore()
     request_ids = iter(("req-operation", "req-cancel"))
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: next(request_ids),
     )
@@ -590,7 +606,9 @@ async def test_runner_cancel_marks_metadata_and_appends_ordered_command() -> Non
 async def test_runner_reconnect_does_not_replay_previous_generation_requests() -> None:
     """Runner request streams are generation-scoped to avoid replay after eviction."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-2")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-2"
+    )
     now = _now()
     first = await service.register_runner(_runner_registration(), registered_at=now)
     result = await service.dispatch_runner_operation(
@@ -627,7 +645,7 @@ async def test_runner_reconnect_does_not_replay_previous_generation_requests() -
 async def test_dispatch_rejects_missing_and_stale_runner_generation() -> None:
     """Control rejects missing or stale Runner generations."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     now = _now()
 
     missing = await service.dispatch_runner_operation(
@@ -650,7 +668,7 @@ async def test_dispatch_rejects_missing_and_stale_runner_generation() -> None:
 async def test_dispatch_rejects_generation_replaced_during_atomic_append() -> None:
     """A reconnect between the initial lookup and append cannot strand work."""
     store = ReconnectBeforeAppendStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "req-race",
     )
@@ -672,7 +690,7 @@ async def test_dispatch_rejects_generation_replaced_during_atomic_append() -> No
 async def test_provider_dispatch_rejects_replacement_during_atomic_append() -> None:
     """Provider reconnect cannot strand a command in its old generation."""
     store = ReconnectBeforeAppendStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "req-provider-race",
     )
@@ -707,13 +725,17 @@ async def test_provider_dispatch_rejects_replacement_during_atomic_append() -> N
 async def test_stale_reply_event_is_not_appended() -> None:
     """Reply events are fenced by current Runner generation."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     now = _now()
-    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    stale = await service.register_runner(_runner_registration(), registered_at=now)
+    await service.register_runner(
+        _runner_registration(),
+        registered_at=now + timedelta(seconds=1),
+    )
 
     result = await service.append_reply_event(
-        _reply("req-1", runner.generation - 1, RuntimeReplyEventType.ACCEPTED),
-        reply_stream_id="runner:runtime-1:generation:1:replies",
+        _reply("req-1", stale.generation, RuntimeReplyEventType.ACCEPTED),
+        reply_stream_id="runner:runtime-1:generation:0000000000000000001:replies",
         operation_id=None,
         expected_target=RuntimeCoordinationTarget.RUNNER,
         expected_subject_id="runtime-1",
@@ -722,7 +744,7 @@ async def test_stale_reply_event_is_not_appended() -> None:
     assert isinstance(result, RuntimeProtocolStaleGeneration)
     assert (
         await service.read_replies(
-            reply_stream_id="runner:runtime-1:generation:1:replies",
+            reply_stream_id="runner:runtime-1:generation:0000000000000000001:replies",
             after_cursor=None,
             limit=10,
         )
@@ -735,7 +757,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
     """Operation metadata remains available past short client deadlines."""
     store = RecordingTtlStore()
     request_ids = iter(("req-1", "req-2"))
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: next(request_ids),
         operation_ttl_seconds=900,
@@ -779,7 +801,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
 async def test_late_final_reply_does_not_replace_canceled_cursor() -> None:
     """Canceled finals remain authoritative when a late Runner final arrives."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "req-late",
     )

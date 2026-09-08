@@ -59,6 +59,12 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
 )
+from azents.services.runtime_connection_registration.data import (
+    RuntimeConnectionRegistrationUnavailable,
+)
+from azents.services.runtime_connection_registration.service import (
+    RuntimeProviderConnectionRegistrar,
+)
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractUnavailable,
 )
@@ -227,6 +233,7 @@ class RuntimeProviderControlGrpcServicer(
         consumer_id: str,
         credential_authenticator: RuntimeProviderCredentialAuthenticator,
         connection_tracker: RuntimeProviderConnectionTracker,
+        connection_registrar: RuntimeProviderConnectionRegistrar,
         contract_proposer: RuntimeProviderContractProposer,
         runner_credential_issuer: RuntimeRunnerCredentialIssuer,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
@@ -239,6 +246,7 @@ class RuntimeProviderControlGrpcServicer(
         self._consumer_id = consumer_id
         self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
         self._connection_tracker = connection_tracker
+        self._connection_registrar = connection_registrar
         self._contract_proposer = contract_proposer
         self._runner_credential_issuer = runner_credential_issuer
         self._command_block_ms = command_block_ms
@@ -297,28 +305,22 @@ class RuntimeProviderControlGrpcServicer(
             auth_credential_id=authentication.credential_id,
         )
         now = datetime.now(UTC)
-        accepted = await self._control_protocol.register_provider(
-            bound_registration,
-            registered_at=now,
-        )
         try:
-            await self._connection_tracker.create_connection(
+            accepted = await self._connection_registrar.register_provider(
+                bound_registration,
                 authentication=authentication,
-                connection_id=accepted.connection_id,
-                generation=accepted.generation,
-                reported_provider_type=registration.provider_type,
-                reported_protocol_version=registration.protocol_version,
-                operational_diagnostics=registration.operational_diagnostics,
-                connected_at=now,
+                registered_at=now,
             )
         except RuntimeProviderCredentialUnavailable:
-            await self._control_protocol.revoke_provider(
-                provider_id=accepted.provider_id,
-                generation=accepted.generation,
-            )
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Provider credential is invalid or unavailable",
+            )
+            raise AssertionError("unreachable") from None
+        except RuntimeConnectionRegistrationUnavailable as error:
+            await context.abort(
+                grpc.StatusCode.ABORTED,
+                f"Provider registration was not accepted: {error.code}",
             )
             raise AssertionError("unreachable") from None
         _LOGGER.info(
@@ -830,6 +832,7 @@ def add_runtime_provider_control_servicer(
     consumer_id: str,
     credential_authenticator: RuntimeProviderCredentialAuthenticator,
     connection_tracker: RuntimeProviderConnectionTracker,
+    connection_registrar: RuntimeProviderConnectionRegistrar,
     contract_proposer: RuntimeProviderContractProposer,
     runner_credential_issuer: RuntimeRunnerCredentialIssuer,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
@@ -844,6 +847,7 @@ def add_runtime_provider_control_servicer(
             consumer_id=consumer_id,
             credential_authenticator=credential_authenticator,
             connection_tracker=connection_tracker,
+            connection_registrar=connection_registrar,
             contract_proposer=contract_proposer,
             runner_credential_issuer=runner_credential_issuer,
             command_block_ms=command_block_ms,

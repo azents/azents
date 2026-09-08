@@ -79,7 +79,10 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
 )
-from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.turn_action import (
+    make_test_mailbox_promotion_repository,
+    make_test_turn_action_capabilities,
+)
 
 from . import ChatSessionService
 from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
@@ -192,6 +195,9 @@ def _service(
     """Create ChatSessionService for tests."""
     mailbox_item_service = _make_mailbox_service(
         session_manager=rdb_session_manager,
+        promotion_repository=make_test_mailbox_promotion_repository(
+            rdb_session_manager
+        ),
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
@@ -566,6 +572,9 @@ class TestChatSessionMailboxItem:
 
         mailbox_item_service = _make_mailbox_service(
             session_manager=rdb_session_manager,
+            promotion_repository=make_test_mailbox_promotion_repository(
+                rdb_session_manager
+            ),
             mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),

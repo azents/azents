@@ -369,10 +369,163 @@ def verify_toolkit_oauth_state(
 
 
 @dataclasses.dataclass(frozen=True)
+class AgentToolkitOAuthState:
+    """Verified OAuth protocol state for one Agent-owned ToolkitConfig."""
+
+    toolkit_id: str
+    workspace_id: str
+    agent_id: str
+    user_id: str
+    redirect_uri: str
+    code_verifier: str
+    callback_target: str
+
+
+def create_agent_toolkit_oauth_state(
+    *,
+    toolkit_id: str,
+    workspace_id: str,
+    agent_id: str,
+    user_id: str,
+    redirect_uri: str,
+    code_verifier: str,
+    callback_target: str,
+    secret_key: str,
+) -> str:
+    """Create encrypted state for an Agent-owned Toolkit OAuth flow."""
+    return _encrypt_state(
+        {
+            "type": "agent_toolkit_oauth",
+            "tid": toolkit_id,
+            "wid": workspace_id,
+            "aid": agent_id,
+            "uid": user_id,
+            "ru": redirect_uri,
+            "cv": code_verifier,
+            "target": callback_target,
+            "n": secrets.token_urlsafe(16),
+        },
+        secret_key,
+    )
+
+
+def verify_agent_toolkit_oauth_state(
+    state: str,
+    secret_key: str,
+) -> AgentToolkitOAuthState | None:
+    """Verify encrypted state for an Agent-owned Toolkit OAuth flow."""
+    data = _decrypt_state(state, secret_key)
+    if data is None or data.get("type") != "agent_toolkit_oauth":
+        return None
+    toolkit_id = data.get("tid")
+    workspace_id = data.get("wid")
+    agent_id = data.get("aid")
+    user_id = data.get("uid")
+    redirect_uri = data.get("ru")
+    code_verifier = data.get("cv")
+    callback_target = data.get("target")
+    if not isinstance(toolkit_id, str):
+        return None
+    if not isinstance(workspace_id, str):
+        return None
+    if not isinstance(agent_id, str):
+        return None
+    if not isinstance(user_id, str):
+        return None
+    if not isinstance(redirect_uri, str):
+        return None
+    if not isinstance(code_verifier, str):
+        return None
+    if not isinstance(callback_target, str):
+        return None
+    return AgentToolkitOAuthState(
+        toolkit_id=toolkit_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        user_id=user_id,
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+        callback_target=callback_target,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class PlatformOAuthState:
     """Verified GitHub Platform OAuth protocol state."""
 
     effective_generation: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentGitHubPlatformOAuthState:
+    """Verified GitHub Platform OAuth state for one Agent setup context."""
+
+    effective_generation: str
+    workspace_id: str
+    agent_id: str
+    user_id: str
+    redirect_uri: str
+    callback_target: str
+
+
+def create_agent_github_platform_oauth_state(
+    secret_key: str,
+    *,
+    effective_generation: str,
+    workspace_id: str,
+    agent_id: str,
+    user_id: str,
+    redirect_uri: str,
+    callback_target: str,
+) -> str:
+    """Create encrypted GitHub Platform OAuth state for Agent Toolkit setup."""
+    payload: dict[str, object] = {
+        "type": "agent_github_installations",
+        "generation": effective_generation,
+        "wid": workspace_id,
+        "aid": agent_id,
+        "uid": user_id,
+        "ru": redirect_uri,
+        "target": callback_target,
+        "n": secrets.token_urlsafe(16),
+    }
+    return _encrypt_state(payload, secret_key)
+
+
+def verify_agent_github_platform_oauth_state(
+    state: str,
+    secret_key: str,
+) -> AgentGitHubPlatformOAuthState | None:
+    """Verify GitHub Platform OAuth state for Agent Toolkit setup."""
+    data = _decrypt_state(state, secret_key)
+    if data is None or data.get("type") != "agent_github_installations":
+        return None
+    effective_generation = data.get("generation")
+    workspace_id = data.get("wid")
+    agent_id = data.get("aid")
+    user_id = data.get("uid")
+    redirect_uri = data.get("ru")
+    callback_target = data.get("target")
+    if not isinstance(effective_generation, str):
+        return None
+    if not isinstance(workspace_id, str):
+        return None
+    if not isinstance(agent_id, str):
+        return None
+    if not isinstance(user_id, str):
+        return None
+    if not isinstance(redirect_uri, str):
+        return None
+    if not isinstance(callback_target, str):
+        return None
+    return AgentGitHubPlatformOAuthState(
+        effective_generation=effective_generation,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        user_id=user_id,
+        redirect_uri=redirect_uri,
+        callback_target=callback_target,
+    )
 
 
 def create_platform_oauth_state(

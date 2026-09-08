@@ -1,12 +1,16 @@
 """Toolkit service data models."""
 
 import dataclasses
-from typing import Annotated, Any
+import datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, computed_field
 from typing_extensions import TypedDict
 
-from azents.repos.mcp_oauth_connection.data import MCPOAuthConnectionSummary
+from azents.repos.mcp_oauth_connection.data import (
+    MCPOAuthConnection,
+    MCPOAuthConnectionSummary,
+)
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig, ToolkitScope
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationState,
@@ -74,6 +78,53 @@ class AgentToolkitListOutput(BaseModel):
     """AgentToolkit list output model."""
 
     items: list[AgentToolkitOutput] = Field(description="AgentToolkit list")
+
+
+ToolkitOwnershipScope = Literal["workspace_shared", "agent_only"]
+ToolkitReadiness = Literal["ready", "authorization_required", "disabled"]
+
+
+class AgentToolkitManagementItemOutput(BaseModel):
+    """One Toolkit shown in the authorized Agent management projection."""
+
+    ownership_scope: ToolkitOwnershipScope
+    toolkit: ToolkitOutput
+    agent_toolkit_id: str | None
+    readiness: ToolkitReadiness
+
+
+class AgentToolkitManagementOutput(BaseModel):
+    """Authorized Agent Toolkit management projection."""
+
+    items: list[AgentToolkitManagementItemOutput]
+    available_shared: list[ToolkitOutput]
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentToolkitOAuthContext:
+    """Authorized Agent-owned Toolkit and its current OAuth connection."""
+
+    toolkit: ToolkitOutput
+    connection: MCPOAuthConnection | None
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentToolkitOAuthConnectionInput:
+    """OAuth connection values ready for encrypted persistence."""
+
+    issuer: str | None
+    resource: str | None
+    server_url: str
+    authorization_endpoint: str
+    token_endpoint: str
+    registration_endpoint: str | None
+    client_id: str
+    client_secret: str | None
+    token_endpoint_auth_method: str
+    scope: str | None
+    access_token: str | None
+    refresh_token: str | None
+    expires_at: datetime.datetime | None
 
 
 class ToolkitCreateInput(BaseModel):
@@ -170,6 +221,13 @@ class ToolkitNotAvailable:
 @dataclasses.dataclass(frozen=True)
 class DuplicateSlug:
     """Same slug already exists in workspace."""
+
+    slug: str
+
+
+@dataclasses.dataclass(frozen=True)
+class EffectiveSlugConflict:
+    """Another enabled Toolkit already uses the slug for one Agent."""
 
     slug: str
 

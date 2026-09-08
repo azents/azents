@@ -6,9 +6,14 @@ from pydantic import ValidationError
 from azents.core.oauth2 import (
     OAuthTokenError,
     OAuthTokenResponse,
+    create_agent_github_platform_oauth_state,
+    create_agent_toolkit_oauth_state,
     create_oauth_state,
     create_platform_oauth_state,
+    create_toolkit_oauth_state,
     parse_token_response,
+    verify_agent_github_platform_oauth_state,
+    verify_agent_toolkit_oauth_state,
     verify_oauth_state,
     verify_platform_oauth_state,
 )
@@ -163,3 +168,97 @@ class TestPlatformOAuthState:
         """toolkit OAuth state is not verified as platform state."""
         state = create_oauth_state("tk", "u", "secret")
         assert verify_platform_oauth_state(state, "secret") is None
+
+
+class TestAgentToolkitOAuthState:
+    """Agent-owned Toolkit OAuth state tests."""
+
+    def test_roundtrip_binds_management_context(self) -> None:
+        """Verify every identity, redirect, verifier, and callback field."""
+        state = create_agent_toolkit_oauth_state(
+            toolkit_id="toolkit-1",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            user_id="user-1",
+            redirect_uri="https://app.test/oauth/mcp/callback?agent_id=agent-1",
+            code_verifier="verifier-1",
+            callback_target="agent_toolkits",
+            secret_key="secret",
+        )
+
+        verified = verify_agent_toolkit_oauth_state(state, "secret")
+
+        assert verified is not None
+        assert verified.toolkit_id == "toolkit-1"
+        assert verified.workspace_id == "workspace-1"
+        assert verified.agent_id == "agent-1"
+        assert verified.user_id == "user-1"
+        assert (
+            verified.redirect_uri
+            == "https://app.test/oauth/mcp/callback?agent_id=agent-1"
+        )
+        assert verified.code_verifier == "verifier-1"
+        assert verified.callback_target == "agent_toolkits"
+
+    def test_invalid_key_is_rejected(self) -> None:
+        """Reject an Agent OAuth state encrypted with another key."""
+        state = create_agent_toolkit_oauth_state(
+            toolkit_id="toolkit-1",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            user_id="user-1",
+            redirect_uri="https://app.test/oauth/mcp/callback",
+            code_verifier="verifier-1",
+            callback_target="agent_toolkits",
+            secret_key="secret",
+        )
+
+        assert verify_agent_toolkit_oauth_state(state, "wrong-secret") is None
+
+    def test_workspace_toolkit_state_is_rejected(self) -> None:
+        """Keep Agent and Workspace Toolkit OAuth state types distinct."""
+        state = create_toolkit_oauth_state(
+            toolkit_id="toolkit-1",
+            workspace_id="workspace-1",
+            user_id="user-1",
+            redirect_uri="https://app.test/oauth/mcp/callback",
+            code_verifier="verifier-1",
+            secret_key="secret",
+        )
+
+        assert verify_agent_toolkit_oauth_state(state, "secret") is None
+
+
+class TestAgentGitHubPlatformOAuthState:
+    """Agent-scoped GitHub Platform OAuth state tests."""
+
+    def test_roundtrip_binds_user_and_agent_context(self) -> None:
+        """Verify the initiating User, Workspace, Agent, and callback context."""
+        state = create_agent_github_platform_oauth_state(
+            "secret",
+            effective_generation="generation-1",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            user_id="user-1",
+            redirect_uri="https://app.test/oauth/github/callback",
+            callback_target="agent_github_installations",
+        )
+
+        verified = verify_agent_github_platform_oauth_state(state, "secret")
+
+        assert verified is not None
+        assert verified.effective_generation == "generation-1"
+        assert verified.workspace_id == "workspace-1"
+        assert verified.agent_id == "agent-1"
+        assert verified.user_id == "user-1"
+        assert verified.redirect_uri == "https://app.test/oauth/github/callback"
+        assert verified.callback_target == "agent_github_installations"
+
+    def test_generation_only_platform_state_is_rejected(self) -> None:
+        """Do not accept a Workspace setup state in an Agent setup callback."""
+        state = create_platform_oauth_state(
+            "secret",
+            effective_generation="generation-1",
+        )
+
+        assert verify_agent_github_platform_oauth_state(state, "secret") is None

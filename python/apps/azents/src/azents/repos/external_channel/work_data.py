@@ -12,7 +12,7 @@ from azents.core.enums import (
 from azents.core.external_channel_progress import (
     ExternalChannelWorkTask as ChannelWorkTask,
 )
-from azents.services.external_channel.provider_effect import (
+from azents.core.external_channel_provider_effect import (
     ProviderEffectOutcome,
     ProviderEffectPlan,
 )

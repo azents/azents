@@ -89,6 +89,10 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
     assert "AZ_RUNTIME_CONTROL_TRANSFER_BACKEND" in rendered
     assert 'value: "redis"' in rendered
+    assert (
+        "name: AZ_RUNTIME_CONTROL_TRANSFER_REDIS_NAMESPACE\n"
+        '              value: "azents:runtime:transfer:v2"'
+    ) in rendered
     assert "AZ_RUNTIME_CONTROL_TRANSFER_OBJECT_PREFIX" in rendered
     assert "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT" in rendered
     assert "AZ_RUNTIME_TRANSFER_COORDINATOR_TLS_CA_FILE" in rendered
@@ -210,6 +214,26 @@ def test_runtime_control_allows_single_replica_configuration() -> None:
 
     assert "replicas: 1" in rendered
     assert "maxUnavailable: 1" in rendered
+
+
+def test_runtime_control_supports_cutover_scale_zero_without_hpa_or_pdb() -> None:
+    """One release can stop every legacy allocator before schema activation."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.replicas=0",
+        "server.runtimeControl.autoscaling.enabled=false",
+        "server.runtimeControl.pdb.enabled=false",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+    )
+
+    runtime_control = rendered[
+        rendered.index("kind: Deployment\nmetadata:\n  name: runtime-control") :
+    ]
+    assert "replicas: 0" in runtime_control
+    assert "kind: HorizontalPodAutoscaler" not in rendered
+    assert "kind: PodDisruptionBudget" not in runtime_control
 
 
 def test_runtime_control_runner_requires_immutable_digest() -> None:

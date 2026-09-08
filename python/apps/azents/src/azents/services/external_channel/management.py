@@ -22,6 +22,14 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    DiscordThreadAutoArchiveDurationMinutes,
+    ExternalChannelConnectionCredentialPayload,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.rdb.session import SessionManager
@@ -67,14 +75,6 @@ from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
     ExternalChannelParticipationLock,
     ExternalChannelParticipationScope,
-)
-from azents.services.external_channel.data import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    DiscordThreadAutoArchiveDurationMinutes,
-    ExternalChannelConnectionCredentialPayload,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
 )
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,

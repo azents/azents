@@ -21,16 +21,27 @@ const exchangeOnce = cache(
   async (
     handle: string,
     toolkitConfigId: string,
+    agentId: string | null,
     code: string,
     state: string,
   ): Promise<ExchangeResult> => {
     try {
-      await trpc.toolkit.oauthExchange({
-        handle,
-        toolkitConfigId,
-        code,
-        state,
-      });
+      if (agentId == null) {
+        await trpc.toolkit.oauthExchange({
+          handle,
+          toolkitConfigId,
+          code,
+          state,
+        });
+      } else {
+        await trpc.toolkit.agentOauthExchange({
+          handle,
+          agentId,
+          toolkitConfigId,
+          code,
+          state,
+        });
+      }
       return { success: true };
     } catch (e) {
       if (e instanceof TRPCError) {
@@ -57,6 +68,7 @@ export default async function OAuthMcpCallbackPage({
     typeof params.toolkit_config_id === "string"
       ? params.toolkit_config_id
       : null;
+  const agentId = typeof params.agent_id === "string" ? params.agent_id : null;
   const error = typeof params.error === "string" ? params.error : null;
 
   const result: ExchangeResult =
@@ -65,7 +77,7 @@ export default async function OAuthMcpCallbackPage({
     state != null &&
     handle != null &&
     toolkitConfigId != null
-      ? await exchangeOnce(handle, toolkitConfigId, code, state)
+      ? await exchangeOnce(handle, toolkitConfigId, agentId, code, state)
       : {
           success: false,
           message:
@@ -79,6 +91,11 @@ export default async function OAuthMcpCallbackPage({
         <CallbackResult
           success={result.success}
           message={result.success ? null : result.message}
+          returnHref={
+            handle != null && agentId != null
+              ? `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`
+              : null
+          }
         />
       </Stack>
     </Container>

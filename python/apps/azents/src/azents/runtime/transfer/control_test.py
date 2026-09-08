@@ -49,7 +49,7 @@ def test_default_runtime_control_transfer_state_is_redis() -> None:
 
     assert isinstance(store, RedisRuntimeTransferStateStore)
     assert store.redis is redis
-    assert store.keys.namespace == "azents:runtime:transfer"
+    assert store.keys.namespace == "azents:runtime:transfer:v2"
 
 
 def test_memory_transfer_state_is_explicit_and_process_local() -> None:

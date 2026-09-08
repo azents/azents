@@ -32,6 +32,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 
 from . import ToolkitOperationsRepository
 from .data import (
+    EffectiveSlugConflict,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
     ToolkitWorkspaceMismatch,
@@ -70,6 +71,7 @@ def _toolkit(*, workspace_id: str = "workspace-1") -> ToolkitConfig:
     return ToolkitConfig(
         id="toolkit-1",
         workspace_id=workspace_id,
+        owner_agent_id=None,
         toolkit_type="mcp",
         slug="toolkit",
         name="Toolkit",
@@ -96,6 +98,7 @@ def _scope() -> ToolkitScope:
 def _create() -> ToolkitCreate:
     return ToolkitCreate(
         workspace_id="workspace-1",
+        owner_agent_id=None,
         toolkit_type="mcp",
         slug="toolkit",
         name="Toolkit",
@@ -215,7 +218,7 @@ async def test_update_revalidates_current_toolkit_and_workspace(
     """A stale preflight cannot authorize a deleted or moved Toolkit mutation."""
     session_manager = _TrackedSessionManager()
     repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
-    toolkit_repo.get_by_id.return_value = locked_toolkit
+    toolkit_repo.get_shared_by_id_for_update.return_value = locked_toolkit
 
     result = await repository.update(
         "toolkit-1",
@@ -252,9 +255,62 @@ async def test_update_rejects_platform_reconnect_race_before_mutation() -> None:
     assert isinstance(result, Failure)
     assert isinstance(result.error, PlatformAuthorityRejected)
     assert result.error.detail == "GitHub Platform App reconnect is required."
-    toolkit_repo.get_by_id.assert_not_awaited()
+    toolkit_repo.get_shared_by_id_for_update.assert_not_awaited()
     toolkit_repo.update_by_id.assert_not_awaited()
     github_repo.list_accessible_installation_ids.assert_not_awaited()
+
+
+async def test_slug_update_locks_all_attached_agents_before_conflict_checks() -> None:
+    """Preserve shared namespace lock ordering in the completed operation."""
+    session_manager = _TrackedSessionManager()
+    repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
+    toolkit_repo.get_shared_by_id_for_update.return_value = _toolkit()
+    repository.agent_toolkit_repository = AsyncMock(spec=AgentToolkitRepository)
+    repository.agent_toolkit_repository.list_agent_ids_by_toolkit.return_value = [
+        "agent-a",
+        "agent-b",
+    ]
+    agent_repo = AsyncMock(spec=AgentRepository)
+    repository.agent_repository = agent_repo
+    events: list[str] = []
+
+    async def lock(session: AsyncSession, agent_id: str) -> None:
+        assert session is session_manager.session
+        assert session_manager.active
+        events.append(f"lock:{agent_id}")
+
+    async def conflict(
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        workspace_id: str,
+        toolkit_id: str,
+        slug: str,
+        enabled: bool,
+    ) -> bool:
+        assert session is session_manager.session
+        assert (workspace_id, toolkit_id, slug, enabled) == (
+            "workspace-1",
+            "toolkit-1",
+            "renamed",
+            True,
+        )
+        events.append(f"check:{agent_id}")
+        return agent_id == "agent-b"
+
+    agent_repo.lock_by_id.side_effect = lock
+    toolkit_repo.has_effective_slug_conflict.side_effect = conflict
+    result = await repository.update(
+        "toolkit-1",
+        ToolkitUpdate(slug="renamed"),
+        workspace_id="workspace-1",
+        expected_toolkit_type="mcp",
+        platform_authority=None,
+    )
+
+    assert result == Failure(EffectiveSlugConflict(slug="renamed"))
+    assert events == ["lock:agent-a", "lock:agent-b", "check:agent-a", "check:agent-b"]
+    toolkit_repo.update_by_id.assert_not_awaited()
 
 
 async def test_update_rejects_revoked_installation_before_mutation() -> None:
@@ -279,5 +335,5 @@ async def test_update_rejects_revoked_installation_before_mutation() -> None:
     assert result.error.detail == (
         "GitHub installation is not accessible to this user."
     )
-    toolkit_repo.get_by_id.assert_not_awaited()
+    toolkit_repo.get_shared_by_id_for_update.assert_not_awaited()
     toolkit_repo.update_by_id.assert_not_awaited()

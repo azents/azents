@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+import asyncio
+import dataclasses
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
 
 import azentsadminclient
 import azentspublicclient
 import pytest
+import requests
+from azents_runtime_control.grpc_runner_client import (
+    GrpcRunnerControlClient,
+    RuntimeRunnerControlStreamClosed,
+)
+from azents_runtime_control.runner import (
+    RunnerOperationEnvelope,
+    RunnerOperationEvent,
+    RunnerRegistration,
+    RunnerRegistrationAccepted,
+    RunnerStateReport,
+    RuntimeRunnerEventType,
+    RuntimeRunnerState,
+)
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from azents_runtime_control.transfer import (
+    RUNNER_TRANSFER_CAPABILITY,
+    RUNNER_TRANSFER_PROTOCOL_VERSION,
+)
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
@@ -51,6 +73,7 @@ from azentspublicclient.models.workspace_runtime_profile_default_replace_request
 from azentspublicclient.models.workspace_runtime_profile_response import (
     WorkspaceRuntimeProfileResponse,
 )
+from redis import Redis
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -70,7 +93,32 @@ from support.utils import (
 )
 
 _RUNTIME_PROVIDER_ID = "system-docker"
+_RUNTIME_PROVIDER_REGISTERED_MARKER = "Runtime Provider registered"
+_RUNTIME_RUNNER_STALE_CLOSE_MARKER = (
+    "Runtime Runner stream close ignored for stale generation"
+)
 _SIGNUP_PASSWORD = "TestPass123!"
+type _StaleRunnerAction = Literal["heartbeat", "report", "result", "revoke"]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RunnerProbeSettings:
+    """Secret-bearing Runner probe settings retained only inside one E2E process."""
+
+    endpoint: str
+    auth_token: str = dataclasses.field(repr=False)
+    registration: RunnerRegistration
+
+
+@dataclasses.dataclass(frozen=True)
+class _InflightProbeOperation:
+    """One real Public API operation retained by a controlled Runner probe."""
+
+    client: GrpcRunnerControlClient
+    accepted: RunnerRegistrationAccepted
+    operation: RunnerOperationEnvelope
+    response_task: asyncio.Task[requests.Response]
+    path: str
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -117,13 +165,516 @@ def _stop_runtime_provider(container: DockerContainer) -> None:
     assert wrapped_container.status == "exited"
 
 
+def _runtime_provider_registration_count(container: DockerContainer) -> int:
+    """Count completed Provider registrations in deterministic container logs."""
+    stdout, stderr = container.get_logs()
+    return (stdout.decode(errors="replace") + stderr.decode(errors="replace")).count(
+        _RUNTIME_PROVIDER_REGISTERED_MARKER
+    )
+
+
+def _container_log_marker_count(container: DockerContainer, marker: str) -> int:
+    """Count one secret-free marker across a deterministic container's logs."""
+    stdout, stderr = container.get_logs()
+    return (stdout.decode(errors="replace") + stderr.decode(errors="replace")).count(
+        marker
+    )
+
+
+def _runner_probe_settings(
+    *,
+    runtime_id: str,
+    provider_container: DockerContainer,
+    runtime_control_container: DockerContainer,
+) -> _RunnerProbeSettings:
+    """Read one running E2E Runner's generated credential and policy evidence."""
+    docker_client = provider_container.get_wrapped_container().client
+    if docker_client is None:
+        raise AssertionError("Docker Runtime Provider client is unavailable")
+    matches = docker_client.containers.list(
+        all=True,
+        filters={
+            "label": [
+                "azents/managed-by=azents-runtime-provider-docker",
+                f"azents/runtime-id={runtime_id}",
+            ]
+        },
+    )
+    if len(matches) != 1:
+        raise AssertionError(
+            f"Expected one Docker Runtime Runner for {runtime_id}, found {len(matches)}"
+        )
+    runner = matches[0]
+    runner.reload()
+    raw_environment = runner.attrs.get("Config", {}).get("Env", [])
+    if not isinstance(raw_environment, list) or not all(
+        isinstance(item, str) for item in raw_environment
+    ):
+        raise AssertionError("Docker Runtime Runner environment is unavailable")
+    environment = {
+        name: value
+        for item in raw_environment
+        if "=" in item
+        for name, value in (item.split("=", 1),)
+    }
+    required = (
+        "AZ_RUNTIME_RUNNER_AUTH_TOKEN",
+        "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID",
+        "AZ_RUNTIME_CONFIGURATION_SEQUENCE",
+        "AZ_RUNTIME_CONFIGURATION_DIGEST",
+        "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION",
+        "HOME",
+    )
+    missing = [name for name in required if not environment.get(name)]
+    if missing:
+        raise AssertionError(
+            "Docker Runtime Runner environment is incomplete: "
+            f"{', '.join(sorted(missing))}"
+        )
+    endpoint = (
+        f"{runtime_control_container.get_container_host_ip()}:"
+        f"{runtime_control_container.get_exposed_port(8030)}"
+    )
+    return _RunnerProbeSettings(
+        endpoint=endpoint,
+        auth_token=environment["AZ_RUNTIME_RUNNER_AUTH_TOKEN"],
+        registration=RunnerRegistration(
+            runtime_id=runtime_id,
+            runner_id=f"stale-probe-{unique()}",
+            protocol_version=RUNNER_TRANSFER_PROTOCOL_VERSION,
+            capabilities=(RUNNER_TRANSFER_CAPABILITY,),
+            health="ready",
+            workspace_path=environment["HOME"],
+            metadata={},
+            auth_credential_id=environment["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"],
+            runtime_configuration=RuntimeConfigurationEvidence(
+                configuration_sequence=int(
+                    environment["AZ_RUNTIME_CONFIGURATION_SEQUENCE"]
+                ),
+                digest=environment["AZ_RUNTIME_CONFIGURATION_DIGEST"],
+                desired_generation=int(
+                    environment["AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"]
+                ),
+            ),
+        ),
+    )
+
+
+async def _wait_for_runner_generation_above(
+    runtime_api: AgentRuntimeV1Api,
+    *,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    generation: int,
+) -> AgentRuntimeResponse:
+    """Wait for the real Runner to replace one probe generation."""
+    deadline = asyncio.get_running_loop().time() + 60
+    while asyncio.get_running_loop().time() < deadline:
+        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            current.runtime is not None
+            and current.runtime.runner_generation is not None
+            and current.lifecycle is not None
+            and int(current.runtime.runner_generation) > generation
+            and current.lifecycle.availability == "ready"
+            and current.actions.use_runner
+        ):
+            return current
+        await asyncio.sleep(0.5)
+    raise AssertionError("Real Runner did not replace the stale E2E probe")
+
+
+async def _start_inflight_probe_operation(
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    path: str,
+) -> _InflightProbeOperation:
+    """Start one real Workspace operation and hold its final Runner result."""
+    operation_received = asyncio.Event()
+    operations: list[RunnerOperationEnvelope] = []
+
+    async def capture_operation(operation: RunnerOperationEnvelope) -> None:
+        operations.append(operation)
+        operation_received.set()
+
+    client = GrpcRunnerControlClient.from_endpoint(
+        settings.endpoint,
+        runner_auth_token=settings.auth_token,
+        tls=None,
+        allow_insecure=True,
+    )
+    client.set_operation_handler(capture_operation)
+    accepted = await client.register_runner(
+        settings.registration,
+        connection_id=f"inflight-probe-{unique()}",
+        registered_at=datetime.now(UTC),
+    )
+    await client.report_runner_state(
+        RunnerStateReport(
+            runtime_id=accepted.runtime_id,
+            runner_id=accepted.runner_id,
+            runner_generation=accepted.generation,
+            runner_state=RuntimeRunnerState.READY,
+            capabilities=settings.registration.capabilities,
+            active_operation_ids=(),
+            health="ready",
+            diagnostic={"source": "inflight-probe"},
+            workspace_path=settings.registration.workspace_path,
+            reported_at=datetime.now(UTC),
+            runtime_configuration=settings.registration.runtime_configuration,
+        )
+    )
+    projection_deadline = asyncio.get_running_loop().time() + 10
+    while asyncio.get_running_loop().time() < projection_deadline:
+        projected = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            projected.runtime is not None
+            and projected.runtime.runner_generation == str(accepted.generation)
+            and projected.runtime.runner_state.value == "ready"
+        ):
+            break
+        await asyncio.sleep(0.2)
+    else:
+        await client.close()
+        raise AssertionError("Runner probe generation was not durably projected")
+    response_task = asyncio.create_task(
+        asyncio.to_thread(
+            requests.post,
+            f"{public_server_url}/chat/v1/agents/{agent_id}/workspace/directories",
+            headers=_headers(token),
+            json={"path": path, "parents": False},
+            timeout=25,
+        )
+    )
+    try:
+        await asyncio.wait_for(operation_received.wait(), timeout=10)
+        operation = operations[0]
+        assert operation.operation_type == "file.mkdir"
+        assert operation.payload["path"] == path
+        assert await client.start_runner_operation(operation)
+    except asyncio.CancelledError:
+        await client.close()
+        if not response_task.done():
+            response_task.cancel()
+        raise
+    except Exception:
+        await client.close()
+        if not response_task.done():
+            response_task.cancel()
+        raise
+    return _InflightProbeOperation(
+        client=client,
+        accepted=accepted,
+        operation=operation,
+        response_task=response_task,
+        path=path,
+    )
+
+
+async def _assert_inflight_request_did_not_succeed(
+    inflight: _InflightProbeOperation,
+) -> None:
+    """Require one lost or stale operation to avoid an HTTP success response."""
+    try:
+        response = await inflight.response_task
+    except requests.RequestException:
+        return
+    assert response.status_code != 200
+
+
+def _assert_workspace_path_missing(
+    workspace_api: ChatV1Api,
+    *,
+    agent_id: str,
+    path: str,
+    headers: dict[str, str],
+) -> None:
+    """Require that a rejected synthetic result created no Runtime path."""
+    with pytest.raises(ApiException) as error:
+        workspace_api.chat_v1_read_agent_workspace_path(
+            agent_id=agent_id,
+            path=path,
+            _headers=headers,
+        )
+    assert cast(Any, error.value).status == 404
+
+
+async def _wait_for_empty_store_recovery(
+    runtime_api: AgentRuntimeV1Api,
+    *,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    minimum_generation: int,
+    provider_container: DockerContainer,
+    prior_provider_registrations: int,
+) -> AgentRuntimeResponse:
+    """Wait for both Provider and Runner to recover after empty-store reset."""
+    deadline = asyncio.get_running_loop().time() + 120
+    while asyncio.get_running_loop().time() < deadline:
+        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            current.runtime is not None
+            and current.runtime.runner_generation is not None
+            and current.lifecycle is not None
+            and _runtime_provider_registration_count(provider_container)
+            > prior_provider_registrations
+            and int(current.runtime.runner_generation) > minimum_generation
+            and current.lifecycle.availability == "ready"
+            and current.actions.use_runner
+        ):
+            return current
+        await asyncio.sleep(0.5)
+    raise AssertionError("Runtime did not recover with higher authority after reset")
+
+
+async def _reset_with_inflight_operation(
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    path: str,
+    previous_generation: int,
+    provider_container: DockerContainer,
+    previous_provider_registrations: int,
+    valkey_container: DockerContainer,
+) -> AgentRuntimeResponse:
+    """Clear Valkey with an active operation and require fail-closed recovery."""
+    inflight = await _start_inflight_probe_operation(
+        settings=settings,
+        public_server_url=public_server_url,
+        token=token,
+        runtime_api=runtime_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        path=path,
+    )
+    redis = Redis(
+        host=valkey_container.get_container_host_ip(),
+        port=int(valkey_container.get_exposed_port(6379)),
+        decode_responses=True,
+    )
+    try:
+        await asyncio.to_thread(redis.flushall)
+        recovered = await _wait_for_empty_store_recovery(
+            runtime_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            minimum_generation=max(
+                previous_generation,
+                inflight.accepted.generation,
+            ),
+            provider_container=provider_container,
+            prior_provider_registrations=previous_provider_registrations,
+        )
+        await _assert_inflight_request_did_not_succeed(inflight)
+        _assert_workspace_path_missing(
+            workspace_api,
+            agent_id=agent_id,
+            path=inflight.path,
+            headers=headers,
+        )
+        return recovered
+    finally:
+        redis.close()
+        await inflight.client.close()
+
+
+async def _assert_stale_runner_action_is_fenced(
+    action: _StaleRunnerAction,
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    runtime_control_container: DockerContainer,
+) -> None:
+    """Replace one probe, submit one stale action, and preserve current state."""
+    inflight: _InflightProbeOperation | None = None
+    if action == "result":
+        inflight = await _start_inflight_probe_operation(
+            settings=settings,
+            public_server_url=public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            path=f"{settings.registration.workspace_path}/stale-result-{unique()}",
+        )
+        client = inflight.client
+        accepted = inflight.accepted
+    else:
+        client = GrpcRunnerControlClient.from_endpoint(
+            settings.endpoint,
+            runner_auth_token=settings.auth_token,
+            tls=None,
+            allow_insecure=True,
+        )
+        accepted = await client.register_runner(
+            settings.registration,
+            connection_id=f"stale-probe-{action}-{unique()}",
+            registered_at=datetime.now(UTC),
+        )
+    current = await _wait_for_runner_generation_above(
+        runtime_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        generation=accepted.generation,
+    )
+    assert current.runtime is not None
+    assert current.runtime.runner_generation is not None
+    current_generation = current.runtime.runner_generation
+    current_runner_state = current.runtime.runner_state
+    stale_close_count = _container_log_marker_count(
+        runtime_control_container,
+        _RUNTIME_RUNNER_STALE_CLOSE_MARKER,
+    )
+    try:
+        if action == "heartbeat":
+            with pytest.raises(RuntimeRunnerControlStreamClosed):
+                await client.heartbeat_runner(
+                    runtime_id=accepted.runtime_id,
+                    generation=accepted.generation,
+                    heartbeat_at=datetime.now(UTC),
+                )
+        elif action == "report":
+            await client.report_runner_state(
+                RunnerStateReport(
+                    runtime_id=accepted.runtime_id,
+                    runner_id=accepted.runner_id,
+                    runner_generation=accepted.generation,
+                    runner_state=RuntimeRunnerState.FAILED,
+                    capabilities=settings.registration.capabilities,
+                    active_operation_ids=(),
+                    health="stale-probe",
+                    diagnostic={"source": "stale-probe"},
+                    workspace_path=settings.registration.workspace_path,
+                    reported_at=datetime.now(UTC),
+                    runtime_configuration=settings.registration.runtime_configuration,
+                )
+            )
+            with pytest.raises(RuntimeRunnerControlStreamClosed):
+                await client.heartbeat_runner(
+                    runtime_id=accepted.runtime_id,
+                    generation=accepted.generation,
+                    heartbeat_at=datetime.now(UTC),
+                )
+        elif action == "result":
+            assert inflight is not None
+            await client.append_runner_event(
+                RunnerOperationEvent(
+                    request_id=inflight.operation.request_id,
+                    runtime_id=accepted.runtime_id,
+                    generation=accepted.generation,
+                    event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+                    payload={"created_path": inflight.path},
+                    created_at=datetime.now(UTC),
+                    final=True,
+                )
+            )
+            with pytest.raises(RuntimeRunnerControlStreamClosed):
+                await client.heartbeat_runner(
+                    runtime_id=accepted.runtime_id,
+                    generation=accepted.generation,
+                    heartbeat_at=datetime.now(UTC),
+                )
+            await _assert_inflight_request_did_not_succeed(inflight)
+            _assert_workspace_path_missing(
+                workspace_api,
+                agent_id=agent_id,
+                path=inflight.path,
+                headers=headers,
+            )
+        else:
+            await client.close()
+            wait_until(
+                lambda: (
+                    _container_log_marker_count(
+                        runtime_control_container,
+                        _RUNTIME_RUNNER_STALE_CLOSE_MARKER,
+                    )
+                    > stale_close_count
+                ),
+                timeout=15,
+                interval=0.2,
+                message="Runtime Control did not ignore the stale Runner revoke",
+            )
+    finally:
+        await client.close()
+
+    after = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert after.runtime is not None
+    assert after.runtime.runner_generation == current_generation
+    assert after.runtime.runner_state == current_runner_state
+
+
+async def _assert_stale_runner_actions_are_fenced(
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    runtime_control_container: DockerContainer,
+) -> None:
+    """Exercise stale heartbeat, report, result, and revoke through real gRPC."""
+    for action in ("heartbeat", "report", "result", "revoke"):
+        await _assert_stale_runner_action_is_fenced(
+            action,
+            settings=settings,
+            public_server_url=public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            workspace_api=workspace_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            runtime_control_container=runtime_control_container,
+        )
+
+
 def _restart_runtime_provider(container: DockerContainer) -> None:
     """Restart the deterministic Provider and wait for a new registration."""
-    marker = "Runtime Provider registered"
-    stdout, stderr = container.get_logs()
-    prior_registrations = (
-        stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    ).count(marker)
+    prior_registrations = _runtime_provider_registration_count(container)
     wrapped_container = container.get_wrapped_container()
     wrapped_container.start()
 
@@ -131,12 +682,7 @@ def _restart_runtime_provider(container: DockerContainer) -> None:
         wrapped_container.reload()
         if wrapped_container.status == "exited":
             raise AssertionError("Runtime Provider exited while restarting")
-        current_stdout, current_stderr = container.get_logs()
-        registrations = (
-            current_stdout.decode(errors="replace")
-            + current_stderr.decode(errors="replace")
-        ).count(marker)
-        return registrations > prior_registrations
+        return _runtime_provider_registration_count(container) > prior_registrations
 
     wait_until(
         registered_again,
@@ -144,6 +690,143 @@ def _restart_runtime_provider(container: DockerContainer) -> None:
         interval=1,
         message="Runtime Provider did not register after restart",
     )
+
+
+def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_runtime_control_container: DockerContainer,
+    azents_runtime_provider_docker_container: DockerContainer,
+    azents_engine_worker_container: DockerContainer,
+    valkey_container: DockerContainer,
+) -> None:
+    """An empty Valkey instance loses live work but not Runtime authority."""
+    del azents_engine_worker_container
+    suffix = unique()
+    token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"runtime-empty-valkey-{suffix}@example.com",
+    )
+    handle = f"runtime-empty-valkey-{suffix}"
+    headers = _headers(token)
+    WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        CreateWorkspaceRequest(
+            workspace_name=f"Runtime Empty Valkey {suffix}",
+            workspace_handle=handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=headers,
+    )
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-runtime-empty-valkey")),
+        ),
+        _headers=headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        azents_public_server_url,
+        token,
+        handle,
+        integration.id,
+    )
+    profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        handle=handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Empty Valkey {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+            runtime_profile_id=profile_id,
+        ),
+        _headers=headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent.id,
+    )
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    before = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert before.runtime is not None
+    assert before.runtime.runner_generation is not None
+    assert before.runtime.workspace_path
+    previous_generation = int(before.runtime.runner_generation)
+    assert previous_generation > 0
+    previous_provider_registrations = _runtime_provider_registration_count(
+        azents_runtime_provider_docker_container
+    )
+    workspace_api = ChatV1Api(public_api_client)
+    settings = _runner_probe_settings(
+        runtime_id=before.runtime.id,
+        provider_container=azents_runtime_provider_docker_container,
+        runtime_control_container=azents_runtime_control_container,
+    )
+    recovered = asyncio.run(
+        _reset_with_inflight_operation(
+            settings=settings,
+            public_server_url=azents_public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            workspace_api=workspace_api,
+            agent_id=agent.id,
+            handle=handle,
+            headers=headers,
+            path=(f"{before.runtime.workspace_path}/lost-inflight-reset-{suffix}"),
+            previous_generation=previous_generation,
+            provider_container=azents_runtime_provider_docker_container,
+            previous_provider_registrations=previous_provider_registrations,
+            valkey_container=valkey_container,
+        )
+    )
+    assert recovered.runtime is not None
+    assert recovered.runtime.workspace_path
+    asyncio.run(
+        _assert_stale_runner_actions_are_fenced(
+            settings=settings,
+            public_server_url=azents_public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            workspace_api=workspace_api,
+            agent_id=agent.id,
+            handle=handle,
+            headers=headers,
+            runtime_control_container=azents_runtime_control_container,
+        )
+    )
+
+    directory = f"{recovered.runtime.workspace_path}/empty-valkey-{suffix}"
+    workspace_api.chat_v1_create_agent_workspace_directory(
+        agent_id=agent.id,
+        agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(
+            path=directory,
+            parents=False,
+        ),
+        _headers=headers,
+    )
+    created = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=agent.id,
+        path=directory,
+        _headers=headers,
+    )
+    assert isinstance(created.actual_instance, AgentWorkspaceDirectoryResponse)
 
 
 def test_runtime_profile_precedence_applied_evidence_and_recreation(

@@ -83,6 +83,7 @@ interface GithubConfigFieldsProps {
   hasCredentials: boolean;
   authorizationState: GitHubPlatformAuthorizationStateResponse | null;
   handle?: string;
+  agentId?: string;
   toolkitConfigId?: string;
 }
 
@@ -162,6 +163,7 @@ export function GithubConfigFields({
   hasCredentials,
   authorizationState,
   handle,
+  agentId,
   toolkitConfigId,
 }: GithubConfigFieldsProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.github");
@@ -233,6 +235,7 @@ export function GithubConfigFields({
       try {
         const data = await getInstallationsMutation.mutateAsync({
           handle: handle ?? "",
+          ...(agentId != null && { agentId }),
           code,
           state,
         });
@@ -244,7 +247,7 @@ export function GithubConfigFields({
         setLoadingInstallations(false);
       }
     },
-    [getInstallationsMutation, handle],
+    [agentId, getInstallationsMutation, handle],
   );
 
   const startOAuthFlow = useCallback(async (): Promise<void> => {
@@ -252,6 +255,7 @@ export function GithubConfigFields({
     try {
       const data = await utils.toolkit.getGithubOauthUrl.fetch({
         handle: handle ?? "",
+        ...(agentId != null && { agentId }),
       });
       if (data.oauth_url) {
         openPopupWithPolling(data.oauth_url);
@@ -261,12 +265,13 @@ export function GithubConfigFields({
     } catch {
       setLoadingInstallations(false);
     }
-  }, [utils.toolkit.getGithubOauthUrl, openPopupWithPolling, handle]);
+  }, [agentId, utils.toolkit.getGithubOauthUrl, openPopupWithPolling, handle]);
 
   const handleInstallApp = useCallback(async (): Promise<void> => {
     try {
       const data = await utils.toolkit.getGithubInstallUrl.fetch({
         handle: handle ?? "",
+        ...(agentId != null && { agentId }),
       });
       if (data.install_url) {
         openPopupWithPolling(data.install_url, () => {
@@ -277,6 +282,7 @@ export function GithubConfigFields({
       // Keep GitHub install URL lookup failures local to this form for now.
     }
   }, [
+    agentId,
     utils.toolkit.getGithubInstallUrl,
     openPopupWithPolling,
     startOAuthFlow,
@@ -326,6 +332,7 @@ export function GithubConfigFields({
     try {
       const result = await testConnectionMutation.mutateAsync({
         handle,
+        ...(agentId != null && { agentId }),
         toolkitType: "github",
         toolkitConfigId: toolkitConfigId ?? null,
         config,

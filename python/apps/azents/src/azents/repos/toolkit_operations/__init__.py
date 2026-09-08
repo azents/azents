@@ -45,6 +45,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from .data import (
     AgentToolkitMismatch,
     AgentWorkspaceMismatch,
+    EffectiveSlugConflict,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
     ScopeToolkitMismatch,
@@ -58,7 +59,9 @@ _PLATFORM_RECONNECT_REQUIRED = "GitHub Platform App reconnect is required."
 _INSTALLATION_NOT_ACCESSIBLE = "GitHub installation is not accessible to this user."
 
 ToolkitReadError = NotFound | ToolkitWorkspaceMismatch
-ToolkitMutationError = ToolkitReadError | DuplicateSlug | PlatformAuthorityRejected
+ToolkitMutationError = (
+    ToolkitReadError | DuplicateSlug | PlatformAuthorityRejected | EffectiveSlugConflict
+)
 ToolkitScopeMutationError = ToolkitReadError | DuplicateScope
 ToolkitScopeDeleteError = ToolkitReadError | ScopeNotFound | ScopeToolkitMismatch
 AgentToolkitListError = AgentWorkspaceMismatch
@@ -68,6 +71,7 @@ AgentToolkitAttachError = (
     | ToolkitUnavailable
     | DuplicateAgentToolkit
     | AgentWorkspaceMismatch
+    | EffectiveSlugConflict
 )
 AgentToolkitDetachError = ScopeNotFound | AgentToolkitMismatch | AgentWorkspaceMismatch
 
@@ -133,7 +137,7 @@ class ToolkitOperationsRepository:
         """Atomically create a Toolkit, Workspace scope, and response snapshot."""
         async with self.session_manager() as session:
             if platform_authority is not None:
-                authority_error = await self._validate_platform_authority(
+                authority_error = await self.validate_platform_authority(
                     session,
                     platform_authority,
                 )
@@ -236,21 +240,41 @@ class ToolkitOperationsRepository:
         """Revalidate current authority and update one Toolkit."""
         async with self.session_manager() as session:
             if platform_authority is not None:
-                authority_error = await self._validate_platform_authority(
+                authority_error = await self.validate_platform_authority(
                     session,
                     platform_authority,
                 )
                 if authority_error is not None:
                     return Failure(authority_error)
-            toolkit_result = await self._get_workspace_toolkit(
-                session,
-                toolkit_id=toolkit_id,
-                workspace_id=workspace_id,
+            toolkit = await self.toolkit_repository.get_shared_by_id_for_update(
+                session, toolkit_id
             )
-            if isinstance(toolkit_result, Failure):
-                return Failure(toolkit_result.error)
-            if toolkit_result.value.toolkit_type != expected_toolkit_type:
+            if toolkit is None:
                 return Failure(NotFound(toolkit_id=toolkit_id))
+            if toolkit.workspace_id != workspace_id:
+                return Failure(ToolkitWorkspaceMismatch(toolkit_id=toolkit_id))
+            if toolkit.toolkit_type != expected_toolkit_type:
+                return Failure(NotFound(toolkit_id=toolkit_id))
+            candidate_slug = update.get("slug", toolkit.slug)
+            candidate_enabled = update.get("enabled", toolkit.enabled)
+            if candidate_slug != toolkit.slug or candidate_enabled != toolkit.enabled:
+                agent_ids = (
+                    await self.agent_toolkit_repository.list_agent_ids_by_toolkit(
+                        session, toolkit_id
+                    )
+                )
+                for agent_id in agent_ids:
+                    await self.agent_repository.lock_by_id(session, agent_id)
+                for agent_id in agent_ids:
+                    if await self.toolkit_repository.has_effective_slug_conflict(
+                        session,
+                        agent_id=agent_id,
+                        workspace_id=workspace_id,
+                        toolkit_id=toolkit_id,
+                        slug=candidate_slug,
+                        enabled=candidate_enabled,
+                    ):
+                        return Failure(EffectiveSlugConflict(slug=candidate_slug))
             update_result = await self.toolkit_repository.update_by_id(
                 session,
                 toolkit_id,
@@ -399,30 +423,32 @@ class ToolkitOperationsRepository:
     ) -> Result[AgentToolkit, AgentToolkitAttachError]:
         """Atomically revalidate availability and attach one Toolkit."""
         async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+            toolkit = await self.toolkit_repository.get_shared_by_id_for_update(
+                session, toolkit_id
+            )
+            if toolkit is None:
+                return Failure(NotFound(toolkit_id=toolkit_id))
+            if toolkit.workspace_id != workspace_id:
+                return Failure(ToolkitWorkspaceMismatch(toolkit_id=toolkit_id))
+            agent = await self.agent_repository.lock_by_id(session, agent_id)
             if agent is None or agent.workspace_id != workspace_id:
                 return Failure(AgentWorkspaceMismatch(agent_id=agent_id))
-            toolkit_result = await self._get_workspace_toolkit(
-                session,
-                toolkit_id=toolkit_id,
-                workspace_id=workspace_id,
-            )
-            if isinstance(toolkit_result, Failure):
-                return Failure(toolkit_result.error)
-            membership = await self.workspace_user_repository.get_by_workspace_and_user(
+            available = await self.toolkit_repository.list_available_for_workspace_user(
                 session,
                 workspace_id,
                 user_id,
             )
-            scopes = await self.scope_repository.list_by_toolkit(session, toolkit_id)
-            toolkit = toolkit_result.value
-            has_workspace_scope = any(
-                scope.scope_type is ToolkitScopeType.WORKSPACE
-                and scope.scope_id == workspace_id
-                for scope in scopes
-            )
-            if membership is None or not has_workspace_scope or not toolkit.enabled:
+            if toolkit_id not in {item.id for item in available}:
                 return Failure(ToolkitUnavailable(toolkit_id=toolkit_id))
+            if await self.toolkit_repository.has_effective_slug_conflict(
+                session,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
+                slug=toolkit.slug,
+                enabled=toolkit.enabled,
+            ):
+                return Failure(EffectiveSlugConflict(slug=toolkit.slug))
             create_result = await self.agent_toolkit_repository.create(
                 session,
                 AgentToolkitCreate(
@@ -479,14 +505,14 @@ class ToolkitOperationsRepository:
         toolkit_id: str,
         workspace_id: str,
     ) -> Result[ToolkitConfig, ToolkitReadError]:
-        toolkit = await self.toolkit_repository.get_by_id(session, toolkit_id)
+        toolkit = await self.toolkit_repository.get_shared_by_id(session, toolkit_id)
         if toolkit is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if toolkit.workspace_id != workspace_id:
             return Failure(ToolkitWorkspaceMismatch(toolkit_id=toolkit_id))
         return Success(toolkit)
 
-    async def _validate_platform_authority(
+    async def validate_platform_authority(
         self,
         session: AsyncSession,
         authority: PlatformToolkitAuthority,

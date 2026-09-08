@@ -61,6 +61,13 @@ class ToolkitUnavailable:
 
 
 @dataclasses.dataclass(frozen=True)
+class EffectiveSlugConflict:
+    """A Toolkit mutation would duplicate an Agent's effective slug."""
+
+    slug: str
+
+
+@dataclasses.dataclass(frozen=True)
 class PlatformAuthorityRejected:
     """Prepared Platform GitHub authority is no longer current."""
 

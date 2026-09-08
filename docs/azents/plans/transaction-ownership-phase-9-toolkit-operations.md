@@ -8,9 +8,10 @@ tags: [backend, architecture, database, toolkit, oauth]
 
 - Phase: 9, Toolkit operation repository ownership and external validation separation.
 - Branch/base: `refactor/toolkit-operations-transactions-260908` →
-  `refactor/project-mailbox-transactions-260908` at `54df1393e342ca9945aa79489548b8f8b6e312f4`.
+  `refactor/project-mailbox-transactions-260908` at `d1815f1af` after base alignment.
 - PR boundary: remove every application-owned database lifetime from Toolkit CRUD,
-  scope management, Agent attachment, and response OAuth composition while
+  scope management, Agent attachment, Agent-owned management and OAuth persistence,
+  and response OAuth composition while
   preserving the current Public API contract and credential behavior.
 - Inputs: [transaction-260908/REQ](../requirements/transaction-260908-repository-ownership.md),
   [transaction-260908/ADR](../adr/transaction-260908-repository-ownership.md),
@@ -53,7 +54,7 @@ tags: [backend, architecture, database, toolkit, oauth]
 | M2 service orchestration | `/root` | `python/apps/azents/src/azents/services/toolkit/**` | M1 | No service-owned transaction; external Platform/settings and provider validation see zero active transaction | Service boundary tests and transaction probes |
 | M3 final authority | `/root` | Toolkit operation repository and directly required GitHub installation/settings data access | M1, M2 | Exact workspace/Toolkit/provider/platform/user/Agent authority is revalidated in final mutation transactions without adding locks | Stale workspace, deleted Toolkit, reconnect/App drift, and update race tests |
 | M4 integration | `/root` | direct FastAPI/Worker/API/MCP OAuth DI callers and tests only | M1–M3 | Constructor graph and OAuth projection use completed operations without API drift | Focused and full affected Pytest, Ruff, format, ty |
-| M5 evidence/spec | `/root` | `docs/azents/spec/domain/toolkit.md`, this plan | M1–M4 | Updated date/version/changelog, residual context and lock ledger (`none` unless evidence changes) | Spec validation, staged pre-commit, independent review |
+| M5 evidence/spec | `/root` | `docs/azents/spec/domain/toolkit.md`, this plan | M1–M4 | Updated date/version/changelog, residual context and preserved DB-only lock ledger | Spec validation, staged pre-commit, direct review |
 
 - Integration order: add operation data contracts; implement repository-owned reads
   and mutations; convert Toolkit service orchestration; update direct dependency
@@ -69,13 +70,33 @@ tags: [backend, architecture, database, toolkit, oauth]
   affected Pytest suites; `uv run ruff check --fix` and `uv run ruff format` on
   affected Python paths; full `uv run ty check --error-on-warning`; staged
   pre-commit without bypass; explicit residual transaction/import/caller search.
-- Scope-drift check: every one of the 25 audit-listed Toolkit contexts is removed
-  or mapped to one typed completed repository operation; no unrelated model,
+- Scope-drift check: the original 25 audit-listed Toolkit contexts and the
+  additional Agent-owned management contexts introduced by the updated base are
+  mapped to typed completed repository operations; no unrelated model,
   integration, file, Runtime, schema, generated API, or Engine behavior is added.
-- Context checkpoint: baseline service has 25 Toolkit contexts, including create
-  nested OAuth/settings work and conditional GitHub validation contexts. The
+- Context checkpoint: the aligned base service has 36 async transaction contexts,
+  including shared and Agent-owned CRUD, management authorization, OAuth
+  persistence, nested OAuth/settings work, and provider validation. The migrated
+  service has zero async contexts and no SQLAlchemy or session-manager imports.
+  All 22 public async methods remain present. The
   intended interface change is internal DI only. Risks are stale Platform App or
   user-installation authority between validation and mutation, Toolkit deletion or
   type/workspace drift, partial Toolkit/scope creation, and OAuth projection
   failure occurring before a write transaction completes. No cross-I/O lock is
   planned or currently justified.
+
+## Base-alignment preservation
+
+The updated base distinguishes shared and Agent-owned Toolkit identity and adds
+effective-slug namespace protection. Shared reads continue to exclude Agent-owned
+rows. Shared slug/enabled changes lock the Toolkit, then all attached Agents in
+repository order, before conflict checks. Attach and Agent-owned updates retain
+Toolkit-before-Agent locking. Agent-owned creation locks its Agent without
+creating a Scope or attachment. Agent-owned OAuth writes retain exact ownership,
+active Agent, and current Owner/AgentAdmin authorization checks.
+
+These are existing DB-only row locks, not cross-I/O lock exceptions or newly
+introduced distributed coordination. Provider validation and Platform resolution
+are outside every completed repository operation. Direct review and tests cover
+the preserved real shared attach/slug race plus ordered-lock and stale-owner
+rejection probes.

@@ -58,6 +58,7 @@ class AgentResponse(BaseModel):
     ]
     runtime_add_available: bool
     runtime_remove_available: bool
+    toolkit_management_available: bool
     terminal_enabled: bool
     infrastructure_terminal_enabled: bool | None
     workspace_terminal_enabled: bool | None
@@ -116,6 +117,7 @@ class AgentResponse(BaseModel):
             ),
             runtime_add_available=data.runtime_add_available,
             runtime_remove_available=data.runtime_remove_available,
+            toolkit_management_available=data.toolkit_management_available,
             terminal_enabled=data.terminal_enabled,
             infrastructure_terminal_enabled=data.infrastructure_terminal_enabled,
             workspace_terminal_enabled=data.workspace_terminal_enabled,

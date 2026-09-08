@@ -2,12 +2,13 @@
 
 import dataclasses
 import json
-from typing import Annotated, Any, assert_never
+from typing import Annotated, Any, assert_never, overload
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import TypeAdapter, ValidationError
 
+from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
 from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
@@ -34,6 +35,15 @@ from azents.repos.toolkit_operations.data import (
     ToolkitWithOAuth,
     ToolkitWorkspaceMismatch,
 )
+from azents.repos.toolkit_operations.data import (
+    EffectiveSlugConflict as RepoEffectiveSlugConflict,
+)
+from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
+from azents.repos.toolkit_operations.owned_data import (
+    AgentManagementDenied,
+    OAuthConnectionWrite,
+)
+from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
@@ -42,9 +52,14 @@ from azents.services.github_platform_system_setting.runtime import (
 from .data import (
     AgentNotBelongToWorkspace,
     AgentToolkitListOutput,
+    AgentToolkitManagementItemOutput,
+    AgentToolkitManagementOutput,
     AgentToolkitNotBelongToAgent,
+    AgentToolkitOAuthConnectionInput,
+    AgentToolkitOAuthContext,
     AgentToolkitOutput,
     DuplicateSlug,
+    EffectiveSlugConflict,
     InvalidConfig,
     InvalidCredentials,
     InvalidToolkitType,
@@ -54,6 +69,7 @@ from .data import (
     ToolkitListOutput,
     ToolkitNotAvailable,
     ToolkitOutput,
+    ToolkitReadiness,
     ToolkitScopeCreateInput,
     ToolkitScopeListOutput,
     ToolkitScopeOutput,
@@ -136,6 +152,7 @@ class ToolkitService:
         ToolkitOperationsRepository,
         Depends(ToolkitOperationsRepository),
     ]
+    owned_operations: Annotated[AgentToolkitOperationsRepository, Depends()]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
@@ -180,6 +197,7 @@ class ToolkitService:
         result = await self.operations_repository.create(
             ToolkitCreate(
                 workspace_id=create.workspace_id,
+                owner_agent_id=None,
                 toolkit_type=create.toolkit_type,
                 slug=slug,
                 name=create.name,
@@ -240,6 +258,7 @@ class ToolkitService:
         | NotBelongToWorkspace
         | InvalidConfig
         | DuplicateSlug
+        | EffectiveSlugConflict
         | InvalidCredentials,
     ]:
         """Update one Toolkit after external preparation and final revalidation."""
@@ -331,6 +350,8 @@ class ToolkitService:
             case Failure(error):
                 if isinstance(error, RepoDuplicateSlug):
                     return Failure(DuplicateSlug(slug=error.slug))
+                if isinstance(error, RepoEffectiveSlugConflict):
+                    return Failure(EffectiveSlugConflict(slug=error.slug))
                 if isinstance(error, PlatformAuthorityRejected):
                     return Failure(InvalidCredentials(error.detail))
                 return Failure(self._map_toolkit_read_error(error))
@@ -448,6 +469,7 @@ class ToolkitService:
         | NotBelongToWorkspace
         | ToolkitNotAvailable
         | DuplicateAgentToolkit
+        | EffectiveSlugConflict
         | AgentNotBelongToWorkspace,
     ]:
         """Attach one currently available Toolkit to an Agent atomically."""
@@ -466,6 +488,8 @@ class ToolkitService:
             return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
         if isinstance(error, ToolkitWorkspaceMismatch):
             return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
+        if isinstance(error, RepoEffectiveSlugConflict):
+            return Failure(EffectiveSlugConflict(slug=error.slug))
         if isinstance(error, ToolkitUnavailable):
             return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
         return Failure(error)
@@ -517,6 +541,7 @@ class ToolkitService:
         self, toolkits: list[ToolkitOutput]
     ) -> list[ToolkitOutput]:
         """Attach public Platform authorization states using one snapshot."""
+        toolkits = [await self._attach_mcp_oauth_connection(item) for item in toolkits]
         platform_items = [
             (toolkit, self._platform_credentials(toolkit)) for toolkit in toolkits
         ]
@@ -723,3 +748,576 @@ class ToolkitService:
             return None
         error = await provider.validate_credentials(credentials)
         return InvalidCredentials(error) if error is not None else None
+
+    async def authorize_agent_management(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[None, AgentNotBelongToWorkspace | NotAdmin]:
+        """Verify current Agent Toolkit management authority."""
+
+        result = await self.owned_operations.authorize_agent_management(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(None)
+
+    async def sync_agent_github_installations(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        role: WorkspaceUserRole,
+        platform_app_id: str,
+        installations: list[dict[str, object]],
+    ) -> Result[None, AgentNotBelongToWorkspace | NotAdmin]:
+        """Synchronize GitHub installations after current Agent authorization."""
+
+        result = await self.owned_operations.sync_agent_github_installations(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            user_id=user_id,
+            platform_app_id=platform_app_id,
+            installations=installations,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(None)
+
+    async def delete_agent_oauth_connection(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        None,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ]:
+        """Delete OAuth state only for the currently authorized Agent-owned Toolkit."""
+
+        result = await self.owned_operations.delete_agent_oauth_connection(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(None)
+
+    async def delete_agent_owned(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        None,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ]:
+        """Delete one ToolkitConfig owned by the exact managed Agent."""
+
+        result = await self.owned_operations.delete_agent_owned(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(None)
+
+    async def store_agent_oauth_connection(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        connection: AgentToolkitOAuthConnectionInput,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        connected: bool,
+    ) -> Result[
+        None,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ]:
+        """Persist OAuth state only while Agent ownership and authority remain valid."""
+
+        result = await self.owned_operations.store_agent_oauth_connection(
+            agent_id,
+            toolkit_id,
+            OAuthConnectionWrite(**dataclasses.asdict(connection)),
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            connected=connected,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(None)
+
+    async def get_agent_owned(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        ToolkitOutput,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ]:
+        """Read one ToolkitConfig owned by the exact managed Agent."""
+
+        result = await self.owned_operations.get_agent_owned(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        output = ToolkitOutput.model_validate(result.value, from_attributes=True)
+        return Success(await self._attach_oauth_connection(output))
+
+    async def get_agent_oauth_context(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentToolkitOAuthContext,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ]:
+        """Load one authorized Agent-owned Toolkit and OAuth connection."""
+
+        result = await self.owned_operations.get_agent_oauth_context(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        return Success(
+            AgentToolkitOAuthContext(
+                toolkit=ToolkitOutput.model_validate(
+                    result.value.toolkit, from_attributes=True
+                ),
+                connection=result.value.connection,
+            )
+        )
+
+    async def list_agent_management(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentToolkitManagementOutput,
+        AgentNotBelongToWorkspace | NotAdmin,
+    ]:
+        """Build the authorized Agent Toolkit management projection."""
+        result = await self.owned_operations.load_agent_management(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            user_id=user_id,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_agent_management_error(result.error))
+        snapshot = result.value
+        attachments = snapshot.attachments
+        owned = snapshot.owned
+        available = snapshot.available
+
+        attached_ids = {attachment.toolkit_id for attachment in attachments}
+        shared_outputs = await self._attach_oauth_connections(
+            [
+                ToolkitOutput.model_validate(toolkit, from_attributes=True)
+                for toolkit in snapshot.shared
+            ]
+        )
+        shared_output_by_id = {toolkit.id: toolkit for toolkit in shared_outputs}
+        owned_outputs = await self._attach_oauth_connections(
+            [
+                ToolkitOutput.model_validate(toolkit, from_attributes=True)
+                for toolkit in owned
+            ]
+        )
+        available_outputs = await self._attach_oauth_connections(
+            [
+                ToolkitOutput.model_validate(toolkit, from_attributes=True)
+                for toolkit in available
+                if toolkit.id not in attached_ids
+            ]
+        )
+        items = [
+            AgentToolkitManagementItemOutput(
+                ownership_scope="workspace_shared",
+                toolkit=shared_output_by_id[attachment.toolkit_id],
+                agent_toolkit_id=attachment.id,
+                readiness=self._readiness(shared_output_by_id[attachment.toolkit_id]),
+            )
+            for attachment in attachments
+            if attachment.toolkit_id in shared_output_by_id
+        ]
+        items.extend(
+            AgentToolkitManagementItemOutput(
+                ownership_scope="agent_only",
+                toolkit=toolkit,
+                agent_toolkit_id=None,
+                readiness=self._readiness(toolkit),
+            )
+            for toolkit in owned_outputs
+        )
+        return Success(
+            AgentToolkitManagementOutput(
+                items=items,
+                available_shared=available_outputs,
+            )
+        )
+
+    async def create_agent_owned(
+        self,
+        agent_id: str,
+        create: ToolkitCreateInput,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        ToolkitOutput,
+        AgentNotBelongToWorkspace
+        | NotAdmin
+        | InvalidToolkitType
+        | InvalidConfig
+        | DuplicateSlug
+        | EffectiveSlugConflict
+        | InvalidCredentials,
+    ]:
+        """Create an Agent-owned ToolkitConfig without a scope or attachment."""
+        access = await self.owned_operations.authorize_agent_management(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(access, Failure):
+            return Failure(self._map_agent_management_error(access.error))
+        type_error = self._validate_toolkit_type(create.toolkit_type)
+        if type_error is not None:
+            return Failure(type_error)
+        config_error = self._validate_config(create.toolkit_type, create.config)
+        if config_error is not None:
+            return Failure(config_error)
+        prepared = await self._prepare_credentials(create.credentials)
+        if isinstance(prepared, InvalidCredentials):
+            return Failure(prepared)
+        credentials = prepared.credentials
+        credential_error = self._validate_credentials(
+            create.toolkit_type,
+            credentials,
+        )
+        if credential_error is not None:
+            return Failure(credential_error)
+        provider_error = await self._validate_provider_credentials(
+            create.toolkit_type, credentials
+        )
+        if provider_error is not None:
+            return Failure(provider_error)
+
+        slug = create.slug if create.slug is not None else create.toolkit_type
+        credentials_json = json.dumps(credentials) if credentials is not None else None
+        result = await self.owned_operations.create_agent_owned(
+            agent_id,
+            ToolkitCreate(
+                workspace_id=workspace_id,
+                owner_agent_id=agent_id,
+                toolkit_type=create.toolkit_type,
+                slug=slug,
+                name=create.name,
+                description=create.description,
+                config=create.config,
+                prompt=create.prompt,
+                credentials=credentials_json,
+                enabled=create.enabled,
+                always_expose_tools=create.always_expose_tools,
+            ),
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            platform_authority=self._platform_authority(prepared, user_id=user_id),
+        )
+        match result:
+            case Success(toolkit):
+                output = ToolkitOutput.model_validate(toolkit, from_attributes=True)
+                return Success(await self._attach_oauth_connection(output))
+            case Failure(error):
+                return Failure(self._map_owned_mutation_error(error))
+            case _:
+                assert_never(result)
+
+    async def update_agent_owned(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        update: ToolkitUpdateInput,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        ToolkitOutput,
+        AgentNotBelongToWorkspace
+        | NotAdmin
+        | NotFound
+        | InvalidConfig
+        | DuplicateSlug
+        | EffectiveSlugConflict
+        | InvalidCredentials,
+    ]:
+        """Update one ToolkitConfig owned by the exact managed Agent."""
+        existing_result = await self.get_agent_owned(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        match existing_result:
+            case Failure(error):
+                return Failure(error)
+            case Success(existing):
+                pass
+            case _:
+                assert_never(existing_result)
+
+        if "config" in update:
+            config_error = self._validate_config(
+                existing.toolkit_type,
+                update["config"],
+            )
+            if config_error is not None:
+                return Failure(config_error)
+
+        prepared = _PreparedCredentials(credentials=None, platform=None)
+        normalized_credentials: dict[str, object] | None = None
+        if "credentials" in update:
+            submitted = update["credentials"]
+            if submitted is not None:
+                preparation = await self._prepare_credentials(submitted)
+                if isinstance(preparation, InvalidCredentials):
+                    return Failure(preparation)
+                prepared = preparation
+                normalized_credentials = prepared.credentials
+                if existing.toolkit_type == ToolkitType.ENVVAR:
+                    if normalized_credentials is None:
+                        return Failure(
+                            InvalidCredentials(
+                                "EnvVar credential updates require credentials."
+                            )
+                        )
+                    config = update["config"] if "config" in update else existing.config
+                    normalized_credentials = merge_envvar_credentials(
+                        existing.credentials,
+                        normalized_credentials,
+                        config,
+                    )
+                credential_error = self._validate_credentials(
+                    existing.toolkit_type,
+                    normalized_credentials,
+                )
+                if credential_error is not None:
+                    return Failure(credential_error)
+                provider_error = await self._validate_provider_credentials(
+                    existing.toolkit_type,
+                    normalized_credentials,
+                )
+                if provider_error is not None:
+                    return Failure(provider_error)
+        elif (
+            existing.toolkit_type == ToolkitType.ENVVAR
+            and "config" in update
+            and existing.credentials is not None
+        ):
+            normalized_credentials = merge_envvar_credentials(
+                existing.credentials,
+                {"values": {}},
+                update["config"],
+            )
+
+        repo_update = ToolkitUpdate()
+        if "slug" in update:
+            repo_update["slug"] = update["slug"]
+        if "name" in update:
+            repo_update["name"] = update["name"]
+        if "description" in update:
+            repo_update["description"] = update["description"]
+        if "config" in update:
+            repo_update["config"] = update["config"]
+        if "prompt" in update:
+            repo_update["prompt"] = update["prompt"]
+        if "enabled" in update:
+            repo_update["enabled"] = update["enabled"]
+        if "always_expose_tools" in update:
+            repo_update["always_expose_tools"] = update["always_expose_tools"]
+        if "credentials" in update or normalized_credentials is not None:
+            repo_update["credentials"] = (
+                json.dumps(normalized_credentials)
+                if normalized_credentials is not None
+                else None
+            )
+        if "config" in update and "credentials" not in update:
+            old_auth = existing.config.get("auth_type") if existing.config else None
+            new_auth = update["config"].get("auth_type") if update["config"] else None
+            if old_auth != new_auth and new_auth is not None:
+                repo_update["credentials"] = None
+
+        result = await self.owned_operations.update_agent_owned(
+            agent_id,
+            toolkit_id,
+            repo_update,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            platform_authority=self._platform_authority(prepared, user_id=user_id),
+        )
+        match result:
+            case Success(toolkit):
+                output = ToolkitOutput.model_validate(toolkit, from_attributes=True)
+                return Success(await self._attach_oauth_connection(output))
+            case Failure(error):
+                return Failure(self._map_owned_mutation_error(error))
+
+    def _readiness(self, toolkit: ToolkitOutput) -> ToolkitReadiness:
+        """Return the known persisted readiness state for management UI."""
+        if not toolkit.enabled:
+            return "disabled"
+        if toolkit.authorization_state is not None:
+            return "authorization_required"
+        mcp_config = _resolve_mcp_config(
+            toolkit.toolkit_type,
+            toolkit.config,
+            self.toolkit_registry,
+        )
+        if mcp_config is not None and mcp_config.auth_type == "oauth2":
+            if (
+                toolkit.oauth_connection is None
+                or toolkit.oauth_connection.status
+                is not MCPOAuthConnectionStatus.CONNECTED
+            ):
+                return "authorization_required"
+        return "ready"
+
+    @staticmethod
+    @overload
+    def _map_agent_management_error(
+        error: AgentWorkspaceMismatch | AgentManagementDenied,
+    ) -> AgentNotBelongToWorkspace | NotAdmin: ...
+
+    @staticmethod
+    @overload
+    def _map_agent_management_error(
+        error: AgentWorkspaceMismatch | AgentManagementDenied | NotFound,
+    ) -> AgentNotBelongToWorkspace | NotAdmin | NotFound: ...
+
+    @staticmethod
+    def _map_agent_management_error(
+        error: AgentWorkspaceMismatch | AgentManagementDenied | NotFound,
+    ) -> AgentNotBelongToWorkspace | NotAdmin | NotFound:
+        """Keep existing public authority errors after completed repository calls."""
+        if isinstance(error, AgentWorkspaceMismatch):
+            return AgentNotBelongToWorkspace(agent_id=error.agent_id)
+        if isinstance(error, AgentManagementDenied):
+            return NotAdmin(agent_id=error.agent_id)
+        return error
+
+    @staticmethod
+    @overload
+    def _map_owned_mutation_error(
+        error: AgentWorkspaceMismatch
+        | AgentManagementDenied
+        | RepoDuplicateSlug
+        | RepoEffectiveSlugConflict
+        | PlatformAuthorityRejected,
+    ) -> (
+        AgentNotBelongToWorkspace
+        | NotAdmin
+        | DuplicateSlug
+        | EffectiveSlugConflict
+        | InvalidCredentials
+    ): ...
+
+    @staticmethod
+    @overload
+    def _map_owned_mutation_error(
+        error: AgentWorkspaceMismatch
+        | AgentManagementDenied
+        | NotFound
+        | RepoDuplicateSlug
+        | RepoEffectiveSlugConflict
+        | PlatformAuthorityRejected,
+    ) -> (
+        AgentNotBelongToWorkspace
+        | NotAdmin
+        | NotFound
+        | DuplicateSlug
+        | EffectiveSlugConflict
+        | InvalidCredentials
+    ): ...
+
+    @staticmethod
+    def _map_owned_mutation_error(
+        error: AgentWorkspaceMismatch
+        | AgentManagementDenied
+        | NotFound
+        | RepoDuplicateSlug
+        | RepoEffectiveSlugConflict
+        | PlatformAuthorityRejected,
+    ) -> (
+        AgentNotBelongToWorkspace
+        | NotAdmin
+        | NotFound
+        | DuplicateSlug
+        | EffectiveSlugConflict
+        | InvalidCredentials
+    ):
+        """Translate repository failures without changing mutation contracts."""
+        if isinstance(error, RepoDuplicateSlug):
+            return DuplicateSlug(slug=error.slug)
+        if isinstance(error, RepoEffectiveSlugConflict):
+            return EffectiveSlugConflict(slug=error.slug)
+        if isinstance(error, PlatformAuthorityRejected):
+            return InvalidCredentials(error.detail)
+        return ToolkitService._map_agent_management_error(error)
