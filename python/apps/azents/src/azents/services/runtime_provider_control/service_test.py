@@ -7,8 +7,15 @@ from contextlib import asynccontextmanager
 import pytest
 from azcommon.datetime import tznow
 from cryptography.fernet import Fernet
+from fastapi import HTTPException
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
+from azents.api.public.runtime_provider_enrollment.v1 import exchange_credential
+from azents.api.public.runtime_provider_enrollment.v1.data import (
+    RuntimeProviderCredentialExchangeRequest,
+)
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
@@ -41,6 +48,9 @@ from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialUnavailable,
     RuntimeProviderEnrollmentUnavailable,
 )
+from azents.services.runtime_provider_control.rate_limit import (
+    RedisRuntimeProviderEnrollmentRateLimiter,
+)
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
@@ -65,7 +75,7 @@ async def _create_bootstrap_issued_token_binding(
     provider_repository: RuntimeProviderRepository,
     binding_repository: RuntimeProviderAuthBindingRepository,
     provider_id: str,
-) -> None:
+) -> str:
     """Attach an issued-token binding to one bootstrap-owned Provider."""
     declaration = await provider_repository.get_bootstrap_declaration_by_provider_id(
         session,
@@ -73,7 +83,7 @@ async def _create_bootstrap_issued_token_binding(
         for_update=False,
     )
     assert declaration is not None
-    await binding_repository.create(
+    binding = await binding_repository.create(
         session,
         create=RuntimeProviderAuthBindingCreate(
             provider_id=provider_id,
@@ -83,6 +93,20 @@ async def _create_bootstrap_issued_token_binding(
             bootstrap_declaration_id=declaration.id,
             config=None,
         ),
+    )
+    return binding.id
+
+
+def _public_exchange_request() -> Request:
+    """Build one production-shaped anonymous enrollment exchange request."""
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/credentials/exchange",
+            "headers": [],
+            "client": ("192.0.2.30", 12345),
+        }
     )
 
 
@@ -286,3 +310,136 @@ class TestRuntimeProviderEnrollmentService:
             generation=2,
             now=now + datetime.timedelta(seconds=2),
         )
+
+    async def test_redis_reset_keeps_invalid_durable_grants_unavailable(
+        self,
+        rdb_session: AsyncSession,
+        redis_url: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A fresh abuse window cannot replace durable grant lifecycle authority."""
+        session_manager = _session_manager(rdb_session)
+        provider_repository = RuntimeProviderRepository()
+        binding_repository = RuntimeProviderAuthBindingRepository()
+        bootstrap_result = await RuntimeProviderBootstrapService(
+            session_manager=session_manager,
+            repository=provider_repository,
+            system_setting_repository=SystemSettingRepository(),
+            binding_repository=binding_repository,
+        ).reconcile(
+            RuntimeProviderBootstrapSnapshot(
+                source_key="helm/redis-reset/azents",
+                adapter_kind=RuntimeProviderBootstrapAdapterKind.HELM_FILE,
+                source_revision="revision-1",
+                source_digest="digest-1",
+                declarations=(
+                    RuntimeProviderBootstrapDeclarationInput(
+                        declaration_key="runtime-provider-redis-reset",
+                        provider_logical_id="redis-reset-provider",
+                        kind=RuntimeProviderKind.DOCKER,
+                        display_name="Redis Reset Provider",
+                        enabled=True,
+                        availability_mode=(
+                            RuntimeProviderAvailabilityMode.PLATFORM_WIDE
+                        ),
+                        capabilities={},
+                        config_schema=None,
+                        metadata=None,
+                        creation_seeds=None,
+                    ),
+                ),
+            )
+        )
+        provider_id = bootstrap_result.created_provider_ids[0]
+        binding_id = await _create_bootstrap_issued_token_binding(
+            session=rdb_session,
+            provider_repository=provider_repository,
+            binding_repository=binding_repository,
+            provider_id=provider_id,
+        )
+        repository = RuntimeProviderControlRepository()
+        service = RuntimeProviderEnrollmentService(
+            session_manager=session_manager,
+            repository=repository,
+            provider_repository=provider_repository,
+            verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
+            binding_repository=binding_repository,
+            kubernetes_token_reviewer=None,
+            auth_registry=None,
+        )
+        now = tznow()
+        consumed = await service.issue_grant(
+            provider_id=provider_id,
+            expires_at=now + datetime.timedelta(minutes=5),
+            issued_by_user_id=None,
+            issued_by_source_id=bootstrap_result.source_id,
+        )
+        await service.exchange_grant(
+            grant_id=consumed.grant_id,
+            secret=consumed.secret,
+            credential_expires_at=None,
+            source_address="192.0.2.30",
+        )
+        revoked = await service.issue_grant(
+            provider_id=provider_id,
+            expires_at=now + datetime.timedelta(minutes=5),
+            issued_by_user_id=None,
+            issued_by_source_id=bootstrap_result.source_id,
+        )
+        await repository.revoke_binding_authority(
+            rdb_session,
+            binding_id=binding_id,
+            revoked_at=now,
+            revoked_by_user_id=None,
+        )
+        expired = await service.issue_grant(
+            provider_id=provider_id,
+            expires_at=now + datetime.timedelta(minutes=1),
+            issued_by_user_id=None,
+            issued_by_source_id=bootstrap_result.source_id,
+        )
+        monkeypatch.setattr(
+            "azents.services.runtime_provider_control.service.tznow",
+            lambda: now + datetime.timedelta(minutes=2),
+        )
+
+        redis = Redis.from_url(redis_url)
+        await redis.flushall()
+        limiter = RedisRuntimeProviderEnrollmentRateLimiter(redis, max_attempts=1)
+        try:
+            for grant in (consumed, revoked, expired):
+                request_body = RuntimeProviderCredentialExchangeRequest(
+                    grant_id=grant.grant_id,
+                    secret=grant.secret,
+                )
+                with pytest.raises(HTTPException) as first_error:
+                    await exchange_credential(
+                        service=service,
+                        rate_limiter=limiter,
+                        request=_public_exchange_request(),
+                        request_body=request_body,
+                    )
+                assert first_error.value.status_code == 403
+
+                with pytest.raises(HTTPException) as limited_error:
+                    await exchange_credential(
+                        service=service,
+                        rate_limiter=limiter,
+                        request=_public_exchange_request(),
+                        request_body=request_body,
+                    )
+                assert limited_error.value.status_code == 429
+
+                await redis.flushall()
+
+                with pytest.raises(HTTPException) as reset_error:
+                    await exchange_credential(
+                        service=service,
+                        rate_limiter=limiter,
+                        request=_public_exchange_request(),
+                        request_body=request_body,
+                    )
+                assert reset_error.value.status_code == 403
+        finally:
+            await redis.flushall()
+            await redis.aclose()

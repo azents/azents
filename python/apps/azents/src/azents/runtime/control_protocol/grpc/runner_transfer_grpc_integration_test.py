@@ -92,6 +92,7 @@ from azents.runtime.transfer.data import (
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.store import RuntimeTransferStateStore
+from azents.testing.runtime_coordination import FakeRuntimeConnectionRegistrar
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _FRAME_BYTES = 128 * 1024
@@ -344,6 +345,7 @@ class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
         super().__init__(
             control_protocol=control_protocol,
             coordination_store=coordination_store,
+            connection_registrar=FakeRuntimeConnectionRegistrar(coordination_store),
             state_sink=state_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,

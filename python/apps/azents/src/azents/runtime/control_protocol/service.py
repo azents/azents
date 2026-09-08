@@ -10,23 +10,18 @@ from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_CAPABILITY,
     RunnerSystemMetricsReport,
 )
-from azents_runtime_control.transfer import (
-    RUNNER_TRANSFER_CAPABILITY,
-    RUNNER_TRANSFER_PROTOCOL_VERSION,
-)
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
     RuntimeProtocolStaleGeneration,
     RuntimeProviderCommand,
-    RuntimeProviderRegistration,
-    RuntimeProviderRegistrationAccepted,
     RuntimeReplyAppendResult,
     RuntimeRequestIdFactory,
     RuntimeRunnerOperation,
-    RuntimeRunnerRegistration,
-    RuntimeRunnerRegistrationAccepted,
     RuntimeSystemMetricsAppendResult,
 )
 from azents.runtime.coordination.data import (
@@ -96,100 +91,6 @@ class RuntimeControlProtocolService:
         self._operation_ttl_seconds = operation_ttl_seconds
         self._request_reclaim_idle_seconds = request_reclaim_idle_seconds
         self._runner_generation_observer = runner_generation_observer
-
-    async def register_provider(
-        self,
-        registration: RuntimeProviderRegistration,
-        *,
-        registered_at: datetime,
-    ) -> RuntimeProviderRegistrationAccepted:
-        """Register a Provider connection and issue a provider generation."""
-        record = await self._store.register_connection(
-            kind=RuntimeConnectionKind.PROVIDER,
-            subject_id=registration.provider_id,
-            connection_id=registration.connection_id,
-            owner_replica_id=registration.owner_replica_id,
-            connected_at=registered_at,
-            heartbeat_at=registered_at,
-            ttl_seconds=self._connection_ttl_seconds,
-            metadata={
-                "provider_type": registration.provider_type,
-                "scope": registration.scope,
-                "workspace_id": registration.workspace_id,
-                "protocol_version": registration.protocol_version,
-                "capabilities": list(registration.capabilities.values),
-                "config_schema_version": registration.config_schema_version,
-                "auth_credential_id": registration.auth_credential_id,
-                "metadata": registration.metadata,
-            },
-        )
-        return RuntimeProviderRegistrationAccepted(
-            provider_id=registration.provider_id,
-            connection_id=registration.connection_id,
-            generation=record.generation,
-            heartbeat_interval_seconds=self._heartbeat_interval_seconds,
-        )
-
-    async def register_runner(
-        self,
-        registration: RuntimeRunnerRegistration,
-        *,
-        registered_at: datetime,
-    ) -> RuntimeRunnerRegistrationAccepted:
-        """Register a Runner connection and issue a runner generation."""
-        if registration.protocol_version != RUNNER_TRANSFER_PROTOCOL_VERSION:
-            raise ValueError("Runner protocol version is not supported")
-        if RUNNER_TRANSFER_CAPABILITY not in registration.capabilities.values:
-            raise ValueError("Runner transfer capability is required")
-        previous = await self._store.get_connection(
-            kind=RuntimeConnectionKind.RUNNER,
-            subject_id=registration.runtime_id,
-        )
-        record = await self._store.register_connection(
-            kind=RuntimeConnectionKind.RUNNER,
-            subject_id=registration.runtime_id,
-            connection_id=registration.connection_id,
-            owner_replica_id=registration.owner_replica_id,
-            connected_at=registered_at,
-            heartbeat_at=registered_at,
-            ttl_seconds=self._connection_ttl_seconds,
-            metadata={
-                "runner_id": registration.runner_id,
-                "protocol_version": registration.protocol_version,
-                "capabilities": list(registration.capabilities.values),
-                "health": registration.health,
-                "workspace_path": registration.workspace_path,
-                "auth_credential_id": registration.auth_credential_id,
-                "metadata": registration.metadata,
-            },
-        )
-        if (
-            previous is not None
-            and previous.generation != record.generation
-            and self._runner_generation_observer is not None
-        ):
-            try:
-                await self._runner_generation_observer.on_runner_replaced(
-                    runtime_id=registration.runtime_id,
-                    previous_generation=previous.generation,
-                    generation=record.generation,
-                )
-            except Exception:
-                _LOGGER.exception(
-                    "Runtime Runner replacement observer failed",
-                    extra={
-                        "runtime_id": registration.runtime_id,
-                        "previous_generation": previous.generation,
-                        "generation": record.generation,
-                    },
-                )
-        return RuntimeRunnerRegistrationAccepted(
-            runtime_id=registration.runtime_id,
-            runner_id=registration.runner_id,
-            connection_id=registration.connection_id,
-            generation=record.generation,
-            heartbeat_interval_seconds=self._heartbeat_interval_seconds,
-        )
 
     async def heartbeat_provider(
         self,
@@ -836,23 +737,28 @@ def _operation_ttl_seconds(
 
 
 def _provider_request_stream_id(provider_id: str, generation: int) -> str:
-    return f"provider:{provider_id}:generation:{generation}:requests"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"provider:{provider_id}:generation:{value}:requests"
 
 
 def _runner_request_stream_id(runtime_id: str, generation: int) -> str:
-    return f"runner:{runtime_id}:generation:{generation}:requests"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"runner:{runtime_id}:generation:{value}:requests"
 
 
 def _provider_reply_stream_id(provider_id: str, generation: int) -> str:
-    return f"provider:{provider_id}:generation:{generation}:replies"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"provider:{provider_id}:generation:{value}:replies"
 
 
 def _runner_reply_stream_id(runtime_id: str, generation: int) -> str:
-    return f"runner:{runtime_id}:generation:{generation}:replies"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"runner:{runtime_id}:generation:{value}:replies"
 
 
 def _generation_group(subject_id: str, generation: int) -> str:
-    return f"{subject_id}:generation:{generation}"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"{subject_id}:generation:{value}"
 
 
 def _connection_kind(target: RuntimeCoordinationTarget) -> RuntimeConnectionKind:

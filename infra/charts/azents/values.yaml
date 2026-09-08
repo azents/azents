@@ -80,7 +80,7 @@ server:
     startTimeoutSeconds: 300
     transfer:
       stateBackend: redis
-      redisNamespace: azents:runtime:transfer
+      redisNamespace: azents:runtime:transfer:v2
       perRuntimeAttempts: 8
       perRuntimeBytes: 8388608
       deploymentAttempts: 32

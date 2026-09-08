@@ -34,6 +34,10 @@ from azents.core.runtime_transfer_coordinator_credential import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_connection_generation.repository import (
+    CURRENT_ALLOCATOR_VERSION,
+    RuntimeConnectionGenerationRepository,
+)
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
@@ -111,6 +115,10 @@ from azents.runtime.transfer.object_store import (
 )
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
+)
+from azents.services.runtime_connection_registration.service import (
+    RuntimeProviderConnectionRegistrationService,
+    RuntimeRunnerConnectionRegistrationService,
 )
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
@@ -208,7 +216,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
     runtime_control_kubernetes_token_review_enabled: bool = False
     runtime_control_transfer_backend: Literal["memory", "redis"] = "redis"
-    runtime_control_transfer_redis_namespace: str = "azents:runtime:transfer"
+    runtime_control_transfer_redis_namespace: str = "azents:runtime:transfer:v2"
     runtime_control_transfer_per_runtime_attempts: int = 8
     runtime_control_transfer_per_runtime_bytes: int = 8 * 1024 * 1024
     runtime_control_transfer_deployment_attempts: int = 32
@@ -291,15 +299,16 @@ async def runtime_control_server_lifespan(
         clock=clock,
     )
     terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
+    runner_generation_observer = CompositeRuntimeRunnerGenerationObserver(
+        transfer_coordinator,
+        RuntimeTerminalRunnerGenerationObserver(
+            store=terminal_coordination,
+            clock=clock,
+        ),
+    )
     control_protocol = RuntimeControlProtocolService(
         coordination_store,
-        runner_generation_observer=CompositeRuntimeRunnerGenerationObserver(
-            transfer_coordinator,
-            RuntimeTerminalRunnerGenerationObserver(
-                store=terminal_coordination,
-                clock=clock,
-            ),
-        ),
+        runner_generation_observer=runner_generation_observer,
     )
     terminal_dispatcher = RuntimeTerminalControlDispatcherAdapter(
         control_protocol=control_protocol,
@@ -324,6 +333,11 @@ async def runtime_control_server_lifespan(
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
+    generation_repository = RuntimeConnectionGenerationRepository()
+    async with session_manager() as session:
+        cutover = await generation_repository.get_cutover(session)
+    if cutover is None or cutover.allocator_version != CURRENT_ALLOCATOR_VERSION:
+        raise RuntimeError("Runtime connection generation authority is not activated")
     agent_repository = AgentRepository()
     runtime_repository = AgentRuntimeRepository()
     policy_repository = RuntimeProviderPolicyRepository()
@@ -383,6 +397,20 @@ async def runtime_control_server_lifespan(
         session_manager=session_manager,
         runtime_repository=runtime_repository,
         verifier=runner_credential_verifier,
+    )
+    provider_connection_registrar = RuntimeProviderConnectionRegistrationService(
+        session_manager=session_manager,
+        generation_repository=generation_repository,
+        coordination_store=coordination_store,
+        provider_control=enrollment_service,
+        clock=clock,
+    )
+    runner_connection_registrar = RuntimeRunnerConnectionRegistrationService(
+        session_manager=session_manager,
+        generation_repository=generation_repository,
+        coordination_store=coordination_store,
+        runner_authentication=runner_authenticator,
+        generation_observer=runner_generation_observer,
     )
     reconciler = RuntimeLifecycleReconciler(
         agent_repository=agent_repository,
@@ -464,6 +492,7 @@ async def runtime_control_server_lifespan(
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
         credential_authenticator=enrollment_service,
         connection_tracker=enrollment_service,
+        connection_registrar=provider_connection_registrar,
         contract_proposer=contract_service,
         runner_credential_issuer=runner_credential_verifier,
     )
@@ -475,6 +504,7 @@ async def runtime_control_server_lifespan(
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
         runner_authenticator=runner_authenticator,
+        connection_registrar=runner_connection_registrar,
         transfer_result_sink=transfer_result_coordinator,
     )
     add_runtime_runner_terminal_servicer(

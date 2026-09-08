@@ -37,6 +37,9 @@ from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimePublicActions,
     AgentRuntimeReadOutput,
 )
+from azents.testing.runtime_coordination import (
+    publish_next_test_connection,
+)
 
 from .data import (
     AgentRuntimeSystemMetricsOutput,
@@ -225,7 +228,8 @@ async def test_connected_capable_generation_without_sample_is_unavailable() -> N
 async def test_connected_runner_without_capability_is_unsupported() -> None:
     """A current old Runner remains operational and reports unsupported metrics."""
     store = InMemoryRuntimeCoordinationStore()
-    connection = await store.register_connection(
+    connection = await publish_next_test_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -412,7 +416,8 @@ async def _register_capable(
     *,
     connection_id: str = "connection-1",
 ) -> int:
-    connection = await store.register_connection(
+    connection = await publish_next_test_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id=connection_id,

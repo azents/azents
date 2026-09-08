@@ -26,7 +26,7 @@ class _FakeRuntimeRepository(AgentRuntimeRepository):
     def __init__(self, runtime: AgentRuntime | None) -> None:
         self.runtime = runtime
 
-    async def get_by_id(
+    async def get_by_id_for_update(
         self,
         session: AsyncSession,
         runtime_id: str,
