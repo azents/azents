@@ -11,6 +11,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - .github/workflows/snapshot.yaml
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -26,7 +27,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-08
-spec_version: 45
+spec_version: 46
 ---
 
 # E2E Primary Test Strategy
@@ -171,6 +172,10 @@ Always-on required CI does not depend on external credentials.
   preserves the existing local Buildx/cache build path. Snapshot pulls run in
   parallel, and lane observability records attempted sources, selected commit SHAs,
   timing, and fallback state.
+- Snapshot workflow dispatch keeps downstream publication enabled by default for
+  compatibility. An explicit `dispatch_downstream: false` manual input builds and
+  publishes immutable images without invoking the downstream deployment, allowing
+  isolated same-SHA CI measurement without mutating live infrastructure.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime

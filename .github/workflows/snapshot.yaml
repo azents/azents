@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      dispatch_downstream:
+        description: Dispatch the published snapshot to the downstream deployment
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -131,6 +137,7 @@ jobs:
 
   dispatch:
     name: downstream-dispatch
+    if: github.event_name != 'workflow_dispatch' || inputs.dispatch_downstream
     needs: build
     runs-on: ubuntu-latest
     env:
