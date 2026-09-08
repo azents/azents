@@ -8,8 +8,11 @@ touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
+  - python/apps/azents/src/azents/core/external_channel_provider.py
+  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
+  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/deps.py
@@ -30,7 +33,6 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_presence.py
   - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
   - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
-  - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
   - python/apps/azents/src/azents/services/external_channel/thread_title.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/scheduled_task/channel.py
@@ -577,6 +579,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 60) — Moved pure provider contracts and
+  Discord presentation lowering below service orchestration without changing
+  provider payloads, serialization, operation keys, or delivery behavior.
 - **2026-09-07** (spec_version 59) — Made Discord Scheduled Task
   `PROGRESS_CREATE` Tracker messages notification-suppressed without changing
   registration, deletion, progress reply, terminal result, update, or cleanup

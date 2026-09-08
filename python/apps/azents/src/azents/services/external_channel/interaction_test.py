@@ -23,6 +23,8 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.external_channel_provider import SlackConnectionCredentials
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -36,7 +38,6 @@ from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
-from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
@@ -60,7 +61,6 @@ from azents.services.external_channel.participation import (
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorCatalog,

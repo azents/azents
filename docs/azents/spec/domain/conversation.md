@@ -46,6 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/chat_write_request/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
+  - python/apps/azents/src/azents/repos/session_title/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/exchange_file/**
@@ -412,6 +413,13 @@ The resulting concise `auto_generated` title only replaces the deterministic tit
 event. Manual title updates or clears therefore remain authoritative, while long-running first turns
 do not delay automatic title generation. Title generation and any post-commit External Channel title
 projection failures must not affect run execution.
+
+The title generation database snapshot and conditional replacement are completed
+repository operations. OAuth freshness, model generation, and External Channel
+title projection execute only after the relevant repository transaction closes.
+Retry checks load a fresh completed ownership snapshot before another model
+attempt.
+
 Clients display `title` when present and otherwise fall back to a contextual label such as "Team
 primary" or "Session". Concrete session route top bars show this session title while preserving the
 Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
@@ -1309,6 +1317,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-08** — v162. Moved automatic title snapshots, retry ownership
+  checks, and conditional replacement behind completed repository operations so
+  OAuth, model, and External Channel work does not span a database transaction.
 - **2026-09-04** — v161. Mapped the shared Agent-session navigation, Subagent
   Tree state, and subscription-usage presentation modules after their frontend
   boundary relocations.

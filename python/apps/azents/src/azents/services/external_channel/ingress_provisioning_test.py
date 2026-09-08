@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -31,7 +32,6 @@ from azents.services.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordDeliveryResult,

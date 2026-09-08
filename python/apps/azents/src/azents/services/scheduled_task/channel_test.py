@@ -1,12 +1,13 @@
 """Scheduled-owned External Channel orchestration tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import NamedTuple
-from unittest.mock import ANY, AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,12 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_progress import ExternalChannelWorkTask
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -35,17 +42,19 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
     ScheduledTrackerProjectionPart,
 )
+from azents.repos.scheduled_task_cycle.progress import (
+    ScheduledTaskProgressRepository,
+)
+from azents.repos.scheduled_task_cycle.progress_data import (
+    ScheduledTaskProgressAdmission,
+    ScheduledTaskProgressPreparation,
+    ScheduledTaskTrackerEffect,
+)
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.channel_action import ExternalChannelActionService
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectPlan,
-    ProviderMutationOutcome,
-    ProviderOperationKey,
-    ProviderTarget,
-)
 from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.terminal import (
@@ -65,6 +74,40 @@ _RUN_ID = "r" * 32
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[AsyncSession]:
     yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+
+
+class _TrackedSession(AsyncSession):
+    """Expose one repository context lifetime through in_transaction."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = True
+
+    def in_transaction(self) -> bool:
+        """Return whether the repository context still owns this session."""
+        return self.active
+
+
+class _TransactionTracker:
+    """Create sessions whose transaction lifetime is directly observable."""
+
+    def __init__(self) -> None:
+        self.sessions: list[AsyncSession] = []
+
+    @asynccontextmanager
+    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+        session = _TrackedSession()
+        self.sessions.append(session)
+        try:
+            yield session
+        finally:
+            session.active = False
+            await session.close()
+
+    def assert_inactive(self) -> None:
+        """Assert every repository transaction context has completed."""
+        assert self.sessions
+        assert all(not session.in_transaction() for session in self.sessions)
 
 
 def _cycle(
@@ -158,15 +201,13 @@ class _ServiceFixture(NamedTuple):
     """Scheduled Channel service and its mock collaborators."""
 
     service: ScheduledTaskChannelService
-    run_repository: AsyncMock
-    cycle_repository: AsyncMock
+    progress_repository: AsyncMock
     provider_repository: AsyncMock
     action_service: AsyncMock
 
 
 def _service() -> _ServiceFixture:
-    run_repository = AsyncMock(spec=AgentRunRepository)
-    cycle_repository = AsyncMock(spec=ScheduledTaskCycleRepository)
+    progress_repository = AsyncMock(spec=ScheduledTaskProgressRepository)
     provider_repository = AsyncMock(spec=ExternalChannelWorkRepository)
     action_service = AsyncMock(spec=ExternalChannelActionService)
     config = require_instance(
@@ -178,10 +219,9 @@ def _service() -> _ServiceFixture:
     )
     service = ScheduledTaskChannelService(
         session_manager=_session_manager,
-        run_repository=require_instance(run_repository, AgentRunRepository),
-        cycle_repository=require_instance(
-            cycle_repository,
-            ScheduledTaskCycleRepository,
+        progress_repository=require_instance(
+            progress_repository,
+            ScheduledTaskProgressRepository,
         ),
         provider_repository=require_instance(
             provider_repository,
@@ -192,20 +232,45 @@ def _service() -> _ServiceFixture:
     )
     return _ServiceFixture(
         service,
-        run_repository,
-        cycle_repository,
+        progress_repository,
         provider_repository,
         action_service,
     )
 
 
+def _tracker_effect(
+    plan: ProviderEffectPlan,
+    *,
+    desired_revision: int = 1,
+) -> ScheduledTaskTrackerEffect:
+    return ScheduledTaskTrackerEffect(
+        plan=plan,
+        expected_desired_revision=desired_revision,
+        part_ordinal=0,
+    )
+
+
+def _prepared(
+    *,
+    state_revision: int,
+    reply_plans: tuple[ProviderEffectPlan, ...] = (),
+    tracker: ScheduledTaskTrackerEffect | None = None,
+) -> ScheduledTaskProgressPreparation:
+    return ScheduledTaskProgressPreparation(
+        status="prepared",
+        cycle_id=_CYCLE_ID,
+        state_revision=state_revision,
+        reply_plans=reply_plans,
+        tracker=tracker,
+    )
+
+
 @pytest.mark.asyncio
-async def test_initial_tracker_uses_scheduled_task_activity_copy() -> None:
-    service, _, cycle_repository, provider_repository, action_service = _service()
-    cycle_repository.get_started.return_value = _cycle()
-    cycle_repository.claim_tracker_projection.return_value = _cycle(version=3)
+async def test_initial_tracker_executes_and_settles_prepared_effect() -> None:
+    service, progress_repository, _, action_service = _service()
     plan = _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE)
-    provider_repository.prepare_binding_effect.return_value = plan
+    tracker = _tracker_effect(plan, desired_revision=0)
+    progress_repository.prepare_initial_tracker.return_value = tracker
     action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
         status="delivered",
         provider_message_key="slack:tenant:channel:tracker",
@@ -220,28 +285,19 @@ async def test_initial_tracker_uses_scheduled_task_activity_copy() -> None:
     )
 
     assert outcome is not None
-    _, kwargs = provider_repository.prepare_binding_effect.await_args
-    assert kwargs["slack_payload"]["text"] == (
-        "Agent is running a scheduled task…\nDaily report"
+    progress_repository.settle_tracker.assert_awaited_once_with(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        cycle_id=_CYCLE_ID,
+        effect=tracker,
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="slack:tenant:channel:tracker",
     )
-    assert kwargs["slack_payload"]["blocks"][0]["title"] == (
-        "Agent is running a scheduled task…\nDaily report"
-    )
-    assert kwargs["discord_payload"]["embeds"] == [
-        {
-            "title": "Scheduled Task",
-            "description": "Daily report\nAugust 16, 2026 at 12:00 PM UTC",
-            "color": 0x5865F2,
-        }
-    ]
-    assert kwargs["discord_payload"]["tracker_kind"] == "scheduled_task"
-    assert "Prepare the report." not in str(kwargs)
-    cycle_repository.settle_tracker_projection.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_registration_uses_exact_binding_and_returns_immediate_outcome() -> None:
-    service, _, _, provider_repository, action_service = _service()
+    service, _, provider_repository, action_service = _service()
     plan = _plan(ExternalChannelDeliveryOperation.CONTROL_MESSAGE)
     provider_repository.prepare_binding_effect.return_value = plan
     action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
@@ -269,7 +325,7 @@ async def test_registration_uses_exact_binding_and_returns_immediate_outcome() -
 
 @pytest.mark.asyncio
 async def test_deletion_uses_exact_binding_and_returns_immediate_outcome() -> None:
-    service, _, _, provider_repository, action_service = _service()
+    service, _, provider_repository, action_service = _service()
     plan = _plan(ExternalChannelDeliveryOperation.CONTROL_MESSAGE)
     provider_repository.prepare_binding_effect.return_value = plan
     action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
@@ -296,7 +352,7 @@ async def test_deletion_uses_exact_binding_and_returns_immediate_outcome() -> No
 
 @pytest.mark.asyncio
 async def test_session_only_deletion_has_no_provider_effect() -> None:
-    service, _, _, provider_repository, action_service = _service()
+    service, _, provider_repository, action_service = _service()
 
     outcome = await service.execute_deletion(
         dataclasses.replace(_task(), binding_id=None)
@@ -309,35 +365,22 @@ async def test_session_only_deletion_has_no_provider_effect() -> None:
 
 @pytest.mark.asyncio
 async def test_scheduled_continue_updates_and_settles_tracker() -> None:
-    service, run_repository, cycle_repository, provider_repository, action_service = (
-        _service()
-    )
-    initial = _cycle()
-    updated = _cycle(desired_revision=1, version=3)
-    claimed = _cycle(
-        desired_revision=1,
-        projection_parts=[
-            ScheduledTrackerProjectionPart(
-                part_ordinal=0,
-                desired_revision=1,
-                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                provider_message_key=None,
-            )
-        ],
-        version=4,
-    )
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
-    )
-    cycle_repository.lock.side_effect = [initial, claimed]
-    cycle_repository.update_progress.return_value = updated
-    cycle_repository.claim_tracker_projection.return_value = claimed
-    cycle_repository.settle_tracker_projection.return_value = True
+    service, progress_repository, _, action_service = _service()
     reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
     tracker_plan = _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE)
-    provider_repository.prepare_binding_reply_effects.return_value = (reply_plan,)
-    provider_repository.prepare_binding_effect.return_value = tracker_plan
+    tracker = _tracker_effect(tracker_plan)
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=4,
+        reply_plans=(reply_plan,),
+        tracker=tracker,
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="admitted",
+            tracker_current=True,
+        )
+    )
+    progress_repository.settle_tracker.return_value = True
     action_service.execute_binding_effect.side_effect = [
         ProviderMutationOutcome(
             status="failed",
@@ -383,16 +426,142 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
         ExternalChannelDeliveryOperation.REPLY,
         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
     ]
-    cycle_repository.update_progress.assert_awaited_once_with(
-        ANY,
-        record=initial,
-        progress_title="Preparing the report…",
-        ordered_tasks=["Collect data"],
+    progress_repository.settle_tracker.assert_awaited_once_with(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        cycle_id=_CYCLE_ID,
+        effect=tracker,
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="slack:tenant:channel:tracker",
     )
-    _, settle_kwargs = cycle_repository.settle_tracker_projection.await_args
-    assert settle_kwargs["expected_desired_revision"] == 1
-    assert settle_kwargs["status"] is ExternalChannelWorkProjectionStatus.PRESENT
-    assert settle_kwargs["provider_message_key"] == ("slack:tenant:channel:tracker")
+    assert action_service.execute_binding_effect.await_args_list == [
+        call(
+            reply_plan,
+            file_storage=None,
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        ),
+        call(tracker_plan),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_external_effects_observe_zero_active_database_transactions() -> None:
+    transaction_tracker = _TransactionTracker()
+    run_repository = AsyncMock(spec=AgentRunRepository)
+    cycle_repository = AsyncMock(spec=ScheduledTaskCycleRepository)
+    provider_repository = AsyncMock(spec=ExternalChannelWorkRepository)
+    initial = _cycle()
+    updated = _cycle(desired_revision=1, version=3)
+    claimed = _cycle(
+        desired_revision=1,
+        projection_parts=[
+            ScheduledTrackerProjectionPart(
+                part_ordinal=0,
+                desired_revision=1,
+                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                provider_message_key=None,
+            )
+        ],
+        version=4,
+    )
+    run_repository.get_by_id.return_value = SimpleNamespace(
+        session_id=_SESSION_ID,
+        scheduled_task_cycle_id=_CYCLE_ID,
+    )
+    cycle_repository.lock.side_effect = [initial, claimed]
+    cycle_repository.update_progress.return_value = updated
+    cycle_repository.claim_tracker_projection.return_value = claimed
+    cycle_repository.settle_tracker_projection.return_value = True
+    reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
+    tracker_plan = _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE)
+    provider_repository.prepare_binding_reply_effects.return_value = (reply_plan,)
+    provider_repository.prepare_binding_effect.return_value = tracker_plan
+    progress_repository = ScheduledTaskProgressRepository(
+        session_manager=transaction_tracker.session_manager,
+        run_repository=require_instance(run_repository, AgentRunRepository),
+        cycle_repository=require_instance(
+            cycle_repository,
+            ScheduledTaskCycleRepository,
+        ),
+        provider_repository=require_instance(
+            provider_repository,
+            ExternalChannelWorkRepository,
+        ),
+    )
+    action_service = AsyncMock(spec=ExternalChannelActionService)
+
+    async def execute_effect(
+        plan: ProviderEffectPlan,
+        **_: object,
+    ) -> ProviderMutationOutcome:
+        transaction_tracker.assert_inactive()
+        return ProviderMutationOutcome(
+            status="delivered",
+            provider_message_key=(
+                "slack:tenant:channel:tracker"
+                if plan.target.operation
+                is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                else "slack:tenant:channel:reply"
+            ),
+            error_kind=None,
+            error_summary=None,
+        )
+
+    action_service.execute_binding_effect.side_effect = execute_effect
+    config = require_instance(
+        MagicMock(
+            spec=Config,
+            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="test-secret")),
+        ),
+        Config,
+    )
+    service = ScheduledTaskChannelService(
+        session_manager=transaction_tracker.session_manager,
+        progress_repository=progress_repository,
+        provider_repository=require_instance(
+            provider_repository,
+            ExternalChannelWorkRepository,
+        ),
+        action_service=require_instance(
+            action_service,
+            ExternalChannelActionService,
+        ),
+        config=config,
+    )
+
+    execution = await service.execute_progress(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        run_id=_RUN_ID,
+        binding_id=_BINDING_ID,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Working on it.",
+        title="Preparing the report…",
+        tasks=[
+            ExternalChannelWorkTask(
+                id="collect",
+                title="Collect data",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
+            )
+        ],
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert execution.result is not None
+    assert len(transaction_tracker.sessions) == 3
+    transaction_tracker.assert_inactive()
+    assert action_service.execute_binding_effect.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -400,16 +569,18 @@ async def test_terminalization_winning_after_progress_commit_suppresses_effects(
     None
 ):
     """A deleted cycle cannot fall through or publish its prepared reply."""
-    service, run_repository, cycle_repository, provider_repository, action_service = (
-        _service()
-    )
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
-    )
-    cycle_repository.lock.side_effect = [_cycle(), None]
+    service, progress_repository, _, action_service = _service()
     reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
-    provider_repository.prepare_binding_reply_effects.return_value = (reply_plan,)
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=2,
+        reply_plans=(reply_plan,),
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="inactive",
+            tracker_current=False,
+        )
+    )
 
     execution = await service.execute_progress(
         agent_id=_AGENT_ID,
@@ -437,35 +608,27 @@ async def test_terminalization_winning_after_progress_commit_suppresses_effects(
 @pytest.mark.asyncio
 async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -> None:
     """A newer canonical progress revision fences every older provider effect."""
-    service, run_repository, cycle_repository, provider_repository, action_service = (
-        _service()
-    )
-    initial = _cycle()
-    updated = _cycle(desired_revision=1, version=3)
-    claimed = _cycle(
-        desired_revision=1,
-        projection_parts=[
-            ScheduledTrackerProjectionPart(
-                part_ordinal=0,
-                desired_revision=1,
-                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                provider_message_key=None,
-            )
-        ],
-        version=4,
-    )
-    newer = _cycle(desired_revision=2, version=5)
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
-    )
-    cycle_repository.lock.side_effect = [initial, newer]
-    cycle_repository.update_progress.return_value = updated
-    cycle_repository.claim_tracker_projection.return_value = claimed
+    service, progress_repository, _, action_service = _service()
     reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
     tracker_plan = _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE)
-    provider_repository.prepare_binding_reply_effects.return_value = (reply_plan,)
-    provider_repository.prepare_binding_effect.return_value = tracker_plan
+    tracker = _tracker_effect(tracker_plan)
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=4,
+        reply_plans=(reply_plan,),
+        tracker=tracker,
+    )
+    admission_started = asyncio.Event()
+    newer_revision_committed = asyncio.Event()
+
+    async def admit_after_newer_revision(**_: object) -> ScheduledTaskProgressAdmission:
+        admission_started.set()
+        await newer_revision_committed.wait()
+        return ScheduledTaskProgressAdmission(
+            status="superseded",
+            tracker_current=False,
+        )
+
+    progress_repository.admit_progress_effects.side_effect = admit_after_newer_revision
     task = ExternalChannelWorkTask(
         id="collect",
         title="Collect data",
@@ -475,21 +638,26 @@ async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -
         sources=[],
     )
 
-    execution = await service.execute_progress(
-        agent_id=_AGENT_ID,
-        session_id=_SESSION_ID,
-        run_id=_RUN_ID,
-        binding_id=_BINDING_ID,
-        mode=ExternalChannelActionMode.CONTINUE,
-        message="Working on it.",
-        title="Preparing the report…",
-        tasks=[task],
-        files=(),
-        file_storage=None,
-        authority=None,
-        provider_delivery_service=None,
-        resolve_runtime_target=None,
+    execution_task = asyncio.create_task(
+        service.execute_progress(
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            run_id=_RUN_ID,
+            binding_id=_BINDING_ID,
+            mode=ExternalChannelActionMode.CONTINUE,
+            message="Working on it.",
+            title="Preparing the report…",
+            tasks=[task],
+            files=(),
+            file_storage=None,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
     )
+    await admission_started.wait()
+    newer_revision_committed.set()
+    execution = await execution_task
 
     assert execution.result is not None
     assert [outcome.reason for outcome in execution.result.outcomes] == [
@@ -500,22 +668,24 @@ async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -
         outcome.status == "not_attempted" for outcome in execution.result.outcomes
     )
     action_service.execute_binding_effect.assert_not_awaited()
-    cycle_repository.settle_tracker_projection.assert_not_awaited()
+    progress_repository.settle_tracker.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
     """Message-only publication is fenced by the cycle version it observed."""
-    service, run_repository, cycle_repository, provider_repository, action_service = (
-        _service()
-    )
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
-    )
-    cycle_repository.lock.side_effect = [_cycle(version=2), _cycle(version=3)]
+    service, progress_repository, _, action_service = _service()
     reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
-    provider_repository.prepare_binding_reply_effects.return_value = (reply_plan,)
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=2,
+        reply_plans=(reply_plan,),
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="superseded",
+            tracker_current=False,
+        )
+    )
 
     execution = await service.execute_progress(
         agent_id=_AGENT_ID,
@@ -541,6 +711,217 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tracker_desired_revision_check_preserves_admitted_reply() -> None:
+    service, progress_repository, _, action_service = _service()
+    reply_plan = _plan(ExternalChannelDeliveryOperation.REPLY)
+    tracker = _tracker_effect(_plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE))
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=4,
+        reply_plans=(reply_plan,),
+        tracker=tracker,
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="admitted",
+            tracker_current=False,
+        )
+    )
+    action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key="slack:tenant:channel:reply",
+        error_kind=None,
+        error_summary=None,
+    )
+
+    execution = await service.execute_progress(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        run_id=_RUN_ID,
+        binding_id=_BINDING_ID,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Working on it.",
+        title="Preparing the report…",
+        tasks=[
+            ExternalChannelWorkTask(
+                id="collect",
+                title="Collect data",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
+            )
+        ],
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert execution.result is not None
+    assert [outcome.status for outcome in execution.result.outcomes] == [
+        "delivered",
+        "not_attempted",
+    ]
+    assert execution.result.outcomes[1].reason == "scheduled_progress_superseded"
+    action_service.execute_binding_effect.assert_awaited_once()
+    progress_repository.settle_tracker.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_outcome", "projection_status", "result_status"),
+    [
+        (
+            ProviderMutationOutcome(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary="The provider rejected the Tracker.",
+            ),
+            ExternalChannelWorkProjectionStatus.FAILED,
+            "failed",
+        ),
+        (
+            ProviderMutationOutcome(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="The Tracker outcome is unknown.",
+            ),
+            ExternalChannelWorkProjectionStatus.UNKNOWN,
+            "unknown",
+        ),
+        (
+            None,
+            ExternalChannelWorkProjectionStatus.UNKNOWN,
+            "not_attempted",
+        ),
+    ],
+)
+async def test_tracker_outcomes_settle_without_retry(
+    provider_outcome: ProviderMutationOutcome | None,
+    projection_status: ExternalChannelWorkProjectionStatus,
+    result_status: str,
+) -> None:
+    service, progress_repository, _, action_service = _service()
+    tracker = _tracker_effect(_plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE))
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=4,
+        tracker=tracker,
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="admitted",
+            tracker_current=True,
+        )
+    )
+    action_service.execute_binding_effect.return_value = provider_outcome
+
+    execution = await service.execute_progress(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        run_id=_RUN_ID,
+        binding_id=_BINDING_ID,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Preparing the report…",
+        tasks=[
+            ExternalChannelWorkTask(
+                id="collect",
+                title="Collect data",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
+            )
+        ],
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert execution.result is not None
+    assert execution.result.outcomes[0].status == result_status
+    progress_repository.settle_tracker.assert_awaited_once_with(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        cycle_id=_CYCLE_ID,
+        effect=tracker,
+        status=projection_status,
+        provider_message_key=None,
+    )
+    action_service.execute_binding_effect.assert_awaited_once_with(tracker.plan)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_provider_return_does_not_replay_or_settle() -> None:
+    service, progress_repository, _, action_service = _service()
+    tracker = _tracker_effect(_plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE))
+    progress_repository.prepare_progress.return_value = _prepared(
+        state_revision=4,
+        tracker=tracker,
+    )
+    progress_repository.admit_progress_effects.return_value = (
+        ScheduledTaskProgressAdmission(
+            status="admitted",
+            tracker_current=True,
+        )
+    )
+    action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key="slack:tenant:channel:tracker",
+        error_kind=None,
+        error_summary=None,
+    )
+    settlement_entered = asyncio.Event()
+    settlement_release = asyncio.Event()
+
+    async def settle_tracker(**_: object) -> bool:
+        settlement_entered.set()
+        await settlement_release.wait()
+        return True
+
+    progress_repository.settle_tracker.side_effect = settle_tracker
+    execution_task = asyncio.create_task(
+        service.execute_progress(
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            run_id=_RUN_ID,
+            binding_id=_BINDING_ID,
+            mode=ExternalChannelActionMode.CONTINUE,
+            message=None,
+            title="Preparing the report…",
+            tasks=[
+                ExternalChannelWorkTask(
+                    id="collect",
+                    title="Collect data",
+                    status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                    details=None,
+                    output=None,
+                    sources=[],
+                )
+            ],
+            files=(),
+            file_storage=None,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+    )
+    await settlement_entered.wait()
+
+    execution_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+    action_service.execute_binding_effect.assert_awaited_once_with(tracker.plan)
+    assert progress_repository.settle_tracker.await_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unsupported_mode",
     [
@@ -551,12 +932,10 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
 async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
     unsupported_mode: ExternalChannelActionMode,
 ) -> None:
-    service, run_repository, cycle_repository, provider_repository, _ = _service()
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
+    service, progress_repository, _, _ = _service()
+    progress_repository.prepare_progress.side_effect = ValueError(
+        "Scheduled Task channel_action only supports continue."
     )
-    cycle_repository.lock.return_value = _cycle()
 
     with pytest.raises(ValueError, match="only supports continue"):
         await service.execute_progress(
@@ -574,6 +953,9 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
+    progress_repository.prepare_progress.side_effect = ValueError(
+        "Scheduled Task progress requires its exact current Binding."
+    )
     with pytest.raises(ValueError, match="exact current Binding"):
         await service.execute_progress(
             agent_id=_AGENT_ID,
@@ -591,13 +973,12 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
             resolve_runtime_target=None,
         )
 
-    provider_repository.prepare_binding_reply_effects.assert_not_awaited()
-    cycle_repository.update_progress.assert_not_awaited()
+    progress_repository.admit_progress_effects.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_terminal_cleanup_runs_after_failed_publication() -> None:
-    service, _, _, provider_repository, action_service = _service()
+    service, _, provider_repository, action_service = _service()
     reply_one = _plan(ExternalChannelDeliveryOperation.REPLY, payload={"part": 0})
     reply_two = _plan(ExternalChannelDeliveryOperation.REPLY, payload={"part": 1})
     cleanup = _plan(ExternalChannelDeliveryOperation.PROGRESS_DELETE)

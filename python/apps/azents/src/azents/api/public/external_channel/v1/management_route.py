@@ -21,6 +21,12 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
@@ -44,12 +50,6 @@ from azents.services.external_channel.access import (
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
-)
-from azents.services.external_channel.data import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
 )
 from azents.services.external_channel.discord_api import (
     DiscordAPIConfigurationInvalid,

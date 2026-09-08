@@ -24,6 +24,7 @@ from azents.core.llm_catalog import (
 )
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.rdb.session import SessionManager
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
     LiteLLMSourceSnapshotRepository,
     LLMCatalogRepository,
@@ -559,6 +560,10 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
             session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
             integration_repository=integration_repository,
+            chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             source_sync_service=LiteLLMSourceSyncService(
                 session_manager=rdb_session_manager,
                 snapshot_repository=LiteLLMSourceSnapshotRepository(),
@@ -693,6 +698,10 @@ async def test_xai_oauth_sync_refreshes_before_listing(
             session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
             integration_repository=integration_repository,
+            chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             source_sync_service=LiteLLMSourceSyncService(
                 session_manager=rdb_session_manager,
                 snapshot_repository=LiteLLMSourceSnapshotRepository(),
@@ -800,6 +809,10 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             session_manager=rdb_session_manager,
             catalog_repository=catalog_repository,
             integration_repository=integration_repository,
+            chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             source_sync_service=LiteLLMSourceSyncService(
                 session_manager=rdb_session_manager,
                 snapshot_repository=LiteLLMSourceSnapshotRepository(),

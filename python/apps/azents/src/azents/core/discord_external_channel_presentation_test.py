@@ -1,12 +1,6 @@
 """Deterministic Discord message-part presentation tests."""
 
-from azents.core.enums import ExternalChannelWorkTaskStatus
-from azents.core.external_channel_progress import (
-    ExternalChannelDesiredProgress,
-    ExternalChannelWorkSource,
-)
-from azents.repos.external_channel.work_data import ChannelWorkTask
-from azents.services.external_channel.discord_presentation import (
+from azents.core.discord_external_channel_presentation import (
     DISCORD_DELIVERY_TEXT_LIMIT,
     render_discord_progress,
     render_discord_session_navigation_components,
@@ -14,6 +8,12 @@ from azents.services.external_channel.discord_presentation import (
     render_scheduled_task_discord_progress,
     split_discord_markdown,
 )
+from azents.core.enums import ExternalChannelWorkTaskStatus
+from azents.core.external_channel_progress import (
+    ExternalChannelDesiredProgress,
+    ExternalChannelWorkSource,
+)
+from azents.repos.external_channel.work_data import ChannelWorkTask
 
 
 def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None:

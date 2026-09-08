@@ -15,14 +15,8 @@ from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from openai import OpenAIError as OpenAIBaseError
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    AgentSessionTitleSource,
-    EventKind,
-    ExternalChannelPrincipalAuthorType,
-    LLMProvider,
-)
+from azents.core.enums import EventKind, ExternalChannelPrincipalAuthorType, LLMProvider
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.engine.events.litellm_responses import map_litellm_provider_error
 from azents.engine.events.openai_responses import call_openai_responses_text
@@ -57,15 +51,10 @@ from azents.engine.run.retry_policy import (
     FailedRunRetryPolicy,
     get_failed_run_retry_policy,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.deps import (
-    get_llm_provider_integration_repository,
-)
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.session_title import SessionTitleRepository
+from azents.repos.session_title.data import SessionTitleGenerationSnapshot
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
@@ -280,16 +269,11 @@ def title_output_contract_incompatibility(
 class SessionTitleService:
     """Generate and persist automatic session titles."""
 
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+    session_title_repository: Annotated[
+        SessionTitleRepository, Depends(SessionTitleRepository)
     ]
-    integration_repository: Annotated[
-        LLMProviderIntegrationRepository,
-        Depends(get_llm_provider_integration_repository),
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    chatgpt_oauth_runtime_repository: Annotated[
+        ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
     model_stream_watchdog: Annotated[
         ModelStreamWatchdog,
@@ -313,34 +297,26 @@ class SessionTitleService:
         context = title_context_from_initial_prompt(event)
         if not context:
             return None
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                agent_session is None
-                or agent_session.title_source != AgentSessionTitleSource.AUTO_INITIAL
-                or agent_session.title_generation_event_id != event.id
-            ):
-                return None
+        snapshot = await self.session_title_repository.load_generation_snapshot(
+            session_id=session_id,
+            generation_event_id=event.id,
+        )
+        if snapshot is None:
+            return None
 
         generated = await self._generate_title(
-            agent_id=agent_session.agent_id,
             session_id=session_id,
             generation_event_id=event.id,
             context=context,
+            snapshot=snapshot,
         )
         if generated is None:
             return None
-        async with self.session_manager() as session:
-            updated = await self.agent_session_repository.replace_initial_auto_title(
-                session,
-                session_id=session_id,
-                title=generated,
-                event_id=event.id,
-            )
-            await session.commit()
+        updated = await self.session_title_repository.replace_initial_auto_title(
+            session_id=session_id,
+            title=generated,
+            event_id=event.id,
+        )
         if updated is not None:
             await self.external_channel_thread_title_service.project_generated_title(
                 session_id=session_id,
@@ -352,30 +328,20 @@ class SessionTitleService:
     async def _generate_title(
         self,
         *,
-        agent_id: str,
         session_id: str,
         generation_event_id: str,
         context: str,
+        snapshot: SessionTitleGenerationSnapshot,
     ) -> str | None:
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return None
-            selection = agent.lightweight_model_selection
-            integration = await self.integration_repository.get_by_id_with_secrets(
-                session,
-                selection.llm_provider_integration_id,
-            )
-            if integration is None or not integration.enabled:
-                return None
-            refreshed = await ensure_runtime_tokens(
-                integration=integration,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-            )
-            if refreshed.failure:
-                return None
-            integration = refreshed.value
+        agent_id = snapshot.agent_id
+        selection = snapshot.selection
+        refreshed = await ensure_runtime_tokens(
+            integration=snapshot.integration,
+            persistence_repository=self.chatgpt_oauth_runtime_repository,
+        )
+        if refreshed.failure:
+            return None
+        integration = refreshed.value
 
         model = to_runtime_model(selection.provider, selection.model_identifier)
         credential_kwargs = build_credential_kwargs(integration)
@@ -547,15 +513,9 @@ class SessionTitleService:
         generation_event_id: str,
     ) -> bool:
         """Return whether the initial automatic title still owns generation."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-        return (
-            agent_session is not None
-            and agent_session.title_source == AgentSessionTitleSource.AUTO_INITIAL
-            and agent_session.title_generation_event_id == generation_event_id
+        return await self.session_title_repository.generation_is_current(
+            session_id=session_id,
+            generation_event_id=generation_event_id,
         )
 
 

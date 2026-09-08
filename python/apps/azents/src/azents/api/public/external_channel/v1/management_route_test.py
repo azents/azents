@@ -32,6 +32,10 @@ from azents.core.enums import (
     ExternalChannelTransport,
     WorkspaceUserRole,
 )
+from azents.core.external_channel_provider import (
+    ExternalChannelConnectionStatusSnapshot,
+    ExternalChannelCredentialSnapshot,
+)
 from azents.repos.external_channel.data import ExternalChannelMultiConnectionImpact
 from azents.repos.external_channel.management_data import (
     ManagedBinding,
@@ -40,10 +44,6 @@ from azents.repos.external_channel.management_data import (
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
-)
-from azents.services.external_channel.data import (
-    ExternalChannelConnectionStatusSnapshot,
-    ExternalChannelCredentialSnapshot,
 )
 from azents.services.external_channel.discord_api import (
     DiscordAPIConfigurationInvalid,

@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -48,7 +49,6 @@ from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )

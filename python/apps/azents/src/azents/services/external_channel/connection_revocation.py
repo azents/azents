@@ -8,13 +8,13 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelConnectionStatus
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
 
 
