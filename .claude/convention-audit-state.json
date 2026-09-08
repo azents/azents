@@ -1,13 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-09-07T22:54:48Z",
+    "checked_at": "2026-09-08T22:29:44Z",
     "checked_ruleset_revisions": [
-      "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
       "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
+      "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
       "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
       "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0"
     ],
-    "checked_through_commit": "52a9115d290ab9416ff9b47118e2e6e8e3f64471"
+    "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -581,34 +582,34 @@
       "checked_through_commit": "52a9115d290ab9416ff9b47118e2e6e8e3f64471"
     },
     "python/libs/azents-runtime-control/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-08T22:29:44Z",
+      "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
+      "checked_through_commit": "012aab09dcf48f27317176cbc5435ea3557ea9e4"
     },
     "python/libs/azents-runtime-control/**::bucket-8-of-8": {
       "checked_at": null,
@@ -958,6 +959,57 @@
       ".claude/conventions/global/stacked-pr-rebase-script.md",
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md"
+    ],
+    "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/python/alembic-revision-only.md",
+      ".claude/conventions/python/apps-depend-on-libs-only.md",
+      ".claude/conventions/python/avoid-underscore-dependency-fields.md",
+      ".claude/conventions/python/bind-extra-for-shared-log-context.md",
+      ".claude/conventions/python/boolean-no-is-prefix.md",
+      ".claude/conventions/python/cancellederror-separately.md",
+      ".claude/conventions/python/catch-narrowest-exception.md",
+      ".claude/conventions/python/dedent-llm-prompts.md",
+      ".claude/conventions/python/dependency-injection-no-singletons.md",
+      ".claude/conventions/python/dependency-injection-over-post-init.md",
+      ".claude/conventions/python/dependency-version-pin.md",
+      ".claude/conventions/python/engine-changes-all-lowerers.md",
+      ".claude/conventions/python/exhaustive-union-match.md",
+      ".claude/conventions/python/explicit-named-indexes.md",
+      ".claude/conventions/python/import-from-defining-module.md",
+      ".claude/conventions/python/layered-architecture-no-skip.md",
+      ".claude/conventions/python/linear-migration-chain.md",
+      ".claude/conventions/python/llm-tool-schema-compatibility.md",
+      ".claude/conventions/python/log-errors-once.md",
+      ".claude/conventions/python/logger-exception-for-errors.md",
+      ".claude/conventions/python/never-discard-exceptions.md",
+      ".claude/conventions/python/no-empty-value-defaults.md",
+      ".claude/conventions/python/no-explicit-5xx-http-exception.md",
+      ".claude/conventions/python/no-getattr-setattr-type-bypass.md",
+      ".claude/conventions/python/postgres-enum-types.md",
+      ".claude/conventions/python/rdb-index-constants.md",
+      ".claude/conventions/python/required-new-fields.md",
+      ".claude/conventions/python/sphinx-style-docstrings.md",
+      ".claude/conventions/python/structured-logging-extra.md",
+      ".claude/conventions/python/structured-multi-field-returns.md",
+      ".claude/conventions/python/timezone-aware-datetimes.md",
+      ".claude/conventions/python/toolkit-prompt-placement.md",
+      ".claude/conventions/python/transaction-db-operations-only.md",
+      ".claude/conventions/python/transparent-error-handling.md",
+      ".claude/conventions/python/type-safety-order.md",
+      ".claude/conventions/python/typeddict-for-update-apis.md"
     ],
     "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
