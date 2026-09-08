@@ -6,6 +6,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      force_current_snapshots:
+        description: Exercise exact-current-SHA required image selection
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -414,9 +420,9 @@ jobs:
         env:
           AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
           AZENTS_E2E_CURRENT_SHA: ${{ steps.snapshot_base.outputs.current_snapshot_sha }}
-          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
-          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
-          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
+          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_server_image }}
+          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_runner_image }}
+          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_provider_docker_image }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"

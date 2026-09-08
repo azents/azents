@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-08
-spec_version: 46
+spec_version: 47
 ---
 
 # E2E Primary Test Strategy
@@ -176,6 +176,11 @@ Always-on required CI does not depend on external credentials.
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
   isolated same-SHA CI measurement without mutating live infrastructure.
+- CI workflow dispatch keeps automatic image-change detection by default. Its
+  opt-in `force_current_snapshots: true` diagnostic treats all required images as
+  changed so an already-published exact-current-SHA set and the unchanged local
+  fallback can be measured repeatedly without altering pull request or `main` push
+  behavior.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
