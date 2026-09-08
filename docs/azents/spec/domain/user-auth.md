@@ -29,6 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_user.py
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
+  - python/apps/azents/src/azents/repos/auth_operation/**
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
   - python/apps/azents/src/azents/repos/email_verification/**
@@ -86,7 +87,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-08
-spec_version: 14
+spec_version: 15
 ---
 
 # User & Authentication
@@ -227,6 +228,15 @@ returns. The verified mark commits before the existing separate user resolution
 and auth Session issuance steps; this does not make those existing later steps a
 new shared atomic group.
 
+User resolution or explicit open-registration creation and authentication Session
+issuance are separate completed repository operations after the verified mark and
+stale-row cleanup. Session issuance conditionally revalidates that the User still
+has access and retains a database `FOR SHARE` lock on that User through insertion.
+Account disable-and-revoke therefore either wins before issuance and prevents it,
+or waits for issuance to commit and revokes the newly visible Session. Refresh-token
+generation occurs between completed operations, and JWT creation occurs only after
+the Session transaction commits.
+
 After verify succeeds:
 
 - If existing user email exists, issue session and access/refresh token.
@@ -253,7 +263,13 @@ Redeem transaction first validates token usability, email match, and existing re
 
 ### 3.4 Password login
 
-`POST /auth/v1/login/password` finds user by email, verifies bcrypt hash in `password_logins.user_id`, and issues session/token. Missing email, unset password, and mismatch are all unified as `InvalidCredentials`.
+`POST /auth/v1/login/password` loads an active-user password credential snapshot
+in a completed repository read, verifies the bcrypt hash outside database
+transactions, and then issues the Session through a separate completed repository
+operation that revalidates active-user authority. JWT creation follows the
+committed Session operation. Missing email, disabled user, unset password,
+mismatch, or authority loss before Session issuance are all unified as
+`InvalidCredentials`.
 
 `GET /auth/v1/login/methods?email=` does not directly expose user existence and returns only password setting status as `has_password`. Unregistered email returns `has_password=false`.
 
@@ -366,6 +382,13 @@ stateDiagram-v2
 - access token default expiry is 30 minutes.
 - refresh token default expiry is 180 days.
 - If `max_expires_at` exists, rotation does not extend absolute lifetime.
+- Refresh-token lookup, revoked/expired/disabled-user eligibility, previous-token
+  grace evaluation, rotation interval evaluation, and conditional rotation execute
+  in one repository-owned transaction. Concurrent current-token rotations preserve
+  the conditional update fence and return the one latest committed Session token.
+- Logout commits Session revocation before publishing Runtime Terminal
+  invalidation. Publication failure does not reopen the completed database
+  transaction.
 
 ## 5. Password and Elevation
 
@@ -476,6 +499,15 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-08** (v15) — Moved Auth user resolution, password credential reads,
+  active-user Session issuance, refresh eligibility/rotation, and logout revocation
+  into completed repository-owned operations. Recorded conditional refresh race
+  behavior, User-row serialization against account disable-and-revoke, and
+  post-commit JWT, password verification, and terminal invalidation boundaries.
+- **2026-09-08** (v14) — Moved email verification delivery, conditional mark,
+  cleanup, and administration reads into completed repository operations while
+  preserving the separate verified-mark, user-resolution, and Session-issuance
+  phases.
 - **2026-09-03** (v13) — Added path-prefixed Admin Web native authentication
   navigation, safe `returnTo` preservation, `/workspaces` fallback, and the
   corresponding auth-policy authority mapping.
