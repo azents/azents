@@ -9,6 +9,7 @@ code_paths:
   - proto/azents/runtime_control/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
@@ -61,8 +62,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-07
-spec_version: 75
+last_verified_at: 2026-09-08
+spec_version: 76
 ---
 
 # Agent Runtime Control
@@ -411,14 +412,36 @@ live-stream `OBSERVE` completion reporting `network_enforcement:drifted` may imm
 `UPDATE_CONFIGURATION`, never `START`. The handoff is discarded after use. A missing completion,
 Provider reconnect, Control restart, stale generation/configuration fence, unsupported evidence, or
 dispatch failure creates no replay or hot loop; the next periodic `OBSERVE` is the only retry.
-The Reconciler validates current fences and exact configuration from a lock-free Runtime snapshot,
-then performs a fresh lock-free target check before preparing Provider dispatch. A state change that
-is observed by either check discards the handoff; a later periodic observation converges a change
-that races after the last check. Pending lifecycle dispatch and terminal deletion block the handoff.
-Lifecycle and desired-configuration adoption retain their existing precedence and do not compete
-with this one-shot handoff. Eligible handoff and successful dispatch logs carry Runtime/Provider
-identity, Provider and desired generations, configuration sequence, reconciliation kind, and
-reason; these logs are not durable repair state.
+The Reconciler prepares every Provider command through a completed claim-free database preflight.
+That operation locks the Agent before the Runtime, validates the selected Runtime snapshot and
+managed/removing capability, and returns detached Provider routing evidence. It closes before
+Runtime Control reads the Redis-or-memory connection registry. A missing live connection records
+`disconnected` through a separately revalidated database operation without consuming the lifecycle
+claim, so an undispatched `stop` or other lifecycle command remains eligible after reconnect.
+
+After resolving a live connection, a second completed database-only operation re-locks the Agent
+and Runtime, revalidates the preflight snapshot and live/required Provider generation, checks the
+required observed generation and configuration sequence, atomically claims lifecycle dispatch when
+applicable, and validates the exact configuration document. It returns an immutable admitted
+dispatch snapshot and closes before Runtime Control appends the Provider gRPC/control request.
+
+Configuration validation failure is persisted atomically inside that post-connection
+claim/configuration operation. Connected/disconnected outcomes use separate short database-only
+operations. They re-lock the Agent and Runtime and require the snapshotted capability version,
+Provider binding, desired lifecycle generation, configuration sequence, Provider/observed
+generations and state, lifecycle claim generation, and prior cached connection state to remain
+current. A stale outcome leaves newer Runtime state unchanged. Cancellation and an exception after
+dispatch begins propagate without an outcome write or immediate result-driven replay; the existing
+durable lifecycle claim, generation fences, Provider evidence, and periodic reconciliation remain
+the retry and convergence authority. No cross-I/O lock, distributed dispatch lock, or new queue is
+used.
+
+For one-shot network repair, a state change observed during admission discards the handoff; a later
+periodic observation converges a change that races after admission. Pending lifecycle dispatch and
+terminal deletion block the handoff. Lifecycle and desired-configuration adoption retain their
+existing precedence and do not compete with this one-shot handoff. Eligible handoff and successful
+dispatch logs carry Runtime/Provider identity, Provider and desired generations, configuration
+sequence, reconciliation kind, and reason; these logs are not durable repair state.
 
 The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
 
@@ -823,6 +846,12 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-08 (spec_version=76)** — Moved Runtime lifecycle preflight,
+  post-connection claim/configuration admission, and outcome persistence into
+  completed repository-owned transactions. Coordination and Provider dispatch
+  now run without an active database transaction or retained Agent/Runtime row
+  lock; unavailable Providers do not consume lifecycle claims, and stale outcomes
+  are rejected by existing generation and claim authority.
 - **2026-09-07 (spec_version=75)** — Made Provider stream closure revoke live and
   durable connection authority before waiting for stream-local relay cleanup, preventing
   a blocked claim from retaining stale Runtime Profile availability.
