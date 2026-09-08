@@ -20,6 +20,10 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionCredentials,
+    ExternalChannelCapabilitySnapshot,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
@@ -27,10 +31,6 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import (
-    DiscordConnectionCredentials,
-    ExternalChannelCapabilitySnapshot,
-)
 from azents.services.external_channel.discord_activation import (
     DiscordConnectionActivationService,
 )

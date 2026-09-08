@@ -10,12 +10,15 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/*channel_work*.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
   - python/apps/azents/src/azents/core/external_channel.py
+  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_projection.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
+  - python/apps/azents/src/azents/core/external_channel_provider.py
+  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
@@ -29,6 +32,9 @@ code_paths:
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
   - python/apps/azents/src/azents/cli/external_channel_ingress.py
   - python/apps/azents/src/azents/services/session_title.py
+  - python/apps/azents/src/azents/services/scheduled_task/channel.py
+  - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress.py
+  - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress_data.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -71,7 +77,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-08
-spec_version: 74
+spec_version: 75
 ---
 
 # External Channel
@@ -550,12 +556,25 @@ cycle projection state. They do not read or mutate Channel Work state. Signed
 provider Edit/Delete controls bind the exact Task and Binding and revalidate the
 current provider principal and interaction before mutation.
 
+Scheduled progress provider plans commit with the canonical progress/Tracker claim.
+A separate repository-owned admission transaction revalidates the current started
+cycle and exact version, then closes before ordered reply and Tracker provider or
+Runtime effects execute. Tracker settlement uses a fresh desired-revision-fenced
+transaction. Supersession or terminalization before admission suppresses publication;
+a later change rejects stale settlement but does not replay or retract an effect
+already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
+history, queue, retry, or fallback target is part of this boundary.
+
 ## Changelog
 
-- **2026-09-08** (spec_version 74) — Moved External Channel connection creation,
+- **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
   Workspace-scoped configuration reads, and generation-fenced health persistence to
   completed repository operations while preserving provider validation outside database
   transactions.
+- **2026-09-08** (spec_version 74) — Moved Scheduled progress provider/Runtime
+  effects outside database transactions through completed preparation, admission,
+  and desired-revision-fenced settlement operations without adding replay or
+  cross-I/O locking.
 - **2026-09-07** (spec_version 73) — Added connection-level Discord automatic
   URL-preview suppression for Single and Multi Apps, defaulted it on for existing and
   new connections, kept it out of Session and binding state, and exposed credential-free

@@ -12,7 +12,7 @@ export type TerminalServerControl =
       lifecycle: TerminalLifecycle;
       attachmentGeneration: number;
       desiredGeneration: number;
-      runnerGeneration: number;
+      runnerGeneration: string;
       shellLabel: string;
       workingDirectoryDisplay: string;
       nextInputSequence: number;
@@ -51,6 +51,16 @@ function hasExactKeys(
 function isSafeInteger(value: unknown, minimum: number): value is number {
   return (
     typeof value === "number" && Number.isSafeInteger(value) && value >= minimum
+  );
+}
+
+function isConnectionGeneration(value: unknown): value is string {
+  const maximum = "9223372036854775807";
+  return (
+    typeof value === "string" &&
+    /^[1-9][0-9]*$/.test(value) &&
+    (value.length < maximum.length ||
+      (value.length === maximum.length && value <= maximum))
   );
 }
 
@@ -175,7 +185,7 @@ export function decodeTerminalServerControl(
         !isLifecycle(value.lifecycle) ||
         !isSafeInteger(value.attachment_generation, 1) ||
         !isSafeInteger(value.desired_generation, 1) ||
-        !isSafeInteger(value.runner_generation, 1) ||
+        !isConnectionGeneration(value.runner_generation) ||
         typeof value.shell_label !== "string" ||
         typeof value.working_directory_display !== "string" ||
         !isSafeInteger(value.next_input_sequence, 1) ||

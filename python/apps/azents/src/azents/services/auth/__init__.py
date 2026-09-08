@@ -16,8 +16,11 @@ from azents.core.deps import get_auth_config, get_email_config
 from azents.core.email.service import EmailService
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification.data import EmailVerificationCreate
+from azents.repos.email_verification_operation import (
+    EmailVerificationOperationRepository,
+)
+from azents.repos.email_verification_operation.data import EmailVerificationVerify
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import SessionCreate, TokenMatch
@@ -63,7 +66,10 @@ class AuthService:
     """
 
     email_service: Annotated[EmailService, Depends()]
-    email_verification_repo: Annotated[EmailVerificationRepository, Depends()]
+    email_verification_operation_repository: Annotated[
+        EmailVerificationOperationRepository,
+        Depends(EmailVerificationOperationRepository),
+    ]
     user_repo: Annotated[UserRepository, Depends()]
     user_email_repo: Annotated[UserEmailRepository, Depends()]
     password_login_repo: Annotated[PasswordLoginRepository, Depends()]
@@ -91,20 +97,14 @@ class AuthService:
         )
         expires_at = tznow() + datetime.timedelta(minutes=expire_minutes)
 
-        async with self.session_manager() as session:
-            # Clean stale verification records for this email
-            await self.email_verification_repo.delete_stale_by_email(
-                session, input.email
+        await self.email_verification_operation_repository.create_delivery_record(
+            create=EmailVerificationCreate(
+                email=input.email,
+                code=code,
+                csrf_token=csrf_token,
+                expires_at=expires_at,
             )
-            await self.email_verification_repo.create(
-                session,
-                EmailVerificationCreate(
-                    email=input.email,
-                    code=code,
-                    csrf_token=csrf_token,
-                    expires_at=expires_at,
-                ),
-            )
+        )
 
         await self.email_service.send_verification_code(
             to_email=input.email,
@@ -124,43 +124,27 @@ class AuthService:
         :param input: Verification input data
         :return: Tokens on success, error on failure
         """
-        # Verify verification code
-        async with self.session_manager() as session:
-            verification = await self.email_verification_repo.get_by_email_and_csrf(
-                session, input.email, input.csrf_token
+        mark_result = (
+            await self.email_verification_operation_repository.verify_and_mark(
+                verification=EmailVerificationVerify(
+                    email=input.email,
+                    csrf_token=input.csrf_token,
+                    code=input.code,
+                )
             )
-            if verification is None:
+        )
+        match mark_result:
+            case Success():
+                pass
+            case Failure():
                 return Failure(InvalidVerificationCode())
-
-            # Check expiration
-            if verification.expires_at < tznow():
-                return Failure(InvalidVerificationCode())
-
-            # Already verified
-            if verification.verified_at is not None:
-                return Failure(InvalidVerificationCode())
-
-            # Compare code (case-insensitive)
-            if verification.code.upper() != input.code.upper():
-                return Failure(InvalidVerificationCode())
-
-            # Mark verified
-            mark_result = await self.email_verification_repo.mark_verified(
-                session, verification.id
-            )
-            match mark_result:
-                case Success():
-                    pass
-                case Failure():
-                    return Failure(InvalidVerificationCode())
-                case _:
-                    assert_never(mark_result)
+            case _:
+                assert_never(mark_result)
 
         # Clean stale rows
-        async with self.session_manager() as session:
-            await self.email_verification_repo.delete_stale_by_email(
-                session, input.email
-            )
+        await self.email_verification_operation_repository.delete_stale_by_email(
+            email=input.email
+        )
 
         # Fetch or automatically create User
         async with self.session_manager() as session:

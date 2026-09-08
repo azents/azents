@@ -509,6 +509,13 @@ class ModelFileStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class RuntimeConnectionAuthorityKind(enum.StrEnum):
+    """Durable Runtime Control connection-authority subject kind."""
+
+    PROVIDER = "provider"
+    RUNNER = "runner"
+
+
 class RuntimeDesiredState(enum.StrEnum):
     """Agent Runtime desired lifecycle status."""
 

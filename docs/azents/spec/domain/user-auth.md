@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-09-03
+updated: 2026-09-08
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -32,6 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
   - python/apps/azents/src/azents/repos/email_verification/**
+  - python/apps/azents/src/azents/repos/email_verification_operation/**
   - python/apps/azents/src/azents/repos/signup_token/**
   - python/apps/azents/src/azents/repos/password_reset_token/**
   - python/apps/azents/src/azents/repos/system_user_role/**
@@ -84,8 +85,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-03
-spec_version: 13
+last_verified_at: 2026-09-08
+spec_version: 14
 ---
 
 # User & Authentication
@@ -217,6 +218,14 @@ erDiagram
 ### 3.1 Email OTP login
 
 `POST /auth/v1/email/send-code` creates OTP and CSRF token and tries email delivery. `POST /auth/v1/email/verify` finds verification row by `(email, csrf_token)` and validates code/expiry/single-use conditions.
+
+Email verification delivery deletes stale rows and inserts the new OTP in one
+repository-owned database operation. Verification lookup, CSRF/code/expiry and
+single-use validation, and the conditional verified mark are also one completed
+repository operation. SMTP delivery occurs only after the delivery operation
+returns. The verified mark commits before the existing separate user resolution
+and auth Session issuance steps; this does not make those existing later steps a
+new shared atomic group.
 
 After verify succeeds:
 

@@ -106,25 +106,6 @@ class VfsSessionRecord(Protocol):
         ...
 
 
-class VfsToolkitAttachment(Protocol):
-    """Toolkit attachment fields used to select VFS release sources."""
-
-    @property
-    def id(self) -> str:
-        """Return the attachment id."""
-        ...
-
-    @property
-    def toolkit_id(self) -> str:
-        """Return the attached toolkit id."""
-        ...
-
-    @property
-    def toolkit_type(self) -> str:
-        """Return the attached toolkit type."""
-        ...
-
-
 class VfsToolkitConfig(Protocol):
     """Toolkit configuration fields used to select VFS release sources."""
 
@@ -136,6 +117,20 @@ class VfsToolkitConfig(Protocol):
     @property
     def workspace_id(self) -> str:
         """Return the owning Workspace id."""
+        ...
+
+    @property
+    def toolkit_type(self) -> str:
+        """Return the registered Toolkit provider type."""
+        ...
+
+
+class VfsEffectiveToolkitConfig(Protocol):
+    """Effective Toolkit projection used to select release sources."""
+
+    @property
+    def toolkit(self) -> VfsToolkitConfig:
+        """Return the effective ToolkitConfig."""
         ...
 
 
@@ -174,27 +169,17 @@ class VfsSessionRepository(Protocol[VfsSessionT_contra]):
         ...
 
 
-class VfsAgentToolkitRepository(Protocol[VfsSessionT_contra]):
-    """Toolkit attachment operation used by VFS projection service."""
+class VfsToolkitRepository(Protocol[VfsSessionT_contra]):
+    """Effective Toolkit operation used by VFS projection service."""
 
-    async def list_by_agent(
+    async def list_effective_for_agent(
         self,
         session: VfsSessionT_contra,
         agent_id: str,
-    ) -> Sequence[VfsToolkitAttachment]:
-        """List toolkit attachments for one Agent."""
-        ...
-
-
-class VfsToolkitRepository(Protocol[VfsSessionT_contra]):
-    """Toolkit configuration operation used by VFS projection service."""
-
-    async def get_by_id(
-        self,
-        session: VfsSessionT_contra,
-        toolkit_id: str,
-    ) -> VfsToolkitConfig | None:
-        """Load one toolkit configuration."""
+        *,
+        workspace_id: str,
+    ) -> Sequence[VfsEffectiveToolkitConfig]:
+        """List enabled ToolkitConfigs effective for one Agent."""
         ...
 
 
@@ -247,7 +232,6 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
     catalog: ReleaseVfsCatalog
     agent_run_repository: VfsRunRepository[VfsSessionT_contra]
     agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
-    agent_toolkit_repository: VfsAgentToolkitRepository[VfsSessionT_contra]
     toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
     required_provider_sources: Mapping[str, ToolkitProvider[Any]]
 
@@ -473,29 +457,19 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
     ) -> list[VfsSourceSpec]:
         """Return enabled Provider release sources eligible for one Agent."""
         async with self.session_manager() as session:
-            attachments = await self.agent_toolkit_repository.list_by_agent(
+            effective_toolkits = await self.toolkit_repository.list_effective_for_agent(
                 session,
                 agent_id,
+                workspace_id=workspace_id,
             )
-            toolkit_configs = {
-                attachment.id: await self.toolkit_repository.get_by_id(
-                    session,
-                    attachment.toolkit_id,
-                )
-                for attachment in attachments
-            }
         eligible_providers: dict[str, ToolkitProvider[Any]] = (
             dict(self.required_provider_sources) if include_required_sources else {}
         )
-        for attachment in attachments:
-            toolkit = toolkit_configs[attachment.id]
-            if (
-                toolkit is None
-                or not toolkit.enabled
-                or toolkit.workspace_id != workspace_id
-            ):
+        for effective in effective_toolkits:
+            toolkit = effective.toolkit
+            if not toolkit.enabled or toolkit.workspace_id != workspace_id:
                 continue
-            provider = self.toolkit_registry.get(attachment.toolkit_type)
+            provider = self.toolkit_registry.get(toolkit.toolkit_type)
             if provider is None or provider.vfs_resource_root is None:
                 continue
             eligible_providers[provider.slug] = provider

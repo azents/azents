@@ -75,6 +75,56 @@ void test("decodes only closed typed server controls", () => {
   );
 });
 
+void test("preserves signed-BIGINT runner generations as decimal strings", () => {
+  const accepted = {
+    type: "accepted",
+    terminal_id: "terminal-1",
+    lifecycle: "attached",
+    attachment_generation: 1,
+    desired_generation: 1,
+    runner_generation: "9223372036854775807",
+    shell_label: "bash",
+    working_directory_display: "~/session",
+    next_input_sequence: 1,
+    replay_min_sequence: 0,
+    replay_max_sequence: 0,
+    replay_truncated: false,
+  };
+
+  const decoded = decodeTerminalServerControl(JSON.stringify(accepted));
+
+  assert.equal(decoded.type, "accepted");
+  assert.equal(decoded.runnerGeneration, "9223372036854775807");
+});
+
+void test("rejects noncanonical runner generation representations", () => {
+  const accepted = {
+    type: "accepted",
+    terminal_id: "terminal-1",
+    lifecycle: "attached",
+    attachment_generation: 1,
+    desired_generation: 1,
+    runner_generation: "1",
+    shell_label: "bash",
+    working_directory_display: "~/session",
+    next_input_sequence: 1,
+    replay_min_sequence: 0,
+    replay_max_sequence: 0,
+    replay_truncated: false,
+  };
+
+  for (const runnerGeneration of [1, "0", "01", "9223372036854775808"]) {
+    assert.throws(() =>
+      decodeTerminalServerControl(
+        JSON.stringify({
+          ...accepted,
+          runner_generation: runnerGeneration,
+        }),
+      ),
+    );
+  }
+});
+
 void test("applies sticky Ctrl and Alt to one software key", () => {
   assert.equal(applyTerminalKeyModifiers("c", true, false), "\u0003");
   assert.equal(applyTerminalKeyModifiers("x", false, true), "\u001bx");

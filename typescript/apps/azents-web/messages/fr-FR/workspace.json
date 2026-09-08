@@ -1399,6 +1399,34 @@
       "provider_profile": "le profil d’infrastructure",
       "workspace_profile": "le profil Runtime du Workspace",
       "agent": "l’Agent"
+    },
+    "toolkitManagement": {
+      "description": "Associez un toolkit partagé dans l’espace de travail ou configurez-en un uniquement pour cet agent.",
+      "addToolkit": "Ajouter un toolkit",
+      "toolLabel": "Outil",
+      "toolPlaceholder": "Sélectionner un outil",
+      "configureForAgent": "Configurer pour cet agent",
+      "attachShared": "Associer un toolkit de l’espace de travail",
+      "attachSharedDescription": "Les paramètres et identifiants du toolkit partagé restent gérés dans les paramètres de l’espace de travail.",
+      "noSharedForType": "Aucun toolkit de l’espace de travail n’est disponible pour cet outil.",
+      "agentOnlyDescription": "Les paramètres et identifiants appartiennent uniquement à cet agent.",
+      "attach": "Associer",
+      "workspaceShared": "Partagé dans l’espace de travail",
+      "agentOnly": "Uniquement cet agent",
+      "workspaceBoundary": "La modification, l’autorisation et la suppression restent dans la gestion des toolkits de l’espace de travail.",
+      "detach": "Dissocier",
+      "edit": "Modifier",
+      "disable": "Désactiver",
+      "enable": "Activer",
+      "delete": "Supprimer",
+      "deleteTitle": "Supprimer le toolkit propre à l’agent",
+      "deleteDescription": "Supprimer {name} de cet agent et effacer définitivement ses identifiants enregistrés ?",
+      "deleteConfirm": "Supprimer le toolkit",
+      "readiness": {
+        "ready": "Prêt",
+        "authorization_required": "Autorisation requise",
+        "disabled": "Désactivé"
+      }
     }
   },
   "toolkits": {
@@ -1547,7 +1575,8 @@
       "connect": "Connecter",
       "reconnect": "Reconnecter",
       "disconnect": "Déconnecter"
-    }
+    },
+    "agentSlugDescription": "Doit être unique parmi les toolkits effectifs de cet agent. Utilisez uniquement des lettres minuscules, des chiffres et des traits de soulignement."
   },
   "dashboard": {
     "headline": "Espace de travail",

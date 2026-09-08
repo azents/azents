@@ -16,15 +16,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
-from azents.repos.external_channel.connection import (
-    ExternalChannelConnectionRepository,
-)
-from azents.repos.external_channel.data import (
-    ExternalChannelConnection,
-    ExternalChannelConnectionCreate,
-)
-from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import (
+from azents.core.external_channel_provider import (
     DiscordConnectionConfiguration,
     DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
@@ -33,6 +25,14 @@ from azents.services.external_channel.data import (
     ExternalChannelProviderIdentity,
     SlackConnectionCredentials,
 )
+from azents.repos.external_channel.connection import (
+    ExternalChannelConnectionRepository,
+)
+from azents.repos.external_channel.data import (
+    ExternalChannelConnection,
+    ExternalChannelConnectionCreate,
+)
+from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.provider import (
     DiscordExternalChannelProviderContract,
     SlackExternalChannelProviderContract,

@@ -58,6 +58,9 @@ from azents.testing.grpc import (
     FakeGrpcContext,
     GrpcMetadata,
 )
+from azents.testing.runtime_coordination import (
+    publish_next_test_connection,
+)
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -1109,7 +1112,8 @@ async def _harness(
     coordination = InMemoryRuntimeCoordinationStore()
     connection = None
     for index in range(connection_registrations):
-        connection = await coordination.register_connection(
+        connection = await publish_next_test_connection(
+            coordination,
             kind=RuntimeConnectionKind.RUNNER,
             subject_id="runtime-1",
             connection_id=f"connection-{index + 1}",

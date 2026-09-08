@@ -5,6 +5,9 @@ from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_to_public,
+)
 from azents.services.runtime_terminal.data import (
     RuntimeTerminalAttachmentAccepted,
     RuntimeTerminalDeniedScope,
@@ -134,7 +137,7 @@ class TerminalAcceptedControl(_ClosedModel):
     lifecycle: RuntimeTerminalLifecycle
     attachment_generation: int = Field(ge=1)
     desired_generation: int = Field(ge=1)
-    runner_generation: int = Field(ge=1)
+    runner_generation: str
     shell_label: str
     working_directory_display: str
     next_input_sequence: int = Field(ge=1)
@@ -147,7 +150,21 @@ class TerminalAcceptedControl(_ClosedModel):
         cls,
         accepted: RuntimeTerminalAttachmentAccepted,
     ) -> "TerminalAcceptedControl":
-        return cls(**accepted.__dict__)
+        return cls(
+            terminal_id=accepted.terminal_id,
+            lifecycle=accepted.lifecycle,
+            attachment_generation=accepted.attachment_generation,
+            desired_generation=accepted.desired_generation,
+            runner_generation=runtime_connection_generation_to_public(
+                accepted.runner_generation
+            ),
+            shell_label=accepted.shell_label,
+            working_directory_display=accepted.working_directory_display,
+            next_input_sequence=accepted.next_input_sequence,
+            replay_min_sequence=accepted.replay_min_sequence,
+            replay_max_sequence=accepted.replay_max_sequence,
+            replay_truncated=accepted.replay_truncated,
+        )
 
 
 class TerminalReplayBeginControl(_ClosedModel):

@@ -21,8 +21,11 @@ from azents.core.deps import get_auth_config, get_email_config
 from azents.core.email.service import EmailService
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification.data import EmailVerificationCreate
+from azents.repos.email_verification_operation import (
+    EmailVerificationOperationRepository,
+)
+from azents.repos.email_verification_operation.data import EmailVerificationVerify
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.user import UserRepository
@@ -62,7 +65,10 @@ class SecurityService:
     """
 
     email_service: Annotated[EmailService, Depends()]
-    email_verification_repo: Annotated[EmailVerificationRepository, Depends()]
+    email_verification_operation_repository: Annotated[
+        EmailVerificationOperationRepository,
+        Depends(EmailVerificationOperationRepository),
+    ]
     password_login_repo: Annotated[PasswordLoginRepository, Depends()]
     user_repo: Annotated[UserRepository, Depends()]
     credential_service: Annotated[CredentialService, Depends()]
@@ -157,17 +163,14 @@ class SecurityService:
         )
         expires_at = tznow() + datetime.timedelta(minutes=expire_minutes)
 
-        async with self.session_manager() as session:
-            await self.email_verification_repo.delete_stale_by_email(session, email)
-            await self.email_verification_repo.create(
-                session,
-                EmailVerificationCreate(
-                    email=email,
-                    code=code,
-                    csrf_token=csrf_token,
-                    expires_at=expires_at,
-                ),
+        await self.email_verification_operation_repository.create_delivery_record(
+            create=EmailVerificationCreate(
+                email=email,
+                code=code,
+                csrf_token=csrf_token,
+                expires_at=expires_at,
             )
+        )
 
         await self.email_service.send_verification_code(
             to_email=email,
@@ -193,37 +196,27 @@ class SecurityService:
 
         email = user.primary_email
 
-        # Verify verification code
-        async with self.session_manager() as session:
-            verification = await self.email_verification_repo.get_by_email_and_csrf(
-                session, email, input.csrf_token
+        mark_result = (
+            await self.email_verification_operation_repository.verify_and_mark(
+                verification=EmailVerificationVerify(
+                    email=email,
+                    csrf_token=input.csrf_token,
+                    code=input.code,
+                )
             )
-            if verification is None:
+        )
+        match mark_result:
+            case Success():
+                pass
+            case Failure():
                 return Failure(InvalidElevationCode())
-
-            if verification.expires_at < tznow():
-                return Failure(InvalidElevationCode())
-
-            if verification.verified_at is not None:
-                return Failure(InvalidElevationCode())
-
-            if verification.code.upper() != input.code.upper():
-                return Failure(InvalidElevationCode())
-
-            mark_result = await self.email_verification_repo.mark_verified(
-                session, verification.id
-            )
-            match mark_result:
-                case Success():
-                    pass
-                case Failure():
-                    return Failure(InvalidElevationCode())
-                case _:
-                    assert_never(mark_result)
+            case _:
+                assert_never(mark_result)
 
         # Clean stale rows
-        async with self.session_manager() as session:
-            await self.email_verification_repo.delete_stale_by_email(session, email)
+        await self.email_verification_operation_repository.delete_stale_by_email(
+            email=email
+        )
 
         # Create elevated access token
         access_token = create_access_token(

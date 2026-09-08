@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_file import external_channel_file_metadata_items
+from azents.core.external_channel_provider import (
+    DiscordConnectionCredentials,
+    SlackConnectionCredentials,
+)
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -26,10 +30,6 @@ from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import (
-    DiscordConnectionCredentials,
-    SlackConnectionCredentials,
-)
 from azents.services.external_channel.discord_events import DiscordNormalizedMessage
 from azents.services.external_channel.discord_history import (
     DiscordConversationHistoryClient,

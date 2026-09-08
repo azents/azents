@@ -5,17 +5,22 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**toolkit_v1_attach_toolkit_to_agent**](ToolkitV1Api.md#toolkit_v1_attach_toolkit_to_agent) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | Attach Toolkit To Agent
+[**toolkit_v1_create_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_create_agent_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs | Create Agent Toolkit Config
 [**toolkit_v1_create_toolkit_config**](ToolkitV1Api.md#toolkit_v1_create_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs | Create Toolkit Config
 [**toolkit_v1_create_toolkit_scope**](ToolkitV1Api.md#toolkit_v1_create_toolkit_scope) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | Create Toolkit Scope
+[**toolkit_v1_delete_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_delete_agent_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Delete Agent Toolkit Config
 [**toolkit_v1_delete_toolkit_config**](ToolkitV1Api.md#toolkit_v1_delete_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Delete Toolkit Config
 [**toolkit_v1_delete_toolkit_scope**](ToolkitV1Api.md#toolkit_v1_delete_toolkit_scope) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes/{scope_id} | Delete Toolkit Scope
 [**toolkit_v1_detach_toolkit_from_agent**](ToolkitV1Api.md#toolkit_v1_detach_toolkit_from_agent) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits/{agent_toolkit_id} | Detach Toolkit From Agent
+[**toolkit_v1_get_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_get_agent_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Get Agent Toolkit Config
 [**toolkit_v1_get_toolkit_config**](ToolkitV1Api.md#toolkit_v1_get_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Get Toolkit Config
+[**toolkit_v1_list_agent_toolkit_management**](ToolkitV1Api.md#toolkit_v1_list_agent_toolkit_management) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs | List Agent Toolkit Management
 [**toolkit_v1_list_agent_toolkits**](ToolkitV1Api.md#toolkit_v1_list_agent_toolkits) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | List Agent Toolkits
 [**toolkit_v1_list_available_toolkit_configs**](ToolkitV1Api.md#toolkit_v1_list_available_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/available | List Available Toolkit Configs
 [**toolkit_v1_list_toolkit_configs**](ToolkitV1Api.md#toolkit_v1_list_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs | List Toolkit Configs
 [**toolkit_v1_list_toolkit_scopes**](ToolkitV1Api.md#toolkit_v1_list_toolkit_scopes) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | List Toolkit Scopes
 [**toolkit_v1_list_toolkits**](ToolkitV1Api.md#toolkit_v1_list_toolkits) | **GET** /toolkit/v1/toolkits | List Toolkits
+[**toolkit_v1_update_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_update_agent_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Update Agent Toolkit Config
 [**toolkit_v1_update_toolkit_config**](ToolkitV1Api.md#toolkit_v1_update_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Update Toolkit Config
 
 
@@ -86,6 +91,90 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**AgentToolkitResponse**](AgentToolkitResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_v1_create_agent_toolkit_config**
+> ToolkitConfigResponse toolkit_v1_create_agent_toolkit_config(agent_id, handle, agent_toolkit_config_create_request)
+
+Create Agent Toolkit Config
+
+Create one ToolkitConfig owned by the path Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_toolkit_config_create_request import AgentToolkitConfigCreateRequest
+from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_toolkit_config_create_request = azentspublicclient.AgentToolkitConfigCreateRequest() # AgentToolkitConfigCreateRequest | 
+
+    try:
+        # Create Agent Toolkit Config
+        api_response = api_instance.toolkit_v1_create_agent_toolkit_config(agent_id, handle, agent_toolkit_config_create_request)
+        print("The response of ToolkitV1Api->toolkit_v1_create_agent_toolkit_config:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitV1Api->toolkit_v1_create_agent_toolkit_config: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_toolkit_config_create_request** | [**AgentToolkitConfigCreateRequest**](AgentToolkitConfigCreateRequest.md)|  | 
+
+### Return type
+
+[**ToolkitConfigResponse**](ToolkitConfigResponse.md)
 
 ### Authorization
 
@@ -268,6 +357,86 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_v1_delete_agent_toolkit_config**
+> toolkit_v1_delete_agent_toolkit_config(agent_id, toolkit_config_id, handle)
+
+Delete Agent Toolkit Config
+
+Delete one ToolkitConfig owned by the path Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Delete Agent Toolkit Config
+        api_instance.toolkit_v1_delete_agent_toolkit_config(agent_id, toolkit_config_id, handle)
+    except Exception as e:
+        print("Exception when calling ToolkitV1Api->toolkit_v1_delete_agent_toolkit_config: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -516,6 +685,89 @@ void (empty response body)
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **toolkit_v1_get_agent_toolkit_config**
+> ToolkitConfigResponse toolkit_v1_get_agent_toolkit_config(agent_id, toolkit_config_id, handle)
+
+Get Agent Toolkit Config
+
+Read one ToolkitConfig owned by the path Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Get Agent Toolkit Config
+        api_response = api_instance.toolkit_v1_get_agent_toolkit_config(agent_id, toolkit_config_id, handle)
+        print("The response of ToolkitV1Api->toolkit_v1_get_agent_toolkit_config:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitV1Api->toolkit_v1_get_agent_toolkit_config: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**ToolkitConfigResponse**](ToolkitConfigResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **toolkit_v1_get_toolkit_config**
 > ToolkitConfigResponse toolkit_v1_get_toolkit_config(toolkit_config_id, handle)
 
@@ -580,6 +832,87 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ToolkitConfigResponse**](ToolkitConfigResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_v1_list_agent_toolkit_management**
+> AgentToolkitManagementResponse toolkit_v1_list_agent_toolkit_management(agent_id, handle)
+
+List Agent Toolkit Management
+
+Return the authorized Agent Toolkit management projection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_toolkit_management_response import AgentToolkitManagementResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # List Agent Toolkit Management
+        api_response = api_instance.toolkit_v1_list_agent_toolkit_management(agent_id, handle)
+        print("The response of ToolkitV1Api->toolkit_v1_list_agent_toolkit_management:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitV1Api->toolkit_v1_list_agent_toolkit_management: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**AgentToolkitManagementResponse**](AgentToolkitManagementResponse.md)
 
 ### Authorization
 
@@ -991,6 +1324,92 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_v1_update_agent_toolkit_config**
+> ToolkitConfigResponse toolkit_v1_update_agent_toolkit_config(agent_id, toolkit_config_id, handle, agent_toolkit_config_update_request)
+
+Update Agent Toolkit Config
+
+Update one ToolkitConfig owned by the path Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_toolkit_config_update_request import AgentToolkitConfigUpdateRequest
+from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_toolkit_config_update_request = azentspublicclient.AgentToolkitConfigUpdateRequest() # AgentToolkitConfigUpdateRequest | 
+
+    try:
+        # Update Agent Toolkit Config
+        api_response = api_instance.toolkit_v1_update_agent_toolkit_config(agent_id, toolkit_config_id, handle, agent_toolkit_config_update_request)
+        print("The response of ToolkitV1Api->toolkit_v1_update_agent_toolkit_config:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitV1Api->toolkit_v1_update_agent_toolkit_config: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_toolkit_config_update_request** | [**AgentToolkitConfigUpdateRequest**](AgentToolkitConfigUpdateRequest.md)|  | 
+
+### Return type
+
+[**ToolkitConfigResponse**](ToolkitConfigResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
