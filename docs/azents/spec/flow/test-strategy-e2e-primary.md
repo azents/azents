@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-08
-spec_version: 47
+spec_version: 48
 ---
 
 # E2E Primary Test Strategy
@@ -200,10 +200,13 @@ Always-on required CI does not depend on external credentials.
   Deterministic External Channel collection uses
   `test_external_channel_management.py` for Slack HTTP, connection management, and
   provider-native progress; `test_external_channel_slack_socket.py` for Socket Mode;
-  `test_external_channel_discord_provisioning.py` for location wait and durable
-  conversation provisioning; and `test_external_channel_discord_journeys.py` for
-  activation, commands, components, and lifecycle. These files collect reusable
-  implementations from `external_channel_scenarios.py`.
+  `test_external_channel_discord_gateway_binding.py` for Gateway location wait and
+  binding; `test_external_channel_discord_configured_provisioning.py` for durable
+  conversation provisioning; `test_external_channel_discord_unmentioned_activity.py`
+  for unmentioned activity and typing recovery; and
+  `test_external_channel_discord_journeys.py` for activation, commands, components,
+  and lifecycle. These files collect reusable implementations from
+  `external_channel_scenarios.py`.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
@@ -382,6 +385,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-08** (spec_version 48) — Split the Discord provisioning collector into
+  independently planned Gateway binding, configured provisioning, and unmentioned
+  activity journeys while preserving historical timing projection and coverage.
 - **2026-09-02** (spec_version 43) — Added two focused real-Docker Runtime
   Terminal journeys for protocol behavior and Runtime lifecycle authority while
   retaining policy and Web presentation coverage in deterministic lower layers.

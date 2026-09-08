@@ -32,10 +32,13 @@ _EXTERNAL_CHANNEL_TIMING_FILES = {
         "test_external_channel_slack_socket.py"
     ),
     "test_discord_gateway_message_waits_for_location_then_binds": (
-        "test_external_channel_discord_provisioning.py"
+        "test_external_channel_discord_gateway_binding.py"
     ),
     "test_discord_configured_message_durably_provisions_conversation": (
-        "test_external_channel_discord_provisioning.py"
+        "test_external_channel_discord_configured_provisioning.py"
+    ),
+    "test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers": (
+        "test_external_channel_discord_unmentioned_activity.py"
     ),
     "test_discord_single_activation_and_interaction_journey": (
         "test_external_channel_discord_journeys.py"
@@ -224,7 +227,15 @@ def _current_timing_path(node_id: str) -> str:
     """Map historical timing nodes onto the file that currently collects them."""
     parts = node_id.split("::")
     path = _current_suite_path(parts[0])
-    if not path.endswith("/test_external_channels.py") or len(parts) < 2:
+    timing_source = path.rsplit("/", 1)[-1]
+    if (
+        timing_source
+        not in {
+            "test_external_channels.py",
+            "test_external_channel_discord_provisioning.py",
+        }
+        or len(parts) < 2
+    ):
         return path
     test_name = parts[1].split("[", 1)[0]
     current_name = _EXTERNAL_CHANNEL_TIMING_FILES.get(test_name)
