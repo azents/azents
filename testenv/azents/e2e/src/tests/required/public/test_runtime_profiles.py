@@ -358,7 +358,7 @@ async def _start_inflight_probe_operation(
             f"{public_server_url}/chat/v1/agents/{agent_id}/workspace/directories",
             headers=_headers(token),
             json={"path": path, "parents": False},
-            timeout=25,
+            timeout=150,
         )
     )
     try:
@@ -390,11 +390,8 @@ async def _assert_inflight_request_did_not_succeed(
     inflight: _InflightProbeOperation,
 ) -> None:
     """Require one lost or stale operation to avoid an HTTP success response."""
-    try:
-        response = await inflight.response_task
-    except requests.RequestException:
-        return
-    assert response.status_code != 200
+    response = await inflight.response_task
+    assert response.status_code == 400
 
 
 def _assert_workspace_path_missing(
@@ -593,6 +590,9 @@ async def _assert_stale_runner_action_is_fenced(
                 )
         elif action == "result":
             assert inflight is not None
+            assert not inflight.response_task.done(), (
+                "Public operation waiter completed before stale-result injection"
+            )
             await client.append_runner_event(
                 RunnerOperationEvent(
                     request_id=inflight.operation.request_id,
