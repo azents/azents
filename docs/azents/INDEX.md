@@ -329,6 +329,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Runtime File Read Data Plane Requirements](requirements/read-260730-runtime-file-read-data-plane.md) | read-260730 | 2026-07-30 | 2026-07-30 |
 | [Memory Redesign: Filesystem → DB + Tool Call Historical Requirements Reconstruction](requirements/redesign-260426-memory-redesign-2026.md) | redesign-260426 | 2026-04-26 | 2026-04-26 |
+| [Ephemeral Redis Coordination Authority Requirements](requirements/redis-260907-ephemeral-coordination-authority.md) | redis-260907 | 2026-09-07 | - |
 | [Re-Execution Preserves Model Target Intent Historical Requirements Reconstruction](requirements/reexecution-260710-reexecution-target-intent.md) | reexecution-260710 | 2026-07-10 | - |
 | [Register Project Picker Worktree UI Historical Requirements Reconstruction](requirements/register-260706-register-picker-worktree-ui.md) | register-260706 | 2026-07-06 | - |
 | [Remove Project Registration Requests Historical Requirements Reconstruction](requirements/registration-260707-registration-requests.md) | registration-260707 | 2026-07-07 | 2026-07-07 |
@@ -747,6 +748,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Runtime File Read Data Plane](adr/read-260730-runtime-file-read-data-plane.md)
 - [Memory Redesign: Filesystem → DB + Tool Call Historical Decision Reconstruction](adr/redesign-260426-memory-redesign-2026.md)
+- [Ephemeral Redis Coordination Authority](adr/redis-260907-ephemeral-coordination-authority.md)
 - [Re-Execution Preserves Model Target Intent](adr/reexecution-260710-reexecution-target-intent.md)
 - [Register Project Picker Worktree UI](adr/register-260706-register-picker-worktree-ui.md)
 - [Remove Project Registration Requests Historical Decision Reconstruction](adr/registration-260707-registration-requests.md)

@@ -224,7 +224,7 @@ class RDBAgentRuntime(RDBModel):
         server_default=RuntimeProviderObservedState.UNKNOWN.value,
     )
     provider_generation: Mapped[int] = mapped_column(
-        sa.Integer,
+        sa.BigInteger,
         init=False,
         nullable=False,
         server_default="0",
@@ -266,7 +266,7 @@ class RDBAgentRuntime(RDBModel):
         server_default=RuntimeRunnerState.UNKNOWN.value,
     )
     runner_generation: Mapped[int] = mapped_column(
-        sa.Integer,
+        sa.BigInteger,
         init=False,
         nullable=False,
         server_default="0",
