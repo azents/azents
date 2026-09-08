@@ -9,6 +9,9 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/core/goal.py
+  - python/apps/azents/src/azents/core/skill_projection.py
+  - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -59,6 +62,9 @@ code_paths:
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/mailbox/**
+  - python/apps/azents/src/azents/repos/goal/**
+  - python/apps/azents/src/azents/repos/skill_state/**
+  - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/subagent_coordination/**
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
@@ -87,8 +93,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-07
-spec_version: 172
+last_verified_at: 2026-09-08
+spec_version: 173
 ---
 
 # Agent Execution Loop
@@ -114,10 +120,13 @@ Main steps:
    preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
    managed-file projection before calling input promotion or resolving a managed SkillAction.
 2. A closed TurnAction capability registry classifies inference requirements and
-   performs Goal/Skill semantic preparation. Preparation atomically updates the
-   Session inference snapshot, applies those side effects, appends canonical
-   events, associates run input, and deletes the source buffer. A changed FIFO
-   head restarts preparation instead of applying a stale resolution.
+   prepares attachments, managed VFS Skills, and detached Goal/Skill semantics
+   without holding the final database transaction. A composing Mailbox repository
+   then locks the Session and FIFO head, revalidates owner generation, expected
+   head identity, and any filesystem Skill snapshot, and atomically applies
+   Goal/Skill effects, appends canonical events, creates operation execution
+   state, associates run input, acknowledges agent results, and deletes the source
+   buffer. Changed authority fails closed instead of applying stale preparation.
 3. Worker executes buffer-keyed operation TurnActions such as
    `create_git_worktree` through a separate closed operation executor registry
    before the next model dispatch. The current Session owner generation admits
@@ -186,7 +195,15 @@ User trees. A stale Worker cannot resume ordinary work after the capability vers
 
 The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers in the canonical enabled effective Toolkit relation for the run's Agent and Workspace. That relation unions enabled Workspace-shared `AgentToolkit` attachments with enabled direct Agent-owned ToolkitConfigs. Projection construction reads only local package resources and authoritative effective-relation metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
 
-Input promotion receives `active_run_id`. An absolute filesystem SkillAction continues to resolve from the existing session `active` Skill projection. An `azents://skills/.../SKILL.md` action resolves only from that active run's VFS projection, validates the managed Skill metadata, and emits the existing durable `skill_loaded` input before the associated user message. Failure to find or authorize the URI produces the unavailable-Skill system input and does not fall back to an idle preview or current package resources.
+Input promotion receives `active_run_id`. An absolute filesystem SkillAction
+resolves from the existing session `active` Skill projection outside the final
+transaction and the exact item is revalidated inside final promotion. An
+`azents://skills/.../SKILL.md` action resolves only from that active run's VFS
+projection before the final database transaction, validates the managed Skill
+metadata, and emits the existing durable `skill_loaded` input before the
+associated user message. Failure to find or authorize the URI produces the
+unavailable-Skill system input and does not fall back to an idle preview or
+current package resources.
 
 During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies projection membership and integrity before creating a Runtime file. Other Runtime file tools remain unaware of the VFS.
 
@@ -1407,6 +1424,10 @@ icon.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 173) — Split Mailbox preparation from its
+  repository-owned final transaction so managed VFS I/O occurs without an active
+  transaction while FIFO, generation, Skill, event, action, Run, and delete
+  authority remains atomically revalidated and applied.
 - **2026-09-07** (spec_version 172) — Made managed VFS release-bundle eligibility
   consume the canonical effective Toolkit relation, including direct Agent-owned
   ToolkitConfigs as well as Workspace-shared attachments.

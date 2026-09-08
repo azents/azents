@@ -102,3 +102,23 @@ class GithubUserInstallationRepository:
             )
         )
         return result.scalar_one_or_none() is not None
+
+    async def list_accessible_installation_ids(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+        platform_app_id: str,
+        installation_ids: frozenset[int],
+    ) -> frozenset[int]:
+        """Return selected App-scoped installation authority rows."""
+        if not installation_ids:
+            return frozenset()
+        result = await session.execute(
+            select(RDBGithubUserInstallation.installation_id).where(
+                RDBGithubUserInstallation.user_id == user_id,
+                RDBGithubUserInstallation.platform_app_id == platform_app_id,
+                RDBGithubUserInstallation.installation_id.in_(installation_ids),
+            )
+        )
+        return frozenset(result.scalars().all())

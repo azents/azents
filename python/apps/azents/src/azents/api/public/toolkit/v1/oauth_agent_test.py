@@ -27,6 +27,7 @@ from azents.core.oauth2 import (
     create_agent_github_platform_oauth_state,
     create_agent_toolkit_oauth_state,
 )
+from azents.core.system_setting import SystemSettingFieldSource
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
@@ -184,6 +185,7 @@ async def test_agent_github_callback_syncs_through_authorized_service(
             private_key="private-key",
             client_secret="client-secret",
             effective_generation="generation-1",
+            app_id_source=SystemSettingFieldSource.ADMIN,
         )
     )
     installations = [

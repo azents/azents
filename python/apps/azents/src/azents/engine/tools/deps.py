@@ -15,7 +15,7 @@ from azents.engine.tools.envvar import EnvVarToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.gcp import GcpToolkitProvider
 from azents.engine.tools.github import GitHubToolkitProvider
-from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
+from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.google_analytics import GoogleAnalyticsToolkitProvider
 from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
@@ -28,6 +28,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository

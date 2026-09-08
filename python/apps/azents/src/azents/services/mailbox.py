@@ -14,7 +14,6 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    ActionExecutionStatus,
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
@@ -55,7 +54,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
+from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -74,6 +73,14 @@ from azents.repos.mailbox.data import (
     ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
+from azents.repos.mailbox.promotion import (
+    MailboxActionExecutionCreate,
+    MailboxPromotionConflict,
+    MailboxPromotionConflictError,
+    MailboxPromotionEvent,
+    MailboxPromotionPlan,
+    MailboxPromotionRepository,
+)
 from azents.repos.scheduled_task.presentation import (
     render_scheduled_task_runtime_message,
 )
@@ -84,13 +91,13 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import (
-    initial_title_from_event,
-    initial_title_from_external_channel_event,
+    initial_title_from_user_text,
 )
 from azents.services.turn_action import (
     TurnActionCapabilityRegistry,
     TurnActionPreparationContext,
     TurnActionPreparationEffect,
+    TurnActionPreparationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,15 +238,26 @@ class PreparedMailboxFiles:
 
 
 @dataclasses.dataclass(frozen=True)
+class PreparedMailboxPromotion:
+    """Detached FIFO snapshot and all external preparation results."""
+
+    agent_id: str
+    workspace_id: str
+    buffer: MailboxItem | None
+    files: PreparedMailboxFiles
+    turn_action: TurnActionPreparationResult | None
+
+
+@dataclasses.dataclass(frozen=True)
 class MailboxPreparationContext:
     """Shared context passed to one closed input-buffer processor."""
 
-    session: AsyncSession
     session_id: str
     active_run_id: str | None
     required_inference_profile: RequestedInferenceProfile | None
     prepared_inference_state: SessionInferenceState | None
     prepared_files: PreparedMailboxFiles
+    prepared_turn_action: TurnActionPreparationResult | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -292,6 +310,7 @@ class MailboxService:
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
     turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()]
+    promotion_repository: Annotated[MailboxPromotionRepository, Depends()]
     external_channel_repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository.create),
@@ -723,190 +742,142 @@ class MailboxService:
         limit: int | None = None,
         include_action_messages: bool = True,
     ) -> PromotedMailboxItems:
-        """Flush pending buffers of session in claim, append, delete order."""
-        del model
-        del limit
-        prepared_files = await self._prepare_mailbox_item_attachments(
+        """Prepare external input state, then atomically promote one FIFO head."""
+        del model, limit
+        preflight = await self._prepare_mailbox_item_attachments(
             session_id=session_id,
             expected_buffer_id=expected_buffer_id,
             include_action_messages=include_action_messages,
             owner_generation=owner_generation,
             active_run_id=active_run_id,
         )
-        async with (
-            self._discard_prepared_model_files_on_failure(prepared_files),
-            self.session_manager() as session,
-        ):
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None:
-                raise ValueError("AgentSession not found")
-            if agent_session.owner_generation != owner_generation:
-                raise MailboxOwnerGenerationStaleError(
-                    "Session owner generation changed before input promotion"
-                )
-            oldest = await self.mailbox_item_repository.lock_oldest_by_session_id(
-                session,
-                session_id,
-            )
-            actual_buffer_id = oldest.id if oldest is not None else None
-            if actual_buffer_id != expected_buffer_id:
-                raise MailboxPreparationStaleError(
-                    "Input buffer FIFO head changed during preparation"
-                )
-            claimed = [oldest] if oldest is not None else []
-            if not claimed:
-                return PromotedMailboxItems(
-                    turn_effect=TurnEffect.NEUTRAL,
-                    operation_action=None,
-                    requested_inference_profile=None,
-                    user_messages=[],
-                    events=[],
-                    promoted_event_ids=[],
-                    deleted_buffer_ids=[],
-                    changed_session_agent_ids=[],
-                    claimed_count=0,
-                    inserted_count=0,
-                    deduped_count=0,
-                    complete_run=False,
-                    suppress_parent_result=False,
-                )
-
+        async with self._discard_prepared_model_files_on_failure(preflight.files):
+            claimed = [preflight.buffer] if preflight.buffer is not None else []
             outcome = await self._promote_claimed_buffers(
-                session,
                 session_id=session_id,
                 claimed=claimed,
                 required_inference_profile=required_inference_profile,
                 prepared_inference_state=prepared_inference_state,
-                prepared_files=prepared_files,
+                prepared_files=preflight.files,
+                prepared_turn_action=preflight.turn_action,
                 profile_resolution_failure=profile_resolution_failure,
                 include_action_messages=include_action_messages,
                 active_run_id=active_run_id,
             )
-            promoted = outcome.promoted
-            operation_action = outcome.operation_action
-            if operation_action is not None:
-                execution = await self.action_execution_repository.create(
-                    session,
-                    ActionExecutionCreate(
-                        id=None,
-                        session_id=session_id,
-                        mailbox_item_id=operation_action.buffer.id,
-                        sender_user_id=operation_action.buffer.sender_user_id,
-                        action_type=operation_action.action.type,
-                        action=_JSON_OBJECT_ADAPTER.validate_python(
-                            operation_action.action.model_dump(mode="json")
-                        ),
-                        status=ActionExecutionStatus.PENDING,
-                        owner_generation=agent_session.owner_generation,
+            failure_promoted: list[_PromotedMailboxItem] = []
+            finalization_failure = (
+                preflight.turn_action.finalization_failure
+                if preflight.turn_action is not None
+                else None
+            )
+            if preflight.buffer is not None and finalization_failure is not None:
+                failure_promoted = [
+                    _system_error_promoted_buffer(
+                        preflight.buffer, finalization_failure
+                    )
+                ]
+            operation = outcome.operation_action
+            action_execution = None
+            if operation is not None:
+                action_execution = MailboxActionExecutionCreate(
+                    action_type=operation.action.type,
+                    action=_JSON_OBJECT_ADAPTER.validate_python(
+                        operation.action.model_dump(mode="json")
                     ),
                 )
-                operation_action = dataclasses.replace(
-                    operation_action,
-                    execution=execution,
-                )
-            event_inserted = await self._append_mailbox_item_events(
-                session,
-                session_id,
-                promoted,
-            )
-            for event in event_inserted:
-                title = initial_title_from_event(event)
-                if title is not None:
-                    await self.agent_session_repository.set_initial_auto_title_if_unset(
-                        session,
+            predecessor_run_id = None
+            if preflight.buffer is not None and isinstance(
+                preflight.buffer.payload, TurnActionContinuationMailboxPayload
+            ):
+                predecessor_run_id = preflight.buffer.payload.predecessor_run_id
+            try:
+                committed = await self.promotion_repository.promote(
+                    MailboxPromotionPlan(
                         session_id=session_id,
-                        title=title,
-                        event_id=event.id,
+                        owner_generation=owner_generation,
+                        expected_buffer_id=expected_buffer_id,
+                        active_run_id=active_run_id,
+                        consume_buffer=bool(outcome.promoted or operation is not None),
+                        success_events=[
+                            _mailbox_promotion_event(item) for item in outcome.promoted
+                        ],
+                        failure_events=[
+                            _mailbox_promotion_event(item) for item in failure_promoted
+                        ],
+                        goal_create=(
+                            preflight.turn_action.goal_create
+                            if (
+                                preflight.turn_action is not None
+                                and profile_resolution_failure is None
+                                and not failure_promoted
+                            )
+                            else None
+                        ),
+                        skill_revalidation=(
+                            preflight.turn_action.skill_revalidation
+                            if preflight.turn_action is not None
+                            else None
+                        ),
+                        action_execution=action_execution,
+                        continuation_predecessor_run_id=predecessor_run_id,
                     )
-            events_by_external_id = {
-                event.external_id: event
-                for event in event_inserted
-                if event.external_id is not None
-            }
-            deduped = [
-                item
-                for item in promoted
-                if item.external_id not in events_by_external_id
-            ]
-            missing: list[str] = []
-            for item in deduped:
-                existing = await self.event_transcript_repository.get_by_external_id(
-                    session,
-                    session_id,
-                    item.external_id,
                 )
-                if existing is None:
-                    missing.append(item.external_id)
-                else:
-                    events_by_external_id[item.external_id] = existing
-            if missing:
-                raise RuntimeError("Conflicted input buffer event was not found")
-            for item in promoted:
-                if not item.initial_title_eligible:
-                    continue
-                event = events_by_external_id[item.external_id]
-                title = initial_title_from_external_channel_event(event)
-                if title is not None:
-                    await self.agent_session_repository.set_initial_auto_title_if_unset(
-                        session,
-                        session_id=session_id,
-                        title=title,
-                        event_id=event.id,
-                    )
+            except MailboxPromotionConflictError as exc:
+                if exc.conflict is MailboxPromotionConflict.OWNER_GENERATION:
+                    raise MailboxOwnerGenerationStaleError(
+                        "Session owner generation changed before input promotion"
+                    ) from exc
+                raise MailboxPreparationStaleError(
+                    "Input buffer FIFO head changed during preparation"
+                ) from exc
 
-            promoted_event_ids = list(
-                dict.fromkeys(
-                    events_by_external_id[item.external_id].id for item in promoted
-                )
+        if committed.deferred:
+            complete_run = active_run_id == predecessor_run_id
+            return PromotedMailboxItems(
+                turn_effect=TurnEffect.NEUTRAL,
+                operation_action=None,
+                requested_inference_profile=None,
+                user_messages=[],
+                events=[],
+                promoted_event_ids=[],
+                deleted_buffer_ids=[],
+                changed_session_agent_ids=[],
+                claimed_count=0,
+                inserted_count=0,
+                deduped_count=0,
+                complete_run=complete_run,
+                suppress_parent_result=complete_run,
             )
-            changed_session_agent_ids = await self._acknowledge_promoted_agent_results(
-                session,
-                session_id=session_id,
-                promoted=promoted,
+        if operation is not None:
+            operation = dataclasses.replace(
+                operation, execution=committed.action_execution
             )
-            if active_run_id is not None:
-                await self.agent_run_repository.associate_input_events(
-                    session,
-                    run_id=active_run_id,
-                    event_ids=promoted_event_ids,
-                )
-            buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
-            if operation_action is not None:
-                buffer_ids.append(operation_action.buffer.id)
-            deleted_count = await self.mailbox_item_repository.delete_claimed_by_ids(
-                session,
-                session_id,
-                buffer_ids,
-            )
-            if deleted_count != len(buffer_ids):
-                logger.warning(
-                    "Input buffer flush deleted a different row count",
-                    extra={
-                        "session_id": session_id,
-                        "claimed_count": len(buffer_ids),
-                        "deleted_count": deleted_count,
-                    },
-                )
-
         return PromotedMailboxItems(
-            turn_effect=outcome.turn_effect,
-            operation_action=operation_action,
-            requested_inference_profile=(
-                _requested_inference_profile(promoted[0].buffer) if promoted else None
+            turn_effect=(
+                TurnEffect.FAILED if committed.handled_failure else outcome.turn_effect
             ),
-            user_messages=[
-                item.user_message for item in promoted if item.user_message is not None
-            ],
-            events=event_inserted,
-            promoted_event_ids=promoted_event_ids,
-            deleted_buffer_ids=buffer_ids,
-            changed_session_agent_ids=changed_session_agent_ids,
-            claimed_count=len(buffer_ids),
-            inserted_count=len(event_inserted),
-            deduped_count=len(deduped),
+            operation_action=operation,
+            requested_inference_profile=(
+                _requested_inference_profile(preflight.buffer)
+                if preflight.buffer is not None and outcome.promoted
+                else None
+            ),
+            user_messages=(
+                []
+                if committed.handled_failure
+                else [
+                    item.user_message
+                    for item in outcome.promoted
+                    if item.user_message is not None
+                ]
+            ),
+            events=committed.events,
+            promoted_event_ids=committed.promoted_event_ids,
+            deleted_buffer_ids=committed.deleted_buffer_ids,
+            changed_session_agent_ids=committed.changed_session_agent_ids,
+            claimed_count=len(committed.deleted_buffer_ids),
+            inserted_count=len(committed.events),
+            deduped_count=committed.deduped_count,
             complete_run=outcome.complete_run,
             suppress_parent_result=outcome.suppress_parent_result,
         )
@@ -1028,12 +999,11 @@ class MailboxService:
         include_action_messages: bool,
         owner_generation: int,
         active_run_id: str | None,
-    ) -> PreparedMailboxFiles:
-        """Resolve the FIFO head attachments without holding a database session."""
+    ) -> PreparedMailboxPromotion:
+        """Resolve FIFO attachments and TurnAction I/O without an active transaction."""
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
+                session, session_id
             )
             buffer = await self._first_promotable_mailbox_item(session, session_id)
         if agent_session is None:
@@ -1043,87 +1013,106 @@ class MailboxService:
             raise MailboxPreparationStaleError(
                 "Input buffer FIFO head changed during preparation"
             )
-        if buffer is None:
-            return PreparedMailboxFiles(
-                attachments=[],
-                file_parts=[],
-                created_model_file_ids=[],
-            )
-
-        file_parts = list(buffer.presentation.file_parts)
-        if (
-            buffer.kind is MailboxItemKind.ACTION_MESSAGE
-            and not include_action_messages
-        ):
-            return PreparedMailboxFiles(
-                attachments=[],
-                file_parts=file_parts,
-                created_model_file_ids=[],
-            )
-        if file_parts:
-            return PreparedMailboxFiles(
-                attachments=[],
-                file_parts=file_parts,
-                created_model_file_ids=[],
-            )
-        if not buffer.presentation.attachments:
-            return PreparedMailboxFiles(
-                attachments=[],
-                file_parts=file_parts,
-                created_model_file_ids=[],
-            )
-        if active_run_id is None:
-            raise MailboxPreparationStaleError(
-                "Attachment materialization requires an active AgentRun"
-            )
-        async with self.session_manager() as session:
-            repository = self.agent_session_repository
-            current_agent_session = await repository.get_by_id(
-                session,
-                session_id,
-            )
-            get_root = repository.get_root_session_agent_by_session_id
-            root = await get_root(
-                session,
-                session_id,
-            )
-            run = await self.agent_run_repository.get_by_id(session, active_run_id)
-        if (
-            current_agent_session is None
-            or root is None
-            or run is None
-            or run.session_id != session_id
-            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-            or current_agent_session.workspace_id != agent_session.workspace_id
-            or current_agent_session.agent_id != agent_session.agent_id
-            or current_agent_session.status is not AgentSessionStatus.ACTIVE
-            or current_agent_session.owner_generation != owner_generation
-        ):
-            raise MailboxPreparationStaleError(
-                "Canonical resource authority changed before attachment materialization"
-            )
-        authority = SessionResourceAuthority(
-            workspace_id=current_agent_session.workspace_id,
-            agent_id=current_agent_session.agent_id,
-            session_id=session_id,
-            root_session_id=root.agent_session_id,
-            run_id=run.id,
-            run_index=run.run_index,
-            owner_generation=owner_generation,
+        files = PreparedMailboxFiles(
+            attachments=[], file_parts=[], created_model_file_ids=[]
         )
-        materialized = await materialize_admitted_input_exchange_file_attachments(
-            buffer.presentation.attachments,
-            authority=authority,
-            exchange_file_service=self.exchange_file_service,
-            model_file_service=self.model_file_service,
-        )
-        file_parts.extend(materialized.file_parts)
-        return PreparedMailboxFiles(
-            attachments=materialized.attachments,
-            file_parts=file_parts,
-            created_model_file_ids=[
-                part.model_file_id for part in materialized.file_parts
-            ],
+        if buffer is not None:
+            file_parts = list(buffer.presentation.file_parts)
+            if (
+                not (
+                    buffer.kind is MailboxItemKind.ACTION_MESSAGE
+                    and not include_action_messages
+                )
+                and not file_parts
+                and buffer.presentation.attachments
+            ):
+                if active_run_id is None:
+                    raise MailboxPreparationStaleError(
+                        "Attachment materialization requires an active AgentRun"
+                    )
+                async with self.session_manager() as session:
+                    current = await self.agent_session_repository.get_by_id(
+                        session, session_id
+                    )
+                    repository = self.agent_session_repository
+                    get_root = repository.get_root_session_agent_by_session_id
+                    root = await get_root(session, session_id)
+                    run = await self.agent_run_repository.get_by_id(
+                        session, active_run_id
+                    )
+                if (
+                    current is None
+                    or root is None
+                    or run is None
+                    or run.session_id != session_id
+                    or run.status
+                    not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+                    or current.workspace_id != agent_session.workspace_id
+                    or current.agent_id != agent_session.agent_id
+                    or current.status is not AgentSessionStatus.ACTIVE
+                    or current.owner_generation != owner_generation
+                ):
+                    raise MailboxPreparationStaleError(
+                        "Canonical resource authority changed before attachment "
+                        "materialization"
+                    )
+                authority = SessionResourceAuthority(
+                    workspace_id=current.workspace_id,
+                    agent_id=current.agent_id,
+                    session_id=session_id,
+                    root_session_id=root.agent_session_id,
+                    run_id=run.id,
+                    run_index=run.run_index,
+                    owner_generation=owner_generation,
+                )
+                materialized = (
+                    await materialize_admitted_input_exchange_file_attachments(
+                        buffer.presentation.attachments,
+                        authority=authority,
+                        exchange_file_service=self.exchange_file_service,
+                        model_file_service=self.model_file_service,
+                    )
+                )
+                file_parts.extend(materialized.file_parts)
+                files = PreparedMailboxFiles(
+                    attachments=materialized.attachments,
+                    file_parts=file_parts,
+                    created_model_file_ids=[
+                        part.model_file_id for part in materialized.file_parts
+                    ],
+                )
+            else:
+                files = PreparedMailboxFiles(
+                    attachments=[],
+                    file_parts=file_parts,
+                    created_model_file_ids=[],
+                )
+        prepared_action = None
+        if (
+            buffer is not None
+            and buffer.kind is MailboxItemKind.ACTION_MESSAGE
+            and include_action_messages
+        ):
+            if buffer.presentation.action is None:
+                raise ValueError("Action message input buffer requires action payload")
+            action = self.turn_action_capabilities.decode(buffer.presentation.action)
+            prepared_action = await self.turn_action_capabilities.prepare(
+                action=action,
+                context=TurnActionPreparationContext(
+                    agent_id=agent_session.agent_id,
+                    session_id=session_id,
+                    workspace_id=agent_session.workspace_id,
+                    active_run_id=active_run_id,
+                    mailbox_item_id=buffer.id,
+                    content=buffer.presentation.content,
+                ),
+            )
+        return PreparedMailboxPromotion(
+            agent_id=agent_session.agent_id,
+            workspace_id=agent_session.workspace_id,
+            buffer=buffer,
+            files=files,
+            turn_action=prepared_action,
         )
 
     async def _first_promotable_mailbox_item(
@@ -1180,13 +1169,13 @@ class MailboxService:
 
     async def _promote_claimed_buffers(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         claimed: list[MailboxItem],
         required_inference_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
         prepared_files: PreparedMailboxFiles,
+        prepared_turn_action: TurnActionPreparationResult | None,
         profile_resolution_failure: str | None,
         include_action_messages: bool,
         active_run_id: str | None,
@@ -1213,21 +1202,13 @@ class MailboxService:
                 suppress_parent_result=False,
             )
         context = MailboxPreparationContext(
-            session=session,
             session_id=session_id,
             active_run_id=active_run_id,
             required_inference_profile=required_inference_profile,
             prepared_inference_state=prepared_inference_state,
             prepared_files=prepared_files,
+            prepared_turn_action=prepared_turn_action,
         )
-        if buffer.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
-            fenced = await _turn_action_continuation_predecessor_fence(
-                self,
-                context,
-                buffer,
-            )
-            if fenced is not None:
-                return fenced
         if (
             _buffer_requires_inference(buffer, self.turn_action_capabilities)
             and profile_resolution_failure is not None
@@ -1503,34 +1484,6 @@ class _TurnActionContinuationMailboxProcessor:
         )
 
 
-async def _turn_action_continuation_predecessor_fence(
-    service: MailboxService,
-    context: MailboxPreparationContext,
-    buffer: MailboxItem,
-) -> MailboxPreparationOutcome | None:
-    """Keep a bridge continuation durable until its predecessor is terminal."""
-    if not isinstance(buffer.payload, TurnActionContinuationMailboxPayload):
-        raise ValueError("TurnAction continuation MailboxItem payload is malformed.")
-    predecessor = await service.agent_run_repository.get_by_id(
-        context.session,
-        buffer.payload.predecessor_run_id,
-    )
-    if predecessor is None or predecessor.session_id != context.session_id:
-        raise ValueError("TurnAction continuation predecessor Run is invalid.")
-    if predecessor.status not in {
-        AgentRunStatus.PENDING,
-        AgentRunStatus.RUNNING,
-    }:
-        return None
-    return MailboxPreparationOutcome(
-        promoted=[],
-        turn_effect=TurnEffect.NEUTRAL,
-        operation_action=None,
-        complete_run=context.active_run_id == predecessor.id,
-        suppress_parent_result=context.active_run_id == predecessor.id,
-    )
-
-
 @dataclasses.dataclass(frozen=True)
 class _AgentMessageMailboxProcessor:
     """Prepare one inter-agent mailbox message."""
@@ -1689,16 +1642,9 @@ class _TurnActionMailboxProcessor:
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
-        prepared = await self.service.turn_action_capabilities.prepare(
-            action=self.action,
-            context=TurnActionPreparationContext(
-                session=context.session,
-                session_id=context.session_id,
-                active_run_id=context.active_run_id,
-                mailbox_item_id=buffer.id,
-                content=buffer.presentation.content,
-            ),
-        )
+        prepared = context.prepared_turn_action
+        if prepared is None:
+            raise RuntimeError("TurnAction promotion requires prepared action state")
         if prepared.handled_failure is not None:
             promoted = [_system_error_promoted_buffer(buffer, prepared.handled_failure)]
         else:
@@ -1757,6 +1703,25 @@ def _preparation_outcome(
         operation_action=None,
         complete_run=False,
         suppress_parent_result=False,
+    )
+
+
+def _mailbox_promotion_event(
+    item: _PromotedMailboxItem,
+) -> MailboxPromotionEvent:
+    """Convert one prepared item to a repository promotion command."""
+    title_candidate = None
+    if item.event_kind is EventKind.USER_MESSAGE and item.user_message is not None:
+        title_candidate = initial_title_from_user_text(item.buffer.presentation.content)
+    elif item.initial_title_eligible:
+        payload = ExternalChannelMessagePayload.model_validate(item.payload)
+        title_candidate = initial_title_from_user_text(payload.body or "")
+    return MailboxPromotionEvent(
+        kind=item.event_kind,
+        payload=item.payload,
+        external_id=item.external_id,
+        item_key=item.item_key or item.buffer.presentation.item_key,
+        initial_title_candidate=title_candidate,
     )
 
 

@@ -116,8 +116,6 @@ def _registry(
 ) -> OperationActionExecutorRegistry:
     return OperationActionExecutorRegistry(
         capabilities=TurnActionCapabilityRegistry(
-            agent_session_repository=cast(Any, object()),
-            goal_store=cast(Any, object()),
             skill_store=cast(Any, object()),
             vfs_projection_service=None,
         ),
