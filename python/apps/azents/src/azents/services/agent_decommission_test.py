@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgePolicy,
@@ -30,7 +31,6 @@ from azents.services.agent_decommission import (
     AgentDecommissionAdvanceResult,
     AgentDecommissionService,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.session_lifecycle.orchestrator import (
     TransitionOperation,
     TransitionParticipantOperation,

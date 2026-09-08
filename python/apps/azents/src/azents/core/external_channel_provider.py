@@ -1,7 +1,7 @@
-"""Provider-generic External Channel connection contracts.
+"""Provider-generic External Channel connection domain contracts.
 
-These models are internal service contracts. They deliberately separate
-provider identity and redacted operational state from encrypted credentials.
+These models separate provider identity and redacted operational state from
+encrypted credentials without depending on application orchestration.
 """
 
 import datetime

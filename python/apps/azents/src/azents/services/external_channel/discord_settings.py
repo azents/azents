@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
@@ -37,7 +38,6 @@ from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
     ExternalChannelParticipationSettings,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 @dataclass(frozen=True)

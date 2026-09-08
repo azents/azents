@@ -13,6 +13,11 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectPlan,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.channel_action import (
@@ -20,11 +25,6 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
-)
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectPlan,
-    ProviderOperationKey,
-    ProviderTarget,
 )
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
 

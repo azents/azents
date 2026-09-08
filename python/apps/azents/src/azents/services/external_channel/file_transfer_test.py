@@ -35,6 +35,7 @@ from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
     ExternalChannelFilesSecrets,
 )
+from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.system_setting import ResolvedSystemSetting, SystemSettingSection
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.rdb.session import SessionManager
@@ -59,7 +60,6 @@ from azents.services.exchange_file import (
     FileAccessDenied,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.discord_files import (
     DiscordAttachmentDownloadInfo,
     DiscordChannelClient,

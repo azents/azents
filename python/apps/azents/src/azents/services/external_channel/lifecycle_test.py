@@ -12,6 +12,11 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectPlan,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgeContext,
@@ -32,11 +37,6 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectPlan,
-    ProviderOperationKey,
-    ProviderTarget,
-)
 
 
 def _definition(key: str) -> SessionLifecycleParticipantDefinition:

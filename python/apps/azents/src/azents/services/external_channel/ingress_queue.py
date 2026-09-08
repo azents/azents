@@ -24,6 +24,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.job_runtime.types import (
     JobExecutionContext,
     JobPayload,
@@ -89,7 +90,6 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,

@@ -29,6 +29,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
+from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -58,7 +59,6 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
 from azents.services.external_channel.discord_files import (
     DiscordAttachmentByteTransport,
     DiscordAttachmentDownloadInfo,

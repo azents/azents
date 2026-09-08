@@ -23,6 +23,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
@@ -55,7 +56,6 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.work import terminate_binding_with_plans
 from azents.repos.external_channel.work_state import ExternalChannelWorkStateStore
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 _NONTERMINAL_SETUP_CLAIM_STATUSES = (
     ExternalChannelSetupClaimStatus.PENDING_AGENT,
