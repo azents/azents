@@ -10,6 +10,8 @@ code_paths:
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel/management_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
@@ -38,12 +40,22 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-09-08
-spec_version: 43
+spec_version: 44
 ---
 
 # External Channel Lifecycle
 
 ## Direct Management Transitions
+
+Management services sequence completed, DB-only repository operations. The management
+operation repository owns authorization reads, configuration and route writes,
+generation checks, and terminal transitions; it returns detached projections or
+provider-effect plans after the relevant session closes. Provider validation,
+activation, terminal controls, and conversation/participation lease assertions execute
+outside active database transactions. Single-connection disconnect retains two
+separate durable stages: beginning DISCONNECTING, then completing lifecycle cleanup
+and terminal state. A second-stage failure does not undo the first committed stage.
+Provider terminal controls run only after both stages finish successfully.
 
 Disconnecting a connected binding terminally sets `disconnected_at`, ends active
 Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
@@ -321,6 +333,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 44) — Moved direct management transaction ownership
+  into completed repository operations while preserving two-stage Single App
+  disconnect and post-commit provider effects.
 - **2026-09-08** (spec_version 43) — Made connection configuration reads and fenced
   health persistence completed repository operations, preserving provider validation
   after the read transaction closes.
