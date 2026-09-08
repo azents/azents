@@ -26478,6 +26478,10 @@
             ],
             "title": "Message Kind"
           },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          },
           "content": {
             "type": "string",
             "title": "Content"
@@ -26487,6 +26491,7 @@
         "required": [
           "type",
           "message_kind",
+          "source_path",
           "content"
         ],
         "title": "PendingMailboxAgentMessagePresentation",

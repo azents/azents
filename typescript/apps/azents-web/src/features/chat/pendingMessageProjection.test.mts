@@ -53,6 +53,48 @@ for (const type of [
   });
 }
 
+void test("projects pending Agent messages with their source path", () => {
+  const createdAt = "2026-09-08T02:19:07.147Z";
+  const presentation: Extract<
+    PendingMailboxEntry["item"]["presentation"],
+    { type: "agent_message" }
+  > = {
+    type: "agent_message",
+    message_kind: "send_message",
+    source_path: "/root/backend-research",
+    content: "A collaborating agent supplied additional context.",
+  };
+  const item: PendingMailboxEntry["item"] = {
+    id: "mailbox-1:agent_message:0",
+    mailbox_item_id: "mailbox-1",
+    item_key: "agent_message:0",
+    kind: "agent_message",
+    state: "pending",
+    created_at: createdAt,
+    presentation,
+  };
+  const entry: PendingMailboxEntry = {
+    envelope: {
+      mailbox_item_id: "mailbox-1",
+      session_id: "session-1",
+      kind: "agent_message",
+      scheduling_mode: "queue_only",
+      created_at: createdAt,
+      items: [item],
+    },
+    item,
+    deleting: false,
+  };
+
+  const message = pendingMailboxMessage(entry, null);
+
+  assert.deepEqual(message.metadata, {
+    source: "agent_mailbox",
+    message_kind: "send_message",
+    source_path: "/root/backend-research",
+  });
+});
+
 void test("renders mapped Discord mentions in pending External Channel input", () => {
   const createdAt = "2026-09-05T15:18:02.149Z";
   const presentation: Extract<
