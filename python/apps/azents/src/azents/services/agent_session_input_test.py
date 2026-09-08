@@ -44,6 +44,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
 from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.chat_write_request import RDBChatWriteRequest
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -1993,6 +1994,10 @@ class TestAgentSessionInputService:
             session_manager=rdb_session_manager,
         )
 
+        request_payload: dict[str, object] = {
+            "request": "test",
+            "inference_profile": _TEST_INFERENCE_PROFILE.model_dump(mode="json"),
+        }
         first = await service.create_buffered_agent_input(
             agent_id=agent_id,
             agent_session_id=agent_session.id,
@@ -2004,11 +2009,27 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
-            request_payload={"request": "test"},
+            request_payload=request_payload,
             client_request_id="client-request-1",
         )
         assert isinstance(first, Success)
         async with rdb_session_manager() as session:
+            historical_profile = _TEST_INFERENCE_PROFILE.model_dump(mode="json")
+            historical_profile.pop("enabled_execution_options")
+            await session.execute(
+                sa.update(RDBChatWriteRequest)
+                .where(
+                    RDBChatWriteRequest.client_request_id == "client-request-1",
+                    RDBChatWriteRequest.requester_user_id == user_id,
+                )
+                .values(
+                    payload={
+                        **request_payload,
+                        "inference_profile": historical_profile,
+                        "sender_user_id": user_id,
+                    }
+                )
+            )
             await AgentSessionRepository().mark_idle(
                 session,
                 agent_session.id,
@@ -2024,7 +2045,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
-            request_payload={"request": "test"},
+            request_payload=request_payload,
             client_request_id="client-request-1",
         )
 

@@ -62,6 +62,19 @@ def test_model_profile_contract_contains_only_session_intent() -> None:
     assert "model_selection" not in response.model_dump(mode="json")
 
 
+def test_model_profile_update_accepts_historical_payload_without_options() -> None:
+    """Existing clients may omit execution options and retain all-off intent."""
+    request = ChatSessionModelProfileUpdateRequest.model_validate(
+        {
+            "client_request_id": "request-1",
+            "model_target_label": "Quality",
+            "reasoning_effort": "high",
+        }
+    )
+
+    assert request.enabled_execution_options == []
+
+
 def test_session_projection_reads_applied_intent_not_prepared_state() -> None:
     """Public Session fields never expose the prepared physical snapshot."""
     now = datetime.datetime.now(datetime.UTC)

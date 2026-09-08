@@ -39,11 +39,22 @@ def _canonical_enabled_execution_options(
     return sorted(enabled, key=lambda option: option.value)
 
 
-def _default_historical_execution_options(data: object) -> object:
+def default_historical_execution_options(data: object) -> object:
     """Decode historical profile payloads that predate execution options."""
     if not isinstance(data, dict) or "enabled_execution_options" in data:
         return data
     return {**data, "enabled_execution_options": []}
+
+
+def normalize_historical_inference_profile_payload(
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Normalize a nested historical inference profile for equality checks."""
+    profile = payload.get("inference_profile")
+    normalized_profile = default_historical_execution_options(profile)
+    if normalized_profile is profile:
+        return payload
+    return {**payload, "inference_profile": normalized_profile}
 
 
 class InferenceProfileSource(enum.StrEnum):
@@ -83,7 +94,7 @@ class RequestedInferenceProfile(BaseModel):
     )
 
     _decode_historical_execution_options = model_validator(mode="before")(
-        _default_historical_execution_options
+        default_historical_execution_options
     )
     _validate_enabled_execution_options = field_validator("enabled_execution_options")(
         _canonical_enabled_execution_options
@@ -112,7 +123,7 @@ class AppliedInferenceProfile(BaseModel):
     )
 
     _decode_historical_execution_options = model_validator(mode="before")(
-        _default_historical_execution_options
+        default_historical_execution_options
     )
     _validate_enabled_execution_options = field_validator("enabled_execution_options")(
         _canonical_enabled_execution_options

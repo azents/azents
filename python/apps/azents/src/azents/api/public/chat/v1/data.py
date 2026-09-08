@@ -23,6 +23,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+    default_historical_execution_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
@@ -643,6 +644,10 @@ class ChatSessionModelProfileUpdateRequest(BaseModel):
     )
     enabled_execution_options: list[ModelExecutionOptionId] = Field(
         description="Explicitly enabled model execution option IDs",
+    )
+
+    _decode_historical_execution_options = model_validator(mode="before")(
+        default_historical_execution_options
     )
 
 

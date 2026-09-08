@@ -22,6 +22,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
+    normalize_historical_inference_profile_payload,
     validate_requested_profile_against_options,
 )
 from azents.engine.events.action_messages import (
@@ -145,6 +146,16 @@ AgentSessionInputError = (
     | ExchangeFileInputClaimError
     | InvalidProjectPath
 )
+
+
+def _idempotency_payloads_match(
+    existing: dict[str, object],
+    current: dict[str, object],
+) -> bool:
+    """Compare request payloads after the bounded historical profile upgrade."""
+    return normalize_historical_inference_profile_payload(
+        existing
+    ) == normalize_historical_inference_profile_payload(current)
 
 
 @dataclasses.dataclass
@@ -301,7 +312,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -510,7 +524,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -787,7 +804,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -1358,7 +1378,10 @@ class AgentSessionInputService:
                     "Client request ID already used for another write type"
                 )
             )
-        if existing.payload != canonical_request_payload:
+        if not _idempotency_payloads_match(
+            existing.payload,
+            canonical_request_payload,
+        ):
             return Failure(
                 AgentSessionInputIdempotencyConflict(
                     "Client request ID already used for another payload"
