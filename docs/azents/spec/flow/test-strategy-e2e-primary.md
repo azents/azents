@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-07
-spec_version: 44
+last_verified_at: 2026-09-08
+spec_version: 45
 ---
 
 # E2E Primary Test Strategy
@@ -162,6 +162,15 @@ Always-on required CI does not depend on external credentials.
   improvement by removing tests, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
+- Required lanes resolve immutable snapshot images before enabling local Buildx.
+  Unchanged images may reuse the pull request base, the direct `main` predecessor, or
+  a compatible first-parent ancestor. On `main` push and explicit workflow dispatch,
+  a changed image may additionally reuse an already-published snapshot tagged for the
+  exact current commit SHA. Snapshot availability is never a workflow dependency or
+  wait condition: a missing, late, cancelled, or failed publication immediately
+  preserves the existing local Buildx/cache build path. Snapshot pulls run in
+  parallel, and lane observability records attempted sources, selected commit SHAs,
+  timing, and fallback state.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime

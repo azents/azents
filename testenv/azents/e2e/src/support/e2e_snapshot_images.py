@@ -1,4 +1,4 @@
-"""Prepare unchanged required E2E images from immutable predecessor snapshots."""
+"""Prepare required E2E images from immutable snapshot tags."""
 
 from __future__ import annotations
 
@@ -142,17 +142,17 @@ def _compatible_with_base(
 def _pull_snapshot(
     image: SnapshotImage,
     *,
-    base_sha: str,
+    compatibility_base_sha: str | None,
     candidate_shas: Sequence[str],
     command_runner: CommandRunner,
 ) -> SnapshotPull:
     started_at = time.monotonic()
     attempted_sources: list[str] = []
     for candidate_sha in candidate_shas:
-        if not _compatible_with_base(
+        if compatibility_base_sha is not None and not _compatible_with_base(
             image,
             candidate_sha=candidate_sha,
-            base_sha=base_sha,
+            base_sha=compatibility_base_sha,
             command_runner=command_runner,
         ):
             continue
@@ -188,28 +188,36 @@ def prepare_required_snapshot_images(
     *,
     base_sha: str,
     candidate_shas: Sequence[str],
+    current_sha: str | None,
     github_token: str | None,
     github_actor: str | None,
     environment: dict[str, str],
     command_runner: CommandRunner,
 ) -> SnapshotPreparation:
-    """Pull unchanged required images from compatible immutable snapshots."""
+    """Pull required images from exact or compatible immutable snapshots."""
     unchanged_required_images = tuple(
         image
         for image in _REQUIRED_IMAGES
         if environment.get(image.changed_environment_variable) == "false"
     )
-    unchanged_images = tuple(
+    images_to_prepare = tuple(
         image
-        for image in unchanged_required_images
+        for image in _REQUIRED_IMAGES
         if not environment.get(image.environment_variable)
+        and (
+            environment.get(image.changed_environment_variable) == "false"
+            or (
+                environment.get(image.changed_environment_variable) == "true"
+                and current_sha is not None
+            )
+        )
     )
     prepared_environment = {
         image.environment_variable: value
         for image in _REQUIRED_IMAGES
         if (value := environment.get(image.environment_variable))
     }
-    if not github_token or not github_actor or not unchanged_images:
+    if not github_token or not github_actor or not images_to_prepare:
         return SnapshotPreparation(
             environment=prepared_environment,
             pulls=(),
@@ -244,16 +252,25 @@ def prepare_required_snapshot_images(
             ),
         )
 
-    with ThreadPoolExecutor(max_workers=len(unchanged_images)) as executor:
+    with ThreadPoolExecutor(max_workers=len(images_to_prepare)) as executor:
         pulls = tuple(
             executor.map(
                 lambda image: _pull_snapshot(
                     image,
-                    base_sha=base_sha,
-                    candidate_shas=candidate_shas,
+                    compatibility_base_sha=(
+                        None
+                        if environment.get(image.changed_environment_variable) == "true"
+                        else base_sha
+                    ),
+                    candidate_shas=(
+                        (current_sha,)
+                        if environment.get(image.changed_environment_variable) == "true"
+                        and current_sha is not None
+                        else candidate_shas
+                    ),
                     command_runner=command_runner,
                 ),
-                unchanged_images,
+                images_to_prepare,
             )
         )
 
@@ -261,7 +278,7 @@ def prepare_required_snapshot_images(
     prepared_environment.update(
         {
             image.environment_variable: image.local_tag
-            for image in unchanged_images
+            for image in images_to_prepare
             if pulls_by_image[image.image].completed
         }
     )
@@ -298,18 +315,25 @@ def _write_observability(
     preparation: SnapshotPreparation,
     base_sha: str,
     candidate_shas: Sequence[str],
+    current_sha: str | None,
     append: bool,
 ) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    status_path = artifact_dir / "snapshot-image-setup.json"
+    preserved_current_sha = current_sha
+    if append and status_path.exists() and preserved_current_sha is None:
+        existing_status = json.loads(status_path.read_text(encoding="utf-8"))
+        preserved_current_sha = existing_status.get("current_sha")
     status = {
         "base_sha": base_sha,
         "candidate_shas": list(candidate_shas),
+        "current_sha": preserved_current_sha,
         "login_completed": preparation.login_completed,
         "all_images_prepared": preparation.all_images_prepared,
         "fallback_required": preparation.fallback_required,
         "prepared_environment_variables": sorted(preparation.environment),
     }
-    (artifact_dir / "snapshot-image-setup.json").write_text(
+    status_path.write_text(
         json.dumps(status, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -355,6 +379,7 @@ def main() -> None:
     preparation = prepare_required_snapshot_images(
         base_sha=base_sha,
         candidate_shas=candidate_shas,
+        current_sha=os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
         github_token=os.environ.get("GHCR_TOKEN"),
         github_actor=os.environ.get("GITHUB_ACTOR"),
         environment=dict(os.environ),
@@ -367,6 +392,7 @@ def main() -> None:
         preparation,
         base_sha,
         candidate_shas,
+        os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
         args.append_observability,
     )
 
