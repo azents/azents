@@ -1243,14 +1243,19 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
 
 
 @pytest.mark.parametrize(
-    "provider",
-    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
+    ("provider", "tracker_visibility", "projects_tracker"),
+    [
+        (ExternalChannelProvider.SLACK, "visible", True),
+        (ExternalChannelProvider.DISCORD, "hidden", False),
+    ],
 )
 async def test_explicit_followup_controls_precede_wake(
     monkeypatch: pytest.MonkeyPatch,
     provider: ExternalChannelProvider,
+    tracker_visibility: str,
+    projects_tracker: bool,
 ) -> None:
-    """Bound follow-ups project one Tracker before waking the Agent."""
+    """Only visible provider Work projects a Tracker before the Agent wake."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
@@ -1273,7 +1278,9 @@ async def test_explicit_followup_controls_precede_wake(
     )
     work_repository.prepare_direct_control = AsyncMock()
     progress_plan = make_provider_effect_plan("followup-progress")
-    work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
+    work_repository.prepare_initial_progress = AsyncMock(
+        return_value=progress_plan if projects_tracker else None
+    )
     provider_control = MagicMock(spec=ExternalChannelProviderControlService)
 
     async def attempt_control(_plan: object) -> None:
@@ -1313,7 +1320,7 @@ async def test_explicit_followup_controls_precede_wake(
     assert ensure_call is not None
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
-    assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    assert ensure_call.kwargs["tracker_visibility"] == tracker_visibility
     work_repository.resume_from_human_input.assert_awaited_once_with(
         transaction,
         agent_id="agent-1",
@@ -1328,7 +1335,9 @@ async def test_explicit_followup_controls_precede_wake(
         binding_id="binding-1",
         work_cycle_id="work-followup",
     )
-    assert provider_control.attempt.await_args_list == [((progress_plan,), {})]
+    assert provider_control.attempt.await_args_list == (
+        [((progress_plan,), {})] if projects_tracker else []
+    )
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
@@ -1461,10 +1470,10 @@ async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
     work_repository.prepare_initial_progress.assert_awaited_once()
 
 
-async def test_late_discord_mention_requests_visible_tracker_promotion(
+async def test_late_discord_mention_keeps_tracker_hidden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One newly admitted Discord mention promotes the finalized active Work."""
+    """A Discord mention retains typing-only automatic activity."""
     ordinary = _item(
         item_id="item-ordinary",
         trigger_key="message-ordinary",
@@ -1531,7 +1540,7 @@ async def test_late_discord_mention_requests_visible_tracker_promotion(
     assert stale is False
     ensure_call = work_repository.ensure_active_work.await_args
     assert ensure_call is not None
-    assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    assert ensure_call.kwargs["tracker_visibility"] == "hidden"
     work_repository.prepare_initial_progress.assert_awaited_once()
 
 

@@ -71,8 +71,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-07
-spec_version: 59
+last_verified_at: 2026-09-08
+spec_version: 60
 ---
 
 # External Channel Provider Ingress
@@ -383,10 +383,11 @@ durable queue content.
    the target Resource when needed, reuses a compatible connected Binding/active
    Session or creates one root Session, Binding, Channel Work, and initial controls,
    then records the Binding/Session on the same owner without moving its items. Slack
-   and Discord derive initial Tracker visibility from that queued item's
-   provider-native invocation flag; an ordinary all-messages item creates hidden Work
-   and no initial Tracker. A stopped Session, disconnected Binding, stale setting,
-   or terminal provider result cannot become ready.
+   derives initial Tracker visibility from that queued item's provider-native
+   invocation flag. Discord always creates hidden conversational Work and relies on
+   the Gateway typing registry for automatic activity, whether the trigger was a
+   mention or an ordinary all-messages item. A stopped Session, disconnected Binding,
+   stale setting, or terminal provider result cannot become ready.
 6. A ready owner's first claim contains exactly one due item; later claims contain at
    most ten due items in queue-key order. Resolution is sequential in that order
    outside a database transaction. A retry-waiting item does not block later due work.
@@ -412,11 +413,12 @@ durable queue content.
    order group with contiguous sequence values following queue order and per-item
    provider-history order. Only a newly created exact trigger row is authoritative
    participant input for its Binding; newly created context history is not.
-10. When at least one newly created mailbox row has a provider-native explicit
-   invocation flag, the transaction creates or promotes the active Slack or Discord
-   Work as Tracker-visible and may claim its latest complete Tracker snapshot. A batch
-   containing only newly created ordinary all-messages input creates or retains hidden
-   Work. Duplicate mailbox rows and context-only history do not promote visibility.
+10. When at least one newly created Slack mailbox row has a provider-native explicit
+   invocation flag, the transaction creates or promotes its active Work as
+   Tracker-visible and may claim the latest complete Tracker snapshot. Discord rows
+   always create or retain hidden Work; neither a mention nor ordinary all-messages
+   input promotes automatic Tracker visibility. Duplicate mailbox rows and
+   context-only history do not promote visibility.
 11. A newly created exact trigger row clears that same Binding's awaiting-input marker,
     if present, while preserving the active Work cycle, title, tasks, and history. The
     transaction then prepares the current progress projection and admits the Session
@@ -480,11 +482,11 @@ conversation position unchanged, so a later eligible mention can include them th
 the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
 reclassified by a later mode change. The explicit-invocation flag remains the
-response-mode, settings-control, and ingress-time Discord Tracker-promotion signal; it
-does not demote an ordinary message that already passed the connected `all_messages`
-gate. That admitted item's exact trigger correlation produces
-`prompt_role=invocation`, while its Work cycle may remain Tracker-hidden until an
-eligible mention or an Agent-authored unfinished Todo transition promotes it.
+response-mode and settings-control signal. It does not make Discord conversational
+Work Tracker-visible and does not demote an ordinary message that already passed the
+connected `all_messages` gate. That admitted item's exact trigger correlation produces
+`prompt_role=invocation`, while its Work cycle remains Tracker-hidden until an
+Agent-authored unfinished Todo transition promotes it.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and returns one immediate

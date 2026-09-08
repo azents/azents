@@ -57,6 +57,7 @@ from azents.services.scheduled_task.control import (
     render_scheduled_task_slack_deletion,
     render_scheduled_task_slack_registration,
 )
+from azents.services.scheduled_task.rendering import render_scheduled_task_schedule
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
 )
@@ -609,6 +610,13 @@ class ScheduledTaskChannelService:
         discord = render_scheduled_task_discord_progress(
             progress,
             scheduled_task_title=record.state.title,
+            scheduled_task_schedule=render_scheduled_task_schedule(
+                schedule_type=record.state.schedule_type,
+                scheduled_at=record.state.scheduled_at,
+                cron_expression=record.state.cron_expression,
+                timezone=record.state.timezone,
+                scheduled_for=record.state.scheduled_for,
+            ).summary,
             work_id=record.state.cycle_id,
             desired_progress_revision=desired_revision,
         )
