@@ -1033,12 +1033,10 @@ class RunExecutor:
                 turn_inference_state = None
             if created_run and not initial_input.has_actionable_work:
                 if initial_input.context_invalidated:
-                    has_pending_mailbox_items = await (
-                        self.mailbox_item_service.has_pending_session_mailbox_items(
-                            snapshot.session_id
-                        )
+                    has_pending_wake = (
+                        self.mailbox_item_service.has_pending_wake_session_mailbox_items
                     )
-                    if has_pending_mailbox_items:
+                    if await has_pending_wake(snapshot.session_id):
                         await self.session_lifecycle.send_session_wake_up(
                             SessionWakeUp(session_id=snapshot.session_id)
                         )

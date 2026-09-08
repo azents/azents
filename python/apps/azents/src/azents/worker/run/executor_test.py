@@ -856,6 +856,11 @@ class _MailboxService:
         del session_id
         return False
 
+    async def has_pending_wake_session_mailbox_items(self, session_id: str) -> bool:
+        """Return no wake-producing buffered input after execution."""
+        del session_id
+        return False
+
 
 class _SessionTitleService:
     """SessionTitleService test double."""
@@ -3300,22 +3305,22 @@ async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwr
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("pending_mailbox", "expected_wake_count"),
+    ("pending_wake_mailbox", "expected_wake_count"),
     [(True, 1), (False, 0)],
 )
 async def test_execute_enqueues_follow_up_for_pending_context_invalidating_action(
     monkeypatch: pytest.MonkeyPatch,
-    pending_mailbox: bool,
+    pending_wake_mailbox: bool,
     expected_wake_count: int,
 ) -> None:
-    """Project-mutating actions wake only when fresh-context input remains."""
+    """Project-mutating actions wake only when wake-producing input remains."""
     lifecycle = _SessionLifecycle()
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
 
-    async def has_pending_session_mailbox_items(session_id: str) -> bool:
+    async def has_pending_wake_session_mailbox_items(session_id: str) -> bool:
         assert session_id == message.session_id
-        return pending_mailbox
+        return pending_wake_mailbox
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
@@ -3336,8 +3341,8 @@ async def test_execute_enqueues_follow_up_for_pending_context_invalidating_actio
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         executor.mailbox_item_service,
-        "has_pending_session_mailbox_items",
-        has_pending_session_mailbox_items,
+        "has_pending_wake_session_mailbox_items",
+        has_pending_wake_session_mailbox_items,
     )
     monkeypatch.setattr(
         run_executor_module,
