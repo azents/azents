@@ -15,11 +15,17 @@ from azents_runtime_control.system_metrics import (
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_from_redis,
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
+    RuntimeConnectionPromotionResult,
+    RuntimeConnectionPromotionStatus,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
     RuntimeFencedMutationResult,
@@ -39,14 +45,47 @@ from azents.runtime.coordination.data import (
 _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
-_REGISTER_CONNECTION_SCRIPT = """
-local generation = redis.call('INCR', KEYS[1])
-redis.call('PERSIST', KEYS[1])
-local record = cjson.decode(ARGV[1])
-record['generation'] = generation
-local encoded = cjson.encode(record)
-redis.call('SET', KEYS[2], encoded, 'EX', tonumber(ARGV[2]))
-return encoded
+_PROMOTE_CONNECTION_CANDIDATE_SCRIPT = """
+local function valid_generation(value)
+  return type(value) == 'string'
+    and string.len(value) == 19
+    and string.match(value, '^%d+$') ~= nil
+    and value > '0000000000000000000'
+    and value <= '9223372036854775807'
+end
+local candidate_raw = redis.call('GET', KEYS[1])
+if not candidate_raw then
+  return {'candidate_missing'}
+end
+local candidate_ok, candidate = pcall(cjson.decode, candidate_raw)
+if not candidate_ok
+  or type(candidate) ~= 'table'
+  or type(candidate['record']) ~= 'table'
+  or candidate['publication_token'] ~= ARGV[1]
+  or candidate['record']['kind'] ~= ARGV[2]
+  or candidate['record']['subject_id'] ~= ARGV[3]
+  or not valid_generation(ARGV[4])
+  or not valid_generation(candidate['record']['generation'])
+  or candidate['record']['generation'] ~= ARGV[4] then
+  redis.call('DEL', KEYS[1])
+  return {'candidate_missing'}
+end
+local current_raw = redis.call('GET', KEYS[2])
+if current_raw then
+  local current = cjson.decode(current_raw)
+  if not valid_generation(current['generation']) then
+    return redis.error_reply('invalid current connection generation')
+  end
+  if current['generation'] >= ARGV[4] then
+    redis.call('DEL', KEYS[1])
+    return {'stale_generation', current_raw}
+  end
+end
+candidate['record']['expires_at'] = ARGV[5]
+local encoded = cjson.encode(candidate['record'])
+redis.call('SET', KEYS[2], encoded, 'EX', tonumber(ARGV[6]))
+redis.call('DEL', KEYS[1])
+return {'applied', encoded, current_raw or ''}
 """
 _GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
@@ -54,7 +93,7 @@ if not raw then
   return 0
 end
 local ok, payload = pcall(cjson.decode, raw)
-if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+if not ok or payload['generation'] ~= ARGV[1] then
   return 0
 end
 redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
@@ -66,7 +105,7 @@ if not raw then
   return 0
 end
 local ok, payload = pcall(cjson.decode, raw)
-if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+if not ok or payload['generation'] ~= ARGV[1] then
   return 0
 end
 redis.call('DEL', KEYS[1])
@@ -94,18 +133,18 @@ if not connection_raw then
   return {'connection_missing'}
 end
 local connection = cjson.decode(connection_raw)
-if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+if connection['generation'] ~= ARGV[1] then
   return {'stale_generation'}
 end
 local proposed = cjson.decode(ARGV[2])
 local envelope = cjson.decode(ARGV[4])
 if connection['kind'] ~= proposed['target']
   or connection['subject_id'] ~= proposed['target_subject_id']
-  or tonumber(proposed['generation']) ~= tonumber(ARGV[1])
+  or proposed['generation'] ~= ARGV[1]
   or proposed['request_id'] ~= envelope['request_id']
   or proposed['runtime_id'] ~= envelope['runtime_id']
   or proposed['target'] ~= envelope['target']
-  or tonumber(proposed['generation']) ~= tonumber(envelope['generation'])
+  or proposed['generation'] ~= envelope['generation']
   or proposed['operation_type'] ~= envelope['operation_type']
   or proposed['reply_stream_id'] ~= envelope['reply_stream_id']
   or proposed['deadline_at'] ~= envelope['deadline_at']
@@ -122,7 +161,7 @@ if current then
     or existing['runtime_id'] ~= proposed['runtime_id']
     or existing['target'] ~= proposed['target']
     or existing['target_subject_id'] ~= proposed['target_subject_id']
-    or tonumber(existing['generation']) ~= tonumber(proposed['generation'])
+    or existing['generation'] ~= proposed['generation']
     or existing['operation_type'] ~= proposed['operation_type']
     or existing['deadline_at'] ~= proposed['deadline_at']
     or existing['transfer_id'] ~= proposed['transfer_id']
@@ -160,7 +199,7 @@ if not connection_raw then
   return {'connection_missing'}
 end
 local connection = cjson.decode(connection_raw)
-if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+if connection['generation'] ~= ARGV[1] then
   return {'stale_generation'}
 end
 local current = redis.call('GET', KEYS[2])
@@ -174,13 +213,13 @@ if connection['kind'] ~= ARGV[4]
   or operation['status'] == 'final'
   or operation['status'] == 'cancel_requested'
   or operation['target_subject_id'] ~= ARGV[2]
-  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['generation'] ~= ARGV[1]
   or operation['runtime_id'] ~= ARGV[3]
   or operation['target'] ~= ARGV[4]
   or operation['request_stream_id'] ~= ARGV[7]
   or envelope['runtime_id'] ~= operation['runtime_id']
   or envelope['target'] ~= operation['target']
-  or tonumber(envelope['generation']) ~= tonumber(operation['generation'])
+  or envelope['generation'] ~= operation['generation']
   or (envelope['operation_type'] ~= 'operation.cancel'
     and envelope['operation_type'] ~= 'file.transfer.cancel.v1')
   or envelope['payload']['operation_id'] ~= operation['operation_id']
@@ -212,7 +251,7 @@ if not connection_raw then
   return {'connection_missing'}
 end
 local connection = cjson.decode(connection_raw)
-if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+if connection['generation'] ~= ARGV[1] then
   return {'stale_generation'}
 end
 local current = redis.call('GET', KEYS[2])
@@ -224,7 +263,7 @@ if connection['kind'] ~= ARGV[4]
   or connection['subject_id'] ~= ARGV[2]
   or operation['status'] ~= 'active'
   or operation['target_subject_id'] ~= ARGV[2]
-  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['generation'] ~= ARGV[1]
   or operation['runtime_id'] ~= ARGV[3]
   or operation['target'] ~= ARGV[4] then
   return {'operation_rejected'}
@@ -248,8 +287,8 @@ if not connection_raw then
 end
 local connection = cjson.decode(connection_raw)
 local event = cjson.decode(ARGV[2])
-if tonumber(connection['generation']) ~= tonumber(ARGV[1])
-  or tonumber(event['generation']) ~= tonumber(ARGV[1]) then
+if connection['generation'] ~= ARGV[1]
+  or event['generation'] ~= ARGV[1] then
   return {'stale_generation'}
 end
 local cursor = redis.call('XADD', KEYS[2], '*', 'payload', ARGV[2])
@@ -265,7 +304,7 @@ if not connection_raw then
   return {'connection_missing'}
 end
 local connection = cjson.decode(connection_raw)
-if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+if connection['generation'] ~= ARGV[1] then
   return {'stale_generation'}
 end
 local current = redis.call('GET', KEYS[2])
@@ -278,13 +317,13 @@ if connection['kind'] ~= ARGV[4]
   or connection['subject_id'] ~= ARGV[2]
   or operation['status'] == 'final'
   or operation['target_subject_id'] ~= ARGV[2]
-  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['generation'] ~= ARGV[1]
   or operation['runtime_id'] ~= ARGV[3]
   or operation['target'] ~= ARGV[4]
   or operation['reply_stream_id'] ~= ARGV[5]
   or event['request_id'] ~= operation['request_id']
   or event['runtime_id'] ~= operation['runtime_id']
-  or tonumber(event['generation']) ~= tonumber(operation['generation']) then
+  or event['generation'] ~= operation['generation'] then
   return {'operation_rejected'}
 end
 local cursor = redis.call('XADD', KEYS[3], '*', 'payload', ARGV[6])
@@ -464,7 +503,7 @@ class RedisRuntimeCoordinationStore:
         self,
         redis: Redis,
         *,
-        key_prefix: str = "azents:agent-runtime:coordination",
+        key_prefix: str = "azents:agent-runtime:coordination:v2",
         stream_ttl_seconds: int = _DEFAULT_STREAM_TTL_SECONDS,
     ) -> None:
         """Initialize the Redis coordination store."""
@@ -489,7 +528,7 @@ class RedisRuntimeCoordinationStore:
             self._connection_key(connection_kind, connection_subject_id),
             self._operation_key(metadata.operation_id),
             self._stream_key("request", metadata.request_stream_id),
-            connection_generation,
+            runtime_connection_generation_to_redis(connection_generation),
             _operation_to_json(metadata),
             "" if ttl_seconds is None else str(ttl_seconds),
             _envelope_to_json(envelope),
@@ -542,7 +581,7 @@ class RedisRuntimeCoordinationStore:
             self._connection_key(connection_kind, connection_subject_id),
             self._operation_key(operation_id),
             self._stream_key("request", operation.request_stream_id),
-            connection_generation,
+            runtime_connection_generation_to_redis(connection_generation),
             connection_subject_id,
             expected_runtime_id,
             expected_target.value,
@@ -576,7 +615,7 @@ class RedisRuntimeCoordinationStore:
             2,
             self._connection_key(connection_kind, connection_subject_id),
             self._operation_key(operation_id),
-            connection_generation,
+            runtime_connection_generation_to_redis(connection_generation),
             connection_subject_id,
             expected_runtime_id,
             expected_target.value,
@@ -605,7 +644,7 @@ class RedisRuntimeCoordinationStore:
             2,
             self._connection_key(connection_kind, connection_subject_id),
             self._stream_key("reply", stream_id),
-            connection_generation,
+            runtime_connection_generation_to_redis(connection_generation),
             _reply_event_to_json(event),
             self._stream_ttl_seconds,
         )
@@ -637,7 +676,7 @@ class RedisRuntimeCoordinationStore:
             self._connection_key(connection_kind, connection_subject_id),
             self._operation_key(operation_id),
             self._stream_key("reply", stream_id),
-            connection_generation,
+            runtime_connection_generation_to_redis(connection_generation),
             connection_subject_id,
             expected_runtime_id,
             expected_target.value,
@@ -955,39 +994,82 @@ class RedisRuntimeCoordinationStore:
         """Delete operation metadata."""
         await self._redis.delete(self._operation_key(operation_id))
 
-    async def register_connection(
+    async def stage_connection_candidate(
+        self,
+        *,
+        record: RuntimeConnectionRecord,
+        publication_token: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """Stage one invisible connection publication candidate once."""
+        if not publication_token:
+            raise ValueError("Connection publication token is required")
+        result = await self._redis.set(
+            self._connection_candidate_key(
+                record.kind,
+                record.subject_id,
+                record.generation,
+                publication_token,
+            ),
+            _connection_candidate_to_json(
+                record=record,
+                publication_token=publication_token,
+            ),
+            ex=ttl_seconds,
+            nx=True,
+        )
+        return bool(result)
+
+    async def promote_connection_candidate(
         self,
         *,
         kind: RuntimeConnectionKind,
         subject_id: str,
-        connection_id: str,
-        owner_replica_id: str,
-        connected_at: datetime,
-        heartbeat_at: datetime,
+        generation: int,
+        publication_token: str,
         ttl_seconds: int,
-        metadata: dict[str, JsonValue],
-    ) -> RuntimeConnectionRecord:
-        """Register a current connection and issue a new generation."""
-        record = RuntimeConnectionRecord(
-            kind=kind,
-            subject_id=subject_id,
-            connection_id=connection_id,
-            owner_replica_id=owner_replica_id,
-            generation=0,
-            connected_at=connected_at,
-            heartbeat_at=heartbeat_at,
-            expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
-            metadata=metadata,
-        )
+    ) -> RuntimeConnectionPromotionResult:
+        """Consume and promote one exact candidate into the current connection."""
+        if not publication_token:
+            raise ValueError("Connection publication token is required")
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
         raw = await self._eval(
-            _REGISTER_CONNECTION_SCRIPT,
+            _PROMOTE_CONNECTION_CANDIDATE_SCRIPT,
             2,
-            self._connection_generation_key(kind, subject_id),
+            self._connection_candidate_key(
+                kind,
+                subject_id,
+                generation,
+                publication_token,
+            ),
             self._connection_key(kind, subject_id),
-            _connection_to_json(record),
+            publication_token,
+            kind.value,
+            subject_id,
+            runtime_connection_generation_to_redis(generation),
+            _datetime_to_json(expires_at) or "",
             ttl_seconds,
         )
-        return _connection_from_json(_decode_text(raw))
+        items = _redis_sequence(raw)
+        if not items:
+            raise RuntimeError("Redis connection promotion response is empty")
+        status = RuntimeConnectionPromotionStatus(_decode_text(items[0]))
+        connection = (
+            _connection_from_json(_decode_text(items[1]))
+            if status is RuntimeConnectionPromotionStatus.APPLIED
+            else None
+        )
+        previous_index = 2 if connection is not None else 1
+        previous = (
+            _connection_from_json(_decode_text(items[previous_index]))
+            if len(items) > previous_index and _decode_text(items[previous_index])
+            else None
+        )
+        return RuntimeConnectionPromotionResult(
+            status=status,
+            connection=connection,
+            previous_connection=previous,
+        )
 
     async def get_connection(
         self,
@@ -1104,7 +1186,7 @@ class RedisRuntimeCoordinationStore:
             _GENERATION_FENCED_SET_CONNECTION_SCRIPT,
             1,
             self._connection_key(kind, subject_id),
-            generation,
+            runtime_connection_generation_to_redis(generation),
             _connection_to_json(record),
             ttl_seconds,
         )
@@ -1121,7 +1203,7 @@ class RedisRuntimeCoordinationStore:
             _GENERATION_FENCED_DELETE_CONNECTION_SCRIPT,
             1,
             self._connection_key(kind, subject_id),
-            generation,
+            runtime_connection_generation_to_redis(generation),
         )
         return bool(result)
 
@@ -1186,15 +1268,24 @@ class RedisRuntimeCoordinationStore:
     def _connection_key(self, kind: RuntimeConnectionKind, subject_id: str) -> str:
         return f"{self._key_prefix}:connection:{kind.value}:{subject_id}"
 
-    def _connection_generation_key(
+    def _connection_candidate_key(
         self,
         kind: RuntimeConnectionKind,
         subject_id: str,
+        generation: int,
+        publication_token: str,
     ) -> str:
-        return f"{self._key_prefix}:connection-generation:{kind.value}:{subject_id}"
+        return (
+            f"{self._key_prefix}:connection-candidate:{kind.value}:"
+            f"{subject_id}:{runtime_connection_generation_to_redis(generation)}:"
+            f"{publication_token}"
+        )
 
     def _system_metrics_key(self, runtime_id: str, generation: int) -> str:
-        return f"{self._key_prefix}:system-metrics:{runtime_id}:{generation}"
+        return (
+            f"{self._key_prefix}:system-metrics:{runtime_id}:"
+            f"{runtime_connection_generation_to_redis(generation)}"
+        )
 
 
 def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | None:
@@ -1317,7 +1408,7 @@ def _envelope_to_json(envelope: RuntimeRequestEnvelope) -> str:
             "request_id": envelope.request_id,
             "runtime_id": envelope.runtime_id,
             "target": envelope.target.value,
-            "generation": envelope.generation,
+            "generation": runtime_connection_generation_to_redis(envelope.generation),
             "operation_type": envelope.operation_type,
             "payload": envelope.payload,
             "reply_stream_id": envelope.reply_stream_id,
@@ -1333,7 +1424,7 @@ def _envelope_from_json(raw: str) -> RuntimeRequestEnvelope:
         request_id=str(payload["request_id"]),
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
-        generation=_required_int(payload["generation"]),
+        generation=_required_connection_generation(payload["generation"]),
         operation_type=str(payload["operation_type"]),
         payload=_json_object(payload["payload"]),
         reply_stream_id=str(payload["reply_stream_id"]),
@@ -1347,7 +1438,7 @@ def _reply_event_to_json(event: RuntimeReplyEvent) -> str:
         {
             "request_id": event.request_id,
             "runtime_id": event.runtime_id,
-            "generation": event.generation,
+            "generation": runtime_connection_generation_to_redis(event.generation),
             "event_type": event.event_type.value,
             "payload": event.payload,
             "created_at": _datetime_to_json(event.created_at),
@@ -1361,7 +1452,7 @@ def _reply_event_from_json(raw: str) -> RuntimeReplyEvent:
     return RuntimeReplyEvent(
         request_id=str(payload["request_id"]),
         runtime_id=str(payload["runtime_id"]),
-        generation=_required_int(payload["generation"]),
+        generation=_required_connection_generation(payload["generation"]),
         event_type=RuntimeReplyEventType(str(payload["event_type"])),
         payload=_json_object(payload["payload"]),
         created_at=_required_datetime(payload["created_at"]),
@@ -1400,7 +1491,7 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
             "runtime_id": metadata.runtime_id,
             "target": metadata.target.value,
             "target_subject_id": metadata.target_subject_id,
-            "generation": metadata.generation,
+            "generation": runtime_connection_generation_to_redis(metadata.generation),
             "operation_type": metadata.operation_type,
             "transfer_id": metadata.transfer_id,
             "transfer_attempt_id": metadata.transfer_attempt_id,
@@ -1434,7 +1525,7 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
         target_subject_id=str(payload["target_subject_id"]),
-        generation=_required_int(payload["generation"]),
+        generation=_required_connection_generation(payload["generation"]),
         operation_type=str(payload["operation_type"]),
         transfer_id=_optional_str(payload.get("transfer_id")),
         transfer_attempt_id=_optional_str(payload.get("transfer_attempt_id")),
@@ -1460,19 +1551,34 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
 
 
 def _connection_to_json(record: RuntimeConnectionRecord) -> str:
+    return _json_dumps(_connection_to_payload(record))
+
+
+def _connection_candidate_to_json(
+    *,
+    record: RuntimeConnectionRecord,
+    publication_token: str,
+) -> str:
     return _json_dumps(
         {
-            "kind": record.kind.value,
-            "subject_id": record.subject_id,
-            "connection_id": record.connection_id,
-            "owner_replica_id": record.owner_replica_id,
-            "generation": record.generation,
-            "connected_at": _datetime_to_json(record.connected_at),
-            "heartbeat_at": _datetime_to_json(record.heartbeat_at),
-            "expires_at": _datetime_to_json(record.expires_at),
-            "metadata": record.metadata,
+            "publication_token": publication_token,
+            "record": _connection_to_payload(record),
         }
     )
+
+
+def _connection_to_payload(record: RuntimeConnectionRecord) -> dict[str, object]:
+    return {
+        "kind": record.kind.value,
+        "subject_id": record.subject_id,
+        "connection_id": record.connection_id,
+        "owner_replica_id": record.owner_replica_id,
+        "generation": runtime_connection_generation_to_redis(record.generation),
+        "connected_at": _datetime_to_json(record.connected_at),
+        "heartbeat_at": _datetime_to_json(record.heartbeat_at),
+        "expires_at": _datetime_to_json(record.expires_at),
+        "metadata": record.metadata,
+    }
 
 
 def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
@@ -1482,7 +1588,7 @@ def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
         subject_id=str(payload["subject_id"]),
         connection_id=str(payload["connection_id"]),
         owner_replica_id=str(payload["owner_replica_id"]),
-        generation=_required_int(payload["generation"]),
+        generation=_required_connection_generation(payload["generation"]),
         connected_at=_required_datetime(payload["connected_at"]),
         heartbeat_at=_required_datetime(payload["heartbeat_at"]),
         expires_at=_required_datetime(payload["expires_at"]),
@@ -1556,6 +1662,15 @@ def _required_int(value: object) -> int:
     if result is None:
         raise RuntimeError("Runtime coordination integer is required")
     return result
+
+
+def _required_connection_generation(value: object) -> int:
+    try:
+        return runtime_connection_generation_from_redis(value)
+    except ValueError as error:
+        raise RuntimeError(
+            "Runtime coordination connection generation is not canonical"
+        ) from error
 
 
 def _json_object(value: object) -> dict[str, JsonValue]:

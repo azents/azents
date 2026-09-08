@@ -42,7 +42,6 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
 )
-from azents.runtime.control_protocol.service import RuntimeControlProtocolService
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.services.runtime_terminal.authority import (
     DatabaseRuntimeTerminalAuthorityResolver,
@@ -56,6 +55,9 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderAuthority,
 )
 from azents.services.terminal_policy.service import TerminalPolicyResolver
+from azents.testing.runtime_coordination import (
+    FakeRuntimeControlProtocolService,
+)
 
 _NOW = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.UTC)
 _RESOURCE = RuntimeTerminalResource(
@@ -275,7 +277,7 @@ async def _register_runner(
     capabilities = ["file.transfer.v1"]
     if terminal_capability:
         capabilities.append("terminal.v1")
-    await RuntimeControlProtocolService(store).register_runner(
+    await FakeRuntimeControlProtocolService(store).register_runner(
         RuntimeRunnerRegistration(
             runtime_id="runtime-1",
             runner_id="runner-1",

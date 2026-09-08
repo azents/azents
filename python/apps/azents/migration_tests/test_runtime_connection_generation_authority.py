@@ -6,7 +6,9 @@ from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 
 _PARENT_REVISION = "4ab7015e39b5"
-_REVISION = "fa67b82b0b53"
+_FOUNDATION_REVISION = "fa67b82b0b53"
+_ACTIVATION_REVISION = "afd1289d7982"
+_LEGACY_CUTOVER_HIGH_WATER = 2**48 - 1
 
 
 def _seed_existing_subjects(connection: sa.Connection) -> None:
@@ -108,7 +110,7 @@ def test_foundation_widens_generation_columns_without_activating_cutover(
     with alembic_engine.begin() as connection:
         _seed_existing_subjects(connection)
 
-    alembic_runner.migrate_up_to(_REVISION)
+    alembic_runner.migrate_up_to(_FOUNDATION_REVISION)
 
     with alembic_engine.connect() as connection:
         authority_count = connection.scalar(
@@ -176,7 +178,7 @@ def test_subject_created_after_foundation_is_not_preallocated(
     alembic_engine: Engine,
 ) -> None:
     """A subject inserted after foundation migration remains unseeded."""
-    alembic_runner.migrate_up_to(_REVISION)
+    alembic_runner.migrate_up_to(_FOUNDATION_REVISION)
     with alembic_engine.begin() as connection:
         connection.execute(
             sa.text(
@@ -214,7 +216,7 @@ def test_foundation_downgrade_rejects_accepted_authority_above_integer(
     alembic_runner.migrate_up_to(_PARENT_REVISION)
     with alembic_engine.begin() as connection:
         _seed_existing_subjects(connection)
-    alembic_runner.migrate_up_to(_REVISION)
+    alembic_runner.migrate_up_to(_FOUNDATION_REVISION)
     with alembic_engine.begin() as connection:
         connection.execute(
             sa.text(
@@ -240,3 +242,257 @@ def test_foundation_downgrade_rejects_accepted_authority_above_integer(
         match="accepted Runtime connection authority or projection exceeds INTEGER",
     ):
         alembic_runner.migrate_down_to(_PARENT_REVISION)
+
+
+def test_activation_seeds_existing_subjects_and_records_cutover(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Activation places every legacy-capable subject in the safe generation band."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_existing_subjects(connection)
+
+    alembic_runner.migrate_up_to(_ACTIVATION_REVISION)
+
+    with alembic_engine.connect() as connection:
+        rows = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT connection_kind, subject_id, high_water_generation,
+                           accepted_generation
+                    FROM runtime_connection_generations
+                    ORDER BY connection_kind, subject_id
+                    """
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert [dict(row) for row in rows] == [
+            {
+                "connection_kind": "provider",
+                "subject_id": "generation-provider",
+                "high_water_generation": _LEGACY_CUTOVER_HIGH_WATER,
+                "accepted_generation": 7,
+            },
+            {
+                "connection_kind": "runner",
+                "subject_id": "generation-runtime",
+                "high_water_generation": _LEGACY_CUTOVER_HIGH_WATER,
+                "accepted_generation": 11,
+            },
+        ]
+        marker = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT allocator_version, cutover_at
+                    FROM runtime_connection_generation_cutovers
+                    """
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert marker["allocator_version"] == 1
+        assert marker["cutover_at"] is not None
+        trigger_names = set(
+            connection.scalars(
+                sa.text(
+                    """
+                    SELECT tgname
+                    FROM pg_trigger
+                    WHERE NOT tgisinternal
+                      AND tgname IN (
+                        'trg_runtime_providers_connection_generation',
+                        'trg_agent_runtimes_connection_generation'
+                      )
+                    """
+                )
+            )
+        )
+        assert trigger_names == {
+            "trg_runtime_providers_connection_generation",
+            "trg_agent_runtimes_connection_generation",
+        }
+
+
+def test_activation_triggers_initialize_future_subjects(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Subjects inserted after activation atomically receive zeroed authority."""
+    alembic_runner.migrate_up_to(_ACTIVATION_REVISION)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES (
+                  'future-generation-workspace',
+                  'Future Generation Workspace',
+                  'future-generation'
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_providers (
+                  id, provider_id, scope, kind, display_name, registration_method,
+                  enabled, lifecycle_state, availability_mode, admin_version,
+                  capabilities
+                ) VALUES (
+                  'future-generation-provider',
+                  'future-generation-provider-logical',
+                  'system', 'docker', 'Future Generation Provider', 'admin',
+                  true, 'active', 'platform_wide', 0, '{}'::jsonb
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                  id, workspace_id, name, model_selection,
+                  lightweight_model_selection, selectable_model_options,
+                  main_model_label, lightweight_model_label
+                ) VALUES (
+                  'future-generation-agent',
+                  'future-generation-workspace',
+                  'Future Generation Agent',
+                  '{}'::jsonb,
+                  '{}'::jsonb,
+                  '[{"label": "default", "model_selection": {}}]'::jsonb,
+                  'default',
+                  'default'
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_runtimes (
+                  id, workspace_id, agent_id, runtime_provider_id,
+                  runtime_provider_resource_id, provider_binding_origin,
+                  desired_generation
+                ) VALUES (
+                  'future-generation-runtime',
+                  'future-generation-workspace',
+                  'future-generation-agent',
+                  'future-generation-provider-logical',
+                  'future-generation-provider',
+                  'agent_explicit',
+                  1
+                )
+                """
+            )
+        )
+        rows = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT connection_kind, subject_id, high_water_generation,
+                           accepted_generation
+                    FROM runtime_connection_generations
+                    WHERE subject_id IN (
+                      'future-generation-provider',
+                      'future-generation-runtime'
+                    )
+                    ORDER BY connection_kind
+                    """
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert [dict(row) for row in rows] == [
+            {
+                "connection_kind": "provider",
+                "subject_id": "future-generation-provider",
+                "high_water_generation": 0,
+                "accepted_generation": 0,
+            },
+            {
+                "connection_kind": "runner",
+                "subject_id": "future-generation-runtime",
+                "high_water_generation": 0,
+                "accepted_generation": 0,
+            },
+        ]
+
+
+def test_activation_downgrade_rejects_started_allocation(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Rollback is forbidden once any post-cutover allocation has started."""
+    alembic_runner.migrate_up_to(_ACTIVATION_REVISION)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_providers (
+                  id, provider_id, scope, kind, display_name, registration_method,
+                  enabled, lifecycle_state, availability_mode, admin_version,
+                  capabilities
+                ) VALUES (
+                  'allocated-generation-provider',
+                  'allocated-generation-provider-logical',
+                  'system', 'docker', 'Allocated Generation Provider', 'admin',
+                  true, 'active', 'platform_wide', 0, '{}'::jsonb
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                UPDATE runtime_connection_generations
+                SET high_water_generation = 1
+                WHERE connection_kind = 'provider'
+                  AND subject_id = 'allocated-generation-provider'
+                """
+            )
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime connection generation allocation has started",
+    ):
+        alembic_runner.migrate_down_to(_FOUNDATION_REVISION)
+
+
+def test_activation_downgrade_rejects_accepted_existing_subject_allocation(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Rollback rejects accepted allocation above an existing subject's seed."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_existing_subjects(connection)
+    alembic_runner.migrate_up_to(_ACTIVATION_REVISION)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE runtime_connection_generations
+                SET high_water_generation = :generation,
+                    accepted_generation = :generation
+                WHERE connection_kind = 'provider'
+                  AND subject_id = 'generation-provider'
+                """
+            ),
+            {"generation": _LEGACY_CUTOVER_HIGH_WATER + 1},
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime connection generation allocation has started",
+    ):
+        alembic_runner.migrate_down_to(_FOUNDATION_REVISION)

@@ -73,6 +73,12 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
+from azents.services.runtime_connection_registration.data import (
+    RuntimeConnectionRegistrationUnavailable,
+)
+from azents.services.runtime_connection_registration.service import (
+    RuntimeRunnerConnectionRegistrar,
+)
 
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
@@ -135,6 +141,7 @@ class RuntimeRunnerControlGrpcServicer(
         owner_replica_id: str,
         consumer_id: str,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+        connection_registrar: RuntimeRunnerConnectionRegistrar,
         transfer_result_sink: RuntimeRunnerTransferResultSink,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
@@ -145,6 +152,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
         self._runner_authenticator = runner_authenticator
+        self._connection_registrar = connection_registrar
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._transfer_result_sink = transfer_result_sink
         self._operation_block_ms = operation_block_ms
@@ -188,13 +196,20 @@ class RuntimeRunnerControlGrpcServicer(
             )
             raise AssertionError("unreachable")
         try:
-            accepted = await self._control_protocol.register_runner(
+            accepted = await self._connection_registrar.register_runner(
                 registration,
+                authentication=authentication,
                 registered_at=datetime.now(UTC),
             )
         except ValueError as exc:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
             raise AssertionError("unreachable") from exc
+        except RuntimeConnectionRegistrationUnavailable as error:
+            await context.abort(
+                grpc.StatusCode.ABORTED,
+                f"Runner registration was not accepted: {error.code}",
+            )
+            raise AssertionError("unreachable") from None
         _LOGGER.info(
             "Runtime Runner stream registered",
             extra={
@@ -952,6 +967,7 @@ def add_runtime_runner_control_servicer(
     owner_replica_id: str,
     consumer_id: str,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+    connection_registrar: RuntimeRunnerConnectionRegistrar,
     transfer_result_sink: RuntimeRunnerTransferResultSink,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
@@ -964,6 +980,7 @@ def add_runtime_runner_control_servicer(
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
+            connection_registrar=connection_registrar,
             transfer_result_sink=transfer_result_sink,
             operation_block_ms=operation_block_ms,
         ),

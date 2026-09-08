@@ -40,6 +40,9 @@ from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
 )
+from azents.testing.runtime_coordination import (
+    publish_next_test_connection,
+)
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "a" * 64
@@ -513,7 +516,8 @@ async def _harness(
     clock = clock or (lambda: _NOW)
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=clock)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
