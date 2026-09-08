@@ -56,6 +56,9 @@ from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project_operations import (
+    SessionWorkspaceProjectOperationsRepository,
+)
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
@@ -176,6 +179,10 @@ def get_skill_toolkit_provider(
         SessionWorkingFolderBindingService,
         Depends(),
     ],
+    project_operations_repository: Annotated[
+        SessionWorkspaceProjectOperationsRepository,
+        Depends(),
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
     store = SkillStateStore(session_manager=session_manager)
@@ -183,13 +190,12 @@ def get_skill_toolkit_provider(
         store=store,
         projection_service=SkillProjectionService(
             store=store,
-            session_manager=session_manager,
+            project_reader=project_operations_repository,
             runtime_target_resolver=agent_runtime_service,
             session_working_folder_binding_service=(
                 session_working_folder_binding_service
             ),
             runner_operations=runner_operations,
-            project_repository=SessionWorkspaceProjectRepository(),
             broadcast=broadcast,
         ),
         vfs_projection_service=vfs_projection_service,

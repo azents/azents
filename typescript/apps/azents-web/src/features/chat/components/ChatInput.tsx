@@ -11,6 +11,7 @@ import {
   Popover,
   rem,
   Stack,
+  Switch,
   Text,
   Textarea,
   UnstyledButton,
@@ -82,6 +83,7 @@ function ChatInputView({
     contextUsage,
     contextUsageActiveRun,
     onApplyInferenceProfile,
+    selectableExecutionOptions,
     isUploading,
     pendingFiles,
     goal,
@@ -143,6 +145,7 @@ function ChatInputView({
     handleFileChange,
     handleModelChange,
     handleEffortChange,
+    handleExecutionOptionToggle,
     handleOpenContextUsage,
     handleProfilePickerEnterTransitionEnd,
     handleDesktopProfileSectionKeyDown,
@@ -203,6 +206,86 @@ function ChatInputView({
           : selectedModelLabel}
       </Text>
     </Button>
+  );
+  const executionOptionControls = selectableExecutionOptions.map(
+    (definition, index) => {
+      const selected = inferenceProfile.enabled_execution_options.includes(
+        definition.id,
+      );
+      const disabled =
+        inputDisabled || editSendDisabled || editingMessageId !== null;
+      if (isMobile) {
+        return (
+          <UnstyledButton
+            key={definition.id}
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={definition.label}
+            disabled={disabled}
+            onClick={() => handleExecutionOptionToggle(definition.id)}
+            style={{
+              width: "100%",
+              padding: `${rem(9)} ${rem(12)}`,
+              display: "block",
+              textAlign: "left",
+              borderTop:
+                index === 0
+                  ? "none"
+                  : `${rem(1)} solid var(--mantine-color-default-border)`,
+              background: selected
+                ? "var(--mantine-color-default-hover)"
+                : "var(--mantine-color-body)",
+            }}
+          >
+            <Group gap="sm" justify="space-between" wrap="nowrap">
+              <Stack gap={rem(1)} style={{ minWidth: 0 }}>
+                <Text size="sm" fw={600} lh={rem(18)} truncate>
+                  {definition.label}
+                </Text>
+                <Text size="xs" c="dimmed" lh={rem(16)} truncate>
+                  {definition.cost_hint}
+                </Text>
+              </Stack>
+              {selected ? (
+                <IconCheck
+                  aria-hidden="true"
+                  size={16}
+                  color="var(--mantine-color-blue-6)"
+                  style={{ flexShrink: 0 }}
+                />
+              ) : null}
+            </Group>
+          </UnstyledButton>
+        );
+      }
+      return (
+        <Group
+          key={definition.id}
+          justify="space-between"
+          wrap="nowrap"
+          px="xs"
+          py="xs"
+        >
+          <Stack gap={rem(2)}>
+            <Text size="sm" fw={500}>
+              {definition.label}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {definition.cost_hint}
+            </Text>
+          </Stack>
+          <Switch
+            checked={selected}
+            disabled={disabled}
+            onChange={() => handleExecutionOptionToggle(definition.id)}
+            aria-label={definition.label}
+            onLabel="ON"
+            offLabel="OFF"
+            size="md"
+          />
+        </Group>
+      );
+    },
   );
   const contextUsageTrigger = contextUsageEnabled ? (
     <TokenUsageIndicator usage={contextUsage} onOpen={handleOpenContextUsage} />
@@ -343,6 +426,26 @@ function ChatInputView({
           ) : null}
         </>
       ) : null}
+      {selectableExecutionOptions.length > 0 ? (
+        <Stack gap="xs">
+          <Divider />
+          <Text size="xs" c="dimmed" fw={600}>
+            {t("composerProfile.executionOptions")}
+          </Text>
+          <Stack
+            gap={0}
+            role="group"
+            aria-label={t("composerProfile.executionOptions")}
+            style={{
+              border: `${rem(1)} solid var(--mantine-color-default-border)`,
+              borderRadius: rem(12),
+              overflow: "hidden",
+            }}
+          >
+            {executionOptionControls}
+          </Stack>
+        </Stack>
+      ) : null}
       {contextUsageEnabled ? (
         <Box ref={contextUsageDetailsRef}>
           {inferenceProfileSelectionEnabled ? <Divider mb="sm" /> : null}
@@ -468,6 +571,15 @@ function ChatInputView({
                   </Group>
                 </UnstyledButton>
               )}
+            </>
+          ) : null}
+          {selectableExecutionOptions.length > 0 ? (
+            <>
+              <Divider my="xs" />
+              <Text size="xs" c="dimmed" fw={600} px="xs">
+                {t("composerProfile.executionOptions")}
+              </Text>
+              {executionOptionControls}
             </>
           ) : null}
         </Stack>

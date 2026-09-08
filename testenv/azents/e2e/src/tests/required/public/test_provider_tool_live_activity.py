@@ -143,6 +143,7 @@ def _submit_quality_prompt(
             "inference_profile": {
                 "model_target_label": "Quality",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,

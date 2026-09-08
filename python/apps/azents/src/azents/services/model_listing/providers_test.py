@@ -24,6 +24,7 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -440,6 +441,13 @@ class _FakeAsyncClient:
                         ],
                         "minimal_client_version": "0.153.0",
                         "tool_mode": "code_mode_only",
+                        "service_tiers": [
+                            {
+                                "id": "priority",
+                                "name": "Fast",
+                                "description": "Faster responses with higher usage.",
+                            }
+                        ],
                         "base_instructions": "provider-owned instructions",
                     },
                     {
@@ -499,6 +507,8 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
         result.models
     )
     assert candidate.model_identifier == "gpt-6-astra"
+    assert candidate.supported_execution_options == [ModelExecutionOptionId.FAST]
+    assert standard_candidate.supported_execution_options == []
     assert candidate.normalized_capabilities.built_in_tools.supported == ["web_search"]
     assert all(
         other_candidate.normalized_capabilities.built_in_tools.supported

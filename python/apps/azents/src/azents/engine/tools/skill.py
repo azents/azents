@@ -5,10 +5,10 @@ import hashlib
 import json
 import logging
 import posixpath
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Literal, Protocol, assert_never
+from typing import Any, Protocol, assert_never
 
 import frontmatter
 import yaml
@@ -22,6 +22,13 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityDeniedError,
     RuntimeCapabilityResolver,
+)
+from azents.core.skill_projection import (
+    SkillProjectionItem,
+    SkillProjectionSnapshot,
+    SkillProjectionState,
+    SkillSourceKind,
+    SyncReason,
 )
 from azents.core.tools import (
     ResolveContext,
@@ -49,12 +56,6 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.engine.tooling.toolkit_state import (
-    ToolkitStateHandle,
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-    ToolkitStateStore,
-)
 from azents.engine.tools.runtime_io import (
     RuntimeFileListResult,
     RuntimeFileTextReadResult,
@@ -63,8 +64,8 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.repos.skill_state import SkillStateRepository
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_working_folder_binding import (
@@ -76,22 +77,10 @@ from azents.transport.chat import chat_input_actions_updated_dump
 
 logger = logging.getLogger(__name__)
 
-SKILL_TOOLKIT_NAMESPACE = "skill"
-SKILL_TOOLKIT_STATE_NAME = "projection"
-SKILL_STATE_SCHEMA_VERSION = 1
 SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _SKILL_READ_MAX_CHARACTERS = 512 * 1024
 _MANAGED_SKILL_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
-
-SkillSourceKind = Literal["agent", "project_agents", "project_claude", "azents"]
-SyncReason = Literal[
-    "session_start",
-    "run_end",
-    "compaction_start",
-    "project_change",
-    "manual",
-]
 
 _SKILL_PROMPT_HEADER = """## Skills
 
@@ -112,47 +101,6 @@ class LoadSkillInput(BaseModel):
             "Skills prompt."
         ),
     )
-
-
-class SkillProjectionItem(ToolkitStateModel):
-    """Projected filesystem Skill item."""
-
-    schema_version: int = SKILL_STATE_SCHEMA_VERSION
-    id: str = Field(min_length=1, description="Stable projection-local Skill item ID")
-    source_kind: SkillSourceKind = Field(description="Skill source kind")
-    project_id: str | None = Field(default=None, description="Project ID")
-    project_path: str | None = Field(default=None, description="Project path")
-    skill_dir_path: str = Field(
-        min_length=1, description="Skill package directory path"
-    )
-    skill_path: str = Field(min_length=1, description="Exact SKILL.md path")
-    slug: str = Field(min_length=1, description="Skill directory slug")
-    name: str = Field(min_length=1, description="Skill display name")
-    description: str = Field(description="Skill description")
-    frontmatter: dict[str, Any] = Field(default_factory=dict)
-    body: str = Field(description="Full SKILL.md body")
-    content_hash: str = Field(min_length=1, description="SHA-256 content hash")
-    source_label: str = Field(min_length=1, description="Compact source label")
-    relative_hint: str = Field(min_length=1, description="Compact relative path hint")
-
-
-class SkillProjectionSnapshot(ToolkitStateModel):
-    """One complete Skill projection snapshot."""
-
-    schema_version: int = SKILL_STATE_SCHEMA_VERSION
-    revision_id: str = Field(default_factory=lambda: uuid7().hex)
-    projection_hash: str = Field(default="", description="Hash of projected items")
-    synced_at: str | None = Field(default=None, description="UTC sync timestamp")
-    sync_reason: SyncReason | None = Field(default=None, description="Sync reason")
-    items: list[SkillProjectionItem] = Field(default_factory=list)
-
-
-class SkillProjectionState(ToolkitStateModel):
-    """Session Skill projection Toolkit State payload."""
-
-    schema_version: int = SKILL_STATE_SCHEMA_VERSION
-    latest: SkillProjectionSnapshot = Field(default_factory=SkillProjectionSnapshot)
-    active: SkillProjectionSnapshot = Field(default_factory=SkillProjectionSnapshot)
 
 
 @dataclass(frozen=True)
@@ -245,6 +193,18 @@ class SkillRuntimeFileReader(Protocol):
         ...
 
 
+class SkillProjectReader(Protocol):
+    """Completed Project list operation required for Skill discovery."""
+
+    async def list_projects(
+        self,
+        *,
+        session_id: str,
+    ) -> list[SessionWorkspaceProject]:
+        """Return the Session Project snapshot after its read transaction closes."""
+        ...
+
+
 class SkillVfsFileResolver(Protocol):
     """Managed VFS operation required by the load_skill tool."""
 
@@ -305,7 +265,7 @@ class SkillBroadcast(Protocol):
 
 
 class SkillStateStore:
-    """Skill projection store based on Toolkit State."""
+    """Engine-facing façade for repository-owned Skill state operations."""
 
     def __init__(
         self,
@@ -313,24 +273,11 @@ class SkillStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create Skill state store."""
-        self.session_manager = session_manager
+        self.repository = SkillStateRepository(session_manager=session_manager)
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Fetch Skill projection state."""
-        async with self.session_manager() as session:
-            return await self.load_in_session(session, agent_id, session_id)
-
-    async def load_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> SkillProjectionState:
-        """Fetch Skill projection state inside the caller transaction."""
-        handle = await self._make_handle(session, agent_id, session_id)
-        if handle is None:
-            return SkillProjectionState()
-        return await handle.load(default_factory=SkillProjectionState)
+        return await self.repository.load(agent_id=agent_id, session_id=session_id)
 
     async def replace_latest(
         self,
@@ -339,20 +286,19 @@ class SkillStateStore:
         snapshot: SkillProjectionSnapshot,
     ) -> SkillProjectionState:
         """Replace latest projection snapshot."""
-        return await self.update(
-            agent_id,
-            session_id,
-            lambda current: current.model_copy(update={"latest": snapshot}),
+        return await self.repository.replace_latest(
+            agent_id=agent_id,
+            session_id=session_id,
+            snapshot=snapshot,
         )
 
     async def adopt_latest(
         self, agent_id: str, session_id: str
     ) -> SkillProjectionState:
         """Copy latest projection into active projection."""
-        return await self.update(
-            agent_id,
-            session_id,
-            lambda current: current.model_copy(update={"active": current.latest}),
+        return await self.repository.adopt_latest(
+            agent_id=agent_id,
+            session_id=session_id,
         )
 
     async def invalidate_project(
@@ -365,64 +311,13 @@ class SkillStateStore:
         session_run_state: AgentSessionRunState,
     ) -> SkillProjectionState:
         """Remove deleted Project items without reading runtime files."""
-
-        def mutate(current: SkillProjectionState) -> SkillProjectionState:
-            latest = _filter_snapshot_project(
-                current.latest,
-                project_id=project_id,
-                project_path=project_path,
-                reason="project_change",
-            )
-            if session_run_state == AgentSessionRunState.IDLE:
-                active = _filter_snapshot_project(
-                    current.active,
-                    project_id=project_id,
-                    project_path=project_path,
-                    reason="project_change",
-                )
-            else:
-                active = current.active
-            return current.model_copy(update={"latest": latest, "active": active})
-
-        return await self.update(agent_id, session_id, mutate)
-
-    async def update(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[SkillProjectionState], SkillProjectionState],
-    ) -> SkillProjectionState:
-        """Update Skill projection state with optimistic retry."""
-        async with self.session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return SkillProjectionState()
-            saved_state: SkillProjectionState | None = None
-
-            def capture(current: SkillProjectionState) -> SkillProjectionState:
-                nonlocal saved_state
-                saved_state = mutator(current)
-                return saved_state
-
-            await handle.update(default_factory=SkillProjectionState, mutator=capture)
-            return saved_state or SkillProjectionState()
-
-    async def _make_handle(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolkitStateHandle[SkillProjectionState] | None:
-        """Create Skill Toolkit State handle for agent/session."""
-        if not agent_id or not session_id:
-            return None
-        identity = ToolkitStateIdentity(
+        return await self.repository.invalidate_project(
             agent_id=agent_id,
             session_id=session_id,
-            toolkit_namespace=SKILL_TOOLKIT_NAMESPACE,
-            state_name=SKILL_TOOLKIT_STATE_NAME,
+            project_id=project_id,
+            project_path=project_path,
+            session_run_state=session_run_state,
         )
-        return ToolkitStateStore(session=session).handle(identity, SkillProjectionState)
 
 
 class SkillProjectionService:
@@ -432,24 +327,20 @@ class SkillProjectionService:
         self,
         *,
         store: SkillProjectionStateStore,
-        session_manager: SessionManager[AsyncSession],
+        project_reader: SkillProjectReader,
         runtime_target_resolver: RuntimeOperationTargetResolver,
         session_working_folder_binding_service: SessionWorkingFolderBindingService,
         runner_operations: SkillRuntimeFileReader | None = None,
-        project_repository: SessionWorkspaceProjectRepository | None = None,
         broadcast: SkillBroadcast | None = None,
     ) -> None:
         """Create Skill projection service."""
         self.store = store
-        self.session_manager = session_manager
+        self.project_reader = project_reader
         self.runtime_target_resolver = runtime_target_resolver
         self.session_working_folder_binding_service = (
             session_working_folder_binding_service
         )
         self.runner_operations = runner_operations
-        self.project_repository = (
-            project_repository or SessionWorkspaceProjectRepository()
-        )
         self.broadcast = broadcast
 
     async def sync_latest(
@@ -477,11 +368,7 @@ class SkillProjectionService:
             )
         except RuntimeStorageError, SessionWorkingFolderBindingError:
             return await self.store.load(agent_id, session_id)
-        async with self.session_manager() as session:
-            projects = await self.project_repository.list_projects(
-                session,
-                session_id=session_id,
-            )
+        projects = await self.project_reader.list_projects(session_id=session_id)
         items = await self._scan_runtime(
             runner_operations=runner_operations,
             runtime_id=runtime.id,
@@ -1141,19 +1028,6 @@ def skill_action_id(skill_path: str) -> str:
     return f"skill:{_stable_item_id(skill_path)}"
 
 
-def resolve_active_skill(
-    state: SkillProjectionState,
-    *,
-    skill_path: str,
-) -> SkillProjectionItem | None:
-    """Resolve exact Skill path from active projection."""
-    normalized = _normalize_path(skill_path)
-    for item in state.active.items:
-        if _normalize_path(item.skill_path) == normalized:
-            return item
-    return None
-
-
 def _dedupe_skill_path_candidates(
     candidates: Sequence[_SkillPathCandidate],
 ) -> list[_SkillPathCandidate]:
@@ -1235,23 +1109,6 @@ def _skill_source_roots(
             )
         )
     return roots
-
-
-def _filter_snapshot_project(
-    snapshot: SkillProjectionSnapshot,
-    *,
-    project_id: str,
-    project_path: str,
-    reason: SyncReason,
-) -> SkillProjectionSnapshot:
-    items = [
-        item
-        for item in snapshot.items
-        if item.project_id != project_id and item.project_path != project_path
-    ]
-    if len(items) == len(snapshot.items):
-        return snapshot
-    return _make_snapshot(items, reason=reason)
 
 
 def _make_snapshot(

@@ -41,6 +41,10 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.skill_projection import (
+    SkillProjectionItem,
+    SkillProjectionSnapshot,
+)
 from azents.core.vfs import VfsProjection, make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import (
     AgentRemoveGitWorktreeAction,
@@ -57,13 +61,7 @@ from azents.engine.events.types import (
 from azents.engine.run.resolve import (
     materialize_admitted_input_exchange_file_attachments,
 )
-from azents.engine.tools.goal import GoalStateStore
-from azents.engine.tools.skill import (
-    SkillProjectionItem,
-    SkillProjectionSnapshot,
-    SkillProjectionState,
-    SkillStateStore,
-)
+from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -79,6 +77,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelMailboxProjectionItem,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
     AgentCreateGitWorktreeContinuationResult,
@@ -90,11 +89,13 @@ from azents.repos.mailbox.data import (
     ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
+from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.model_file.data import ModelFile
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
+from azents.repos.skill_state import SkillStateRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -343,6 +344,7 @@ async def _create_scheduled_admission_fixture(
                         )
                     ],
                 ),
+                requested_enabled_execution_options=[],
             ),
         )
         return _ScheduledAdmissionFixture(
@@ -401,6 +403,7 @@ async def _create_buffer(
                 action=None,
                 attachments=attachments if attachments is not None else [],
                 file_parts=file_parts if file_parts is not None else [],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -433,6 +436,7 @@ async def _create_action_buffer(
                 action=action.model_dump(mode="json"),
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -471,6 +475,7 @@ async def _create_agent_message_buffer(
                 action=None,
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -517,6 +522,7 @@ async def _create_agent_result_buffer(
                 action=None,
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -602,7 +608,7 @@ async def _create_terminal_child_run(
 class _VfsService:
     """VFS resolver test double for managed Skill action promotion."""
 
-    def __init__(self) -> None:
+    def __init__(self, tracked_sessions: list[AsyncSession] | None = None) -> None:
         revision = make_vfs_source_revision(
             source_id="release:azents",
             source_kind="global_release",
@@ -617,9 +623,17 @@ class _VfsService:
         )
         self.projection = make_vfs_projection([revision])
         self.run_ids: list[str] = []
+        self.tracked_sessions = tracked_sessions
+        self.observed_no_active_transaction = False
 
     async def resolve_file(self, **kwargs: object) -> VfsResolvedFile:
         """Resolve from the configured immutable projection."""
+        if self.tracked_sessions is not None:
+            assert self.tracked_sessions
+            assert all(
+                not session.in_transaction() for session in self.tracked_sessions
+            )
+            self.observed_no_active_transaction = True
         self.run_ids.append(str(kwargs["run_id"]))
         entry = self.projection.find(str(kwargs["uri"]))
         if entry is None:
@@ -980,6 +994,20 @@ def _mailbox_item_service(
             agent_session_repository,
             vfs_projection_service=vfs_projection_service,
         ),
+        promotion_repository=MailboxPromotionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_repository=MailboxRepository(),
+            session_repository=agent_session_repository,
+            event_repository=(
+                event_transcript_repository or EventTranscriptRepository()
+            ),
+            run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            goal_store=GoalStateStore(session_manager=rdb_session_manager),
+            skill_state_repository=SkillStateRepository(
+                session_manager=rdb_session_manager
+            ),
+        ),
         external_channel_repository=ExternalChannelRepository(),
     )
 
@@ -992,8 +1020,6 @@ def _turn_action_capabilities(
 ) -> TurnActionCapabilityRegistry:
     """Create the closed TurnAction capability registry for tests."""
     return TurnActionCapabilityRegistry(
-        agent_session_repository=agent_session_repository,
-        goal_store=GoalStateStore(session_manager=session_manager),
         skill_store=SkillStateStore(session_manager=session_manager),
         vfs_projection_service=vfs_projection_service,
     )
@@ -1015,6 +1041,20 @@ def _scheduled_task_service() -> ScheduledTaskService:
 async def _unit_session_manager() -> AsyncIterator[AsyncSession]:
     """Yield a DB-session placeholder for preparation-only unit tests."""
     yield AsyncMock(spec=AsyncSession)
+
+
+@dataclasses.dataclass
+class _TrackingSessionManager:
+    """Record sessions so external fakes can inspect transaction state."""
+
+    delegate: SessionManager[AsyncSession]
+    sessions: list[AsyncSession]
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[AsyncSession]:
+        async with self.delegate() as session:
+            self.sessions.append(session)
+            yield session
 
 
 async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> None:
@@ -1040,6 +1080,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         attachments=[attachment_uri],
         file_parts=[],
         created_at=tznow(),
+        requested_enabled_execution_options=[],
     )
     exchange_file = _exchange_file(
         file_id="1234567890abcdef1234567890abcdef",
@@ -1103,6 +1144,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
         external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
             _unit_session_manager,
@@ -1119,9 +1161,9 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         active_run_id="run-1",
     )
 
-    assert prepared.attachments[0].uri == attachment_uri
-    assert prepared.file_parts[0].model_file_id == model_file.id
-    assert prepared.created_model_file_ids == [model_file.id]
+    assert prepared.files.attachments[0].uri == attachment_uri
+    assert prepared.files.file_parts[0].model_file_id == model_file.id
+    assert prepared.files.created_model_file_ids == [model_file.id]
     assert exchange_file_service.resolve_admitted_input_attachment_called
     assert model_file_service.create_for_admitted_input_called
 
@@ -1203,6 +1245,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         attachments=["exchange://exchange/workspace-001/session/image.png"],
         file_parts=[],
         created_at=tznow(),
+        requested_enabled_execution_options=[],
     )
     mailbox_item_repository: MailboxRepository = AsyncMock(spec=MailboxRepository)
     mailbox_item_repository.list_for_flush.return_value = [buffer]
@@ -1210,7 +1253,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         spec=AgentSessionRepository
     )
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
-        agent_id="agent-001"
+        agent_id="agent-001", workspace_id="workspace-001"
     )
     exchange_file_service = _ExchangeFileService()
     model_file_service = _ModelFileService()
@@ -1228,6 +1271,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
         external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
             _unit_session_manager,
@@ -1244,9 +1288,9 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         active_run_id="run-1",
     )
 
-    assert prepared.attachments == []
-    assert prepared.file_parts == []
-    assert prepared.created_model_file_ids == []
+    assert prepared.files.attachments == []
+    assert prepared.files.file_parts == []
+    assert prepared.files.created_model_file_ids == []
     assert not exchange_file_service.resolve_attachment_metadata_for_agent_called
     assert not model_file_service.create_for_agent_pending_input_called
 
@@ -1365,6 +1409,37 @@ async def test_admit_scheduled_trigger_starts_cycle_and_binds_run(
     assert persisted_run is not None
     assert persisted_run.scheduled_task_cycle_id == fixture.cycle_id
     assert pending_mailbox == []
+
+
+@pytest.mark.asyncio
+async def test_generic_flush_preserves_scheduled_trigger_head(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Generic model-input flush leaves Scheduled Task work to its admission path."""
+    fixture = await _create_scheduled_admission_fixture(
+        rdb_session_manager,
+        slug="scheduled-trigger-generic-flush",
+    )
+
+    result = await _mailbox_item_service(
+        rdb_session_manager
+    ).flush_session_mailbox_items(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        model="gpt-5.4",
+        required_inference_profile=None,
+        expected_buffer_id=fixture.buffer_id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=None,
+    )
+
+    assert result.claimed_count == 0
+    assert result.deleted_buffer_ids == []
+    async with rdb_session_manager() as session:
+        assert (
+            await MailboxRepository().get_by_id(session, fixture.buffer_id) is not None
+        )
 
 
 @pytest.mark.asyncio
@@ -1571,6 +1646,7 @@ async def test_admit_scheduled_continuation_rebinds_started_cycle(
                         )
                     ],
                 ),
+                requested_enabled_execution_options=[],
             ),
         )
 
@@ -1667,6 +1743,7 @@ class TestMailboxService:
                 attachments=[],
                 file_parts=[],
                 created_at=first_at,
+                requested_enabled_execution_options=[],
             )
 
         promoted = [
@@ -1751,6 +1828,7 @@ class TestMailboxService:
                     created_at=datetime.datetime(
                         2026, 8, 17, 12, 0, tzinfo=datetime.UTC
                     ),
+                    requested_enabled_execution_options=[],
                 ),
                 user_message=None,
             )
@@ -1850,6 +1928,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
             after = await AgentSessionRepository().get_by_id(
@@ -1892,6 +1971,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
             after = await AgentSessionRepository().get_by_id(
@@ -1928,6 +2008,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         async with rdb_session_manager() as session:
@@ -2000,6 +2081,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         async with rdb_session_manager() as session:
@@ -2070,6 +2152,7 @@ class TestMailboxService:
             attachments=[],
             file_parts=[],
             created_at=datetime.datetime.now(datetime.UTC),
+            requested_enabled_execution_options=[],
         )
         agent_session_repository = AgentSessionRepository()
         service = MailboxService(
@@ -2085,6 +2168,7 @@ class TestMailboxService:
                 toolkit_state_repository=ToolkitStateRepository(),
             ),
             action_execution_repository=ActionExecutionRepository(),
+            promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
             turn_action_capabilities=_turn_action_capabilities(
                 rdb_session_manager,
                 agent_session_repository,
@@ -2106,6 +2190,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         with pytest.raises(
@@ -2150,6 +2235,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert result.promoted_event_ids == [result.events[0].id]
         assert len(result.user_messages) == 1
@@ -2160,11 +2246,13 @@ class TestMailboxService:
         assert event_payload.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert event_payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         promoted = result.user_messages[0]
         assert promoted.external_id == f"{buffer_id}:user_message"
@@ -2174,12 +2262,14 @@ class TestMailboxService:
             == RequestedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             )
         )
         assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         async with rdb_session_manager() as session:
             remaining = await session.scalar(
@@ -2193,6 +2283,7 @@ class TestMailboxService:
         assert stored_event.payload["requested_inference_profile"] == {
             "model_target_label": "Quality",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
 
     async def test_flush_promotes_external_channel_continuation_event(
@@ -2225,6 +2316,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
 
@@ -2237,6 +2329,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer.id,
             prepared_inference_state=None,
@@ -2279,6 +2372,7 @@ class TestMailboxService:
                 activated_at=tznow(),
                 requested_model_target_label="default",
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
             )
             buffer = await MailboxRepository().create(
                 session,
@@ -2322,6 +2416,7 @@ class TestMailboxService:
                             branch_name="agent/generated",
                         ),
                     ),
+                    requested_enabled_execution_options=[],
                 ),
             )
 
@@ -2552,6 +2647,7 @@ class TestMailboxService:
             effective_context_window_tokens=100_000,
             effective_auto_compaction_threshold_tokens=80_000,
             resolved_at=datetime.datetime.now(datetime.UTC),
+            enabled_execution_options=[],
         )
         event_repository = EventTranscriptRepository()
         monkeypatch.setattr(
@@ -2572,6 +2668,7 @@ class TestMailboxService:
                 required_inference_profile=RequestedInferenceProfile(
                     model_target_label="Fast",
                     reasoning_effort=ModelReasoningEffort.HIGH,
+                    enabled_execution_options=[],
                 ),
                 expected_buffer_id=buffer_id,
                 prepared_inference_state=prepared_state,
@@ -2592,6 +2689,50 @@ class TestMailboxService:
         )
         assert agent_session.inference_state is None
         assert remaining is not None
+        assert goal.objective is None
+        assert goal.status is None
+
+    async def test_profile_failure_does_not_create_goal(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A failed Goal action reports the failure without mutating Goal state."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-goal-profile-failure",
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="Prepare the release",
+            action=GoalAction(),
+        )
+        agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
+
+        result = await _mailbox_item_service(
+            rdb_session_manager
+        ).flush_session_mailbox_items(
+            session_id=session_id,
+            owner_generation=0,
+            model="unavailable-model",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Unavailable",
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure="Selected model is temporarily unavailable.",
+            active_run_id=None,
+        )
+
+        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+            agent_id,
+            session_id,
+        )
+        assert result.turn_effect is TurnEffect.FAILED
+        assert result.deleted_buffer_ids == [buffer_id]
         assert goal.objective is None
         assert goal.status is None
 
@@ -2630,6 +2771,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -2697,6 +2839,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Fast",
             reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[],
         )
         assert result.promoted_event_ids == [event.id for event in result.events]
         async with rdb_session_manager() as session:
@@ -2738,6 +2881,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -2749,6 +2893,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert len(result.promoted_event_ids) == 1
         async with rdb_session_manager() as session:
@@ -2779,6 +2924,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3062,7 +3208,7 @@ class TestMailboxService:
         )
         service = _mailbox_item_service(rdb_session_manager)
         monkeypatch.setattr(
-            service.mailbox_item_repository,
+            service.promotion_repository.mailbox_repository,
             "delete_claimed_by_ids",
             AsyncMock(side_effect=RuntimeError("delete failed")),
         )
@@ -3101,12 +3247,15 @@ class TestMailboxService:
         )
         agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
         item = _skill_item()
-        await SkillStateStore(session_manager=rdb_session_manager).update(
-            agent_id,
-            session_id,
-            lambda _current: SkillProjectionState(
-                active=SkillProjectionSnapshot(items=[item])
-            ),
+        skill_repository = SkillStateRepository(session_manager=rdb_session_manager)
+        await skill_repository.replace_latest(
+            agent_id=agent_id,
+            session_id=session_id,
+            snapshot=SkillProjectionSnapshot(items=[item]),
+        )
+        await skill_repository.adopt_latest(
+            agent_id=agent_id,
+            session_id=session_id,
         )
         buffer_id = await _create_action_buffer(
             rdb_session_manager,
@@ -3124,6 +3273,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3174,9 +3324,13 @@ class TestMailboxService:
             content="Review this change",
             action=SkillAction(skill_path=uri),
         )
-        vfs_service = _VfsService()
+        tracking_session_manager = _TrackingSessionManager(
+            delegate=rdb_session_manager,
+            sessions=[],
+        )
+        vfs_service = _VfsService(tracking_session_manager.sessions)
         service = _mailbox_item_service(
-            rdb_session_manager,
+            tracking_session_manager,
             vfs_projection_service=vfs_service,
         )
 
@@ -3187,6 +3341,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3195,6 +3350,7 @@ class TestMailboxService:
         )
 
         assert vfs_service.run_ids == [run.id]
+        assert vfs_service.observed_no_active_transaction
         assert [event.kind for event in result.events] == [
             EventKind.SKILL_LOADED,
             EventKind.USER_MESSAGE,
@@ -3671,14 +3827,13 @@ async def test_external_channel_message_projection() -> None:
             attachments=[],
             file_parts=[],
             created_at=at(0),
+            requested_enabled_execution_options=[],
         )
 
     processor = ExternalChannelMessageMailboxProcessor(
         _mailbox_item_service(_unit_session_manager)
     )
-    preparation_session: AsyncSession = AsyncMock(spec=AsyncSession)
     preparation_context = MailboxPreparationContext(
-        session=preparation_session,
         session_id="session-1",
         active_run_id=None,
         required_inference_profile=None,
@@ -3688,6 +3843,7 @@ async def test_external_channel_message_projection() -> None:
             file_parts=[],
             created_model_file_ids=[],
         ),
+        prepared_turn_action=None,
     )
     context_buffer = mailbox_item(
         item=context,

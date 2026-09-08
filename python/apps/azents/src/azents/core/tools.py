@@ -364,8 +364,6 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate credential validity.
@@ -373,8 +371,6 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         Subclasses override this to implement toolkit-specific validation logic.
         Default implementation passes without validation.
 
-        :param session: DB session
-        :param user_id: User ID
         :param credentials: Toolkit credentials (dict or None)
         :return: Error message on failure, or None on success
         """

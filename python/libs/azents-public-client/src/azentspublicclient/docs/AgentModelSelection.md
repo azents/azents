@@ -14,6 +14,7 @@ Name | Type | Description | Notes
 **model_family** | **str** |  | [optional] 
 **normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) | Runtime capability snapshot | 
 **model_snapshot** | **Dict[str, object]** | Normalized model snapshot | 
+**supported_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Directly selectable execution options supported by this model | [optional] 
 **source_metadata** | **Dict[str, object]** |  | [optional] 
 **last_refreshed_at** | **datetime** |  | [optional] 
 

@@ -33,6 +33,9 @@ from azents.core.mcp_transport import (
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
 )
+from azents.core.toolkit_state import (
+    ToolkitStateIdentity,
+)
 from azents.core.tools import (
     AwsToolkitConfig,
     ResolveContext,
@@ -49,11 +52,6 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
-from azents.engine.tooling.toolkit_state import (
-    ToolkitStateHandle,
-    ToolkitStateIdentity,
-    ToolkitStateStore,
-)
 from azents.engine.tools.mcp_base import (
     McpArtifactSink,
     McpToolSnapshotItem,
@@ -62,6 +60,10 @@ from azents.engine.tools.mcp_base import (
     build_mcp_artifact_sink,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.toolkit_state.store import (
+    ToolkitStateHandle,
+    ToolkitStateStore,
+)
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
@@ -570,8 +572,6 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate Access Key structure."""

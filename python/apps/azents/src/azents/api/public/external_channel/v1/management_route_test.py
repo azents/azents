@@ -42,6 +42,10 @@ from azents.repos.external_channel.management_data import (
     ManagedConnection,
     ManagedMultiConnection,
 )
+from azents.repos.external_channel.management_operation_data import (
+    ExternalChannelManagementGenerationChanged,
+    ExternalChannelManagementNotFound,
+)
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
 )
@@ -51,8 +55,6 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIUnavailable,
 )
 from azents.services.external_channel.management import (
-    ExternalChannelManagementGenerationChanged,
-    ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
     ExternalChannelResponseModeSetting,
     ManagedConnectionSetup,

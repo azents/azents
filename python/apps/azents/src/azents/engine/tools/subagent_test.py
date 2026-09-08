@@ -37,6 +37,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
@@ -215,6 +216,7 @@ def _agent_session(
             effective_context_window_tokens=64_000,
             effective_auto_compaction_threshold_tokens=51_200,
             resolved_at=_NOW,
+            enabled_execution_options=[],
         ),
         id=id,
         workspace_id="workspace-1",
@@ -479,12 +481,14 @@ class _AgentSessionRepository:
         session_id: str,
         model_target_label: str,
         reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentSession:
         """Record the durable child Session model intent."""
         del session
         profile = SessionAppliedInferenceProfile(
             model_target_label=model_target_label,
             reasoning_effort=reasoning_effort,
+            enabled_execution_options=enabled_execution_options,
         )
         self.applied_profiles.append((session_id, profile))
         updated = self.sessions[session_id].model_copy(
@@ -558,6 +562,7 @@ class _AgentRunRepository:
             model_call_started_at=None,
             ended_at=None,
             updated_at=_NOW,
+            requested_enabled_execution_options=[],
         )
         self.get_by_id_calls: list[str] = []
         self.pending_creates: list[dict[str, object]] = []
@@ -582,6 +587,7 @@ class _AgentRunRepository:
                 model_call_started_at=None,
                 ended_at=_NOW,
                 updated_at=_NOW,
+                requested_enabled_execution_options=[],
             )
         }
 
@@ -1419,6 +1425,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
             SessionAppliedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
         )
     ]
@@ -1492,6 +1499,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
             SessionAppliedInferenceProfile(
                 model_target_label="Research",
                 reasoning_effort=ModelReasoningEffort.MEDIUM,
+                enabled_execution_options=[],
             ),
         )
     ]
@@ -1538,6 +1546,7 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
             SessionAppliedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=ModelReasoningEffort.LOW,
+                enabled_execution_options=[],
             ),
         )
     ]
@@ -1913,6 +1922,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         model_call_started_at=None,
         ended_at=None,
         updated_at=_NOW,
+        requested_enabled_execution_options=[],
     )
     state = await toolkit.update_context(
         TurnContext(

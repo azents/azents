@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Annotated, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
@@ -26,13 +25,13 @@ from azents.core.external_channel_provider import (
     ExternalChannelProviderIdentity,
     SlackConnectionCredentials,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
+from azents.repos.external_channel.connection import (
+    ExternalChannelConnectionRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionCreate,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.provider import (
     DiscordExternalChannelProviderContract,
@@ -78,13 +77,9 @@ def get_external_channel_credentials_codec(
 class ExternalChannelConnectionService:
     """Create and validate provider connections without exposing secrets."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    connection_repository: Annotated[
+        ExternalChannelConnectionRepository,
+        Depends(ExternalChannelConnectionRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -148,9 +143,7 @@ class ExternalChannelConnectionService:
             socket_gap_detected_at=None,
             socket_gap_reason=None,
         )
-        async with self.session_manager() as session:
-            connection = await self.repository.create_connection(session, create)
-            await session.commit()
+        connection = await self.connection_repository.create_connection(create=create)
         return ExternalChannelConnectionSetup(connection=connection)
 
     async def create_discord_connection(
@@ -198,22 +191,20 @@ class ExternalChannelConnectionService:
             socket_gap_detected_at=None,
             socket_gap_reason=None,
         )
-        async with self.session_manager() as session:
-            connection = await self.repository.create_connection(session, create)
-            await session.commit()
+        connection = await self.connection_repository.create_connection(create=create)
         return ExternalChannelConnectionSetup(connection=connection)
 
     async def validate_connection(
         self,
         *,
+        workspace_id: str,
         connection_id: str,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Run Slack identity validation and persist a sanitized health result."""
-        async with self.session_manager() as session:
-            configuration = await self.repository.get_connection_configuration(
-                session,
-                connection_id=connection_id,
-            )
+        configuration = await self.connection_repository.load_connection_configuration(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+        )
         if configuration is None:
             raise ExternalChannelConnectionNotFound(connection_id)
         if configuration.provider is not ExternalChannelProvider.SLACK:
@@ -249,32 +240,25 @@ class ExternalChannelConnectionService:
         )
         if capabilities is not None:
             capabilities["customize_messages"] = result.customize_messages
-        async with self.session_manager() as session:
-            connection = await self.repository.update_connection_health(
-                session,
-                connection_id=connection_id,
-                status=status,
-                provider_tenant_id=(
-                    identity.tenant_id if identity is not None else None
-                ),
-                provider_bot_user_id=(
-                    identity.bot_user_id if identity is not None else None
-                ),
-                capabilities=capabilities,
-                checked_at=checked_at,
-                expected_encrypted_credentials=configuration.encrypted_credentials,
+        health_update = await self.connection_repository.update_connection_health(
+            connection_id=connection_id,
+            status=status,
+            provider_tenant_id=identity.tenant_id if identity is not None else None,
+            provider_bot_user_id=(
+                identity.bot_user_id if identity is not None else None
+            ),
+            capabilities=capabilities,
+            checked_at=checked_at,
+            expected_encrypted_credentials=configuration.encrypted_credentials,
+            expected_configuration_generation=configuration.configuration_generation,
+        )
+        connection = health_update.connection
+        if connection is None:
+            if not health_update.connection_exists:
+                raise ExternalChannelConnectionNotFound(connection_id)
+            raise ExternalChannelConnectionStateChanged(
+                "The connection changed during validation. Retry the operation."
             )
-            if connection is None:
-                current = await self.repository.get_connection(
-                    session,
-                    connection_id=connection_id,
-                )
-                if current is None:
-                    raise ExternalChannelConnectionNotFound(connection_id)
-                raise ExternalChannelConnectionStateChanged(
-                    "The connection changed during validation. Retry the operation."
-                )
-            await session.commit()
         return ExternalChannelConnectionStatusSnapshot(
             status=connection.status,
             code=result.code,

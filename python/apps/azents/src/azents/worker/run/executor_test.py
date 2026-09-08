@@ -47,6 +47,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -281,6 +282,9 @@ class _PendingRun:
     run_index: int = 1
     requested_model_target_label: str | None = "default"
     requested_reasoning_effort: ModelReasoningEffort | None = None
+    requested_enabled_execution_options: list[ModelExecutionOptionId] = (
+        dataclasses.field(default_factory=list)
+    )
     inference_profile_source: InferenceProfileSource = (
         InferenceProfileSource.AGENT_DEFAULT
     )
@@ -1475,6 +1479,7 @@ def _executor(
                 ),
                 resolved_at=recoverable.resolved_at
                 or datetime.datetime.now(datetime.UTC),
+                enabled_execution_options=[],
             )
         agent_session_repository = _AgentSessionRepository(
             inference_state=inference_state
@@ -1491,8 +1496,6 @@ def _executor(
     if vfs_projection_service is None:
         vfs_projection_service = _VfsProjectionService()
     capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
-        "agent_session_repository": agent_session_repository,
-        "goal_store": object(),
         "skill_store": object(),
         "vfs_projection_service": None,
     }
@@ -1964,6 +1967,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     return Success(
         ResolvedInvokeInputProfile(
             run_request=RunRequest(
+                enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
                 agent_prompt=None,
@@ -1989,6 +1993,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
     del args, kwargs
     return Success(
         RunRequest(
+            enabled_execution_options=[],
             session_id="session-001",
             user_messages=[],
             agent_prompt=None,
@@ -2075,6 +2080,7 @@ async def test_execute_uses_atomic_scheduled_admission(
         started_at=None,
         model_call_started_at=None,
         updated_at=now,
+        requested_enabled_execution_options=[],
     )
     scheduled_message = make_run_user_message(
         sender_user_id=None,
@@ -2144,6 +2150,7 @@ async def test_execute_uses_atomic_scheduled_admission(
         RequestedInferenceProfile(
             model_target_label="default",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
     ]
     assert result.run_id == scheduled_run.id
@@ -2331,6 +2338,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     pending_profile = RequestedInferenceProfile(
         model_target_label="Fast",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     pending_inputs = [
         PendingInputInferenceProfile(
@@ -2356,6 +2364,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         recovered_snapshots.append(resolved_selection)
         return Success(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
                 agent_prompt=None,
@@ -2577,6 +2586,7 @@ async def test_execute_recovers_activated_command_run(
         del args, kwargs
         return Success(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
                 agent_prompt=None,
@@ -2685,6 +2695,7 @@ async def test_execute_recovers_durable_retry_budget(
         del args, kwargs
         return Success(
             RunRequest(
+                enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
                 agent_prompt=None,
@@ -2747,6 +2758,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     executor = _executor(
         session_lifecycle=lifecycle,
@@ -2791,6 +2803,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
     assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
         model_target_label="fast",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     assert poll_calls[0]["active_run_id"] == recoverable.id
 
@@ -2810,6 +2823,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     order: list[str] = []
     lifecycle = _SessionLifecycle(order, recoverable_run=recoverable)
@@ -2890,11 +2904,13 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     session_repository = _AgentSessionRepository(inference_state=old_state)
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     executor = _executor(agent_session_repository=session_repository)
     monkeypatch.setattr(
@@ -2919,6 +2935,7 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
     assert prepared.value.profile == RequestedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     assert prepared.value.inference_state.model_selection.model_identifier == "gpt-4o"
     assert session_repository.inference_state is prepared.value.inference_state
@@ -2937,11 +2954,13 @@ async def test_execute_new_implicit_run_remaps_same_label_to_current_agent(
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     session_repository = _AgentSessionRepository(inference_state=old_state)
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     engine = _RecordingEngine([])
     executor = _executor(
@@ -3096,6 +3115,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     updated_state = SessionInferenceState(
         model_target_label="planning",
@@ -3105,6 +3125,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         effective_context_window_tokens=128_000,
         effective_auto_compaction_threshold_tokens=102_400,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
     session_repo = _AgentSessionRepository(inference_state=initial_state)
     engine = _BoundarySwitchEngine()
@@ -3123,6 +3144,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
             session_repo.applied_inference_profile = SessionAppliedInferenceProfile(
                 model_target_label="planning",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             )
             return RunInputPollResult(
                 context_invalidated=True,
@@ -3131,6 +3153,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
                 requested_inference_profile=RequestedInferenceProfile(
                     model_target_label="planning",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 promoted_event_ids=["event-002"],
                 user_messages=[],
@@ -3227,6 +3250,7 @@ async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwr
                 SessionAppliedInferenceProfile(
                     model_target_label="planning",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 )
             )
         return RunInputPollResult(
@@ -3510,6 +3534,7 @@ async def test_boundary_poll_processes_turn_actions(
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
         run_id="run-001",
         poll_fn=None,
@@ -3576,6 +3601,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
         run_id="run-001",
         poll_fn=None,
@@ -3666,6 +3692,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
             attachments=[],
             file_parts=[],
             created_at=created_at,
+            requested_enabled_execution_options=[],
         )
 
     buffers = {
@@ -3694,9 +3721,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
     ]
     processor_service: Any = SimpleNamespace()
     processor = ExternalChannelMessageMailboxProcessor(processor_service)
-    db_session: Any = object()
     preparation_context = MailboxPreparationContext(
-        session=db_session,
         session_id="session-1",
         active_run_id=None,
         required_inference_profile=None,
@@ -3706,6 +3731,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
             file_parts=[],
             created_model_file_ids=[],
         ),
+        prepared_turn_action=None,
     )
     promoted_buffer_ids: list[str] = []
     promoted_events: list[Event] = []
@@ -5551,6 +5577,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
             model_target_label="default",
             model_display_name="gpt-4o",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         for _, run in live_event_projector.live_run_updates
     )
@@ -5563,6 +5590,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         "model_target_label": "default",
         "model_display_name": "gpt-4o",
         "reasoning_effort": None,
+        "enabled_execution_options": [],
     }
 
 

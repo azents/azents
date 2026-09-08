@@ -6,6 +6,7 @@ from typing import Annotated, NamedTuple, assert_never
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -23,6 +24,7 @@ from azents.core.inference_profile import (
     validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -49,6 +51,17 @@ from azents.services.exchange_file import (
     FileUnavailable,
 )
 from azents.services.mailbox import MailboxEnqueue, MailboxService
+
+_EXECUTION_OPTIONS_ADAPTER = TypeAdapter(list[ModelExecutionOptionId])
+
+
+def _stored_enabled_execution_options(
+    payload: dict[str, object],
+) -> list[ModelExecutionOptionId]:
+    """Decode historical model-profile payloads with all-off option intent."""
+    return _EXECUTION_OPTIONS_ADAPTER.validate_python(
+        payload.get("enabled_execution_options", [])
+    )
 
 
 def _raise_attachment_claim_error(error: object) -> None:
@@ -108,6 +121,7 @@ class AcceptedModelProfile:
     request: AcceptedChatWriteRequest
     model_target_label: str
     reasoning_effort: ModelReasoningEffort | None
+    enabled_execution_options: list[ModelExecutionOptionId]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -247,6 +261,9 @@ class ChatWriteService:
                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
+                    requested_enabled_execution_options=(
+                        inference_profile.enabled_execution_options
+                    ),
                     sender_user_id=user_id,
                     order_group=None,
                     order_sequence=0,
@@ -277,6 +294,7 @@ class ChatWriteService:
                 session_id=session_id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
             mailbox_item = result.mailbox_item
 
@@ -548,6 +566,7 @@ class ChatWriteService:
         client_request_id: str,
         model_target_label: str,
         reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
         payload: dict[str, object],
     ) -> AcceptedModelProfile:
         """Replace a root Session's applied model profile idempotently."""
@@ -584,6 +603,9 @@ class ChatWriteService:
                     ),
                     model_target_label=existing_label,
                     reasoning_effort=parsed_effort,
+                    enabled_execution_options=_stored_enabled_execution_options(
+                        existing.payload
+                    ),
                 )
 
             agent = await self.agent_repository.lock_by_id(session, agent_id)
@@ -593,20 +615,14 @@ class ChatWriteService:
                 or agent.workspace_id != locked.workspace_id
             ):
                 raise ValueError("AgentSession is not active")
-            option = next(
-                (
-                    option
-                    for option in agent.selectable_model_options
-                    if option.label == model_target_label
+            validate_requested_profile_against_options(
+                agent.selectable_model_options,
+                RequestedInferenceProfile(
+                    model_target_label=model_target_label,
+                    reasoning_effort=reasoning_effort,
+                    enabled_execution_options=enabled_execution_options,
                 ),
-                None,
             )
-            if option is None:
-                raise ValueError("Model target label is not available")
-            if reasoning_effort is not None and reasoning_effort not in (
-                option.model_selection.normalized_capabilities.reasoning.effort_levels
-            ):
-                raise ValueError("Reasoning effort is not supported by model target")
 
             record, created = await self._create_idempotent_record(
                 session,
@@ -637,6 +653,9 @@ class ChatWriteService:
                     ),
                     model_target_label=existing_label,
                     reasoning_effort=parsed_effort,
+                    enabled_execution_options=_stored_enabled_execution_options(
+                        record.payload
+                    ),
                 )
 
             updated = await self.agent_session_repository.set_applied_inference_profile(
@@ -644,6 +663,7 @@ class ChatWriteService:
                 session_id=session_id,
                 model_target_label=model_target_label,
                 reasoning_effort=reasoning_effort,
+                enabled_execution_options=enabled_execution_options,
             )
             if updated.id != locked.id:
                 raise RuntimeError("AgentSession model profile target changed")
@@ -656,6 +676,7 @@ class ChatWriteService:
             ),
             model_target_label=model_target_label,
             reasoning_effort=reasoning_effort,
+            enabled_execution_options=enabled_execution_options,
         )
 
     def _validate_failed_run_retry_target(

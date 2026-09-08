@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,8 +31,9 @@ class ChatSessionModelProfileResponse(BaseModel):
     session_id: StrictStr = Field(description="AgentSession ID")
     model_target_label: StrictStr = Field(description="Agent-owned selectable model target label")
     reasoning_effort: Optional[ModelReasoningEffort]
+    enabled_execution_options: List[ModelExecutionOptionId] = Field(description="Enabled model execution option IDs")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["session_id", "model_target_label", "reasoning_effort"]
+    __properties: ClassVar[List[str]] = ["session_id", "model_target_label", "reasoning_effort", "enabled_execution_options"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -98,7 +100,8 @@ class ChatSessionModelProfileResponse(BaseModel):
         _obj = cls.model_validate({
             "session_id": obj.get("session_id"),
             "model_target_label": obj.get("model_target_label"),
-            "reasoning_effort": obj.get("reasoning_effort")
+            "reasoning_effort": obj.get("reasoning_effort"),
+            "enabled_execution_options": obj.get("enabled_execution_options")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

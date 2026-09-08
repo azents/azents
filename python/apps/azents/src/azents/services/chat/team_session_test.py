@@ -49,6 +49,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
@@ -101,13 +102,17 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
-from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.turn_action import (
+    make_test_mailbox_promotion_repository,
+    make_test_turn_action_capabilities,
+)
 
 from . import ChatSessionService
 from .data import (
     PrimarySessionArchiveBlocked,
     PrimarySessionPinBlocked,
     RunningSessionArchiveBlocked,
+    UpdateGoalStatusInput,
 )
 
 
@@ -287,6 +292,7 @@ async def _start_scheduled_cycle(
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
         session.add(run)
@@ -438,6 +444,9 @@ def _service(
             ),
             action_execution_repository=ActionExecutionRepository(),
             turn_action_capabilities=make_test_turn_action_capabilities(
+                rdb_session_manager
+            ),
+            promotion_repository=make_test_mailbox_promotion_repository(
                 rdb_session_manager
             ),
             external_channel_repository=ExternalChannelRepository(),
@@ -669,6 +678,86 @@ class _FolderDeleteRunner(RuntimeRunnerOperationClient):
 
 class TestChatSessionTeamSessions:
     """Team session service behavior."""
+
+    async def test_goal_mutations_use_typed_repository_operations(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Goal edit, pause, resume, and clear preserve Chat behavior."""
+        workspace_id = await _create_workspace(rdb_session, "team-goal-mutations")
+        user_id = await _create_user(
+            rdb_session,
+            "team-goal-mutations@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-goal-mutations",
+        )
+        session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        await rdb_session.commit()
+        goal_store = GoalStateStore(session_manager=rdb_session_manager)
+        await goal_store.create(
+            agent_id=agent_id,
+            session_id=session.id,
+            objective="Original objective",
+            updated_at="2026-09-08T00:00:00+00:00",
+        )
+        service = _service(rdb_session_manager)
+
+        edited = await service.update_goal(
+            session.id,
+            user_id=user_id,
+            objective="Updated objective",
+        )
+        assert isinstance(edited, Success)
+        assert edited.value.goal.objective == "Updated objective"
+        assert edited.value.wake_up is True
+        assert edited.value.event is not None
+
+        paused = await service.update_goal_status(
+            session.id,
+            user_id=user_id,
+            input=UpdateGoalStatusInput(status="paused", resume_hint=None),
+        )
+        assert isinstance(paused, Success)
+        assert paused.value.goal.status == "paused"
+        assert paused.value.wake_up is False
+
+        resumed = await service.update_goal_status(
+            session.id,
+            user_id=user_id,
+            input=UpdateGoalStatusInput(
+                status="active",
+                resume_hint="Continue after review.",
+            ),
+        )
+        assert isinstance(resumed, Success)
+        assert resumed.value.goal.status == "active"
+        assert resumed.value.wake_up is True
+        assert resumed.value.event is not None
+
+        cleared = await service.update_goal(
+            session.id,
+            user_id=user_id,
+            objective=None,
+        )
+        assert isinstance(cleared, Success)
+        assert cleared.value.goal.objective is None
+        assert cleared.value.goal.status is None
+        assert cleared.value.wake_up is False
 
     async def test_create_empty_team_session_without_workspace_path(
         self,

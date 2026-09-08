@@ -227,6 +227,7 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             terminal_result_event_id="22222222222222222222222222222222",
             terminal_result_message="partial output",
             parent_result_delivery_state=None,

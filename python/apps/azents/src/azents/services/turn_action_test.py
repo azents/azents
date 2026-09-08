@@ -4,10 +4,14 @@ from typing import cast
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.skill_projection import (
+    SkillProjectionItem,
+    SkillProjectionSnapshot,
+    SkillProjectionState,
+)
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -20,14 +24,7 @@ from azents.engine.events.action_messages import (
     SkillAction,
     TurnAction,
 )
-from azents.engine.tools.goal import GoalStateStore
-from azents.engine.tools.skill import (
-    SkillProjectionItem,
-    SkillProjectionSnapshot,
-    SkillProjectionState,
-    SkillStateStore,
-)
-from azents.repos.agent_session import AgentSessionRepository
+from azents.engine.tools.skill import SkillStateStore
 
 from .turn_action import (
     TurnActionAdmissionError,
@@ -40,6 +37,7 @@ from .turn_action import (
 _PROFILE = RequestedInferenceProfile(
     model_target_label="default",
     reasoning_effort=None,
+    enabled_execution_options=[],
 )
 
 
@@ -60,8 +58,6 @@ def _registry(
 ) -> TurnActionCapabilityRegistry:
     """Create a registry whose stateful dependencies are not used by policy tests."""
     return TurnActionCapabilityRegistry(
-        agent_session_repository=cast(AgentSessionRepository, object()),
-        goal_store=cast(GoalStateStore, object()),
         skill_store=cast(SkillStateStore, skill_store or _SkillStore()),
         vfs_projection_service=None,
     )
@@ -228,8 +224,9 @@ async def test_operation_preparation_returns_neutral_handoff(
     prepared = await _registry().prepare(
         action=action,
         context=TurnActionPreparationContext(
-            session=cast(AsyncSession, object()),
+            agent_id="agent-1",
             session_id="session-1",
+            workspace_id="workspace-1",
             active_run_id="run-1",
             mailbox_item_id="mailbox-1",
             content="",

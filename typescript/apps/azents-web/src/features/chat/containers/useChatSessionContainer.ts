@@ -74,6 +74,7 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
+  ModelExecutionOptionId,
   ModelReasoningEffort,
   PendingMailboxEnvelope,
   RequestedInferenceProfile,
@@ -267,6 +268,15 @@ function reasoningEffortFromValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function executionOptionIdsFromValue(value: unknown): ModelExecutionOptionId[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(
+    (item): item is ModelExecutionOptionId => item === "fast",
+  );
+}
+
 function requestedInferenceProfileFromValue(
   value: unknown,
 ): RequestedInferenceProfile | null {
@@ -285,6 +295,9 @@ function requestedInferenceProfileFromValue(
   return {
     model_target_label: modelTargetLabel,
     reasoning_effort: reasoningEffort,
+    enabled_execution_options: executionOptionIdsFromValue(
+      value.enabled_execution_options,
+    ),
   };
 }
 
@@ -324,6 +337,9 @@ function appliedInferenceProfileFromValue(
     model_display_name:
       typeof modelDisplayName === "string" ? modelDisplayName : null,
     reasoning_effort: reasoningEffort,
+    enabled_execution_options: executionOptionIdsFromValue(
+      value.enabled_execution_options,
+    ),
   };
 }
 
@@ -2038,6 +2054,7 @@ export function useChatSessionContainer(
     () => ({
       model_target_label: agent.main_model_label,
       reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+      enabled_execution_options: [],
     }),
     [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );
@@ -2050,6 +2067,7 @@ export function useChatSessionContainer(
       return {
         model_target_label: session.current_model_target_label,
         reasoning_effort: session.current_reasoning_effort,
+        enabled_execution_options: session.current_enabled_execution_options,
       };
     }, [agentSessionQuery.data]);
 
@@ -3129,6 +3147,7 @@ export function useChatSessionContainer(
           clientRequestId,
           modelTargetLabel: profile.model_target_label,
           reasoningEffort,
+          enabledExecutionOptions: profile.enabled_execution_options,
         });
         failedWriteRequestRef.current = null;
         await utils.chat.getAgentSession.invalidate({

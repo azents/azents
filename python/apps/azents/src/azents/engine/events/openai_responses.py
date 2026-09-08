@@ -76,6 +76,7 @@ from websockets.exceptions import InvalidStatus, WebSocketException
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.file_parts import ModelFileResolver
 from azents.engine.events.protocols import (
@@ -265,6 +266,8 @@ class OpenAIResponsesLowerer:
         top_p: float | None = None,
         stop: list[str] | None = None,
         reasoning_effort: str | None = None,
+        supported_execution_options: Sequence[ModelExecutionOptionId],
+        enabled_execution_options: Sequence[ModelExecutionOptionId],
         hosted_tools: Sequence[BuiltinToolSpec] | None = None,
         prompt_cache_scope: str | None = None,
         model_developer: LLMModelDeveloper | None = None,
@@ -288,6 +291,8 @@ class OpenAIResponsesLowerer:
             top_p=top_p,
             stop=stop,
             reasoning_effort=reasoning_effort,
+            supported_execution_options=supported_execution_options,
+            enabled_execution_options=enabled_execution_options,
             hosted_tools=hosted_tools,
             prompt_cache_scope=prompt_cache_scope,
             model_developer=model_developer,
@@ -1815,7 +1820,13 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
 def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
     """Estimate cost through LiteLLM using only usage and pricing metadata."""
     pricing_model = model.removeprefix("openai/")
-    if pricing_model not in model_cost and f"openai/{pricing_model}" not in model_cost:
+    pricing = model_cost.get(pricing_model) or model_cost.get(f"openai/{pricing_model}")
+    if pricing is None:
+        return None
+    service_tier = (
+        "priority" if response.service_tier == "fast" else response.service_tier
+    )
+    if service_tier == "priority" and not _has_priority_pricing(pricing):
         return None
     minimal_response = ResponsesAPIResponse.model_construct(
         model=model,
@@ -1828,7 +1839,7 @@ def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
             model=model,
             call_type="responses",
             custom_llm_provider="openai",
-            service_tier=response.service_tier,
+            service_tier=service_tier,
         )
     except ValueError:
         return None
@@ -1838,6 +1849,19 @@ def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
     if not math.isfinite(normalized) or normalized < 0:
         return None
     return normalized
+
+
+def _has_priority_pricing(pricing: Mapping[str, object]) -> bool:
+    """Return whether both premium token price directions are available."""
+    return all(
+        isinstance(pricing.get(key), int | float)
+        and not isinstance(pricing.get(key), bool)
+        for key in (
+            "input_cost_per_token_priority",
+            "cache_read_input_token_cost_priority",
+            "output_cost_per_token_priority",
+        )
+    )
 
 
 async def call_openai_responses_text(

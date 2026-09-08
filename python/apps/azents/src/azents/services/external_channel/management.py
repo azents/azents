@@ -4,11 +4,10 @@ import datetime
 import json
 import re
 from dataclasses import dataclass
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Literal
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
@@ -18,8 +17,6 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
-    ExternalChannelRouteCatalogStatus,
-    ExternalChannelRouteMode,
     ExternalChannelTransport,
 )
 from azents.core.external_channel_provider import (
@@ -30,29 +27,18 @@ from azents.core.external_channel_provider import (
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.models.external_channel import RDBExternalChannelConnection
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.external_channel.data import (
-    ExternalChannelAgentRouteCreate,
     ExternalChannelMultiConnectionDisconnect,
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
 )
-from azents.repos.external_channel.lifecycle import (
-    ExternalChannelLifecycleRepository,
-)
 from azents.repos.external_channel.management import (
     ExternalChannelChannelDefaultTransition,
-    ExternalChannelManagementRepository,
 )
 from azents.repos.external_channel.management_data import (
     ManagedApprovalRequest,
     ManagedBinding,
-    ManagedBlock,
     ManagedChannelDefault,
     ManagedChannelDefaultMutation,
     ManagedConnection,
@@ -62,8 +48,13 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.external_channel.management_operation_data import (
+    ExternalChannelManagementNotFound,
+    ManagedAgentAccess,
+)
+from azents.repos.external_channel.management_operations import (
+    ExternalChannelManagementOperationRepository,
+)
 from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.connection import (
@@ -94,14 +85,6 @@ from azents.services.external_channel.slack_http import (
     SLACK_REQUIRED_BOT_SCOPES,
     SLACK_SETTINGS_SHORTCUT_CALLBACK_ID,
 )
-
-
-class ExternalChannelManagementNotFound(LookupError):
-    """A management resource is unavailable to the caller."""
-
-
-class ExternalChannelManagementGenerationChanged(RuntimeError):
-    """A destructive management request observed a newer Multi App generation."""
 
 
 class ManagedConnectionSetup(BaseModel):
@@ -171,40 +154,12 @@ class DiscordUrlPreviewSuppressionSetting(BaseModel):
     suppress_url_previews: bool
 
 
-class ManagedAgentAccess(NamedTuple):
-    """Current Agent-level access grants and blocks."""
-
-    grants: list[ManagedGrant]
-    blocks: list[ManagedBlock]
-
-
 @dataclass
 class ExternalChannelManagementService:
     """Authorize and orchestrate External Channel management boundaries."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    repository: Annotated[
-        ExternalChannelManagementRepository,
-        Depends(ExternalChannelManagementRepository.create),
-    ]
-    domain_repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ]
-    lifecycle_repository: Annotated[
-        ExternalChannelLifecycleRepository,
-        Depends(ExternalChannelLifecycleRepository.create),
-    ]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_admin_repository: Annotated[
-        AgentAdminRepository,
-        Depends(AgentAdminRepository),
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository,
-        Depends(WorkspaceUserRepository),
+    operation_repository: Annotated[
+        ExternalChannelManagementOperationRepository, Depends()
     ]
     connection_service: Annotated[
         ExternalChannelConnectionService,
@@ -238,18 +193,11 @@ class ExternalChannelManagementService:
         agent_id: str,
         workspace_user_id: str,
     ) -> list[ManagedConnection]:
-        await self._require_agent(
+        return await self.operation_repository.list_connections(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=False,
         )
-        async with self.session_manager() as session:
-            return await self.repository.list_connections(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
 
     async def get_default_response_mode(
         self,
@@ -278,27 +226,13 @@ class ExternalChannelManagementService:
         setting: ExternalChannelResponseModeSetting,
     ) -> ExternalChannelResponseModeSetting:
         """Replace only the Agent default without rewriting existing bindings."""
-        await self._require_agent(
+        response_mode = await self.operation_repository.update_default_response_mode(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=True,
+            response_mode=setting.response_mode,
         )
-        async with self.session_manager() as session:
-            update_default = (
-                self.agent_repository.update_external_channel_default_response_mode
-            )
-            agent = await update_default(
-                session,
-                agent_id=agent_id,
-                response_mode=setting.response_mode,
-            )
-            if agent is None or agent.workspace_id != workspace_id:
-                raise ExternalChannelManagementNotFound(agent_id)
-            await session.commit()
-        return ExternalChannelResponseModeSetting(
-            response_mode=agent.external_channel_default_response_mode
-        )
+        return ExternalChannelResponseModeSetting(response_mode=response_mode)
 
     async def list_agent_multi_connections(
         self,
@@ -308,18 +242,11 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
     ) -> list[ManagedMultiConnection]:
         """List read-only Multi Apps associated with one visible Agent."""
-        await self._require_agent(
+        return await self.operation_repository.list_agent_multi_connections(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=False,
         )
-        async with self.session_manager() as session:
-            return await self.repository.list_agent_multi_connections(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
 
     async def setup_slack(
         self,
@@ -343,23 +270,12 @@ class ExternalChannelManagementService:
             transport=transport,
             credentials=credentials,
         )
-        async with self.session_manager() as session:
-            await self.domain_repository.create_agent_route(
-                session,
-                ExternalChannelAgentRouteCreate(
-                    connection_id=setup.connection.id,
-                    agent_id=agent_id,
-                    agent_id_snapshot=agent_id,
-                    route_mode=ExternalChannelRouteMode.DEDICATED,
-                    connection_app_mode=ExternalChannelAppMode.SINGLE,
-                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
-                    catalog_removed_at=None,
-                    catalog_removed_by_user_id=None,
-                ),
-            )
-            await session.commit()
+        await self.operation_repository.create_dedicated_route(
+            connection_id=setup.connection.id, agent_id=agent_id
+        )
         await self.connection_service.validate_connection(
-            connection_id=setup.connection.id
+            workspace_id=workspace_id,
+            connection_id=setup.connection.id,
         )
         connections = await self.list_connections(
             workspace_id=workspace_id,
@@ -394,21 +310,9 @@ class ExternalChannelManagementService:
             configuration=configuration,
             credentials=credentials,
         )
-        async with self.session_manager() as session:
-            await self.domain_repository.create_agent_route(
-                session,
-                ExternalChannelAgentRouteCreate(
-                    connection_id=setup.connection.id,
-                    agent_id=agent_id,
-                    agent_id_snapshot=agent_id,
-                    route_mode=ExternalChannelRouteMode.DEDICATED,
-                    connection_app_mode=ExternalChannelAppMode.SINGLE,
-                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
-                    catalog_removed_at=None,
-                    catalog_removed_by_user_id=None,
-                ),
-            )
-            await session.commit()
+        await self.operation_repository.create_dedicated_route(
+            connection_id=setup.connection.id, agent_id=agent_id
+        )
         await self.discord_activation_service.activate(
             connection_id=setup.connection.id
         )
@@ -431,14 +335,9 @@ class ExternalChannelManagementService:
         limit: int,
     ) -> list[ManagedMultiConnection]:
         """List redacted Workspace-owned Multi Apps for one optional provider."""
-        async with self.session_manager() as session:
-            return await self.repository.list_multi_connections(
-                session,
-                workspace_id=workspace_id,
-                provider=provider,
-                offset=offset,
-                limit=limit,
-            )
+        return await self.operation_repository.list_multi_connections(
+            workspace_id=workspace_id, provider=provider, offset=offset, limit=limit
+        )
 
     async def get_multi_connection(
         self,
@@ -449,17 +348,12 @@ class ExternalChannelManagementService:
         include_disconnected: bool = False,
     ) -> ManagedMultiConnection:
         """Load one provider-scoped Workspace Multi App."""
-        async with self.session_manager() as session:
-            connection = await self.repository.get_managed_multi_connection(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                include_disconnected=include_disconnected,
-            )
-        if connection is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        return connection
+        return await self.operation_repository.get_multi_connection(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            include_disconnected=include_disconnected,
+        )
 
     async def setup_multi_slack(
         self,
@@ -478,7 +372,8 @@ class ExternalChannelManagementService:
             app_mode=ExternalChannelAppMode.MULTI,
         )
         await self.connection_service.validate_connection(
-            connection_id=setup.connection.id
+            workspace_id=workspace_id,
+            connection_id=setup.connection.id,
         )
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
@@ -531,7 +426,8 @@ class ExternalChannelManagementService:
                 connection_id=connection_id
             )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_multi_slack(
@@ -560,20 +456,16 @@ class ExternalChannelManagementService:
             )
         )
         encrypted = self.connection_service.credentials_codec.encrypt(validated)
-        async with self.session_manager() as session:
-            connection = await self.repository.replace_multi_slack_configuration(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider_app_id=app_id,
-                transport=transport,
-                encrypted_credentials=encrypted,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+        await self.operation_repository.replace_multi_slack_configuration(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            app_id=app_id,
+            encrypted=encrypted,
+            transport=transport,
+        )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_multi_discord(
@@ -598,18 +490,13 @@ class ExternalChannelManagementService:
             )
         )
         encrypted = self.connection_service.credentials_codec.encrypt(validated)
-        async with self.session_manager() as session:
-            connection = await self.repository.replace_multi_discord_configuration(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider_app_id=app_id,
-                encrypted_credentials=encrypted,
-                provider_config=configuration.model_dump(mode="json"),
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+        await self.operation_repository.replace_multi_discord_configuration(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            app_id=app_id,
+            encrypted=encrypted,
+            provider_config=configuration.model_dump(mode="json"),
+        )
         return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
@@ -623,25 +510,16 @@ class ExternalChannelManagementService:
         setting: DiscordThreadAutoArchiveDurationSetting,
     ) -> ManagedMultiConnection:
         """Replace one Multi App Thread policy without provider reactivation."""
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
+        return await (
+            self.operation_repository.update_multi_discord_thread_auto_archive_duration(
                 workspace_id=workspace_id,
                 connection_id=connection_id,
-                provider=ExternalChannelProvider.DISCORD,
                 expected_generation=expected_generation,
+                thread_auto_archive_duration_minutes=(
+                    setting.thread_auto_archive_duration_minutes
+                ),
             )
-            managed = (
-                await self.repository.update_multi_discord_thread_auto_archive_duration(
-                    session,
-                    connection=connection,
-                    duration=setting.thread_auto_archive_duration_minutes,
-                )
-            )
-            if managed is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return managed
+        )
 
     async def update_multi_discord_url_preview_suppression(
         self,
@@ -652,25 +530,14 @@ class ExternalChannelManagementService:
         setting: DiscordUrlPreviewSuppressionSetting,
     ) -> ManagedMultiConnection:
         """Replace one Multi App URL-preview policy without reactivation."""
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
+        return await (
+            self.operation_repository.update_multi_discord_url_preview_suppression(
                 workspace_id=workspace_id,
                 connection_id=connection_id,
-                provider=ExternalChannelProvider.DISCORD,
                 expected_generation=expected_generation,
+                suppress_url_previews=setting.suppress_url_previews,
             )
-            managed = (
-                await self.repository.update_multi_discord_url_preview_suppression(
-                    session,
-                    connection=connection,
-                    suppress_url_previews=setting.suppress_url_previews,
-                )
-            )
-            if managed is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return managed
+        )
 
     async def list_multi_routes(
         self,
@@ -682,18 +549,13 @@ class ExternalChannelManagementService:
         limit: int,
     ) -> list[ManagedMultiRoute]:
         """List the complete paged catalog, including removed history."""
-        async with self.session_manager() as session:
-            routes = await self.repository.list_multi_routes(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                offset=offset,
-                limit=limit,
-            )
-        if routes is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        return routes
+        return await self.operation_repository.list_multi_routes(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            offset=offset,
+            limit=limit,
+        )
 
     async def add_multi_route(
         self,
@@ -704,64 +566,12 @@ class ExternalChannelManagementService:
         agent_id: str,
     ) -> ManagedMultiRoute:
         """Add one active Workspace Agent to a Multi App catalog."""
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            connection = await self.repository.get_multi_connection(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                lock=True,
-            )
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                connection is None
-                or agent is None
-                or agent.workspace_id != workspace_id
-            ):
-                raise ExternalChannelManagementNotFound(connection_id)
-            existing = await self.repository.get_multi_route_by_agent(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection.id,
-                provider=provider,
-                agent_id=agent_id,
-            )
-            if existing is not None:
-                if (
-                    existing.catalog_status
-                    is ExternalChannelRouteCatalogStatus.AVAILABLE
-                    and existing.agent_id == agent_id
-                ):
-                    return existing
-                raise ValueError(
-                    "Removed Multi App Agent associations must be re-enabled."
-                )
-            route = await self.domain_repository.create_agent_route(
-                session,
-                ExternalChannelAgentRouteCreate(
-                    connection_id=connection.id,
-                    agent_id=agent_id,
-                    agent_id_snapshot=agent_id,
-                    route_mode=ExternalChannelRouteMode.DEDICATED,
-                    connection_app_mode=ExternalChannelAppMode.MULTI,
-                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
-                    catalog_removed_at=None,
-                    catalog_removed_by_user_id=None,
-                ),
-            )
-            connection.updated_at = now
-            await session.commit()
-            managed = await self.repository.get_multi_route(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                route_id=route.id,
-            )
-        if managed is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        return managed
+        return await self.operation_repository.add_multi_route(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            agent_id=agent_id,
+        )
 
     async def get_multi_route_impact(
         self,
@@ -772,24 +582,12 @@ class ExternalChannelManagementService:
         route_id: str,
     ) -> ExternalChannelMultiRouteImpact:
         """Return a sanitized count-only removal impact preview."""
-        async with self.session_manager() as session:
-            connection = await self.repository.get_multi_connection(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                include_disconnected=True,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            impact = await self.lifecycle_repository.project_multi_route_impact(
-                session,
-                connection_id=connection_id,
-                route_id=route_id,
-            )
-        if impact is None:
-            raise ExternalChannelManagementNotFound(route_id)
-        return impact
+        return await self.operation_repository.get_multi_route_impact(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            route_id=route_id,
+        )
 
     async def get_multi_connection_impact(
         self,
@@ -799,22 +597,9 @@ class ExternalChannelManagementService:
         provider: ExternalChannelProvider,
     ) -> ExternalChannelMultiConnectionImpact:
         """Return sanitized impact before disconnecting one whole Multi App."""
-        async with self.session_manager() as session:
-            connection = await self.repository.get_multi_connection(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            impact = await self.lifecycle_repository.project_multi_connection_impact(
-                session,
-                connection_id=connection.id,
-            )
-        if impact is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        return impact
+        return await self.operation_repository.get_multi_connection_impact(
+            workspace_id=workspace_id, connection_id=connection_id, provider=provider
+        )
 
     async def remove_multi_route(
         self,
@@ -827,27 +612,14 @@ class ExternalChannelManagementService:
         expected_generation: datetime.datetime,
     ) -> ExternalChannelMultiRouteImpact:
         """Generation-fence one destructive Multi App catalog removal."""
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                expected_generation=expected_generation,
-                include_disconnected=True,
-            )
-            removal = await self.lifecycle_repository.remove_multi_route(
-                session,
-                connection_id=connection.id,
-                route_id=route_id,
-                removed_by_user_id=user_id,
-                now=now,
-            )
-            if removal is None:
-                raise ExternalChannelManagementNotFound(route_id)
-            connection.updated_at = now
-            await session.commit()
+        removal = await self.operation_repository.remove_multi_route(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            route_id=route_id,
+            user_id=user_id,
+            expected_generation=expected_generation,
+        )
         for plan in removal.cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
         return removal.impact
@@ -861,35 +633,12 @@ class ExternalChannelManagementService:
         route_id: str,
     ) -> ManagedMultiRoute:
         """Re-enable a removed Multi App route without reviving old state."""
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            connection = await self.repository.get_multi_connection(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                lock=True,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            if not await self.lifecycle_repository.reenable_multi_route(
-                session,
-                connection_id=connection_id,
-                route_id=route_id,
-            ):
-                raise ExternalChannelManagementNotFound(route_id)
-            connection.updated_at = now
-            await session.commit()
-            route = await self.repository.get_multi_route(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                route_id=route_id,
-            )
-        if route is None:
-            raise ExternalChannelManagementNotFound(route_id)
-        return route
+        return await self.operation_repository.reenable_multi_route(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            route_id=route_id,
+        )
 
     async def list_multi_channel_defaults(
         self,
@@ -901,18 +650,13 @@ class ExternalChannelManagementService:
         limit: int,
     ) -> list[ManagedChannelDefault]:
         """List paged Multi App channel defaults without channel message content."""
-        async with self.session_manager() as session:
-            defaults = await self.repository.list_multi_channel_defaults(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                offset=offset,
-                limit=limit,
-            )
-        if defaults is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        return defaults
+        return await self.operation_repository.list_multi_channel_defaults(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            offset=offset,
+            limit=limit,
+        )
 
     async def replace_multi_channel_default(
         self,
@@ -950,29 +694,18 @@ class ExternalChannelManagementService:
                 deadline=deadline,
             ) as participation_lease:
                 await participation_lease.assert_owned()
-                async with self.session_manager() as session:
-                    connection = await self._lock_multi_connection_generation(
-                        session,
+                transition = (
+                    await self.operation_repository.replace_multi_channel_default(
                         workspace_id=workspace_id,
                         connection_id=connection_id,
                         provider=provider,
-                        expected_generation=expected_generation,
-                    )
-                    transition = await self.repository.replace_multi_channel_default(
-                        session,
-                        workspace_id=workspace_id,
-                        connection_id=connection.id,
-                        provider=provider,
                         provider_channel_id=provider_channel_id,
                         route_id=route_id,
-                        configured_by_user_id=user_id,
+                        user_id=user_id,
+                        expected_generation=expected_generation,
                         now=now,
                     )
-                    if transition is None or transition.channel_default is None:
-                        raise ExternalChannelManagementNotFound(route_id)
-                    if transition.changed:
-                        connection.updated_at = now
-                    await session.commit()
+                )
         for plan in transition.cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
         return _managed_channel_default_mutation(transition)
@@ -1011,26 +744,16 @@ class ExternalChannelManagementService:
                 deadline=deadline,
             ) as participation_lease:
                 await participation_lease.assert_owned()
-                async with self.session_manager() as session:
-                    connection = await self._lock_multi_connection_generation(
-                        session,
+                transition = (
+                    await self.operation_repository.clear_multi_channel_default(
                         workspace_id=workspace_id,
                         connection_id=connection_id,
                         provider=provider,
-                        expected_generation=expected_generation,
-                    )
-                    transition = await self.repository.clear_multi_channel_default(
-                        session,
-                        workspace_id=workspace_id,
-                        connection_id=connection.id,
-                        provider=provider,
                         provider_channel_id=provider_channel_id,
+                        expected_generation=expected_generation,
                         now=now,
                     )
-                    if transition is None:
-                        raise ExternalChannelManagementNotFound(provider_channel_id)
-                    connection.updated_at = now
-                    await session.commit()
+                )
         for plan in transition.cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
         return _managed_channel_default_mutation(transition)
@@ -1044,38 +767,15 @@ class ExternalChannelManagementService:
         expected_generation: datetime.datetime,
     ) -> ManagedMultiConnectionDisconnect:
         """Generation-fence terminal Multi App disconnect around provider I/O."""
-        now = datetime.datetime.now(datetime.UTC)
-        cleanup_plans = ()
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                expected_generation=expected_generation,
-                include_disconnected=True,
-            )
-            disconnected = await self.lifecycle_repository.disconnect_multi_connection(
-                session,
-                connection_id=connection.id,
-                now=now,
-                reason="manager_disconnected",
-                defer_provider_state_purge=True,
-            )
-            if disconnected is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            cleanup_plans = disconnected.cleanup_plans
-            await (
-                self.lifecycle_repository.purge_disconnected_connection_provider_state(
-                    session,
-                    connection_ids=[connection.id],
-                )
-            )
-            connection.updated_at = now
-            await session.commit()
-        for plan in cleanup_plans:
+        result = await self.operation_repository.disconnect_multi_connection(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            provider=provider,
+            expected_generation=expected_generation,
+        )
+        for plan in result.cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
-        return _managed_multi_disconnect(disconnected)
+        return _managed_multi_disconnect(result)
 
     async def load_multi_management_handoff(
         self,
@@ -1084,17 +784,9 @@ class ExternalChannelManagementService:
         interaction_id: str,
     ) -> ManagedSlackManagementHandoff:
         """Load one opaque Slack management handoff after Workspace authorization."""
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            handoff = await self.repository.load_multi_management_handoff(
-                session,
-                workspace_id=workspace_id,
-                interaction_id=interaction_id,
-                now=now,
-            )
-        if handoff is None:
-            raise ExternalChannelManagementNotFound(interaction_id)
-        return handoff
+        return await self.operation_repository.load_multi_management_handoff(
+            workspace_id=workspace_id, interaction_id=interaction_id
+        )
 
     async def validate_connection(
         self,
@@ -1104,25 +796,19 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         connection_id: str,
     ) -> ExternalChannelConnectionStatusSnapshot:
-        await self._require_owned_connection(
+        provider = await self.operation_repository.get_owned_connection_provider(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
             connection_id=connection_id,
         )
-        async with self.session_manager() as session:
-            connection = await self.domain_repository.get_connection(
-                session,
-                connection_id=connection_id,
-            )
-        if connection is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        if connection.provider is ExternalChannelProvider.DISCORD:
+        if provider is ExternalChannelProvider.DISCORD:
             return await self.discord_activation_service.activate(
                 connection_id=connection_id
             )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_slack(
@@ -1158,21 +844,17 @@ class ExternalChannelManagementService:
             ),
         )
         encrypted = self.connection_service.credentials_codec.encrypt(validated)
-        async with self.session_manager() as session:
-            connection = await self.repository.replace_slack_configuration(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                provider_app_id=app_id,
-                transport=transport,
-                encrypted_credentials=encrypted,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+        await self.operation_repository.replace_slack_configuration(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            app_id=app_id,
+            encrypted=encrypted,
+            agent_id=agent_id,
+            transport=transport,
+        )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_discord(
@@ -1205,19 +887,14 @@ class ExternalChannelManagementService:
             )
         )
         encrypted = self.connection_service.credentials_codec.encrypt(validated)
-        async with self.session_manager() as session:
-            connection = await self.repository.replace_discord_configuration(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                provider_app_id=app_id,
-                encrypted_credentials=encrypted,
-                provider_config=configuration.model_dump(mode="json"),
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+        await self.operation_repository.replace_discord_configuration(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            app_id=app_id,
+            encrypted=encrypted,
+            agent_id=agent_id,
+            provider_config=configuration.model_dump(mode="json"),
+        )
         return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
@@ -1232,26 +909,17 @@ class ExternalChannelManagementService:
         setting: DiscordThreadAutoArchiveDurationSetting,
     ) -> ManagedConnection:
         """Replace one dedicated Thread policy without provider reactivation."""
-        await self._require_owned_connection(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            workspace_user_id=workspace_user_id,
-            connection_id=connection_id,
-        )
-        async with self.session_manager() as session:
-            connection = (
-                await self.repository.update_discord_thread_auto_archive_duration(
-                    session,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    connection_id=connection_id,
-                    duration=setting.thread_auto_archive_duration_minutes,
-                )
+        return await (
+            self.operation_repository.update_discord_thread_auto_archive_duration(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                workspace_user_id=workspace_user_id,
+                connection_id=connection_id,
+                thread_auto_archive_duration_minutes=(
+                    setting.thread_auto_archive_duration_minutes
+                ),
             )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return connection
+        )
 
     async def update_discord_url_preview_suppression(
         self,
@@ -1263,24 +931,13 @@ class ExternalChannelManagementService:
         setting: DiscordUrlPreviewSuppressionSetting,
     ) -> ManagedConnection:
         """Replace one dedicated URL-preview policy without reactivation."""
-        await self._require_owned_connection(
+        return await self.operation_repository.update_discord_url_preview_suppression(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
             connection_id=connection_id,
+            suppress_url_previews=setting.suppress_url_previews,
         )
-        async with self.session_manager() as session:
-            connection = await self.repository.update_discord_url_preview_suppression(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                suppress_url_previews=setting.suppress_url_previews,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return connection
 
     async def disconnect_connection(
         self,
@@ -1290,46 +947,15 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         connection_id: str,
     ) -> ManagedConnection:
-        await self._require_agent(
+        result = await self.operation_repository.disconnect_connection(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=True,
+            connection_id=connection_id,
         )
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            cleanup_plans = await self.repository.begin_connection_disconnect(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                now=now,
-            )
-            if cleanup_plans is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        async with self.session_manager() as session:
-            disconnected = await self.lifecycle_repository.disconnect_single_connection(
-                session,
-                connection_id=connection_id,
-                now=datetime.datetime.now(datetime.UTC),
-                reason="manager_disconnected",
-            )
-            if disconnected is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            connection = await self.repository.complete_connection_disconnect(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        for plan in cleanup_plans:
+        for plan in result.cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
-        return connection
+        return result.connection
 
     async def update_connection_access_policy(
         self,
@@ -1341,24 +967,13 @@ class ExternalChannelManagementService:
         policy: ExternalChannelAccessPolicyInput,
     ) -> ManagedConnection:
         """Update one dedicated connection's route-scoped ingress policy."""
-        await self._require_owned_connection(
+        return await self.operation_repository.update_connection_access_policy(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
             connection_id=connection_id,
+            open_access_enabled=policy.open_access_enabled,
         )
-        async with self.session_manager() as session:
-            connection = await self.repository.update_connection_access_policy(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                open_access_enabled=policy.open_access_enabled,
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return connection
 
     async def list_bindings(
         self,
@@ -1367,13 +982,11 @@ class ExternalChannelManagementService:
         agent_id: str,
         agent_session_id: str,
     ) -> list[ManagedBinding]:
-        async with self.session_manager() as session:
-            return await self.repository.list_bindings(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                agent_session_id=agent_session_id,
-            )
+        return await self.operation_repository.list_bindings(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+        )
 
     async def disconnect_binding(
         self,
@@ -1390,19 +1003,13 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             admin=True,
         )
-        async with self.session_manager() as session:
-            cleanup_plans = await self.repository.disconnect_binding(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                agent_session_id=agent_session_id,
-                binding_id=binding_id,
-                now=datetime.datetime.now(datetime.UTC),
-                reason="manager_disconnected",
-            )
-            if cleanup_plans is None:
-                raise ExternalChannelManagementNotFound(binding_id)
-            await session.commit()
+        cleanup_plans = await self.operation_repository.disconnect_binding(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+            binding_id=binding_id,
+            now=datetime.datetime.now(datetime.UTC),
+        )
         for plan in cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
         return await self.list_bindings(
@@ -1429,14 +1036,12 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             admin=True,
         )
-        async with self.session_manager() as session:
-            scope = await self.repository.get_binding_mutation_scope(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                agent_session_id=agent_session_id,
-                binding_id=binding_id,
-            )
+        scope = await self.operation_repository.get_binding_mutation_scope(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+            binding_id=binding_id,
+        )
         if scope is None:
             raise ExternalChannelManagementNotFound(binding_id)
         if scope.resource_type is ExternalChannelResourceType.PARENT_CHANNEL:
@@ -1464,33 +1069,23 @@ class ExternalChannelManagementService:
                     deadline=deadline,
                 ) as participation_lease:
                     await participation_lease.assert_owned()
-                    async with self.session_manager() as session:
-                        updated = await self.repository.update_binding_response_mode(
-                            session,
-                            workspace_id=workspace_id,
-                            agent_id=agent_id,
-                            agent_session_id=agent_session_id,
-                            binding_id=binding_id,
-                            configured_by_user_id=user_id,
-                            response_mode=setting.response_mode,
-                        )
-                        if not updated:
-                            raise ExternalChannelManagementNotFound(binding_id)
-                        await session.commit()
+                    await self.operation_repository.update_binding_response_mode(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        agent_session_id=agent_session_id,
+                        binding_id=binding_id,
+                        user_id=user_id,
+                        response_mode=setting.response_mode,
+                    )
         else:
-            async with self.session_manager() as session:
-                updated = await self.repository.update_binding_response_mode(
-                    session,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    agent_session_id=agent_session_id,
-                    binding_id=binding_id,
-                    configured_by_user_id=user_id,
-                    response_mode=setting.response_mode,
-                )
-                if not updated:
-                    raise ExternalChannelManagementNotFound(binding_id)
-                await session.commit()
+            await self.operation_repository.update_binding_response_mode(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                agent_session_id=agent_session_id,
+                binding_id=binding_id,
+                user_id=user_id,
+                response_mode=setting.response_mode,
+            )
         bindings = await self.list_bindings(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -1508,21 +1103,11 @@ class ExternalChannelManagementService:
         agent_id: str,
         workspace_user_id: str,
     ) -> ManagedAgentAccess:
-        await self._require_agent(
+        return await self.operation_repository.list_agent_access(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=False,
         )
-        async with self.session_manager() as session:
-            return ManagedAgentAccess(
-                await self.repository.list_grants(
-                    session,
-                    agent_id=agent_id,
-                    agent_session_id=None,
-                ),
-                await self.repository.list_blocks(session, agent_id=agent_id),
-            )
 
     async def list_session_grants(
         self,
@@ -1532,18 +1117,12 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         agent_session_id: str,
     ) -> list[ManagedGrant]:
-        await self._require_agent(
+        return await self.operation_repository.list_session_grants(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=False,
+            agent_session_id=agent_session_id,
         )
-        async with self.session_manager() as session:
-            return await self.repository.list_grants(
-                session,
-                agent_id=agent_id,
-                agent_session_id=agent_session_id,
-            )
 
     async def revoke_grant(
         self,
@@ -1560,14 +1139,9 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             admin=True,
         )
-        async with self.session_manager() as session:
-            owned = await self.repository.grant_belongs_to_agent(
-                session,
-                agent_id=agent_id,
-                grant_id=grant_id,
-            )
-        if not owned:
-            raise ExternalChannelManagementNotFound(grant_id)
+        await self.operation_repository.require_owned_grant(
+            agent_id=agent_id, grant_id=grant_id
+        )
         await self.access_service.revoke_grant(
             grant_id=grant_id,
         )
@@ -1587,14 +1161,9 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             admin=True,
         )
-        async with self.session_manager() as session:
-            owned = await self.repository.block_belongs_to_agent(
-                session,
-                agent_id=agent_id,
-                block_id=block_id,
-            )
-        if not owned:
-            raise ExternalChannelManagementNotFound(block_id)
+        await self.operation_repository.require_owned_block(
+            agent_id=agent_id, block_id=block_id
+        )
         await self.access_service.remove_block(
             block_id=block_id,
             removed_by_user_id=user_id,
@@ -1607,25 +1176,9 @@ class ExternalChannelManagementService:
         access_request_id: str,
         user_id: str,
     ) -> ManagedApprovalRequest:
-        async with self.session_manager() as session:
-            request = await self.repository.get_approval_request(
-                session,
-                access_request_id=access_request_id,
-            )
-            if request is None:
-                raise ExternalChannelManagementNotFound(access_request_id)
-            member = await self.workspace_user_repository.get_by_workspace_and_user(
-                session,
-                request.workspace_id,
-                user_id,
-            )
-            if member is None or not await self.agent_admin_repository.is_admin(
-                session,
-                request.agent_id,
-                member.id,
-            ):
-                raise ExternalChannelManagementNotFound(access_request_id)
-            return request
+        return await self.operation_repository.get_approval(
+            access_request_id=access_request_id, user_id=user_id
+        )
 
     async def decide_approval(
         self,
@@ -1673,33 +1226,6 @@ class ExternalChannelManagementService:
             user_id=user_id,
         )
 
-    async def _lock_multi_connection_generation(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        connection_id: str,
-        provider: ExternalChannelProvider,
-        expected_generation: datetime.datetime,
-        include_disconnected: bool = False,
-    ) -> RDBExternalChannelConnection:
-        """Lock one Multi App and reject a stale destructive mutation."""
-        connection = await self.repository.get_multi_connection(
-            session,
-            workspace_id=workspace_id,
-            connection_id=connection_id,
-            provider=provider,
-            lock=True,
-            include_disconnected=include_disconnected,
-        )
-        if connection is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        if connection.updated_at != expected_generation:
-            raise ExternalChannelManagementGenerationChanged(
-                "The Multi App changed. Reload it before retrying the operation."
-            )
-        return connection
-
     async def _require_owned_connection(
         self,
         *,
@@ -1708,23 +1234,12 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         connection_id: str,
     ) -> None:
-        await self._require_agent(
+        return await self.operation_repository.require_owned_connection(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            admin=True,
+            connection_id=connection_id,
         )
-        async with self.session_manager() as session:
-            if (
-                await self.repository.get_connection(
-                    session,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    connection_id=connection_id,
-                )
-                is None
-            ):
-                raise ExternalChannelManagementNotFound(connection_id)
 
     async def _require_agent(
         self,
@@ -1734,17 +1249,12 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         admin: bool,
     ) -> Agent:
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None or agent.workspace_id != workspace_id:
-                raise ExternalChannelManagementNotFound(agent_id)
-            if admin and not await self.agent_admin_repository.is_admin(
-                session,
-                agent_id,
-                workspace_user_id,
-            ):
-                raise ExternalChannelManagementNotFound(agent_id)
-            return agent
+        return await self.operation_repository.require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=admin,
+        )
 
 
 def _managed_multi_disconnect(

@@ -290,12 +290,14 @@ def test_user_message_preserves_requested_inference_profile() -> None:
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
     )
 
     assert payload.model_dump(mode="json")["requested_inference_profile"] == {
         "model_target_label": "Quality",
         "reasoning_effort": None,
+        "enabled_execution_options": [],
     }
 
 
@@ -307,6 +309,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
             model_target_label="Quality",
             model_display_name="GPT 5.5",
             reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[],
         ),
     )
 
@@ -319,6 +322,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
             "model_target_label": "Quality",
             "model_display_name": "GPT 5.5",
             "reasoning_effort": "high",
+            "enabled_execution_options": [],
         },
     }
 

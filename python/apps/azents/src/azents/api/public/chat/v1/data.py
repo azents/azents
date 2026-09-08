@@ -20,11 +20,14 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
+from azents.core.goal import GoalStateSnapshot
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+    default_historical_execution_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
@@ -33,7 +36,6 @@ from azents.engine.events.action_messages import (
     PersistedChatAction,
 )
 from azents.engine.events.types import Event, UserMessagePayload, public_event_payload
-from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
 from azents.rdb.models.event import JSONValue
 from azents.repos.action_execution.data import (
@@ -640,6 +642,13 @@ class ChatSessionModelProfileUpdateRequest(BaseModel):
     reasoning_effort: ModelReasoningEffort | None = Field(
         description="Explicit reasoning effort, or null for model Default",
     )
+    enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Explicitly enabled model execution option IDs",
+    )
+
+    _decode_historical_execution_options = model_validator(mode="before")(
+        default_historical_execution_options
+    )
 
 
 class ChatSessionModelProfileResponse(BaseModel):
@@ -651,6 +660,9 @@ class ChatSessionModelProfileResponse(BaseModel):
     )
     reasoning_effort: ModelReasoningEffort | None = Field(
         description="Explicit reasoning effort, or null for model Default",
+    )
+    enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Enabled model execution option IDs",
     )
 
 
@@ -2028,6 +2040,9 @@ class AgentSessionResponse(BaseModel):
     current_reasoning_effort: ModelReasoningEffort | None = Field(
         description="Reasoning effort prepared for the next turn, or null for Default",
     )
+    current_enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Execution options applied to future Session turns",
+    )
     title: str | None = Field(description="User-facing session title")
     title_source: AgentSessionTitleSource | None = Field(
         description="Source of the current session title",
@@ -2088,6 +2103,11 @@ class AgentSessionResponse(BaseModel):
                 session.applied_inference_profile.reasoning_effort
                 if session.applied_inference_profile is not None
                 else None
+            ),
+            current_enabled_execution_options=(
+                session.applied_inference_profile.enabled_execution_options
+                if session.applied_inference_profile is not None
+                else []
             ),
             title=session.title,
             title_source=session.title_source,

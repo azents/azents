@@ -131,8 +131,6 @@ class TestGoogleAnalyticsProviderValidation:
         """Valid SA Key passes."""
         provider = GoogleAnalyticsToolkitProvider()
         result = await provider.validate_credentials(
-            session=AsyncMock(),
-            user_id="user",
             credentials={
                 "service_account_key": {
                     "type": "service_account",
@@ -150,8 +148,6 @@ class TestGoogleAnalyticsProviderValidation:
         """Return error message when credentials is None."""
         provider = GoogleAnalyticsToolkitProvider()
         result = await provider.validate_credentials(
-            session=AsyncMock(),
-            user_id="user",
             credentials=None,
         )
         assert result is not None
@@ -162,8 +158,6 @@ class TestGoogleAnalyticsProviderValidation:
         """Return error message when required field is missing."""
         provider = GoogleAnalyticsToolkitProvider()
         result = await provider.validate_credentials(
-            session=AsyncMock(),
-            user_id="user",
             credentials={
                 "service_account_key": {
                     "type": "service_account",

@@ -223,6 +223,11 @@ class RDBLLMCatalogEntry(RDBModel):
     normalized_capabilities: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False
     )
+    supported_execution_options: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
     lifecycle_status: Mapped[LLMModelLifecycleStatus] = mapped_column(
         llm_model_lifecycle_status_enum, nullable=False
     )

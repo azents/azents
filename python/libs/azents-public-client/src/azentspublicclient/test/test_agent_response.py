@@ -45,7 +45,15 @@ class TestAgentResponse(unittest.TestCase):
                     'key' : null
                     },
                 selectable_model_options = [
-                    { }
+                    azentspublicclient.models.selectable_model_option_response.SelectableModelOptionResponse(
+                        label = '', 
+                        model_selection = {
+                            'key' : null
+                            }, 
+                        settings = { }, 
+                        execution_option_definitions = [
+                            { }
+                            ], )
                     ],
                 main_model_label = '',
                 lightweight_model_label = '',
@@ -104,7 +112,15 @@ class TestAgentResponse(unittest.TestCase):
                     'key' : null
                     },
                 selectable_model_options = [
-                    { }
+                    azentspublicclient.models.selectable_model_option_response.SelectableModelOptionResponse(
+                        label = '', 
+                        model_selection = {
+                            'key' : null
+                            }, 
+                        settings = { }, 
+                        execution_option_definitions = [
+                            { }
+                            ], )
                     ],
                 main_model_label = '',
                 lightweight_model_label = '',

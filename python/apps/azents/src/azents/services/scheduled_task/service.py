@@ -806,6 +806,7 @@ class ScheduledTaskDispatcher:
                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
+                    requested_enabled_execution_options=[],
                     sender_user_id=None,
                     order_group=None,
                     order_sequence=0,

@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **description** | **str** |  | 
 **model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
 **lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
-**selectable_model_options** | [**List[SelectableModelOption]**](SelectableModelOption.md) |  | 
+**selectable_model_options** | [**List[SelectableModelOptionResponse]**](SelectableModelOptionResponse.md) |  | 
 **main_model_label** | **str** |  | 
 **lightweight_model_label** | **str** |  | 
 **effective_context_window_tokens** | **int** |  | 

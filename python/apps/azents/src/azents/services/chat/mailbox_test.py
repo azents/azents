@@ -79,7 +79,10 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
 )
-from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.turn_action import (
+    make_test_mailbox_promotion_repository,
+    make_test_turn_action_capabilities,
+)
 
 from . import ChatSessionService
 from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
@@ -192,6 +195,9 @@ def _service(
     """Create ChatSessionService for tests."""
     mailbox_item_service = _make_mailbox_service(
         session_manager=rdb_session_manager,
+        promotion_repository=make_test_mailbox_promotion_repository(
+            rdb_session_manager
+        ),
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
@@ -301,6 +307,7 @@ async def _create_session_with_buffer(
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="main",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            requested_enabled_execution_options=[],
             sender_user_id=user_id,
             order_group=None,
             order_sequence=0,
@@ -393,6 +400,7 @@ class TestChatSessionMailboxItem:
                     model_selection=make_test_model_selection(),
                     model_settings=make_test_model_settings(),
                     reasoning_effort=ModelReasoningEffort.HIGH,
+                    enabled_execution_options=[],
                     effective_context_window_tokens=100_000,
                     effective_auto_compaction_threshold_tokens=80_000,
                     resolved_at=now,
@@ -521,6 +529,7 @@ class TestChatSessionMailboxItem:
                     model_selection=make_test_model_selection(),
                     model_settings=make_test_model_settings(),
                     reasoning_effort=ModelReasoningEffort.HIGH,
+                    enabled_execution_options=[],
                     effective_context_window_tokens=100_000,
                     effective_auto_compaction_threshold_tokens=80_000,
                     resolved_at=now,
@@ -566,6 +575,9 @@ class TestChatSessionMailboxItem:
 
         mailbox_item_service = _make_mailbox_service(
             session_manager=rdb_session_manager,
+            promotion_repository=make_test_mailbox_promotion_repository(
+                rdb_session_manager
+            ),
             mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),

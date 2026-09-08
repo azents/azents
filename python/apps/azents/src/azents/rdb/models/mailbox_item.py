@@ -67,6 +67,11 @@ class RDBMailboxItem(RDBModel):
         model_reasoning_effort_enum,
         nullable=True,
     )
+    requested_enabled_execution_options: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
     sender_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
@@ -95,8 +100,9 @@ class RDBMailboxItem(RDBModel):
     )
 
     CK_REQUESTED_PROFILE = sa.CheckConstraint(
-        "requested_reasoning_effort IS NULL "
-        "OR requested_model_target_label IS NOT NULL",
+        "requested_model_target_label IS NOT NULL OR "
+        "(requested_reasoning_effort IS NULL "
+        "AND requested_enabled_execution_options = '[]'::jsonb)",
         name="ck_mailbox_items_requested_profile",
     )
     CK_SENDER_USER_KIND = sa.CheckConstraint(

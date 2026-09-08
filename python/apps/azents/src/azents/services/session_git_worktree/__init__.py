@@ -76,6 +76,9 @@ from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
 )
+from azents.repos.session_workspace_project_operations import (
+    SessionWorkspaceProjectOperationsRepository,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefEntry,
@@ -405,6 +408,9 @@ class SessionGitWorktreeService:
     session_workspace_project_repository: Annotated[
         SessionWorkspaceProjectRepository, Depends(SessionWorkspaceProjectRepository)
     ]
+    session_workspace_project_operations_repository: Annotated[
+        SessionWorkspaceProjectOperationsRepository, Depends()
+    ]
     agent_project_catalog_repository: Annotated[
         AgentProjectCatalogRepository, Depends(AgentProjectCatalogRepository)
     ]
@@ -584,6 +590,7 @@ class SessionGitWorktreeService:
                         scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                         requested_model_target_label=None,
                         requested_reasoning_effort=None,
+                        requested_enabled_execution_options=[],
                         sender_user_id=None,
                         order_group=None,
                         order_sequence=0,
@@ -775,6 +782,7 @@ class SessionGitWorktreeService:
                         scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                         requested_model_target_label=None,
                         requested_reasoning_effort=None,
+                        requested_enabled_execution_options=[],
                         sender_user_id=None,
                         order_group=None,
                         order_sequence=0,
@@ -4443,6 +4451,7 @@ class SessionGitWorktreeService:
                             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=None,
                             requested_reasoning_effort=None,
+                            requested_enabled_execution_options=[],
                             sender_user_id=None,
                             order_group=None,
                             order_sequence=0,
@@ -4820,13 +4829,12 @@ class SessionGitWorktreeService:
             return
         projection_service = SkillProjectionService(
             store=self.skill_store,
-            session_manager=self.session_manager,
+            project_reader=self.session_workspace_project_operations_repository,
             runtime_target_resolver=self.runtime_target_resolver,
             session_working_folder_binding_service=(
                 self.session_working_folder_binding_service
             ),
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
-            project_repository=self.session_workspace_project_repository,
         )
         await projection_service.sync_latest(
             agent_id=agent_id,

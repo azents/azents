@@ -37,6 +37,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -1861,6 +1862,9 @@ class AgentSessionRepository:
                     mode="json"
                 ),
                 current_reasoning_effort=inference_state.reasoning_effort,
+                current_enabled_execution_options=[
+                    option.value for option in inference_state.enabled_execution_options
+                ],
                 current_effective_context_window_tokens=(
                     inference_state.effective_context_window_tokens
                 ),
@@ -1884,6 +1888,7 @@ class AgentSessionRepository:
         session_id: str,
         model_target_label: str,
         reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentSession:
         """Replace the Session-owned applied model intent."""
         result = await session.execute(
@@ -1892,6 +1897,9 @@ class AgentSessionRepository:
             .values(
                 applied_model_target_label=model_target_label,
                 applied_reasoning_effort=reasoning_effort,
+                applied_enabled_execution_options=[
+                    option.value for option in enabled_execution_options
+                ],
             )
             .returning(RDBAgentSession)
         )
@@ -2456,6 +2464,7 @@ class AgentSessionRepository:
             applied_inference_profile = SessionAppliedInferenceProfile(
                 model_target_label=rdb.applied_model_target_label,
                 reasoning_effort=rdb.applied_reasoning_effort,
+                enabled_execution_options=rdb.applied_enabled_execution_options,
             )
         inference_state: SessionInferenceState | None = None
         if rdb.current_model_target_label is not None:
@@ -2476,6 +2485,7 @@ class AgentSessionRepository:
                     rdb.current_model_settings
                 ),
                 reasoning_effort=rdb.current_reasoning_effort,
+                enabled_execution_options=rdb.current_enabled_execution_options,
                 effective_context_window_tokens=(
                     rdb.current_effective_context_window_tokens
                 ),

@@ -616,6 +616,7 @@ export function useAgentDraftChatContainer(
     () => ({
       model_target_label: agent.main_model_label,
       reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+      enabled_execution_options: [],
     }),
     [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );

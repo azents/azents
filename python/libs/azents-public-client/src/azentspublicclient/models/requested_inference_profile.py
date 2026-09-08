@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,8 +30,9 @@ class RequestedInferenceProfile(BaseModel):
     """ # noqa: E501
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned selectable model target label")
     reasoning_effort: Optional[StrictStr]
+    enabled_execution_options: List[ModelExecutionOptionId] = Field(description="Explicitly enabled model execution option IDs")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort"]
+    __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort", "enabled_execution_options"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,7 +98,8 @@ class RequestedInferenceProfile(BaseModel):
 
         _obj = cls.model_validate({
             "model_target_label": obj.get("model_target_label"),
-            "reasoning_effort": obj.get("reasoning_effort")
+            "reasoning_effort": obj.get("reasoning_effort"),
+            "enabled_execution_options": obj.get("enabled_execution_options")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

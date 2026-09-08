@@ -65,6 +65,7 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.core.xai import resolve_xai_api_base_url
 from azents.core.xai_oauth import (
@@ -95,6 +96,61 @@ OPENROUTER_PUBLISHERS: dict[str, LLMModelDeveloper] = {
     "meta-llama": LLMModelDeveloper.META,
     "mistralai": LLMModelDeveloper.MISTRAL,
 }
+
+_OPENAI_FAST_MODEL_IDS = frozenset(
+    {
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.2",
+        "gpt-5.1",
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        "gpt-4o",
+        "gpt-4o-2024-05-13",
+        "gpt-4o-mini",
+        "o3",
+        "o4-mini",
+        "gpt-5.3-codex",
+    }
+)
+
+
+def _openai_supported_execution_options(
+    model_id: str,
+) -> list[ModelExecutionOptionId]:
+    """Return options for an exact reviewed OpenAI model identifier."""
+    if model_id in _OPENAI_FAST_MODEL_IDS:
+        return [ModelExecutionOptionId.FAST]
+    return []
+
+
+def _chatgpt_supported_execution_options(
+    model: dict[str, object],
+) -> list[ModelExecutionOptionId]:
+    """Return options from authoritative ChatGPT service-tier metadata only."""
+    service_tiers = model.get("service_tiers")
+    if not isinstance(service_tiers, list) or not service_tiers:
+        return []
+    tiers: set[str] = set()
+    for value in service_tiers:
+        if isinstance(value, str):
+            tiers.add(value)
+        elif isinstance(value, dict):
+            tier_id = value.get("id")
+            if isinstance(tier_id, str):
+                tiers.add(tier_id)
+    if {"priority", "fast"} & tiers:
+        return [ModelExecutionOptionId.FAST]
+    return []
+
 
 _BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _CHATGPT_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
@@ -424,6 +480,7 @@ def _candidate_from_bedrock_summary(
             tool_calling=ModelToolCallingCapabilities(supported=True),
             compatibility=ModelCompatibilityCapabilities(provider_family="bedrock"),
         ),
+        supported_execution_options=[],
         model_snapshot={
             "source": "aws_bedrock:list_foundation_models",
             "provider": LLMProvider.AWS_BEDROCK.value,
@@ -540,6 +597,7 @@ def _candidate_from_chatgpt_model(
         model_developer=LLMModelDeveloper.OPENAI,
         model_family=_chatgpt_family(model_id),
         normalized_capabilities=capabilities,
+        supported_execution_options=_chatgpt_supported_execution_options(model),
         model_snapshot={
             "source": "chatgpt:codex_models",
             "provider": LLMProvider.CHATGPT_OAUTH.value,
@@ -564,6 +622,7 @@ def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
         "max_context_window",
         "minimal_client_version",
         "priority",
+        "service_tiers",
         "supported_in_api",
         "supported_reasoning_levels",
         "supports_parallel_tool_calls",
@@ -670,6 +729,7 @@ def _candidate_from_kimi_model(
         model_developer=LLMModelDeveloper.MOONSHOT,
         model_family=_kimi_family(model_id),
         normalized_capabilities=capabilities,
+        supported_execution_options=[],
         model_snapshot={
             "source": "kimi:code_models",
             "provider": LLMProvider.KIMI_OAUTH.value,
@@ -733,6 +793,7 @@ def _candidate_from_xai_api_key_model(
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model_id),
         normalized_capabilities=_conservative_xai_capabilities(),
+        supported_execution_options=[],
         model_snapshot={
             "source": "xai:developer_models",
             "provider": LLMProvider.XAI.value,
@@ -824,6 +885,7 @@ def _candidate_from_xai_oauth_model(
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model.id),
         normalized_capabilities=capabilities,
+        supported_execution_options=[],
         model_snapshot={
             "source": "xai_oauth:grok_models",
             "provider": LLMProvider.XAI_OAUTH.value,
@@ -987,6 +1049,7 @@ def _candidate_from_openrouter_model(
         model_developer=developer,
         model_family=_openrouter_family(model_id),
         normalized_capabilities=capabilities,
+        supported_execution_options=[],
         model_snapshot={
             "source": "openrouter:account_models",
             "provider": LLMProvider.OPENROUTER.value,
@@ -1140,6 +1203,7 @@ def _candidate_from_vertex_model(
             tool_calling=ModelToolCallingCapabilities(supported=True),
             compatibility=ModelCompatibilityCapabilities(provider_family="vertex_ai"),
         ),
+        supported_execution_options=[],
         model_snapshot={
             "source": "google_vertex_ai:publisher_models",
             "provider": LLMProvider.GOOGLE_VERTEX_AI.value,

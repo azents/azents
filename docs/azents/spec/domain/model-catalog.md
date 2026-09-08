@@ -5,6 +5,8 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
+  - python/apps/azents/src/azents/core/model_execution_options.py
+  - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_catalog_sync.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
@@ -13,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
+  - python/apps/azents/src/azents/rdb/models/llm_catalog.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -28,8 +32,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-08-27
-spec_version: 21
+last_verified_at: 2026-09-08
+spec_version: 22
 ---
 
 # Model Catalog Domain Spec
@@ -74,6 +78,36 @@ maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
 capability, including historical catalog and Agent snapshots, resolves that maximum
 as its default. The capability remains additive JSON and requires no relational
 migration.
+
+## Switchable model execution options
+
+Execution options are a separate class from static `ModelCapabilities` and built-in
+tools. A code-owned definition registry assigns stable option IDs and boolean
+control semantics. Catalog entries and saved `AgentModelSelection` snapshots carry
+`supported_execution_options` independently of normalized capabilities; inference
+profiles carry the user's `enabled_execution_options` independently of support.
+The first option is `fast`.
+
+OpenAI API support is projected from reviewed exact model identifiers grounded in
+the provider's Fast pricing documentation. Unreviewed aliases, suffix variants,
+fine-tuned models, and other OpenAI-compatible providers do not acquire support
+through a prefix match. ChatGPT OAuth support comes from the connected account's
+current `service_tiers` declarations for `priority` or `fast`; missing or empty
+metadata does not advertise Fast. Support is not an account-entitlement, quota,
+regional-availability, cost, or latency guarantee.
+
+Public response projections expose code-owned option definitions separately from
+persisted IDs, including display text, a qualitative provider-specific cost hint,
+and the `"boolean"` control discriminator. Agent public selectable-option responses
+include these definitions for the composer. Definition metadata is not written into
+saved model selection JSON and does not become a second support authority.
+
+Catalog projection and selection normalization explicitly copy supported IDs.
+Existing catalog rows and historical saved selections without this field start with
+no supported execution options. Catalog synchronization followed by model
+reselection creates a support-aware Agent snapshot; reads and execution do not
+upgrade old snapshots from raw metadata or refetch provider catalogs. Newly enabling
+Fast always requires explicit user intent and never changes built-in tool settings.
 
 ## Source snapshots and sync attempts
 

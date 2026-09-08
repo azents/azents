@@ -208,20 +208,15 @@ class TestEnvVarToolkitProviderValidateCredentials:
     def _provider(self) -> EnvVarToolkitProvider:
         return EnvVarToolkitProvider()
 
-    def _session(self) -> AsyncSession:
-        return AsyncMock(spec=AsyncSession)
-
     async def test_none_credentials_accepted(self) -> None:
         """credentials=None always passes."""
-        err = await self._provider().validate_credentials(self._session(), "u1", None)
+        err = await self._provider().validate_credentials(None)
 
         assert err is None
 
     async def test_valid_credentials_pass(self) -> None:
         """Pass schema + regex + size limits."""
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": {"FOO": "bar", "BAZ_1": "qux"}},
         )
 
@@ -230,8 +225,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
     async def test_invalid_schema_rejected(self) -> None:
         """Reject credentials dict without values field."""
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"wrong_key": {}},
         )
 
@@ -240,8 +233,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
         assert err is None
 
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": "not a dict"},
         )
 
@@ -253,8 +244,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
 
         for bad_name in ("WITH-DASH", "1LEADING_DIGIT", "", "has space"):
             err = await provider.validate_credentials(
-                self._session(),
-                "u1",
                 {"values": {bad_name: "x"}},
             )
             assert err is not None
@@ -263,8 +252,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
     async def test_lowercase_env_name_accepted(self) -> None:
         """Lowercase env name is also allowed, e.g. aws_access_key."""
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": {"aws_access_key": "x", "MixedCase_123": "y"}},
         )
         assert err is None
@@ -272,8 +259,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
     async def test_too_long_name_rejected(self) -> None:
         """Reject names of 65 chars or longer."""
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": {"A" * 65: "x"}},
         )
 
@@ -282,8 +267,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
     async def test_too_long_value_rejected(self) -> None:
         """Reject values of 4KB or larger."""
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": {"FOO": "x" * 4097}},
         )
 
@@ -294,8 +277,6 @@ class TestEnvVarToolkitProviderValidateCredentials:
         entries = {f"VAR_{i:03d}": "x" for i in range(51)}
 
         err = await self._provider().validate_credentials(
-            self._session(),
-            "u1",
             {"values": entries},
         )
 
