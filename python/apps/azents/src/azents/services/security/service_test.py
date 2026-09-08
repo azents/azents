@@ -17,6 +17,9 @@ from azents.core.config import (
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.email_verification import EmailVerificationRepository
+from azents.repos.email_verification_operation import (
+    EmailVerificationOperationRepository,
+)
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -77,7 +80,10 @@ def _make_service(
     email_service = _make_email_service(configured=email_configured)
     return SecurityService(
         email_service=email_service,
-        email_verification_repo=EmailVerificationRepository(),
+        email_verification_operation_repository=EmailVerificationOperationRepository(
+            email_verification_repository=EmailVerificationRepository(),
+            session_manager=rdb_session_manager,
+        ),
         password_login_repo=PasswordLoginRepository(),
         user_repo=UserRepository(),
         credential_service=CredentialService(
