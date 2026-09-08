@@ -37,12 +37,14 @@ class TestPendingMailboxAgentMessagePresentation(unittest.TestCase):
             return PendingMailboxAgentMessagePresentation(
                 type = 'agent_message',
                 message_kind = 'spawn_agent',
+                source_path = '',
                 content = ''
             )
         else:
             return PendingMailboxAgentMessagePresentation(
                 type = 'agent_message',
                 message_kind = 'spawn_agent',
+                source_path = '',
                 content = '',
         )
         """

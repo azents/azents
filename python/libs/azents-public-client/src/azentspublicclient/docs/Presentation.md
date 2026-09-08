@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **file_parts** | [**List[FileOutputPart]**](FileOutputPart.md) |  | [optional] 
 **requested_inference_profile** | [**RequestedInferenceProfile**](RequestedInferenceProfile.md) |  | [optional] 
 **message_kind** | **str** |  | 
+**source_path** | **str** |  | 
 **provider** | **str** |  | 
 **resource_label** | **str** |  | 
 **resource_type** | **str** |  | 
