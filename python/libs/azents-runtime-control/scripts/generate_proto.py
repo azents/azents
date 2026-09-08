@@ -5,11 +5,21 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+from typing import NamedTuple
 
 import grpc_tools
 from grpc_tools import protoc
 
 _GENERATED_HEADER = "# ruff: noqa\n"
+
+
+class GeneratedProtoFiles(NamedTuple):
+    """Generated Python modules and stubs for one protobuf source."""
+
+    pb2: pathlib.Path
+    grpc: pathlib.Path
+    pb2_stub: pathlib.Path
+    grpc_stub: pathlib.Path
 
 
 def main() -> None:
@@ -78,7 +88,7 @@ def main() -> None:
 def _fix_generated_imports(
     proto_file: pathlib.Path,
     out_dir: pathlib.Path,
-) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
+) -> GeneratedProtoFiles:
     module_name = f"{proto_file.stem}_pb2"
     grpc_file = out_dir / f"{module_name}_grpc.py"
     pb2_file = out_dir / f"{module_name}.py"
@@ -101,7 +111,12 @@ def _fix_generated_imports(
         if generated_file.suffix == ".pyi":
             content = content.replace("  # noqa: Y015", "")
         generated_file.write_text(_GENERATED_HEADER + content)
-    return pb2_file, grpc_file, pb2_stub, grpc_stub
+    return GeneratedProtoFiles(
+        pb2=pb2_file,
+        grpc=grpc_file,
+        pb2_stub=pb2_stub,
+        grpc_stub=grpc_stub,
+    )
 
 
 if __name__ == "__main__":

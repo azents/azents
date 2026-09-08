@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
@@ -655,7 +655,31 @@ def _struct(metadata: Mapping[str, JsonValue]) -> struct_pb2.Struct:
 
 
 def json_value_from_struct(struct: struct_pb2.Struct) -> dict[str, JsonValue]:
-    return cast(dict[str, JsonValue], json_format.MessageToDict(struct))
+    raw: object = json_format.MessageToDict(struct)
+    if not isinstance(raw, dict):
+        raise TypeError("Protobuf Struct JSON conversion did not return an object")
+    result: dict[str, JsonValue] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            raise TypeError("Protobuf Struct JSON object key is not a string")
+        result[key] = _json_value(value)
+    return result
+
+
+def _json_value(value: object) -> JsonValue:
+    """Validate one recursively decoded protobuf JSON value."""
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        result: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("Protobuf Struct JSON object key is not a string")
+            result[key] = _json_value(item)
+        return result
+    raise TypeError("Protobuf Struct JSON value has an unsupported type")
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
