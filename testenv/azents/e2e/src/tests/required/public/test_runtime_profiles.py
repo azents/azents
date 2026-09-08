@@ -51,6 +51,7 @@ from azentspublicclient.models.workspace_runtime_profile_default_replace_request
 from azentspublicclient.models.workspace_runtime_profile_response import (
     WorkspaceRuntimeProfileResponse,
 )
+from redis import Redis
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -144,6 +145,143 @@ def _restart_runtime_provider(container: DockerContainer) -> None:
         interval=1,
         message="Runtime Provider did not register after restart",
     )
+
+
+def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_runtime_provider_docker_container: DockerContainer,
+    azents_engine_worker_container: DockerContainer,
+    valkey_container: DockerContainer,
+) -> None:
+    """An empty Valkey instance loses live work but not Runtime authority."""
+    del azents_runtime_provider_docker_container, azents_engine_worker_container
+    suffix = unique()
+    token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"runtime-empty-valkey-{suffix}@example.com",
+    )
+    handle = f"runtime-empty-valkey-{suffix}"
+    headers = _headers(token)
+    WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        CreateWorkspaceRequest(
+            workspace_name=f"Runtime Empty Valkey {suffix}",
+            workspace_handle=handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=headers,
+    )
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-runtime-empty-valkey")),
+        ),
+        _headers=headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        azents_public_server_url,
+        token,
+        handle,
+        integration.id,
+    )
+    profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        handle=handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Empty Valkey {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+            runtime_profile_id=profile_id,
+        ),
+        _headers=headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent.id,
+    )
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    before = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert before.runtime is not None
+    assert before.runtime.runner_generation is not None
+    previous_generation = int(before.runtime.runner_generation)
+    assert previous_generation > 0
+
+    redis = Redis(
+        host=valkey_container.get_container_host_ip(),
+        port=int(valkey_container.get_exposed_port(6379)),
+        decode_responses=True,
+    )
+    try:
+        redis.flushall()
+    finally:
+        redis.close()
+
+    recovered: AgentRuntimeResponse | None = None
+
+    def runtime_recovered_with_higher_generation() -> bool:
+        nonlocal recovered
+        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent.id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            current.runtime is None
+            or current.runtime.runner_generation is None
+            or current.lifecycle is None
+        ):
+            return False
+        recovered = current
+        return (
+            int(current.runtime.runner_generation) > previous_generation
+            and current.lifecycle.availability == "ready"
+            and current.actions.use_runner
+        )
+
+    wait_until(
+        runtime_recovered_with_higher_generation,
+        timeout=120,
+        interval=1,
+        message="Runtime did not recover with higher authority after Valkey reset",
+    )
+    assert recovered is not None
+    assert recovered.runtime is not None
+    assert recovered.runtime.workspace_path
+
+    directory = f"{recovered.runtime.workspace_path}/empty-valkey-{suffix}"
+    workspace_api = ChatV1Api(public_api_client)
+    workspace_api.chat_v1_create_agent_workspace_directory(
+        agent_id=agent.id,
+        agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(
+            path=directory,
+            parents=False,
+        ),
+        _headers=headers,
+    )
+    created = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=agent.id,
+        path=directory,
+        _headers=headers,
+    )
+    assert isinstance(created.actual_instance, AgentWorkspaceDirectoryResponse)
 
 
 def test_runtime_profile_precedence_applied_evidence_and_recreation(
