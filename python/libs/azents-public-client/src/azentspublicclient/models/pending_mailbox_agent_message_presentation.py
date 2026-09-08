@@ -28,9 +28,10 @@ class PendingMailboxAgentMessagePresentation(BaseModel):
     """ # noqa: E501
     type: StrictStr
     message_kind: StrictStr
+    source_path: StrictStr
     content: StrictStr
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "message_kind", "content"]
+    __properties: ClassVar[List[str]] = ["type", "message_kind", "source_path", "content"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -106,6 +107,7 @@ class PendingMailboxAgentMessagePresentation(BaseModel):
         _obj = cls.model_validate({
             "type": obj.get("type"),
             "message_kind": obj.get("message_kind"),
+            "source_path": obj.get("source_path"),
             "content": obj.get("content")
         })
         # store additional fields in additional_properties

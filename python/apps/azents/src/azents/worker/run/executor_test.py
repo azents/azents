@@ -1514,7 +1514,6 @@ def _executor(
         integration_repository=object(),
         toolkit_registry={},
         vfs_projection_service=vfs_projection_service,
-        agent_toolkit_repository=object(),
         toolkit_repository=object(),
         agent_runtime_repository=object(),
         agent_session_repository=agent_session_repository,

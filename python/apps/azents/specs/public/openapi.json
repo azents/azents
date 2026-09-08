@@ -12381,6 +12381,325 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs": {
+      "get": {
+        "tags": [
+          "Toolkit v1"
+        ],
+        "summary": "List Agent Toolkit Management",
+        "description": "Return the authorized Agent Toolkit management projection.",
+        "operationId": "toolkit_v1_list_agent_toolkit_management",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentToolkitManagementResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Toolkit v1"
+        ],
+        "summary": "Create Agent Toolkit Config",
+        "description": "Create one ToolkitConfig owned by the path Agent.",
+        "operationId": "toolkit_v1_create_agent_toolkit_config",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentToolkitConfigCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolkitConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}": {
+      "get": {
+        "tags": [
+          "Toolkit v1"
+        ],
+        "summary": "Get Agent Toolkit Config",
+        "description": "Read one ToolkitConfig owned by the path Agent.",
+        "operationId": "toolkit_v1_get_agent_toolkit_config",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolkitConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Toolkit v1"
+        ],
+        "summary": "Update Agent Toolkit Config",
+        "description": "Update one ToolkitConfig owned by the path Agent.",
+        "operationId": "toolkit_v1_update_agent_toolkit_config",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentToolkitConfigUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolkitConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Toolkit v1"
+        ],
+        "summary": "Delete Agent Toolkit Config",
+        "description": "Delete one ToolkitConfig owned by the path Agent.",
+        "operationId": "toolkit_v1_delete_agent_toolkit_config",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes": {
       "post": {
         "tags": [
@@ -12909,6 +13228,187 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-install-url": {
+      "get": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Get Agent Github Platform Install Url",
+        "description": "Return the Platform GitHub App install URL for Agent Toolkit setup.",
+        "operationId": "toolkit_oauth_v1_get_agent_github_platform_install_url",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubPlatformInstallUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-oauth-url": {
+      "get": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Get Agent Github Platform Oauth Url",
+        "description": "Return the Platform GitHub user OAuth URL for Agent Toolkit setup.",
+        "operationId": "toolkit_oauth_v1_get_agent_github_platform_oauth_url",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubPlatformOAuthUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-installations": {
+      "post": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Get Agent Github Platform Installations",
+        "description": "Return GitHub installations for authorized Agent Toolkit setup.",
+        "operationId": "toolkit_oauth_v1_get_agent_github_platform_installations",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubPlatformInstallationsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubPlatformInstallationsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connect": {
       "post": {
         "tags": [
@@ -13076,6 +13576,200 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connect": {
+      "post": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Connect Agent Oauth",
+        "description": "Create an OAuth authorization URL for an Agent-owned Toolkit.",
+        "operationId": "toolkit_oauth_v1_connect_agent_oauth",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/exchange": {
+      "post": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Exchange Agent Oauth Connection",
+        "description": "Exchange OAuth code for an Agent-owned Toolkit connection.",
+        "operationId": "toolkit_oauth_v1_exchange_agent_oauth_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connection": {
+      "delete": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Disconnect Agent Oauth Connection",
+        "description": "Delete an Agent-owned Toolkit OAuth connection.",
+        "operationId": "toolkit_oauth_v1_disconnect_agent_oauth_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/test-connection": {
       "post": {
         "tags": [
@@ -13147,6 +13841,139 @@
           }
         ],
         "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/test-connection": {
+      "post": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Test Agent Connection Saved",
+        "description": "Test one stored Agent-owned Toolkit connection.",
+        "operationId": "toolkit_oauth_v1_test_agent_connection_saved",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Config Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/test-connection": {
+      "post": {
+        "tags": [
+          "Toolkit OAuth v1"
+        ],
+        "summary": "Test Agent Connection Unsaved",
+        "description": "Test unsaved Agent-owned Toolkit settings without creating a resource.",
+        "operationId": "toolkit_oauth_v1_test_agent_connection_unsaved",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
           {
             "name": "handle",
             "in": "path",
@@ -15006,6 +15833,10 @@
             "type": "boolean",
             "title": "Runtime Remove Available"
           },
+          "toolkit_management_available": {
+            "type": "boolean",
+            "title": "Toolkit Management Available"
+          },
           "terminal_enabled": {
             "type": "boolean",
             "title": "Terminal Enabled"
@@ -15127,6 +15958,7 @@
           "runtime_profile_configuration_status",
           "runtime_add_available",
           "runtime_remove_available",
+          "toolkit_management_available",
           "terminal_enabled",
           "infrastructure_terminal_enabled",
           "workspace_terminal_enabled",
@@ -16684,6 +17516,172 @@
         "title": "AgentToolkitAttachRequest",
         "description": "AgentToolkit attach request."
       },
+      "AgentToolkitConfigCreateRequest": {
+        "properties": {
+          "toolkit_type": {
+            "type": "string",
+            "title": "Toolkit Type",
+            "description": "Tool slug"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[a-z0-9_]+$",
+                "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug",
+            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Tool configuration"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Custom prompt"
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentials",
+            "description": "Credentials JSON object, such as MCP, encrypted on the server"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Enabled state",
+            "default": true
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools",
+            "description": "Expose every toolkit tool directly instead of through Tool Search",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "toolkit_type",
+          "name",
+          "config"
+        ],
+        "title": "AgentToolkitConfigCreateRequest",
+        "description": "Agent-owned Toolkit Config creation request."
+      },
+      "AgentToolkitConfigUpdateRequest": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Slug",
+            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Tool settings"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Custom prompt"
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentials",
+            "description": "Credentials JSON object (delete when None)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Enabled flag"
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools",
+            "description": "Whether every tool bypasses Tool Search and remains visible"
+          }
+        },
+        "type": "object",
+        "title": "AgentToolkitConfigUpdateRequest",
+        "description": "Agent-owned Toolkit Config partial update request."
+      },
       "AgentToolkitListResponse": {
         "properties": {
           "items": {
@@ -16700,6 +17698,75 @@
         ],
         "title": "AgentToolkitListResponse",
         "description": "AgentToolkit list response model."
+      },
+      "AgentToolkitManagementItemResponse": {
+        "properties": {
+          "ownership_scope": {
+            "type": "string",
+            "enum": [
+              "workspace_shared",
+              "agent_only"
+            ],
+            "title": "Ownership Scope"
+          },
+          "toolkit": {
+            "$ref": "#/components/schemas/ToolkitConfigResponse"
+          },
+          "agent_toolkit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Toolkit Id"
+          },
+          "readiness": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "authorization_required",
+              "disabled"
+            ],
+            "title": "Readiness"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ownership_scope",
+          "toolkit",
+          "agent_toolkit_id",
+          "readiness"
+        ],
+        "title": "AgentToolkitManagementItemResponse",
+        "description": "One Toolkit in the authorized Agent management projection."
+      },
+      "AgentToolkitManagementResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentToolkitManagementItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "available_shared": {
+            "items": {
+              "$ref": "#/components/schemas/ToolkitConfigResponse"
+            },
+            "type": "array",
+            "title": "Available Shared"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "available_shared"
+        ],
+        "title": "AgentToolkitManagementResponse",
+        "description": "Authorized Agent Toolkit management projection."
       },
       "AgentToolkitResponse": {
         "properties": {
@@ -25509,6 +26576,10 @@
             ],
             "title": "Message Kind"
           },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          },
           "content": {
             "type": "string",
             "title": "Content"
@@ -25518,6 +26589,7 @@
         "required": [
           "type",
           "message_kind",
+          "source_path",
           "content"
         ],
         "title": "PendingMailboxAgentMessagePresentation",

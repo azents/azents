@@ -112,7 +112,11 @@ __all__ = [
     "AgentSessionTitleUpdateRequest",
     "AgentSessionUnreadTerminalRunAcknowledgeRequest",
     "AgentToolkitAttachRequest",
+    "AgentToolkitConfigCreateRequest",
+    "AgentToolkitConfigUpdateRequest",
     "AgentToolkitListResponse",
+    "AgentToolkitManagementItemResponse",
+    "AgentToolkitManagementResponse",
     "AgentToolkitResponse",
     "AgentType",
     "AgentUpdateRequest",
@@ -631,7 +635,11 @@ from azentspublicclient.models.agent_session_title_source import AgentSessionTit
 from azentspublicclient.models.agent_session_title_update_request import AgentSessionTitleUpdateRequest as AgentSessionTitleUpdateRequest
 from azentspublicclient.models.agent_session_unread_terminal_run_acknowledge_request import AgentSessionUnreadTerminalRunAcknowledgeRequest as AgentSessionUnreadTerminalRunAcknowledgeRequest
 from azentspublicclient.models.agent_toolkit_attach_request import AgentToolkitAttachRequest as AgentToolkitAttachRequest
+from azentspublicclient.models.agent_toolkit_config_create_request import AgentToolkitConfigCreateRequest as AgentToolkitConfigCreateRequest
+from azentspublicclient.models.agent_toolkit_config_update_request import AgentToolkitConfigUpdateRequest as AgentToolkitConfigUpdateRequest
 from azentspublicclient.models.agent_toolkit_list_response import AgentToolkitListResponse as AgentToolkitListResponse
+from azentspublicclient.models.agent_toolkit_management_item_response import AgentToolkitManagementItemResponse as AgentToolkitManagementItemResponse
+from azentspublicclient.models.agent_toolkit_management_response import AgentToolkitManagementResponse as AgentToolkitManagementResponse
 from azentspublicclient.models.agent_toolkit_response import AgentToolkitResponse as AgentToolkitResponse
 from azentspublicclient.models.agent_type import AgentType as AgentType
 from azentspublicclient.models.agent_update_request import AgentUpdateRequest as AgentUpdateRequest

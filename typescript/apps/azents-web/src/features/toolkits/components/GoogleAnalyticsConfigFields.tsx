@@ -55,6 +55,7 @@ interface GoogleAnalyticsConfigFieldsProps {
   onCredentialsChange: (credentials: GaCredentials) => void;
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   toolkitConfigId?: string;
 }
 
@@ -65,6 +66,7 @@ export function GoogleAnalyticsConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: GoogleAnalyticsConfigFieldsProps): React.ReactElement {
   const propertyId =
@@ -91,12 +93,20 @@ export function GoogleAnalyticsConfigFields({
   const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "google_analytics",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   const handleKeyPaste = useCallback(
     (value: string): void => {

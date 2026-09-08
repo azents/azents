@@ -227,9 +227,13 @@ async def test_initial_tracker_uses_scheduled_task_activity_copy() -> None:
     assert kwargs["slack_payload"]["blocks"][0]["title"] == (
         "Agent is running a scheduled task…\nDaily report"
     )
-    assert kwargs["discord_payload"]["embeds"][0]["description"] == (
-        "◉ Agent is running a scheduled task…\nDaily report"
-    )
+    assert kwargs["discord_payload"]["embeds"] == [
+        {
+            "title": "Scheduled Task",
+            "description": "Daily report\nAugust 16, 2026 at 12:00 PM UTC",
+            "color": 0x5865F2,
+        }
+    ]
     assert kwargs["discord_payload"]["tracker_kind"] == "scheduled_task"
     assert "Prepare the report." not in str(kwargs)
     cycle_repository.settle_tracker_projection.assert_awaited_once()

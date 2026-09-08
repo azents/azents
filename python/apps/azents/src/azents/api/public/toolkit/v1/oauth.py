@@ -6,9 +6,10 @@ Provides toolkit-level OAuth2 connection endpoints and connection test endpoints
 import json
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, assert_never, cast
 
 import httpx
+from azcommon.result import Result
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from azents.core.auth.permissions import Permissions
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_config, get_credential_cipher
+from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.github_auth import (
     create_github_app_jwt,
     exchange_oauth_code,
@@ -41,10 +43,14 @@ from azents.core.oauth2 import (
     OAuthTokenError,
     OAuthTokenResponse,
     build_authorization_url,
+    create_agent_github_platform_oauth_state,
+    create_agent_toolkit_oauth_state,
     create_platform_oauth_state,
     create_toolkit_oauth_state,
     exchange_authorization_code,
     generate_pkce_pair,
+    verify_agent_github_platform_oauth_state,
+    verify_agent_toolkit_oauth_state,
     verify_platform_oauth_state,
     verify_toolkit_oauth_state,
 )
@@ -57,8 +63,17 @@ from azents.repos.github_user_installation import (
 )
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit.data import NotFound
+from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+)
+from azents.services.toolkit import ToolkitService
+from azents.services.toolkit.data import (
+    AgentNotBelongToWorkspace,
+    AgentToolkitOAuthConnectionInput,
+    AgentToolkitOAuthContext,
+    ToolkitOutput,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +82,9 @@ router = APIRouter()
 
 _OAuthSecretsUnion = McpSecretsOAuth2 | McpSecretsOAuth2Token | McpSecretsOAuth2Dcr
 _oauth_secrets_adapter = TypeAdapter[_OAuthSecretsUnion](_OAuthSecretsUnion)
+_credentials_adapter = TypeAdapter(dict[str, object])
+_AGENT_TOOLKIT_CALLBACK_TARGET = "agent_toolkits"
+_AGENT_GITHUB_CALLBACK_TARGET = "agent_github_installations"
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +367,203 @@ async def get_github_platform_installations(
     return GitHubPlatformInstallationsResponse(installations=items)
 
 
+@router.get("/workspaces/{handle}/agents/{agent_id}/github/platform-install-url")
+async def get_agent_github_platform_install_url(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
+    *,
+    handle: str,
+    agent_id: str,
+) -> GitHubPlatformInstallUrlResponse:
+    """Return the Platform GitHub App install URL for Agent Toolkit setup."""
+    del handle
+    await _authorize_agent_management_or_error(
+        service,
+        member,
+        agent_id=agent_id,
+    )
+    platform = await platform_runtime.resolve()
+    if platform.app_id is None or platform.private_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GitHub Platform App is not configured.",
+        )
+    try:
+        jwt_token = create_github_app_jwt(
+            platform.app_id,
+            platform.private_key,
+        )
+        slug = await get_app_slug(jwt_token)
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"Failed to fetch GitHub App info: HTTP {exc.response.status_code}"
+        ) from exc
+    return GitHubPlatformInstallUrlResponse(
+        install_url=f"https://github.com/apps/{slug}/installations/new"
+    )
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/github/platform-oauth-url")
+async def get_agent_github_platform_oauth_url(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
+    *,
+    handle: str,
+    agent_id: str,
+) -> GitHubPlatformOAuthUrlResponse:
+    """Return the Platform GitHub user OAuth URL for Agent Toolkit setup."""
+    await _authorize_agent_management_or_error(
+        service,
+        member,
+        agent_id=agent_id,
+    )
+    platform = await platform_runtime.resolve()
+    if platform.client_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GitHub Platform App OAuth is not configured.",
+        )
+    redirect_uri = f"{config.web_url}/oauth/github/callback" if config.web_url else ""
+    state = create_agent_github_platform_oauth_state(
+        config.credential_encryption.key,
+        effective_generation=platform.effective_generation,
+        workspace_id=member.workspace_id,
+        agent_id=agent_id,
+        user_id=member.user_id,
+        redirect_uri=redirect_uri,
+        callback_target=_AGENT_GITHUB_CALLBACK_TARGET,
+    )
+    return GitHubPlatformOAuthUrlResponse(
+        oauth_url=(
+            "https://github.com/login/oauth/authorize"
+            f"?client_id={platform.client_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&state={state}"
+        )
+    )
+
+
+@router.post("/workspaces/{handle}/agents/{agent_id}/github/platform-installations")
+async def get_agent_github_platform_installations(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
+    body: GitHubPlatformInstallationsRequest,
+    *,
+    handle: str,
+    agent_id: str,
+) -> GitHubPlatformInstallationsResponse:
+    """Return GitHub installations for authorized Agent Toolkit setup."""
+    await _authorize_agent_management_or_error(
+        service,
+        member,
+        agent_id=agent_id,
+    )
+    oauth_state = verify_agent_github_platform_oauth_state(
+        body.state,
+        config.credential_encryption.key,
+    )
+    expected_redirect_uri = (
+        f"{config.web_url}/oauth/github/callback" if config.web_url else ""
+    )
+    if (
+        oauth_state is None
+        or oauth_state.workspace_id != member.workspace_id
+        or oauth_state.agent_id != agent_id
+        or oauth_state.user_id != member.user_id
+        or oauth_state.redirect_uri != expected_redirect_uri
+        or oauth_state.callback_target != _AGENT_GITHUB_CALLBACK_TARGET
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth state does not match Agent GitHub setup.",
+        )
+    platform = await platform_runtime.resolve()
+    if oauth_state.effective_generation != platform.effective_generation:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "system_setting_changed",
+                "message": "Platform GitHub App settings changed. Restart OAuth.",
+            },
+        )
+    if (
+        platform.app_id is None
+        or platform.client_id is None
+        or platform.client_secret is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GitHub Platform App OAuth is not configured.",
+        )
+    try:
+        user_token = await exchange_oauth_code(
+            platform.client_id,
+            platform.client_secret,
+            body.code,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"GitHub OAuth token exchange failed: HTTP {exc.response.status_code}"
+        ) from exc
+    try:
+        try:
+            raw_installations = await list_user_installations(user_token)
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Failed to fetch user installations: HTTP {exc.response.status_code}"
+            ) from exc
+        sync_result = await service.sync_agent_github_installations(
+            agent_id,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            user_id=member.user_id,
+            role=member.role,
+            platform_app_id=platform.app_id,
+            installations=raw_installations,
+        )
+        _raise_agent_management_error(sync_result)
+    finally:
+        await revoke_oauth_token(
+            platform.client_id,
+            platform.client_secret,
+            user_token,
+        )
+    items: list[GitHubInstallationItem] = []
+    for installation in raw_installations:
+        account = installation.get("account")
+        if not isinstance(account, dict):
+            continue
+        installation_id = installation.get("id")
+        login = account.get("login")
+        account_type = account.get("type")
+        avatar_url = account.get("avatar_url")
+        if (
+            isinstance(installation_id, int)
+            and isinstance(login, str)
+            and isinstance(account_type, str)
+            and isinstance(avatar_url, str)
+        ):
+            items.append(
+                GitHubInstallationItem(
+                    id=installation_id,
+                    account_login=login,
+                    account_type=account_type,
+                    account_avatar_url=avatar_url,
+                )
+            )
+    return GitHubPlatformInstallationsResponse(installations=items)
+
+
 # ---------------------------------------------------------------------------
 # OAuth connection endpoints
 # ---------------------------------------------------------------------------
@@ -382,7 +597,7 @@ async def connect_oauth(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         existing = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
@@ -532,7 +747,7 @@ async def exchange_oauth_connection(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         connection = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
@@ -610,7 +825,7 @@ async def disconnect_oauth_connection(
     toolkit_repo = ToolkitRepository(cipher=cipher)
     connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
         if toolkit is None or toolkit.workspace_id != member.workspace_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -620,8 +835,303 @@ async def disconnect_oauth_connection(
 
 
 # ---------------------------------------------------------------------------
+# Agent-owned OAuth connection endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}"
+    "/toolkit-configs/{toolkit_config_id}/oauth/connect",
+)
+async def connect_agent_oauth(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    *,
+    handle: str,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> OAuthAuthorizeResponse:
+    """Create an OAuth authorization URL for an Agent-owned Toolkit."""
+    context = await _get_agent_oauth_context_or_404(
+        service,
+        member,
+        agent_id=agent_id,
+        toolkit_config_id=toolkit_config_id,
+    )
+    toolkit = context.toolkit
+    existing = context.connection
+    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
+    if mcp_config.auth_type != "oauth2":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Toolkit does not use OAuth2 authentication.",
+        )
+    metadata = await _discover_required_metadata(mcp_config, config.mcp_proxy_url)
+    redirect_uri = (
+        f"{config.web_url}/oauth/mcp/callback"
+        f"?handle={handle}&agent_id={agent_id}"
+        f"&toolkit_config_id={toolkit_config_id}"
+        if config.web_url
+        else ""
+    )
+    client_id = existing.client_id if existing is not None else None
+    client_secret = existing.client_secret if existing is not None else None
+    if client_id is None:
+        manual = _extract_oauth_client_credentials(toolkit.credentials)
+        if manual is not None:
+            client_id, client_secret = manual
+        elif metadata.registration_endpoint is not None:
+            try:
+                dcr = await register_client(
+                    metadata.registration_endpoint,
+                    redirect_uri,
+                    proxy_url=config.mcp_proxy_url,
+                )
+            except DcrError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Dynamic client registration failed: {exc}",
+                ) from exc
+            client_id = dcr.client_id
+            client_secret = dcr.client_secret
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "OAuth2 client credentials are not configured "
+                    "and server does not support DCR."
+                ),
+            )
+
+    code_verifier, code_challenge = generate_pkce_pair()
+    oauth_state = create_agent_toolkit_oauth_state(
+        toolkit_id=toolkit_config_id,
+        workspace_id=member.workspace_id,
+        agent_id=agent_id,
+        user_id=member.user_id,
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+        callback_target=_AGENT_TOOLKIT_CALLBACK_TARGET,
+        secret_key=config.credential_encryption.key,
+    )
+    scope = " ".join(mcp_config.scopes) if mcp_config.scopes else None
+    store_result = await service.store_agent_oauth_connection(
+        agent_id,
+        toolkit_config_id,
+        AgentToolkitOAuthConnectionInput(
+            issuer=metadata.issuer,
+            resource=mcp_config.server_url,
+            server_url=mcp_config.server_url,
+            authorization_endpoint=metadata.authorization_endpoint,
+            token_endpoint=metadata.token_endpoint,
+            registration_endpoint=metadata.registration_endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_endpoint_auth_method=(
+                "client_secret_post" if client_secret is not None else "none"
+            ),
+            scope=scope,
+            access_token=existing.access_token if existing is not None else None,
+            refresh_token=existing.refresh_token if existing is not None else None,
+            expires_at=existing.expires_at if existing is not None else None,
+        ),
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+        connected=(
+            existing is not None
+            and existing.status is MCPOAuthConnectionStatus.CONNECTED
+            and existing.access_token is not None
+        ),
+    )
+    _raise_agent_item_error(store_result)
+    return OAuthAuthorizeResponse(
+        authorization_url=build_authorization_url(
+            auth_url=metadata.authorization_endpoint,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scopes=mcp_config.scopes,
+            state=oauth_state,
+            code_challenge=code_challenge,
+            resource=mcp_config.server_url,
+        )
+    )
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}"
+    "/toolkit-configs/{toolkit_config_id}/oauth/exchange",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def exchange_agent_oauth_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    body: OAuthExchangeRequest,
+    *,
+    handle: str,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> None:
+    """Exchange OAuth code for an Agent-owned Toolkit connection."""
+    verified = verify_agent_toolkit_oauth_state(
+        body.state,
+        config.credential_encryption.key,
+    )
+    expected_redirect_uri = (
+        f"{config.web_url}/oauth/mcp/callback"
+        f"?handle={handle}&agent_id={agent_id}"
+        f"&toolkit_config_id={toolkit_config_id}"
+        if config.web_url
+        else ""
+    )
+    if (
+        verified is None
+        or verified.toolkit_id != toolkit_config_id
+        or verified.workspace_id != member.workspace_id
+        or verified.agent_id != agent_id
+        or verified.user_id != member.user_id
+        or verified.redirect_uri != expected_redirect_uri
+        or verified.callback_target != _AGENT_TOOLKIT_CALLBACK_TARGET
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth state does not match Agent toolkit.",
+        )
+    context = await _get_agent_oauth_context_or_404(
+        service,
+        member,
+        agent_id=agent_id,
+        toolkit_config_id=toolkit_config_id,
+    )
+    toolkit = context.toolkit
+    connection = context.connection
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="OAuth connection not found. Start connect again.",
+        )
+    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
+    if mcp_config.auth_type != "oauth2":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Toolkit does not use OAuth2 authentication.",
+        )
+    token_response = await _exchange_and_handle_errors(
+        token_url=connection.token_endpoint,
+        client_id=connection.client_id,
+        client_secret=connection.client_secret,
+        code=body.code,
+        redirect_uri=verified.redirect_uri,
+        code_verifier=verified.code_verifier,
+        resource=connection.resource or mcp_config.server_url,
+        proxy_url=config.mcp_proxy_url,
+        toolkit_id=toolkit_config_id,
+        user_id=member.user_id,
+    )
+    store_result = await service.store_agent_oauth_connection(
+        agent_id,
+        toolkit_config_id,
+        AgentToolkitOAuthConnectionInput(
+            issuer=connection.issuer,
+            resource=connection.resource,
+            server_url=connection.server_url,
+            authorization_endpoint=connection.authorization_endpoint,
+            token_endpoint=connection.token_endpoint,
+            registration_endpoint=connection.registration_endpoint,
+            client_id=connection.client_id,
+            client_secret=connection.client_secret,
+            token_endpoint_auth_method=connection.token_endpoint_auth_method,
+            scope=connection.scope,
+            access_token=token_response.access_token,
+            refresh_token=token_response.refresh_token,
+            expires_at=token_response.expires_at,
+        ),
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+        connected=True,
+    )
+    _raise_agent_item_error(store_result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}"
+    "/toolkit-configs/{toolkit_config_id}/oauth/connection",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def disconnect_agent_oauth_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    handle: str,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> None:
+    """Delete an Agent-owned Toolkit OAuth connection."""
+    del handle
+    result = await service.delete_agent_oauth_connection(
+        agent_id=agent_id,
+        toolkit_id=toolkit_config_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    _raise_agent_item_error(result)
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+async def _get_agent_toolkit_or_404(
+    service: ToolkitService,
+    member: WorkspaceMember,
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> ToolkitOutput:
+    """Load one currently authorized Agent-owned Toolkit without disclosure."""
+    result = await service.get_agent_owned(
+        agent_id,
+        toolkit_config_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Toolkit config not found.",
+        )
+    return result.value
+
+
+async def _get_agent_oauth_context_or_404(
+    service: ToolkitService,
+    member: WorkspaceMember,
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> AgentToolkitOAuthContext:
+    """Load Agent-owned OAuth state through the authorization-aware service."""
+    result = await service.get_agent_oauth_context(
+        agent_id,
+        toolkit_config_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Toolkit config not found.",
+        )
+    return result.value
 
 
 def _resolve_mcp_config(
@@ -769,7 +1279,7 @@ async def test_connection_saved(
     toolkit_repo = ToolkitRepository(cipher=cipher)
 
     async with session_manager() as session:
-        toolkit = await toolkit_repo.get_by_id(session, toolkit_config_id)
+        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
 
     if toolkit is None or toolkit.workspace_id != member.workspace_id:
         raise HTTPException(
@@ -853,9 +1363,185 @@ async def test_connection_unsaved(
     )
 
 
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}"
+    "/toolkit-configs/{toolkit_config_id}/test-connection",
+)
+async def test_agent_connection_saved(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> TestConnectionResponse:
+    """Test one stored Agent-owned Toolkit connection."""
+    toolkit = await _get_agent_toolkit_or_404(
+        service,
+        member,
+        agent_id=agent_id,
+        toolkit_config_id=toolkit_config_id,
+    )
+    provider = registry.get(toolkit.toolkit_type)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown toolkit type: {toolkit.toolkit_type}",
+        )
+    validated_config = provider.validate_config(toolkit.config)
+    result = await provider.test_connection(
+        validated_config,
+        toolkit.credentials,
+        proxy_url=config.mcp_proxy_url,
+    )
+    return TestConnectionResponse(
+        success=result.success,
+        message=result.message,
+        discovered_auth_url=result.discovered_auth_url,
+        discovered_token_url=result.discovered_token_url,
+        supports_dcr=result.supports_dcr,
+    )
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/test-connection",
+)
+async def test_agent_connection_unsaved(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
+    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    *,
+    agent_id: str,
+    body: TestConnectionRequest,
+) -> TestConnectionResponse:
+    """Test unsaved Agent-owned Toolkit settings without creating a resource."""
+    await _authorize_agent_management_or_error(
+        service,
+        member,
+        agent_id=agent_id,
+    )
+    provider = registry.get(body.toolkit_type)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown toolkit type: {body.toolkit_type}",
+        )
+    validated_config = provider.validate_config(body.config)
+    credentials_json = await _resolve_agent_test_credentials(
+        body,
+        service,
+        member,
+        agent_id=agent_id,
+    )
+    credentials_json = await _bind_platform_app_test_credentials(
+        credentials_json,
+        platform_runtime,
+    )
+    result = await provider.test_connection(
+        validated_config,
+        credentials_json,
+        proxy_url=config.mcp_proxy_url,
+    )
+    return TestConnectionResponse(
+        success=result.success,
+        message=result.message,
+        discovered_auth_url=result.discovered_auth_url,
+        discovered_token_url=result.discovered_token_url,
+        supports_dcr=result.supports_dcr,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test connection helpers
 # ---------------------------------------------------------------------------
+
+
+async def _authorize_agent_management_or_error(
+    service: ToolkitService,
+    member: WorkspaceMember,
+    *,
+    agent_id: str,
+) -> None:
+    """Require current Agent management authority without exposing Toolkit state."""
+    result = await service.authorize_agent_management(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    _raise_agent_management_error(result)
+
+
+def _raise_agent_management_error(
+    result: Result[None, AgentNotBelongToWorkspace | NotAdmin],
+) -> None:
+    """Map Agent-level management authorization without item disclosure."""
+    if result.success:
+        return
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found.",
+            )
+        case NotAdmin():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Agent administrator or workspace owner access required.",
+            )
+        case _:
+            assert_never(error)
+
+
+def _raise_agent_item_error(
+    result: Result[
+        None,
+        AgentNotBelongToWorkspace | NotAdmin | NotFound,
+    ],
+) -> None:
+    """Map every Agent-owned item mismatch to the same 404 boundary."""
+    if result.success:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Toolkit config not found.",
+    )
+
+
+async def _resolve_agent_test_credentials(
+    body: TestConnectionRequest,
+    service: ToolkitService,
+    member: WorkspaceMember,
+    *,
+    agent_id: str,
+) -> str | None:
+    """Merge saved Agent-owned credentials with unsaved non-empty values."""
+    if body.toolkit_config_id is not None:
+        toolkit = await _get_agent_toolkit_or_404(
+            service,
+            member,
+            agent_id=agent_id,
+            toolkit_config_id=body.toolkit_config_id,
+        )
+        saved: dict[str, object] = {}
+        if toolkit.credentials is not None:
+            try:
+                saved = _credentials_adapter.validate_json(toolkit.credentials)
+            except ValidationError:
+                pass
+        if body.credentials is not None:
+            for key, value in body.credentials.items():
+                if isinstance(value, str) and value == "":
+                    continue
+                saved[key] = value
+        return json.dumps(saved) if saved else None
+    if body.credentials is not None:
+        return json.dumps(body.credentials)
+    return None
 
 
 async def _bind_platform_app_test_credentials(
@@ -898,7 +1584,9 @@ async def _resolve_test_credentials(
     if body.toolkit_config_id is not None:
         toolkit_repo = ToolkitRepository(cipher=cipher)
         async with session_manager() as session:
-            toolkit = await toolkit_repo.get_by_id(session, body.toolkit_config_id)
+            toolkit = await toolkit_repo.get_shared_by_id(
+                session, body.toolkit_config_id
+            )
 
         if toolkit is not None and toolkit.workspace_id == workspace_id:
             saved: dict[str, object] = {}

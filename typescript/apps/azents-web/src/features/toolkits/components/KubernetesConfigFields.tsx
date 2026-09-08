@@ -80,6 +80,7 @@ interface KubernetesConfigFieldsProps {
   /** Existing credentials existence in edit mode */
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   /** Existing toolkit config ID in edit mode */
   toolkitConfigId?: string;
 }
@@ -267,6 +268,7 @@ export function KubernetesConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: KubernetesConfigFieldsProps): React.ReactElement {
   // Set of cluster names selected for credential replacement in edit mode
@@ -300,12 +302,20 @@ export function KubernetesConfigFields({
   const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "kubernetes",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   // --- Cluster CRUD ---
 

@@ -79,6 +79,7 @@ const agent: AgentResponse = {
   runtime_profile_configuration_status: "configured",
   runtime_add_available: false,
   runtime_remove_available: true,
+  toolkit_management_available: true,
   terminal_enabled: true,
   infrastructure_terminal_enabled: true,
   workspace_terminal_enabled: true,

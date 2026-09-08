@@ -230,7 +230,7 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
     ("initial_provider", "initial_invocation", "tracker_visibility"),
     [
         (ExternalChannelProvider.DISCORD, False, "hidden"),
-        (ExternalChannelProvider.DISCORD, True, "visible"),
+        (ExternalChannelProvider.DISCORD, True, "hidden"),
         (ExternalChannelProvider.SLACK, False, "hidden"),
         (ExternalChannelProvider.SLACK, True, "visible"),
     ],

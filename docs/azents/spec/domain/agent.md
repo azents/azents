@@ -67,8 +67,11 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
+  - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentAvatar.tsx
@@ -103,7 +106,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-08
-spec_version: 73
+spec_version: 74
 ---
 
 # Agent Domain Spec
@@ -134,6 +137,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `runtime_capability_version` | positive optimistic version for dedicated Runtime add/remove transitions and stale admission fencing |
 | `runtime_profile_id` | nullable exact Workspace Runtime Profile selection for a managed Agent. Null does not imply Runtime-free state |
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
+| `toolkit_management_available` | requester-relative true only for a Workspace Owner or explicit AgentAdmin of this active Agent; grants the enhanced saved-Agent Toolkit management flow but does not disclose any Toolkit state itself |
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
@@ -578,7 +582,7 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 ## 6. Memory / toolkit / avatar
 
 - Agent with `memory_enabled=false` does not expose memory prompt/tool.
-- Toolkit CRUD and runtime state follow `spec/domain/toolkit.md`.
+- Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` begins with Toolkit type selection and then offers eligible Workspace-shared candidates or an Agent-only configuration flow without changing Agent creation or Chat.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
 - Main Web provides available avatar variants as responsive width candidates and
   declares the rendered CSS width, allowing the browser to select a thumbnail that
@@ -611,6 +615,12 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-08** (spec_version 74) — Added model execution-option support,
+  enabled intent, and composer definitions independently of static model
+  capabilities and built-in tools.
+- **2026-09-07** (spec_version 73) — Added requester-relative enhanced Toolkit-management
+  availability to saved Agent responses and documented its exact Owner-or-AgentAdmin
+  authority boundary without changing Agent creation or Chat.
 - **2026-09-04** (spec_version 72) — Made shared Agent avatar rendering select
   responsive thumbnail tiers using CSS display size and device pixel density.
 - **2026-09-04** (spec_version 71) — Mapped the shared Agent avatar component

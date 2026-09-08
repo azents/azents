@@ -32,12 +32,16 @@ from azents.engine.events.types import (
 )
 from azents.repos.mailbox.data import (
     AgentCreateGitWorktreeContinuationResult,
+    AgentMessageMailboxPayload,
     ExternalChannelMessageMailboxPayload,
     MailboxItem,
     MailboxPresentationItem,
     TurnActionContinuationMailboxPayload,
 )
-from azents.services.chat.data import PendingMailboxExternalChannelPresentation
+from azents.services.chat.data import (
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxExternalChannelPresentation,
+)
 
 from .live_events import (
     InMemoryLiveEventStore,
@@ -256,6 +260,52 @@ def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> No
     assert event.payload.source_run_index == 4
     assert event.payload.run_status is AgentRunStatus.COMPLETED
     assert event.payload.source_terminal_result_event_id == "3" * 32
+
+
+def test_agent_message_pending_projection_preserves_source_path() -> None:
+    """Pending Agent messages expose the source SessionAgent path."""
+    mailbox_item = MailboxItem(
+        id="0823456789abcdef0123456789abcdef",
+        session_id="1123456789abcdef0123456789abcdef",
+        kind=MailboxItemKind.AGENT_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        requested_enabled_execution_options=[],
+        sender_user_id=None,
+        order_group="0823456789abcdef0123456789abcdef",
+        order_sequence=0,
+        content="Review completed.",
+        idempotency_key="agent-message-source-path",
+        metadata={"source": "agent_mailbox"},
+        action=None,
+        attachments=[],
+        file_parts=[],
+        payload=AgentMessageMailboxPayload(
+            type="agent_message",
+            items=[
+                MailboxPresentationItem(
+                    item_key="agent_message:0",
+                    presentation_kind="agent_message",
+                    content="Review completed.",
+                    metadata={
+                        "message_kind": "send_message",
+                        "source_session_agent_id": "source-agent",
+                        "source_path": "/root/reviewer",
+                        "target_session_agent_id": "target-agent",
+                        "target_path": "/root",
+                    },
+                )
+            ],
+        ),
+        created_at=datetime.datetime(2026, 9, 8, tzinfo=datetime.UTC),
+    )
+
+    projection = mailbox_item_to_pending_projection(mailbox_item)
+    presentation = projection.items[0].presentation
+
+    assert isinstance(presentation, PendingMailboxAgentMessagePresentation)
+    assert presentation.source_path == "/root/reviewer"
 
 
 def test_action_mailbox_item_live_event_preserves_requested_profile() -> None:

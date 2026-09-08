@@ -40,6 +40,7 @@ interface AwsConfigFieldsProps {
   onCredentialsChange: (credentials: AwsCredentials) => void;
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   toolkitConfigId?: string;
 }
 
@@ -70,6 +71,7 @@ export function AwsConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: AwsConfigFieldsProps): React.ReactElement {
   const region =
@@ -94,12 +96,20 @@ export function AwsConfigFields({
   const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "aws",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   return (
     <Stack gap="md">

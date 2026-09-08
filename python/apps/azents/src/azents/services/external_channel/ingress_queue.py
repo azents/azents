@@ -706,7 +706,11 @@ class ExternalChannelIngressDrainService:
                             )
                             if trigger_message:
                                 trigger_mailbox_keys.add(mailbox_idempotency_key)
-                            if item.invocation and trigger_message:
+                            if (
+                                item.provider is ExternalChannelProvider.SLACK
+                                and item.invocation
+                                and trigger_message
+                            ):
                                 visible_tracker_mailbox_keys.add(
                                     mailbox_idempotency_key
                                 )
