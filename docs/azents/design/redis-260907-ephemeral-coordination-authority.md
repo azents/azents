@@ -2,6 +2,7 @@
 title: "Ephemeral Redis Coordination Authority Design"
 created: 2026-09-07
 updated: 2026-09-07
+implemented: 2026-09-08
 tags: [architecture, backend, reliability, redis]
 document_role: primary
 document_type: design
