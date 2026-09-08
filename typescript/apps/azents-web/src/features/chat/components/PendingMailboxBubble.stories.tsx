@@ -61,14 +61,18 @@ export const AgentMessage: Story = {
     entry: item("agent", {
       type: "agent_message",
       message_kind: "send_message",
+      source_path: "/root/backend-research",
       content: "A collaborating agent supplied additional context.",
     }),
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const trigger = canvas.getByRole("button", {
-      name: "/send_message",
+      name: "/root/backend-research",
     });
+    await expect(
+      canvas.getByText("Message from agent backend-research"),
+    ).toBeVisible();
     await expect(
       canvas.queryByText("A collaborating agent supplied additional context."),
     ).toBeNull();

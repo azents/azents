@@ -72,6 +72,10 @@ from azents.runtime.coordination.memory import (
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
+from azents.testing.runtime_coordination import (
+    FakeRuntimeConnectionRegistrar,
+    publish_next_test_connection,
+)
 
 
 class _ReplySignalingStore(InMemoryRuntimeCoordinationStore):
@@ -216,7 +220,8 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
     """Valid results use the sink; malformed results become protocol final errors."""
     store = InMemoryRuntimeCoordinationStore()
     now = datetime.now(UTC)
-    await store.register_connection(
+    await publish_next_test_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -259,6 +264,7 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=control,
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="consumer-1",
@@ -307,6 +313,7 @@ async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() 
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=RuntimeControlProtocolService(store),
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="consumer-1",
@@ -680,6 +687,7 @@ async def test_runner_grpc_isolates_metrics_store_failure_from_heartbeat() -> No
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=service,
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -1189,6 +1197,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=control,
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -1230,6 +1239,9 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=control,
         coordination_store=InMemoryRuntimeCoordinationStore(),
+        connection_registrar=FakeRuntimeConnectionRegistrar(
+            InMemoryRuntimeCoordinationStore()
+        ),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -1266,6 +1278,9 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=control,
         coordination_store=InMemoryRuntimeCoordinationStore(),
+        connection_registrar=FakeRuntimeConnectionRegistrar(
+            InMemoryRuntimeCoordinationStore()
+        ),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -1300,6 +1315,9 @@ async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> 
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=control,
         coordination_store=InMemoryRuntimeCoordinationStore(),
+        connection_registrar=FakeRuntimeConnectionRegistrar(
+            InMemoryRuntimeCoordinationStore()
+        ),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -1327,7 +1345,8 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
     """Rejected and accepted results retain dedup authority for delayed intents."""
     store = InMemoryRuntimeCoordinationStore()
     now = datetime.now(UTC)
-    await store.register_connection(
+    await publish_next_test_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -1370,6 +1389,7 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
     servicer = RuntimeRunnerControlGrpcServicer(
         control_protocol=RuntimeControlProtocolService(store),
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
@@ -2042,7 +2062,8 @@ async def test_runner_grpc_rejects_start_after_generation_replacement() -> None:
     assert isinstance(result, RuntimeDispatchResult)
     await anext(stream)
     now = _now()
-    replacement = await store.register_connection(
+    replacement = await publish_next_test_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-2",
@@ -2221,6 +2242,7 @@ def _servicer(
     return RuntimeRunnerControlGrpcServicer(
         control_protocol=service,
         coordination_store=store,
+        connection_registrar=FakeRuntimeConnectionRegistrar(store),
         state_sink=sink,
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",

@@ -44,6 +44,9 @@ from azents.runtime.transfer.data import (
     RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
+from azents.testing.runtime_coordination import (
+    publish_next_test_connection,
+)
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 
@@ -83,7 +86,8 @@ async def test_authenticated_transitions_preserve_state_and_dispatch_metadata() 
     """Map authenticated admit, ready, and dispatch transitions over gRPC."""
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()
-    connection = await coordination.register_connection(
+    connection = await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",

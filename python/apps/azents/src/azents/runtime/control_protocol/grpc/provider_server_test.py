@@ -59,6 +59,10 @@ from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialUnavailable,
 )
 from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
+from azents.testing.runtime_coordination import (
+    FakeRuntimeConnectionRegistrar,
+    FakeRuntimeControlProtocolService,
+)
 
 
 async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
@@ -244,6 +248,7 @@ class CancellationDelayedControlProtocolService(RuntimeControlProtocolService):
     def __init__(self, store: InMemoryRuntimeCoordinationStore) -> None:
         """Initialize observable cancellation barriers."""
         super().__init__(store)
+        self.store = store
         self.claim_started = asyncio.Event()
         self.release_cancellation = asyncio.Event()
 
@@ -296,7 +301,7 @@ class FakeGrpcContext(
 @pytest.mark.asyncio
 async def test_provider_grpc_registers_and_acks_heartbeat() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
     await inbound.put(
@@ -354,7 +359,7 @@ async def test_provider_grpc_disconnects_before_command_task_cleanup() -> None:
 async def test_provider_grpc_rejects_stream_generation_mismatch() -> None:
     store = InMemoryRuntimeCoordinationStore()
     sink = FakeReportSink()
-    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), sink)
     inbound = QueueIterator()
     await inbound.put(_register_message())
     await inbound.put(
@@ -379,7 +384,7 @@ async def test_provider_grpc_rejects_stream_generation_mismatch() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_report_after_newer_registration() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store)
+    service = FakeRuntimeControlProtocolService(store)
     sink = FakeReportSink()
     servicer = _servicer(service, sink)
     old_inbound = QueueIterator()
@@ -413,7 +418,7 @@ async def test_provider_grpc_rejects_report_after_newer_registration() -> None:
 async def test_provider_grpc_rejects_report_generation_mismatch() -> None:
     store = InMemoryRuntimeCoordinationStore()
     sink = FakeReportSink()
-    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), sink)
     inbound = QueueIterator()
     await inbound.put(_register_message())
     report = _report_message()
@@ -440,7 +445,9 @@ async def test_provider_grpc_rejects_report_generation_mismatch() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-1"
+    )
     sink = FakeReportSink()
     servicer = _servicer(service, sink)
     inbound = QueueIterator()
@@ -521,7 +528,7 @@ async def test_provider_grpc_keeps_only_one_command_in_flight() -> None:
     """Control leaves later commands in coordination until completion frees a slot."""
     request_ids = iter(("req-1", "req-2"))
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: next(request_ids),
     )
@@ -566,7 +573,9 @@ async def test_provider_grpc_keeps_only_one_command_in_flight() -> None:
 async def test_provider_grpc_rejects_restart_report_for_another_runtime() -> None:
     """A correlated Restart completion cannot hand off a different Runtime."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    service = FakeRuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-1"
+    )
     sink = FakeReportSink()
     servicer = _servicer(service, sink)
     inbound = QueueIterator()
@@ -619,7 +628,7 @@ async def test_provider_grpc_rejects_restart_report_for_another_runtime() -> Non
 async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> None:
     """A duplicate OBSERVE completion cannot enqueue duplicate drift repair."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(
+    service = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "observe-request",
     )
@@ -706,7 +715,7 @@ async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> No
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_missing_provider_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
@@ -741,7 +750,7 @@ async def test_provider_grpc_rejects_ambiguous_or_unknown_auth_metadata(
     metadata: tuple[tuple[str, str], ...],
 ) -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
@@ -754,7 +763,7 @@ async def test_provider_grpc_rejects_ambiguous_or_unknown_auth_metadata(
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_shared_control_token_fallback() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
@@ -770,7 +779,7 @@ async def test_provider_grpc_rejects_shared_control_token_fallback() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_registration_provider_id_spoofing() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     message = _register_message()
     message.register.provider_id = "provider-2"
@@ -786,7 +795,7 @@ async def test_provider_grpc_rejects_registration_provider_id_spoofing() -> None
 async def test_provider_grpc_rejects_report_provider_id_spoofing() -> None:
     store = InMemoryRuntimeCoordinationStore()
     sink = FakeReportSink()
-    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), sink)
     inbound = QueueIterator()
     await inbound.put(_register_message())
     report = _report_message()
@@ -812,7 +821,7 @@ async def test_provider_grpc_rejects_report_provider_id_spoofing() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_accepts_provider_credential_metadata() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    servicer = _servicer(FakeRuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
@@ -842,7 +851,7 @@ async def test_provider_grpc_rejects_kubernetes_v1_before_registration() -> None
         )
     )
     servicer = _servicer(
-        RuntimeControlProtocolService(store),
+        FakeRuntimeControlProtocolService(store),
         FakeReportSink(),
         bridge=bridge,
     )
@@ -877,7 +886,7 @@ async def test_provider_grpc_accepts_kubernetes_v2_registration() -> None:
         )
     )
     servicer = _servicer(
-        RuntimeControlProtocolService(store),
+        FakeRuntimeControlProtocolService(store),
         FakeReportSink(),
         bridge=bridge,
     )
@@ -909,7 +918,7 @@ async def test_provider_grpc_persists_v3_registration_and_heartbeat_diagnostics(
         )
     )
     servicer = _servicer(
-        RuntimeControlProtocolService(store),
+        FakeRuntimeControlProtocolService(store),
         FakeReportSink(),
         bridge=bridge,
     )
@@ -989,7 +998,7 @@ async def test_provider_grpc_v3_enforcement_controls_configuration_acknowledgeme
     )
     await inbound.put(register)
     stream = _servicer(
-        RuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
+        FakeRuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
         sink,
         bridge=bridge,
     ).ConnectProvider(inbound, FakeGrpcContext())
@@ -1040,7 +1049,7 @@ async def test_provider_grpc_rejects_kubernetes_payloads_from_docker(
         )
     await inbound.put(register)
     stream = _servicer(
-        RuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
+        FakeRuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
         sink,
     ).ConnectProvider(inbound, FakeGrpcContext())
     if payload == "registration":
@@ -1113,7 +1122,7 @@ async def test_provider_grpc_rejects_protocol_mismatched_reconciliation(
     )
     sink = FakeReportSink()
     servicer = _servicer(
-        RuntimeControlProtocolService(store),
+        FakeRuntimeControlProtocolService(store),
         sink,
         bridge=bridge,
     )
@@ -1161,7 +1170,9 @@ async def test_provider_grpc_rejects_protocol_mismatched_reconciliation(
 
 
 def _servicer(
-    service: RuntimeControlProtocolService,
+    service: (
+        FakeRuntimeControlProtocolService | CancellationDelayedControlProtocolService
+    ),
     sink: FakeReportSink,
     *,
     bridge: FakeProviderCredentialBridge | None = None,
@@ -1178,6 +1189,10 @@ def _servicer(
         consumer_id="provider-consumer-a",
         credential_authenticator=bridge,
         connection_tracker=bridge,
+        connection_registrar=FakeRuntimeConnectionRegistrar(
+            service.store,
+            provider_connection_tracker=bridge,
+        ),
         contract_proposer=FakeRuntimeProviderContractProposer(),
         runner_credential_issuer=FakeRuntimeRunnerCredentialIssuer(),
         command_block_ms=1,

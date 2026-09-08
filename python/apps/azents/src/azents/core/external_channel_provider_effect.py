@@ -9,7 +9,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
-from azents.services.external_channel.data import DiscordConnectionConfiguration
+from azents.core.external_channel_provider import DiscordConnectionConfiguration
 
 _PROVIDER_OPERATION_KEY_MAX_LENGTH = 25
 

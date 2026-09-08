@@ -24,6 +24,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.job_runtime.types import (
     JobExecutionContext,
     JobPayload,
@@ -89,7 +90,6 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
@@ -706,7 +706,11 @@ class ExternalChannelIngressDrainService:
                             )
                             if trigger_message:
                                 trigger_mailbox_keys.add(mailbox_idempotency_key)
-                            if item.invocation and trigger_message:
+                            if (
+                                item.provider is ExternalChannelProvider.SLACK
+                                and item.invocation
+                                and trigger_message
+                            ):
                                 visible_tracker_mailbox_keys.add(
                                     mailbox_idempotency_key
                                 )

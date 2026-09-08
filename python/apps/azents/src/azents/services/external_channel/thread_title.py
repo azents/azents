@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
 )
+from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.core.external_channel_title import (
     DISCORD_INITIAL_THREAD_TITLE_LABEL,
     normalize_discord_thread_title,
@@ -35,7 +36,6 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.discord_sdk import DiscordSDKError
 

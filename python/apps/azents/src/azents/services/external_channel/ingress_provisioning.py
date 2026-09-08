@@ -151,6 +151,7 @@ def _tracker_visibility(
     provider: ExternalChannelProvider,
     invocation: bool,
 ) -> Literal["hidden", "visible"]:
-    """Derive first-cycle Tracker eligibility from explicit invocation."""
-    del provider
+    """Keep Discord automatic activity on typing instead of a Tracker."""
+    if provider is ExternalChannelProvider.DISCORD:
+        return "hidden"
     return "visible" if invocation else "hidden"

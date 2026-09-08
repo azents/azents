@@ -54,7 +54,12 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
+from azents.repos.toolkit.data import (
+    EffectiveToolkitConfig,
+    EffectiveToolkitSlugConflict,
+    EffectiveToolkitSource,
+    ToolkitConfig,
+)
 from azents.runtime.types import RuntimeDomainConfig
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -306,6 +311,13 @@ def _runtime_capability_resolver(
     )
 
 
+def _empty_toolkit_repository() -> AsyncMock:
+    """Create a Toolkit repository without effective persisted Toolkits."""
+    repository = AsyncMock()
+    repository.list_effective_for_agent.return_value = []
+    return repository
+
+
 def test_auto_toolkit_revision_changes_with_canonical_scope() -> None:
     """Auto-bound Toolkits replace retained instances after scope changes."""
     config = _TestToolkitConfig(value="same")
@@ -341,39 +353,35 @@ async def _resolve_failing_registered_toolkit(
     always_expose_tools: bool = False,
 ) -> list[ToolkitBinding]:
     """Resolve one registered Toolkit using the supplied provider."""
-    agent_toolkit_repository = AsyncMock()
-    agent_toolkit_repository.list_by_agent.return_value = [
-        AgentToolkit(
-            id="agent-toolkit-1",
-            agent_id="agent-1",
-            toolkit_id="toolkit-1",
-            toolkit_type="test",
-            created_at=_NOW,
+    toolkit_repository = AsyncMock()
+    toolkit_repository.list_effective_for_agent.return_value = [
+        EffectiveToolkitConfig(
+            toolkit=ToolkitConfig(
+                id="toolkit-1",
+                workspace_id="ws-1",
+                owner_agent_id=None,
+                toolkit_type="test",
+                slug="test",
+                name="Test",
+                description=None,
+                config={"value": "valid"} if toolkit_config is None else toolkit_config,
+                prompt=None,
+                credentials=None,
+                enabled=True,
+                always_expose_tools=always_expose_tools,
+                revision=1,
+                created_at=_NOW,
+                updated_at=_NOW,
+            ),
+            source=EffectiveToolkitSource.SHARED_ATTACHMENT,
+            agent_toolkit_id="agent-toolkit-1",
         )
     ]
-    toolkit_repository = AsyncMock()
-    toolkit_repository.get_by_id.return_value = ToolkitConfig(
-        id="toolkit-1",
-        workspace_id="ws-1",
-        toolkit_type="test",
-        slug="test",
-        name="Test",
-        description=None,
-        config={"value": "valid"} if toolkit_config is None else toolkit_config,
-        prompt=None,
-        credentials=None,
-        enabled=True,
-        always_expose_tools=always_expose_tools,
-        revision=1,
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
     return await resolve_agent_tools(
         "agent-1",
         _make_toolkit_context(),
         execution_mode=ToolkitExecutionMode.ROOT,
         toolkit_registry={"test": provider},
-        agent_toolkit_repository=agent_toolkit_repository,
         toolkit_repository=toolkit_repository,
         session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
         web_url="https://example.test",
@@ -397,6 +405,42 @@ async def test_registered_toolkit_binding_captures_direct_exposure_policy() -> N
 
     assert len(bindings) == 1
     assert bindings[0].always_expose_tools is True
+
+
+async def test_registered_toolkit_duplicate_slug_fails_before_provider_resolution() -> (
+    None
+):
+    """Fail the effective namespace before resolving any provider."""
+    conflict = EffectiveToolkitSlugConflict(
+        agent_id="agent-1",
+        slug="duplicate",
+        toolkit_ids=("toolkit-1", "toolkit-2"),
+    )
+    toolkit_repository = AsyncMock()
+    toolkit_repository.list_effective_for_agent.side_effect = conflict
+    provider = AsyncMock()
+
+    with pytest.raises(EffectiveToolkitSlugConflict) as exc_info:
+        await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.ROOT,
+            toolkit_registry={"test": provider},
+            toolkit_repository=toolkit_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            memory_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        )
+
+    assert exc_info.value is conflict
+    provider.resolve.assert_not_awaited()
 
 
 def _make_turn_context() -> TurnContext:
@@ -852,16 +896,13 @@ class TestResolveAgentTools:
         """Root and subagent Runs resolve the shared-context worktree Toolkit."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=execution_mode,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -910,16 +951,13 @@ class TestResolveAgentTools:
         """Claude rules Toolkit is auto-bound after Runtime capability admission."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -963,16 +1001,13 @@ class TestResolveAgentTools:
         """Claude rules Toolkit is not auto-bound without Runtime capability."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -995,16 +1030,13 @@ class TestResolveAgentTools:
         """Root sessions receive the coherent subagent collaboration bundle."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -1032,8 +1064,6 @@ class TestResolveAgentTools:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
 
         @asynccontextmanager
         async def goal_session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -1044,8 +1074,7 @@ class TestResolveAgentTools:
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -1076,8 +1105,6 @@ class TestResolveAgentTools:
         """Scheduled auto-binding needs no attachment, config, or credentials."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
-        agent_toolkit_repository = AsyncMock()
-        agent_toolkit_repository.list_by_agent.return_value = []
         provider = _make_scheduled_provider()
 
         root = await resolve_agent_tools(
@@ -1085,8 +1112,7 @@ class TestResolveAgentTools:
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
@@ -1105,8 +1131,7 @@ class TestResolveAgentTools:
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
-            agent_toolkit_repository=agent_toolkit_repository,
-            toolkit_repository=AsyncMock(),
+            toolkit_repository=_empty_toolkit_repository(),
             session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",

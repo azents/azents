@@ -332,97 +332,147 @@ class RuntimeProviderEnrollmentService:
     ) -> RuntimeProviderConnection:
         """Persist an authenticated Provider stream after control registration."""
         async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_id(
+            return await self.create_connection_in_transaction(
                 session,
-                provider_id=authentication.provider_resource_id,
-                for_update=True,
-            )
-            if provider is None or provider.lifecycle_state in _TERMINAL:
-                raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-            binding = await self.binding_repository.get_by_id(
-                session,
-                binding_id=authentication.binding_id,
-                for_update=True,
-            )
-            if (
-                binding is None
-                or binding.provider_id != authentication.provider_resource_id
-                or binding.auth_method is not authentication.auth_method
-                or binding.subject != authentication.auth_subject
-                or binding.state is not RuntimeProviderBindingState.ACTIVE
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            if (
-                authentication.evidence_expires_at is not None
-                and authentication.evidence_expires_at <= connected_at
-            ):
-                raise RuntimeProviderCredentialUnavailable("evidence_expired")
-            if authentication.credential_id is not None:
-                if not await self.repository.mark_credential_used(
-                    session,
-                    credential_id=authentication.credential_id,
-                    used_at=connected_at,
-                ):
-                    raise RuntimeProviderCredentialUnavailable("credential_unavailable")
-            if not await self.binding_repository.mark_connected(
-                session,
-                binding_id=binding.id,
+                authentication=authentication,
+                connection_id=connection_id,
+                generation=generation,
+                reported_provider_type=reported_provider_type,
+                reported_protocol_version=reported_protocol_version,
+                operational_diagnostics=operational_diagnostics,
+                authorized_at=connected_at,
                 connected_at=connected_at,
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            connection = await self.repository.create_connection(
-                session,
-                create=RuntimeProviderConnectionCreate(
-                    provider_id=authentication.provider_resource_id,
-                    binding_id=authentication.binding_id,
-                    credential_id=authentication.credential_id,
-                    auth_method=authentication.auth_method,
-                    auth_subject=authentication.auth_subject,
-                    evidence_expires_at=authentication.evidence_expires_at,
-                    connection_id=connection_id,
-                    generation=generation,
-                    reported_provider_type=reported_provider_type,
-                    reported_protocol_version=reported_protocol_version,
-                    operational_diagnostics=operational_diagnostics,
-                    connected_at=connected_at,
-                ),
             )
-            revoked_credentials = ()
-            if authentication.credential_id is not None:
-                revoked_credentials = (
-                    await self.repository.revoke_older_bootstrap_credentials(
-                        session,
-                        provider_id=authentication.provider_resource_id,
-                        current_credential_id=authentication.credential_id,
-                        revoked_at=connected_at,
-                    )
+
+    async def validate_connection_authority_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        validated_at: datetime.datetime,
+    ) -> None:
+        """Validate Provider authority inside a caller-owned transaction."""
+        provider = await self.provider_repository.get_by_id(
+            session,
+            provider_id=authentication.provider_resource_id,
+            for_update=True,
+        )
+        if provider is None or provider.lifecycle_state in _TERMINAL:
+            raise RuntimeProviderCredentialUnavailable("provider_unavailable")
+        binding = await self.binding_repository.get_by_id(
+            session,
+            binding_id=authentication.binding_id,
+            for_update=True,
+        )
+        if (
+            binding is None
+            or binding.provider_id != authentication.provider_resource_id
+            or binding.auth_method is not authentication.auth_method
+            or binding.subject != authentication.auth_subject
+            or binding.state is not RuntimeProviderBindingState.ACTIVE
+        ):
+            raise RuntimeProviderCredentialUnavailable("binding_unavailable")
+        if (
+            authentication.evidence_expires_at is not None
+            and authentication.evidence_expires_at <= validated_at
+        ):
+            raise RuntimeProviderCredentialUnavailable("evidence_expired")
+        if authentication.credential_id is not None and not (
+            await self.repository.credential_active(
+                session,
+                credential_id=authentication.credential_id,
+                provider_id=authentication.provider_resource_id,
+                binding_id=authentication.binding_id,
+                now=validated_at,
+            )
+        ):
+            raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+
+    async def create_connection_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        connection_id: str,
+        generation: int,
+        reported_provider_type: str,
+        reported_protocol_version: str,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
+        authorized_at: datetime.datetime,
+        connected_at: datetime.datetime,
+    ) -> RuntimeProviderConnection:
+        """Persist Provider acceptance inside a caller-owned transaction."""
+        await self.validate_connection_authority_in_transaction(
+            session,
+            authentication=authentication,
+            validated_at=authorized_at,
+        )
+        if authentication.credential_id is not None:
+            if not await self.repository.mark_credential_used(
+                session,
+                credential_id=authentication.credential_id,
+                used_at=connected_at,
+            ):
+                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+        if not await self.binding_repository.mark_connected(
+            session,
+            binding_id=authentication.binding_id,
+            connected_at=connected_at,
+        ):
+            raise RuntimeProviderCredentialUnavailable("binding_unavailable")
+        connection = await self.repository.create_connection(
+            session,
+            create=RuntimeProviderConnectionCreate(
+                provider_id=authentication.provider_resource_id,
+                binding_id=authentication.binding_id,
+                credential_id=authentication.credential_id,
+                auth_method=authentication.auth_method,
+                auth_subject=authentication.auth_subject,
+                evidence_expires_at=authentication.evidence_expires_at,
+                connection_id=connection_id,
+                generation=generation,
+                reported_provider_type=reported_provider_type,
+                reported_protocol_version=reported_protocol_version,
+                operational_diagnostics=operational_diagnostics,
+                connected_at=connected_at,
+            ),
+        )
+        revoked_credentials = ()
+        if authentication.credential_id is not None:
+            revoked_credentials = (
+                await self.repository.revoke_older_bootstrap_credentials(
+                    session,
+                    provider_id=authentication.provider_resource_id,
+                    current_credential_id=authentication.credential_id,
+                    revoked_at=connected_at,
                 )
+            )
+        await self.provider_repository.append_audit_event(
+            session,
+            create=RuntimeProviderAuditEventCreate(
+                provider_id=authentication.provider_resource_id,
+                event_type=RuntimeProviderAuditEventType.CONNECTION_OPENED,
+                actor_user_id=None,
+                metadata={
+                    "connection_id": connection.id,
+                    "credential_id": authentication.credential_id,
+                    "generation": generation,
+                },
+                created_at=connected_at,
+            ),
+        )
+        for credential in revoked_credentials:
             await self.provider_repository.append_audit_event(
                 session,
                 create=RuntimeProviderAuditEventCreate(
-                    provider_id=authentication.provider_resource_id,
-                    event_type=RuntimeProviderAuditEventType.CONNECTION_OPENED,
+                    provider_id=credential.provider_id,
+                    event_type=RuntimeProviderAuditEventType.CREDENTIAL_REVOKED,
                     actor_user_id=None,
-                    metadata={
-                        "connection_id": connection.id,
-                        "credential_id": authentication.credential_id,
-                        "generation": generation,
-                    },
+                    metadata={"credential_id": credential.id},
                     created_at=connected_at,
                 ),
             )
-            for credential in revoked_credentials:
-                await self.provider_repository.append_audit_event(
-                    session,
-                    create=RuntimeProviderAuditEventCreate(
-                        provider_id=credential.provider_id,
-                        event_type=RuntimeProviderAuditEventType.CREDENTIAL_REVOKED,
-                        actor_user_id=None,
-                        metadata={"credential_id": credential.id},
-                        created_at=connected_at,
-                    ),
-                )
-            return connection
+        return connection
 
     async def heartbeat_connection(
         self,

@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from azents.core.runtime_connection_generation import (
+    MAX_RUNTIME_CONNECTION_GENERATION,
+)
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
@@ -126,6 +129,7 @@ def _admission_value(payload: dict[str, object]) -> dict[str, object]:
 
 def test_keys_are_namespaced_deterministic_and_identifier_safe() -> None:
     """Keys cover transfer state without exposing raw identifier separators."""
+    assert _RedisTransferKeys().namespace == "azents:runtime:transfer:v2"
     keys = _RedisTransferKeys(namespace="azents:runtime:transfer:test")
     transfer_id = "transfer:one/two"
     attempt_id = "attempt:one/two"
@@ -183,6 +187,25 @@ def test_record_envelope_round_trips_all_public_and_private_evidence() -> None:
     assert _decode_record_envelope(encoded) == _RedisTransferRecordEnvelope(
         record=record,
         admission_released=True,
+    )
+
+
+def test_record_envelope_preserves_maximum_runner_generation_as_string() -> None:
+    """Redis JSON preserves the exact signed-BIGINT generation without a number."""
+    record = replace(
+        _record(),
+        accepted_runner_generation=MAX_RUNTIME_CONNECTION_GENERATION,
+    )
+
+    payload = _json_payload(record)
+
+    assert payload["version"] == 9
+    assert _record_value(payload)["accepted_runner_generation"] == "9223372036854775807"
+    assert (
+        _decode_record_envelope(
+            json.dumps(payload, separators=(",", ":")).encode()
+        ).record
+        == record
     )
 
 
@@ -246,6 +269,11 @@ def test_record_codec_rejects_schema_and_domain_failures() -> None:
     _admission_value(invalid_size)["expected_size"] = -1
     with pytest.raises(ValueError, match="negative"):
         _decode_record_envelope(json.dumps(invalid_size).encode())
+
+    numeric_generation = _json_payload(record)
+    _record_value(numeric_generation)["accepted_runner_generation"] = 4
+    with pytest.raises(ValueError, match="connection-generation string"):
+        _decode_record_envelope(json.dumps(numeric_generation).encode())
 
 
 def test_record_codec_rejects_oversized_serialization() -> None:

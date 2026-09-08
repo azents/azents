@@ -8,7 +8,6 @@ from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkTask,
     checking_progress_title,
-    scheduled_task_checking_progress_title,
 )
 from azents.core.external_channel_session_presence import (
     ExternalChannelSessionPresenceState,
@@ -219,7 +218,8 @@ def render_discord_progress(
         progress,
         work_id=work_id,
         desired_progress_revision=desired_progress_revision,
-        checking_title=checking_progress_title(),
+        checking_embed_title="Channel Work",
+        checking_description=f"◉ {checking_progress_title()}",
     )
 
 
@@ -227,6 +227,7 @@ def render_scheduled_task_discord_progress(
     progress: ExternalChannelDesiredProgress,
     *,
     scheduled_task_title: str,
+    scheduled_task_schedule: str,
     work_id: str,
     desired_progress_revision: int,
 ) -> DiscordProgressPresentation:
@@ -235,7 +236,16 @@ def render_scheduled_task_discord_progress(
         progress,
         work_id=work_id,
         desired_progress_revision=desired_progress_revision,
-        checking_title=scheduled_task_checking_progress_title(scheduled_task_title),
+        checking_embed_title="Scheduled Task",
+        checking_description=_truncate(
+            "\n".join(
+                (
+                    _single_line(scheduled_task_title),
+                    _single_line(scheduled_task_schedule),
+                )
+            ),
+            DISCORD_DELIVERY_TEXT_LIMIT,
+        ),
     )
 
 
@@ -244,7 +254,8 @@ def _render_discord_progress(
     *,
     work_id: str,
     desired_progress_revision: int,
-    checking_title: str,
+    checking_embed_title: str,
+    checking_description: str,
 ) -> DiscordProgressPresentation:
     """Lower one progress snapshot with its explicit checking context."""
     del work_id, desired_progress_revision
@@ -254,8 +265,8 @@ def _render_discord_progress(
                 DiscordProgressPage(
                     text="",
                     embeds=_tracker_embeds(
-                        title="Channel Work",
-                        description=f"◉ {checking_title}",
+                        title=checking_embed_title,
+                        description=checking_description,
                     ),
                 ),
             )

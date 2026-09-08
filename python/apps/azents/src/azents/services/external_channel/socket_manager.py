@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
 )
+from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -34,7 +35,6 @@ from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngressAuthority,

@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
@@ -26,7 +27,6 @@ from azents.services.external_channel.admission import ExternalChannelAdmissionS
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
-from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,

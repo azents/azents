@@ -29,6 +29,7 @@ Name | Type | Description | Notes
 **runtime_profile_configuration_status** | **str** |  | 
 **runtime_add_available** | **bool** |  | 
 **runtime_remove_available** | **bool** |  | 
+**toolkit_management_available** | **bool** |  | 
 **terminal_enabled** | **bool** |  | 
 **infrastructure_terminal_enabled** | **bool** |  | 
 **workspace_terminal_enabled** | **bool** |  | 

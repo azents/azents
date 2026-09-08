@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pydantic import TypeAdapter
 
 from azents.core.crypto import CredentialCipher
-from azents.services.external_channel.data import (
+from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     ExternalChannelConnectionCredentials,
     ExternalChannelCredentialSnapshot,

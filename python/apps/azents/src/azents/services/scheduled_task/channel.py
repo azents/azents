@@ -16,23 +16,23 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
-from azents.core.external_channel_progress import (
-    ExternalChannelDesiredProgress,
-    ExternalChannelWorkTask,
-    checking_progress,
-)
-from azents.core.slack_external_channel_progress import (
-    render_scheduled_task_slack_progress,
+from azents.core.external_channel_progress import ExternalChannelWorkTask
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectOutcome,
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelActionResult
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.scheduled_task_cycle.data import (
-    ScheduledTaskCycleRecord,
+from azents.repos.scheduled_task_cycle.progress import (
+    ScheduledTaskProgressRepository,
+)
+from azents.repos.scheduled_task_cycle.progress_data import (
+    ScheduledTaskProgressPreparation,
+    ScheduledTaskTrackerEffect,
 )
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
@@ -40,14 +40,6 @@ from azents.runtime.transfer.runtime_to_provider import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     RuntimeTargetResolver,
-)
-from azents.services.external_channel.discord_presentation import (
-    render_scheduled_task_discord_progress,
-)
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectOutcome,
-    ProviderEffectPlan,
-    ProviderMutationOutcome,
 )
 from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.control import (
@@ -70,24 +62,6 @@ class ScheduledTaskProgressExecution:
     result: ChannelActionResult | None
 
 
-@dataclasses.dataclass(frozen=True)
-class _ScheduledRunResolution:
-    """Whether one Run is Scheduled-bound and its current started cycle."""
-
-    scheduled: bool
-    record: ScheduledTaskCycleRecord | None
-
-
-@dataclasses.dataclass(frozen=True)
-class _TrackerEffect:
-    """One claimed Scheduled Tracker provider mutation."""
-
-    plan: ProviderEffectPlan
-    expected_desired_revision: int
-    part_ordinal: int
-    state_version: int
-
-
 class ScheduledTaskChannelService:
     """Own Scheduled provider effects without reusing Channel Work state."""
 
@@ -95,15 +69,13 @@ class ScheduledTaskChannelService:
         self,
         *,
         session_manager: SessionManager[AsyncSession],
-        run_repository: AgentRunRepository,
-        cycle_repository: ScheduledTaskCycleRepository,
+        progress_repository: ScheduledTaskProgressRepository,
         provider_repository: ExternalChannelWorkRepository,
         action_service: ExternalChannelActionService,
         config: Config,
     ) -> None:
         self.session_manager = session_manager
-        self.run_repository = run_repository
-        self.cycle_repository = cycle_repository
+        self.progress_repository = progress_repository
         self.provider_repository = provider_repository
         self.action_service = action_service
         self.config = config
@@ -233,29 +205,25 @@ class ScheduledTaskChannelService:
         cycle_id: str,
     ) -> ProviderEffectOutcome | None:
         """Attempt the run-start Tracker create once after admission commits."""
-        async with self.session_manager() as session:
-            record = await self.cycle_repository.get_started(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                cycle_id=cycle_id,
-            )
-            if record is None or record.state.binding_id is None:
-                return None
-            tracker = await self._claim_tracker_effect(
-                session,
-                record=record,
-                progress=checking_progress(),
-            )
+        tracker = await self.progress_repository.prepare_initial_tracker(
+            agent_id=agent_id,
+            session_id=session_id,
+            cycle_id=cycle_id,
+        )
         if tracker is None:
             return None
         outcome = await self.action_service.execute_binding_effect(tracker.plan)
-        await self._settle_tracker(
+        status, provider_message_key = _projection_outcome(
+            operation=tracker.plan.target.operation,
+            outcome=outcome,
+        )
+        await self.progress_repository.settle_tracker(
             agent_id=agent_id,
             session_id=session_id,
             cycle_id=cycle_id,
             effect=tracker,
-            outcome=outcome,
+            status=status,
+            provider_message_key=provider_message_key,
         )
         return _provider_outcome(
             operation=tracker.plan.target.operation,
@@ -281,166 +249,112 @@ class ScheduledTaskChannelService:
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> ScheduledTaskProgressExecution:
         """Route one current Scheduled Run action before Channel Work mutation."""
-        async with self.session_manager() as session:
-            resolution = await self._resolve_run_cycle(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                run_id=run_id,
-            )
-            if not resolution.scheduled:
-                return ScheduledTaskProgressExecution(result=None)
-            record = resolution.record
-            if record is None:
-                raise ValueError(
-                    "The current Scheduled Task cycle is no longer active."
-                )
-            if mode is not ExternalChannelActionMode.CONTINUE:
-                raise ValueError(
-                    "Scheduled Task channel_action only supports continue; use "
-                    "submit_scheduled_task_result to finish or fail the cycle."
-                )
-            if record.state.binding_id != binding_id:
-                raise ValueError(
-                    "Scheduled Task progress requires its exact current Binding."
-                )
-            if (title is None) != (tasks is None):
-                raise ValueError(
-                    "Scheduled Task progress requires both a title and task list."
-                )
-            current = record
-            tracker: _TrackerEffect | None = None
-            if title is not None and tasks is not None:
-                current = await self.cycle_repository.update_progress(
-                    session,
-                    record=current,
-                    progress_title=title,
-                    ordered_tasks=[task.title for task in tasks],
-                )
-                tracker = await self._claim_tracker_effect(
-                    session,
-                    record=current,
-                    progress=ExternalChannelDesiredProgress(
-                        schema_version=2,
-                        state="working",
-                        title=title,
-                        tasks=list(tasks),
-                    ),
-                )
-            reply_plans = (
-                ()
-                if message is None
-                else await self.provider_repository.prepare_binding_reply_effects(
-                    session,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    binding_id=binding_id,
-                    text=message,
-                    files=files,
-                    operation_seed=f"scheduled-progress:{current.state.cycle_id}",
-                    slack_reply_broadcast=False,
-                    discord_forward_to_parent=False,
-                )
-            )
-            state_revision = (
-                current.version if tracker is None else tracker.state_version
-            )
+        preparation = await self.progress_repository.prepare_progress(
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            binding_id=binding_id,
+            mode=mode,
+            message=message,
+            title=title,
+            tasks=tasks,
+            files=files,
+        )
+        if preparation.status == "not_scheduled":
+            return ScheduledTaskProgressExecution(result=None)
+        if preparation.status == "inactive":
+            raise ValueError("The current Scheduled Task cycle is no longer active.")
+        cycle_id, state_revision = _prepared_progress_identity(preparation)
+        reply_plans = preparation.reply_plans
+        tracker = preparation.tracker
 
         outcomes: list[ProviderEffectOutcome] = []
-        async with self.session_manager() as effect_session:
-            effect_resolution = await self._resolve_run_cycle(
-                effect_session,
-                agent_id=agent_id,
-                session_id=session_id,
-                run_id=run_id,
+        admission = await self.progress_repository.admit_progress_effects(
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            state_revision=state_revision,
+            tracker_expected_desired_revision=(
+                None if tracker is None else tracker.expected_desired_revision
+            ),
+        )
+        if admission.status == "inactive":
+            outcomes.extend(
+                _inactive_cycle_outcomes(
+                    message_requested=message is not None,
+                    reply_plans=reply_plans,
+                    tracker=tracker,
+                )
             )
-            effect_record = effect_resolution.record
-            if effect_record is None:
-                outcomes.extend(
-                    _inactive_cycle_outcomes(
-                        message_requested=message is not None,
-                        reply_plans=reply_plans,
-                        tracker=tracker,
+        elif admission.status == "superseded":
+            outcomes.extend(
+                _superseded_progress_outcomes(
+                    message_requested=message is not None,
+                    reply_plans=reply_plans,
+                    tracker=tracker,
+                )
+            )
+        else:
+            if message is not None and not reply_plans:
+                outcomes.append(
+                    _unavailable_outcome(
+                        operation=ExternalChannelDeliveryOperation.REPLY,
+                        part=0,
                     )
                 )
-            elif effect_record.version != state_revision:
-                outcomes.extend(
-                    _superseded_progress_outcomes(
-                        message_requested=message is not None,
-                        reply_plans=reply_plans,
-                        tracker=tracker,
+            for part, plan in enumerate(reply_plans):
+                outcome = await self.action_service.execute_binding_effect(
+                    plan,
+                    file_storage=file_storage,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    authority=authority,
+                    provider_delivery_service=provider_delivery_service,
+                    resolve_runtime_target=resolve_runtime_target,
+                )
+                outcomes.append(
+                    _provider_outcome(
+                        operation=plan.target.operation,
+                        part=part,
+                        outcome=outcome,
                     )
                 )
-            else:
-                if message is not None and not reply_plans:
+            if tracker is not None:
+                if not admission.tracker_current:
                     outcomes.append(
-                        _unavailable_outcome(
-                            operation=ExternalChannelDeliveryOperation.REPLY,
-                            part=0,
+                        _not_attempted_outcome(
+                            operation=tracker.plan.target.operation,
+                            part=tracker.part_ordinal,
+                            reason="scheduled_progress_superseded",
+                            detail=(
+                                "A newer Scheduled Task progress revision "
+                                "superseded this provider effect."
+                            ),
                         )
                     )
-                for part, plan in enumerate(reply_plans):
-                    outcome = await self.action_service.execute_binding_effect(
-                        plan,
-                        file_storage=file_storage,
+                else:
+                    tracker_outcome = await self.action_service.execute_binding_effect(
+                        tracker.plan
+                    )
+                    status, provider_message_key = _projection_outcome(
+                        operation=tracker.plan.target.operation,
+                        outcome=tracker_outcome,
+                    )
+                    await self.progress_repository.settle_tracker(
                         agent_id=agent_id,
                         session_id=session_id,
-                        authority=authority,
-                        provider_delivery_service=provider_delivery_service,
-                        resolve_runtime_target=resolve_runtime_target,
+                        cycle_id=cycle_id,
+                        effect=tracker,
+                        status=status,
+                        provider_message_key=provider_message_key,
                     )
                     outcomes.append(
                         _provider_outcome(
-                            operation=plan.target.operation,
-                            part=part,
-                            outcome=outcome,
-                        )
-                    )
-                if tracker is not None:
-                    if (
-                        effect_record.state.tracker_desired_revision
-                        != tracker.expected_desired_revision
-                    ):
-                        outcomes.append(
-                            _not_attempted_outcome(
-                                operation=tracker.plan.target.operation,
-                                part=tracker.part_ordinal,
-                                reason="scheduled_progress_superseded",
-                                detail=(
-                                    "A newer Scheduled Task progress revision "
-                                    "superseded this provider effect."
-                                ),
-                            )
-                        )
-                    else:
-                        tracker_outcome = (
-                            await self.action_service.execute_binding_effect(
-                                tracker.plan
-                            )
-                        )
-                        status, provider_message_key = _projection_outcome(
                             operation=tracker.plan.target.operation,
+                            part=tracker.part_ordinal,
                             outcome=tracker_outcome,
                         )
-                        await self.cycle_repository.settle_tracker_projection(
-                            effect_session,
-                            agent_id=agent_id,
-                            session_id=session_id,
-                            cycle_id=record.state.cycle_id,
-                            expected_desired_revision=(
-                                tracker.expected_desired_revision
-                            ),
-                            part_ordinal=tracker.part_ordinal,
-                            status=status,
-                            provider_message_key=provider_message_key,
-                        )
-                        outcomes.append(
-                            _provider_outcome(
-                                operation=tracker.plan.target.operation,
-                                part=tracker.part_ordinal,
-                                outcome=tracker_outcome,
-                            )
-                        )
+                    )
         return ScheduledTaskProgressExecution(
             result=ChannelActionResult(
                 binding_id=binding_id,
@@ -546,154 +460,13 @@ class ScheduledTaskChannelService:
             )
         return tuple(outcomes)
 
-    async def _resolve_run_cycle(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        run_id: str,
-    ) -> _ScheduledRunResolution:
-        run = await self.run_repository.get_by_id(session, run_id)
-        if run is None:
-            return _ScheduledRunResolution(scheduled=False, record=None)
-        if run.session_id != session_id:
-            raise ValueError("The current AgentRun does not belong to this Session.")
-        if run.scheduled_task_cycle_id is None:
-            return _ScheduledRunResolution(scheduled=False, record=None)
-        cycle = await self.cycle_repository.lock(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            cycle_id=run.scheduled_task_cycle_id,
-        )
-        if (
-            cycle is None
-            or cycle.state.phase != "started"
-            or cycle.state.current_run_id != run_id
-        ):
-            return _ScheduledRunResolution(scheduled=True, record=None)
-        return _ScheduledRunResolution(scheduled=True, record=cycle)
-
-    async def _claim_tracker_effect(
-        self,
-        session: AsyncSession,
-        *,
-        record: ScheduledTaskCycleRecord,
-        progress: ExternalChannelDesiredProgress,
-    ) -> _TrackerEffect | None:
-        binding_id = record.state.binding_id
-        if binding_id is None:
-            return None
-        desired_revision = record.state.tracker_desired_revision
-        current_part = next(
-            (
-                part
-                for part in record.state.tracker_current_projection_parts
-                if part.part_ordinal == 0
-            ),
-            None,
-        )
-        operation = (
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-            if current_part is not None
-            and current_part.provider_message_key is not None
-            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
-        )
-        slack = render_scheduled_task_slack_progress(
-            progress,
-            scheduled_task_title=record.state.title,
-            work_id=record.state.cycle_id,
-            desired_progress_revision=desired_revision,
-        )
-        discord = render_scheduled_task_discord_progress(
-            progress,
-            scheduled_task_title=record.state.title,
-            work_id=record.state.cycle_id,
-            desired_progress_revision=desired_revision,
-        )
-        if not discord.pages:
-            raise RuntimeError("Scheduled Tracker rendering produced no Discord page.")
-        page = discord.pages[0]
-        slack_payload: dict[str, object] = {
-            "text": slack.text,
-            "blocks": slack.blocks,
-            "desired_progress_revision": desired_revision,
-            "tracker_kind": "scheduled_task",
-        }
-        discord_payload: dict[str, object] = {
-            "text": page.text,
-            "embeds": page.embeds,
-            "desired_progress_revision": desired_revision,
-            "tracker_kind": "scheduled_task",
-        }
-        if current_part is not None and current_part.provider_message_key is not None:
-            slack_payload["provider_message_key"] = current_part.provider_message_key
-            discord_payload["provider_message_key"] = current_part.provider_message_key
-        plan = await self.provider_repository.prepare_binding_effect(
-            session,
-            agent_id=record.state.agent_id,
-            session_id=record.state.session_id,
-            binding_id=binding_id,
-            operation=operation,
-            slack_payload=slack_payload,
-            discord_payload=discord_payload,
-            operation_seed=(
-                f"scheduled-tracker:{record.state.cycle_id}:{desired_revision}:0"
-            ),
-        )
-        if plan is None:
-            return None
-        claimed = await self.cycle_repository.claim_tracker_projection(
-            session,
-            agent_id=record.state.agent_id,
-            session_id=record.state.session_id,
-            cycle_id=record.state.cycle_id,
-            expected_desired_revision=desired_revision,
-            part_ordinal=0,
-        )
-        if claimed is None:
-            return None
-        return _TrackerEffect(
-            plan=plan,
-            expected_desired_revision=desired_revision,
-            part_ordinal=0,
-            state_version=claimed.version,
-        )
-
-    async def _settle_tracker(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        cycle_id: str,
-        effect: _TrackerEffect,
-        outcome: ProviderMutationOutcome | None,
-    ) -> None:
-        status, provider_message_key = _projection_outcome(
-            operation=effect.plan.target.operation,
-            outcome=outcome,
-        )
-        async with self.session_manager() as session:
-            await self.cycle_repository.settle_tracker_projection(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                cycle_id=cycle_id,
-                expected_desired_revision=effect.expected_desired_revision,
-                part_ordinal=effect.part_ordinal,
-                status=status,
-                provider_message_key=provider_message_key,
-            )
-
 
 def get_scheduled_task_channel_service(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
-    run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
-    cycle_repository: Annotated[
-        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    progress_repository: Annotated[
+        ScheduledTaskProgressRepository, Depends(ScheduledTaskProgressRepository)
     ],
     provider_repository: Annotated[
         ExternalChannelWorkRepository,
@@ -705,8 +478,7 @@ def get_scheduled_task_channel_service(
     """Create the Scheduled-owned External Channel effect service."""
     return ScheduledTaskChannelService(
         session_manager=session_manager,
-        run_repository=run_repository,
-        cycle_repository=cycle_repository,
+        progress_repository=progress_repository,
         provider_repository=provider_repository,
         action_service=action_service,
         config=config,
@@ -747,6 +519,19 @@ def _projection_outcome(
     )
 
 
+def _prepared_progress_identity(
+    preparation: ScheduledTaskProgressPreparation,
+) -> tuple[str, int]:
+    """Return required identities from one successful preparation."""
+    if (
+        preparation.status != "prepared"
+        or preparation.cycle_id is None
+        or preparation.state_revision is None
+    ):
+        raise RuntimeError("Scheduled progress preparation is incomplete.")
+    return preparation.cycle_id, preparation.state_revision
+
+
 def _provider_outcome(
     *,
     operation: ExternalChannelDeliveryOperation,
@@ -768,7 +553,7 @@ def _inactive_cycle_outcomes(
     *,
     message_requested: bool,
     reply_plans: Sequence[ProviderEffectPlan],
-    tracker: _TrackerEffect | None,
+    tracker: ScheduledTaskTrackerEffect | None,
 ) -> list[ProviderEffectOutcome]:
     """Report every provider effect suppressed by terminalization winning."""
     outcomes = [
@@ -805,7 +590,7 @@ def _superseded_progress_outcomes(
     *,
     message_requested: bool,
     reply_plans: Sequence[ProviderEffectPlan],
-    tracker: _TrackerEffect | None,
+    tracker: ScheduledTaskTrackerEffect | None,
 ) -> list[ProviderEffectOutcome]:
     """Report every provider effect suppressed by a newer progress revision."""
     outcomes = [

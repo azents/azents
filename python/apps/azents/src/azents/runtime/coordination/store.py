@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Protocol
 
 from azents.runtime.coordination.data import (
-    JsonValue,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
+    RuntimeConnectionPromotionResult,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
     RuntimeFencedMutationResult,
@@ -238,19 +238,26 @@ class RuntimeCoordinationStore(Protocol):
         """Delete operation metadata."""
         ...
 
-    async def register_connection(
+    async def stage_connection_candidate(
+        self,
+        *,
+        record: RuntimeConnectionRecord,
+        publication_token: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """Stage one invisible connection publication candidate once."""
+        ...
+
+    async def promote_connection_candidate(
         self,
         *,
         kind: RuntimeConnectionKind,
         subject_id: str,
-        connection_id: str,
-        owner_replica_id: str,
-        connected_at: datetime,
-        heartbeat_at: datetime,
+        generation: int,
+        publication_token: str,
         ttl_seconds: int,
-        metadata: dict[str, JsonValue],
-    ) -> RuntimeConnectionRecord:
-        """Register a current connection and issue a new generation."""
+    ) -> RuntimeConnectionPromotionResult:
+        """Consume and promote one exact candidate into the current connection."""
         ...
 
     async def get_connection(

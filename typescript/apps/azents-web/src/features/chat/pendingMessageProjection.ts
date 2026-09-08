@@ -71,7 +71,7 @@ export function pendingMailboxMessage(
         metadata: {
           source: "agent_mailbox",
           message_kind: presentation.message_kind,
-          source_path: `/${presentation.message_kind}`,
+          source_path: presentation.source_path,
         },
       };
     case "external_channel_message": {

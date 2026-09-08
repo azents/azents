@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
@@ -1105,12 +1108,14 @@ def cancel_request_id(record: RuntimeTransferRecord) -> str:
 
 def runner_request_stream_id(runtime_id: str, generation: int) -> str:
     """Return the current generation-specific Runner request stream identifier."""
-    return f"runner:{runtime_id}:generation:{generation}:requests"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"runner:{runtime_id}:generation:{value}:requests"
 
 
 def runner_reply_stream_id(runtime_id: str, generation: int) -> str:
     """Return the current generation-specific Runner reply stream identifier."""
-    return f"runner:{runtime_id}:generation:{generation}:replies"
+    value = runtime_connection_generation_to_redis(generation)
+    return f"runner:{runtime_id}:generation:{value}:replies"
 
 
 def _intent_envelope(

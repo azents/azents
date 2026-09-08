@@ -10,6 +10,10 @@ from azents_runtime_control.system_metrics import (
     RunnerSystemMetricsScope,
 )
 
+from azents.core.runtime_connection_generation import (
+    validate_runtime_connection_generation,
+)
+
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 
@@ -68,6 +72,14 @@ class RuntimeFencedMutationStatus(enum.StrEnum):
     OPERATION_REJECTED = "operation_rejected"
 
 
+class RuntimeConnectionPromotionStatus(enum.StrEnum):
+    """Outcome of one exact one-shot connection candidate promotion."""
+
+    APPLIED = "applied"
+    CANDIDATE_MISSING = "candidate_missing"
+    STALE_GENERATION = "stale_generation"
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeFencedMutationResult[ValueT]:
     """Typed result for one atomic connection-generation-fenced mutation."""
@@ -93,6 +105,10 @@ class RuntimeRequestEnvelope:
     stream_id: str | None = None
     consumer_group: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate the exact connection-generation domain."""
+        validate_runtime_connection_generation(self.generation)
+
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeRequestRecord:
@@ -113,6 +129,10 @@ class RuntimeReplyEvent:
     payload: dict[str, JsonValue]
     created_at: datetime
     final: bool
+
+    def __post_init__(self) -> None:
+        """Validate the exact connection-generation domain."""
+        validate_runtime_connection_generation(self.generation)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -172,6 +192,7 @@ class RuntimeOperationMetadata:
 
     def __post_init__(self) -> None:
         """Require complete transfer identity and direction metadata together."""
+        validate_runtime_connection_generation(self.generation)
         transfer_values = (
             self.transfer_id,
             self.transfer_attempt_id,
@@ -214,6 +235,19 @@ class RuntimeConnectionRecord:
     heartbeat_at: datetime
     expires_at: datetime
     metadata: dict[str, JsonValue]
+
+    def __post_init__(self) -> None:
+        """Validate the exact connection-generation domain."""
+        validate_runtime_connection_generation(self.generation)
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeConnectionPromotionResult:
+    """Typed result for one connection candidate promotion."""
+
+    status: RuntimeConnectionPromotionStatus
+    connection: RuntimeConnectionRecord | None
+    previous_connection: RuntimeConnectionRecord | None
 
 
 @dataclasses.dataclass(frozen=True)

@@ -14,16 +14,24 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
+from azentspublicclient.api.workspace_user_v1_api import WorkspaceUserV1Api
 from azentspublicclient.api.workspace_v1_api import (
     WorkspaceV1Api as PublicWorkspaceV1Api,
 )
 from azentspublicclient.exceptions import ApiException
+from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
 from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
+)
+from azentspublicclient.models.agent_toolkit_config_create_request import (
+    AgentToolkitConfigCreateRequest,
+)
+from azentspublicclient.models.agent_toolkit_config_update_request import (
+    AgentToolkitConfigUpdateRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
@@ -44,6 +52,7 @@ from azentspublicclient.models.toolkit_config_create_request import (
 from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
+from azentspublicclient.models.workspace_user_role import WorkspaceUserRole
 
 from support.utils import (
     authenticate_user,
@@ -112,26 +121,47 @@ def _add_member(
     handle: str,
 ) -> str:
     """workspacet Membert invitationt access_tokent return."""
+    token, _ = _add_workspace_user(
+        public_api_client,
+        admin_api_client,
+        owner_token=owner_token,
+        handle=handle,
+        role=WorkspaceUserRole.MEMBER,
+    )
+    return token
+
+
+def _add_workspace_user(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    *,
+    owner_token: str,
+    handle: str,
+    role: WorkspaceUserRole,
+) -> tuple[str, str]:
+    """Invite one Workspace user and return token plus WorkspaceUser ID."""
     uniq = unique()
-    member_token, _, _ = authenticate_user(
-        public_api_client, admin_api_client, email=f"member-{uniq}@example.com"
+    email = f"workspace-user-{uniq}@example.com"
+    token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=email,
     )
     inv_api = InvitationV1Api(public_api_client)
     invitation = inv_api.invitation_v1_create_invitation(
         handle,
-        CreateInvitationRequest(email=f"member-{uniq}@example.com"),
+        CreateInvitationRequest(email=email, role=role),
         _headers={"Authorization": f"Bearer {owner_token}"},
-    )
-    # tautht t token t (invitation emailt t t create)
-    _, member_email = invitation.id, f"member-{uniq}@example.com"
-    member_token, _, _ = authenticate_user(
-        public_api_client, admin_api_client, email=member_email
     )
     inv_api.invitation_v1_accept_invitation(
         invitation.id,
-        _headers={"Authorization": f"Bearer {member_token}"},
+        _headers={"Authorization": f"Bearer {token}"},
     )
-    return member_token
+    member = WorkspaceUserV1Api(public_api_client).workspaceuser_v1_get_current_member(
+        handle=handle,
+        _headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, member.workspace_user_id
 
 
 def _create_toolkit(
@@ -715,3 +745,235 @@ class TestToolkitAvailableAndAttach:
                 _headers=headers,
             )
         assert exc_info.value.status == 403
+
+
+class TestAgentOwnedToolkit:
+    """Agent-owned Toolkit management and isolation."""
+
+    def test_owner_crud_is_isolated_from_workspace_and_other_agent(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Owner can manage one Agent-only config without exposing it elsewhere."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        headers = {"Authorization": f"Bearer {owner_token}"}
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        other_agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        api = ToolkitV1Api(public_api_client)
+
+        created = api.toolkit_v1_create_agent_toolkit_config(
+            agent_id=agent_id,
+            handle=handle,
+            agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+                toolkit_type="mcp",
+                slug=f"private_{unique()}",
+                name="Private MCP",
+                config={
+                    "server_url": "https://example.com/mcp",
+                    "auth_type": "none",
+                    "timeout": 30.0,
+                },
+                enabled=True,
+            ),
+            _headers=headers,
+        )
+
+        management = api.toolkit_v1_list_agent_toolkit_management(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        owned = next(item for item in management.items if item.toolkit.id == created.id)
+        assert owned.ownership_scope == "agent_only"
+        assert owned.readiness == "ready"
+
+        workspace_configs = api.toolkit_v1_list_toolkit_configs(
+            handle=handle,
+            _headers=headers,
+        )
+        assert all(item.id != created.id for item in workspace_configs.items)
+
+        with pytest.raises(ApiException) as cross_agent:
+            api.toolkit_v1_get_agent_toolkit_config(
+                agent_id=other_agent_id,
+                handle=handle,
+                toolkit_config_id=created.id,
+                _headers=headers,
+            )
+        assert cross_agent.value.status == 404
+
+        updated = api.toolkit_v1_update_agent_toolkit_config(
+            agent_id=agent_id,
+            handle=handle,
+            toolkit_config_id=created.id,
+            agent_toolkit_config_update_request=AgentToolkitConfigUpdateRequest(
+                enabled=False
+            ),
+            _headers=headers,
+        )
+        assert updated.enabled is False
+
+        api.toolkit_v1_delete_agent_toolkit_config(
+            agent_id=agent_id,
+            handle=handle,
+            toolkit_config_id=created.id,
+            _headers=headers,
+        )
+        with pytest.raises(ApiException) as deleted:
+            api.toolkit_v1_get_agent_toolkit_config(
+                agent_id=agent_id,
+                handle=handle,
+                toolkit_config_id=created.id,
+                _headers=headers,
+            )
+        assert deleted.value.status == 404
+
+    def test_member_cannot_discover_agent_owned_toolkits(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """A Workspace Member receives collection denial and item non-disclosure."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        member_token = _add_member(
+            public_api_client,
+            admin_api_client,
+            owner_token=owner_token,
+            handle=handle,
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        api = ToolkitV1Api(public_api_client)
+        created = api.toolkit_v1_create_agent_toolkit_config(
+            agent_id=agent_id,
+            handle=handle,
+            agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+                toolkit_type="mcp",
+                name="Private MCP",
+                config={
+                    "server_url": "https://example.com/mcp",
+                    "auth_type": "none",
+                    "timeout": 30.0,
+                },
+                enabled=True,
+            ),
+            _headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        member_headers = {"Authorization": f"Bearer {member_token}"}
+
+        with pytest.raises(ApiException) as collection:
+            api.toolkit_v1_list_agent_toolkit_management(
+                agent_id=agent_id,
+                handle=handle,
+                _headers=member_headers,
+            )
+        assert collection.value.status == 403
+
+        with pytest.raises(ApiException) as item:
+            api.toolkit_v1_get_agent_toolkit_config(
+                agent_id=agent_id,
+                handle=handle,
+                toolkit_config_id=created.id,
+                _headers=member_headers,
+            )
+        assert item.value.status == 404
+
+    def test_explicit_agent_admin_can_manage_while_workspace_manager_cannot(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Explicit AgentAdmin authority is distinct from Workspace Manager."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        admin_token, admin_workspace_user_id = _add_workspace_user(
+            public_api_client,
+            admin_api_client,
+            owner_token=owner_token,
+            handle=handle,
+            role=WorkspaceUserRole.MEMBER,
+        )
+        manager_token, _ = _add_workspace_user(
+            public_api_client,
+            admin_api_client,
+            owner_token=owner_token,
+            handle=handle,
+            role=WorkspaceUserRole.MANAGER,
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        AgentV1Api(public_api_client).agent_v1_add_agent_admin(
+            agent_id=agent_id,
+            handle=handle,
+            agent_admin_add_request=AgentAdminAddRequest(
+                workspace_user_id=admin_workspace_user_id
+            ),
+            _headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        api = ToolkitV1Api(public_api_client)
+        created = api.toolkit_v1_create_agent_toolkit_config(
+            agent_id=agent_id,
+            handle=handle,
+            agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+                toolkit_type="mcp",
+                name="AgentAdmin MCP",
+                config={
+                    "server_url": "https://example.com/mcp",
+                    "auth_type": "none",
+                    "timeout": 30.0,
+                },
+                enabled=True,
+            ),
+            _headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        management = api.toolkit_v1_list_agent_toolkit_management(
+            agent_id=agent_id,
+            handle=handle,
+            _headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert any(item.toolkit.id == created.id for item in management.items)
+
+        manager_headers = {"Authorization": f"Bearer {manager_token}"}
+        with pytest.raises(ApiException) as collection:
+            api.toolkit_v1_list_agent_toolkit_management(
+                agent_id=agent_id,
+                handle=handle,
+                _headers=manager_headers,
+            )
+        assert collection.value.status == 403
+        with pytest.raises(ApiException) as item:
+            api.toolkit_v1_get_agent_toolkit_config(
+                agent_id=agent_id,
+                handle=handle,
+                toolkit_config_id=created.id,
+                _headers=manager_headers,
+            )
+        assert item.value.status == 404

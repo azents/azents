@@ -22,6 +22,7 @@ from azents.core.enums import (
     OwnerLifecycleKind,
     OwnerLifecycleStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
@@ -41,7 +42,6 @@ from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleCleanup
 from azents.repos.user import UserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,

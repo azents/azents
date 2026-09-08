@@ -6,8 +6,8 @@ from urllib.parse import quote, urlsplit
 from pydantic import ValidationError
 
 from azents.core.enums import ExternalChannelAppMode
-from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
-from azents.services.external_channel.provider_effect import ProviderTarget
+from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
+from azents.core.external_channel_provider_effect import ProviderTarget
 from azents.services.uploads.schema import StoredImage
 
 _MAX_AGENT_NAME_LENGTH = 80

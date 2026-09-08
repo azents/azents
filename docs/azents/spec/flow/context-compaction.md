@@ -14,7 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
-  - python/apps/azents/src/azents/services/scheduled_task/rendering.py
+  - python/apps/azents/src/azents/repos/scheduled_task/presentation.py
   - python/apps/azents/src/azents/engine/run/commands.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/resolve.py

@@ -1399,6 +1399,34 @@
       "provider_profile": "インフラプロファイル",
       "workspace_profile": "ワークスペースランタイムプロファイル",
       "agent": "Agent"
+    },
+    "toolkitManagement": {
+      "description": "ワークスペース共有ツールキットを接続するか、このエージェント専用に設定します。",
+      "addToolkit": "ツールキット追加",
+      "toolLabel": "ツール",
+      "toolPlaceholder": "ツールを選択してください",
+      "configureForAgent": "このエージェント専用に設定",
+      "attachShared": "ワークスペースツールキットを接続",
+      "attachSharedDescription": "共有ツールキットの設定と認証情報は、引き続きワークスペース設定で管理されます。",
+      "noSharedForType": "このツールで利用できるワークスペースツールキットはありません。",
+      "agentOnlyDescription": "設定と認証情報はこのエージェント専用です。",
+      "attach": "接続",
+      "workspaceShared": "ワークスペース共有",
+      "agentOnly": "このエージェント専用",
+      "workspaceBoundary": "編集、認証、削除はワークスペースのツールキット管理で行います。",
+      "detach": "接続解除",
+      "edit": "編集",
+      "disable": "無効化",
+      "enable": "有効化",
+      "delete": "削除",
+      "deleteTitle": "エージェント専用ツールキットを削除",
+      "deleteDescription": "このエージェントから {name} を削除し、保存された認証情報も完全に削除しますか？",
+      "deleteConfirm": "ツールキットを削除",
+      "readiness": {
+        "ready": "準備完了",
+        "authorization_required": "認証が必要",
+        "disabled": "無効"
+      }
     }
   },
   "toolkits": {
@@ -1547,7 +1575,8 @@
       "connect": "接続",
       "reconnect": "再接続",
       "disconnect": "切断"
-    }
+    },
+    "agentSlugDescription": "このエージェントで有効なツールキット内で一意にします。英小文字、数字、アンダースコアのみ使用できます。"
   },
   "dashboard": {
     "headline": "ワークスペース",

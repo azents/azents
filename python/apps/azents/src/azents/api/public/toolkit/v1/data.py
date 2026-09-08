@@ -1,15 +1,33 @@
 """Toolkit v1 Public API data models."""
 
 import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationReason,
 )
-from azents.services.toolkit.data import ToolkitSlug, ToolkitUpdateInput
+from azents.services.toolkit.data import (
+    TOOLKIT_SLUG_PATTERN,
+    ToolkitSlug,
+    ToolkitUpdateInput,
+)
+
+AgentToolkitSlug = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=100,
+        pattern=TOOLKIT_SLUG_PATTERN,
+        description=(
+            "Unique within the owning Agent's effective Toolkit namespace. "
+            "Use lowercase letters, numbers, and underscores only."
+        ),
+    ),
+]
 
 
 class MCPOAuthConnectionSummaryResponse(BaseModel):
@@ -85,10 +103,43 @@ class ToolkitConfigCreateRequest(BaseModel):
     )
 
 
+class AgentToolkitConfigCreateRequest(ToolkitConfigCreateRequest):
+    """Agent-owned Toolkit Config creation request."""
+
+    slug: AgentToolkitSlug | None = Field(
+        default=None,
+        description=(
+            "Unique within the owning Agent's effective Toolkit namespace. "
+            "Use lowercase letters, numbers, and underscores only."
+        ),
+    )
+
+
 class ToolkitConfigUpdateRequest(ToolkitUpdateInput):
     """Toolkit Config update request, for partial updates."""
 
     pass
+
+
+class AgentToolkitConfigUpdateRequest(TypedDict, total=False):
+    """Agent-owned Toolkit Config partial update request."""
+
+    slug: AgentToolkitSlug
+    name: Annotated[str, Field(description="Display name")]
+    description: Annotated[str | None, Field(description="Description")]
+    config: Annotated[dict[str, Any], Field(description="Tool settings")]
+    prompt: Annotated[str | None, Field(description="Custom prompt")]
+    credentials: Annotated[
+        dict[str, object] | None,
+        Field(description="Credentials JSON object (delete when None)"),
+    ]
+    enabled: Annotated[bool, Field(description="Enabled flag")]
+    always_expose_tools: Annotated[
+        bool,
+        Field(
+            description="Whether every tool bypasses Tool Search and remains visible"
+        ),
+    ]
 
 
 class ToolkitScopeResponse(BaseModel):
@@ -121,6 +172,22 @@ class AgentToolkitListResponse(BaseModel):
     """AgentToolkit list response model."""
 
     items: list[AgentToolkitResponse]
+
+
+class AgentToolkitManagementItemResponse(BaseModel):
+    """One Toolkit in the authorized Agent management projection."""
+
+    ownership_scope: Literal["workspace_shared", "agent_only"]
+    toolkit: ToolkitConfigResponse
+    agent_toolkit_id: str | None
+    readiness: Literal["ready", "authorization_required", "disabled"]
+
+
+class AgentToolkitManagementResponse(BaseModel):
+    """Authorized Agent Toolkit management projection."""
+
+    items: list[AgentToolkitManagementItemResponse]
+    available_shared: list[ToolkitConfigResponse]
 
 
 class AgentToolkitAttachRequest(BaseModel):

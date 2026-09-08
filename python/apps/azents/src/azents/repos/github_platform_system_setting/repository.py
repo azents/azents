@@ -4,7 +4,8 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
-from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitConfig
+from azents.rdb.models.toolkit import RDBToolkitConfig
+from azents.repos.toolkit import effective_agent_toolkit_relation
 
 from .data import (
     PlatformGitHubAppInstallationImpact,
@@ -99,9 +100,10 @@ class PlatformGitHubAppSystemSettingRepository:
         """Return distinct Agents attached to affected Platform Toolkits."""
         if not toolkit_ids:
             return 0
+        relation = effective_agent_toolkit_relation(enabled_only=True)
         count = await session.scalar(
-            sa.select(sa.func.count(sa.distinct(RDBAgentToolkit.agent_id))).where(
-                RDBAgentToolkit.toolkit_id.in_(toolkit_ids)
+            sa.select(sa.func.count(sa.distinct(relation.c.agent_id))).where(
+                relation.c.toolkit_id.in_(toolkit_ids)
             )
         )
         return count or 0

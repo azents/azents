@@ -46,7 +46,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
     provider_observed_generation: StrictInt
     provider_connection_state: RuntimeProviderConnectionState
     runner_state: RuntimeRunnerState
-    runner_generation: StrictInt
+    runner_generation: Optional[StrictStr]
     workspace_path: Optional[StrictStr]
     failure_generation: Optional[StrictInt]
     failure_code: Optional[StrictStr]
@@ -122,6 +122,11 @@ class AgentRuntimeRawStateResponse(BaseModel):
         # and model_fields_set contains the field
         if self.reset_final_desired_state is None and "reset_final_desired_state" in self.model_fields_set:
             _dict['reset_final_desired_state'] = None
+
+        # set to None if runner_generation (nullable) is None
+        # and model_fields_set contains the field
+        if self.runner_generation is None and "runner_generation" in self.model_fields_set:
+            _dict['runner_generation'] = None
 
         # set to None if workspace_path (nullable) is None
         # and model_fields_set contains the field

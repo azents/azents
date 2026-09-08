@@ -30,7 +30,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 
 
 class _Record(BaseModel):
