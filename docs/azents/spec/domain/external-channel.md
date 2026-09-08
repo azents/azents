@@ -25,7 +25,9 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/repos/external_channel/**
+  - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/job_runtime/**
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
   - python/apps/azents/src/azents/cli/external_channel_ingress.py
@@ -75,7 +77,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-08
-spec_version: 74
+spec_version: 75
 ---
 
 # External Channel
@@ -507,7 +509,12 @@ classification without another provider call. Validation checks the provider-rep
 OAuth scope header when present and requires the message, conversation-history,
 conversation-metadata, posting, and user identity scopes used by the adapter.
 `files:read` and `files:write` independently grant download and upload capabilities;
-either may remain unavailable without disabling text conversation.
+either may remain unavailable without disabling text conversation. Connection setup,
+Workspace-scoped configuration reads, and health persistence are completed
+repository operations. Slack validation decrypts credentials and calls the provider
+only after the configuration read has closed; health writes compare the captured
+credential and configuration generation so stale validation cannot replace newer
+connection state.
 
 Disconnect has no lifecycle-status admission guard. It disables inbound routing,
 clears credentials, terminalizes owned live state, and commits the terminal
@@ -560,6 +567,10 @@ history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
+  Workspace-scoped configuration reads, and generation-fenced health persistence to
+  completed repository operations while preserving provider validation outside database
+  transactions.
 - **2026-09-08** (spec_version 74) — Moved Scheduled progress provider/Runtime
   effects outside database transactions through completed preparation, admission,
   and desired-revision-fenced settlement operations without adding replay or
