@@ -45,8 +45,10 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
+from azents.repos.exchange_file.operations import ExchangeFileOperationRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
+from azents.repos.model_file.operations import ModelFileOperationRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
@@ -404,21 +406,33 @@ def _materializer(
         workspace_s3=WorkspaceS3Config(bucket="test-bucket"),
         file_lifecycle=FileLifecycleConfig(),
     )
+    exchange_run_repository = _AgentRunRepository()
     exchange_service = ExchangeFileService(
+        operation_repository=ExchangeFileOperationRepository(
+            exchange_file_repository=exchange_repository,
+            agent_repository=AgentRepository(),
+            agent_session_repository=session_repository,
+            agent_run_repository=exchange_run_repository,
+            workspace_user_repository=workspace_user_repository,
+            session_manager=session_manager,
+        ),
         exchange_file_repository=exchange_repository,
-        agent_repository=AgentRepository(),
         agent_session_repository=session_repository,
-        agent_run_repository=_AgentRunRepository(),
         workspace_user_repository=workspace_user_repository,
-        session_manager=session_manager,
         s3_service=s3_service,
         config=config,
     )
+    model_run_repository = _AgentRunRepository()
     model_service = ModelFileService(
+        operation_repository=ModelFileOperationRepository(
+            model_file_repository=model_repository,
+            agent_session_repository=session_repository,
+            agent_run_repository=model_run_repository,
+            workspace_user_repository=workspace_user_repository,
+            session_manager=session_manager,
+        ),
         model_file_repository=model_repository,
-        agent_session_repository=session_repository,
-        agent_run_repository=_AgentRunRepository(),
-        workspace_user_repository=workspace_user_repository,
+        agent_run_repository=model_run_repository,
         session_manager=session_manager,
         s3_service=s3_service,
         config=config,
@@ -764,7 +778,9 @@ async def test_rejects_provider_output_after_owner_generation_changes() -> None:
     model_repository = fixture.model_repository
     s3_service = fixture.s3_service
     prepared = await materializer.prepare(_normalized_output())
-    session_repository = materializer.model_file_service.agent_session_repository
+    session_repository = (
+        materializer.model_file_service.operation_repository.agent_session_repository
+    )
     assert isinstance(session_repository, _AgentSessionRepository)
     session_repository.owner_generation += 1
 

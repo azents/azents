@@ -17,19 +17,18 @@ from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import AgentRunStatus, AgentSessionStatus, ArtifactStatus
+from azents.core.enums import ArtifactStatus
 from azents.core.s3.deps import get_s3_service
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.artifact import ArtifactRepository, artifact_storage_key
+from azents.repos.artifact import artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.artifact.operations import (
+    ArtifactMetadataFailure,
+    ArtifactOperationRepository,
+)
+from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.services.file_lifecycle_policy import artifact_expires_at
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -109,22 +108,9 @@ def _sanitize_display_filename(filename: str | None) -> str:
 class ArtifactService:
     """Coordinate Artifact metadata and object storage."""
 
-    artifact_repository: Annotated[ArtifactRepository, Depends(ArtifactRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
-    agent_run_repository: Annotated[
-        AgentRunRepository,
-        Depends(AgentRunRepository),
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository,
-        Depends(WorkspaceUserRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    operation_repository: Annotated[
+        ArtifactOperationRepository,
+        Depends(ArtifactOperationRepository),
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
@@ -146,25 +132,16 @@ class ArtifactService:
         metadata: dict[str, object] | None = None,
     ) -> Result[Artifact, ArtifactSessionNotFound | ArtifactAccessDenied]:
         """Create Artifact metadata and object."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None:
-                return Failure(ArtifactSessionNotFound())
-            if not await self._has_workspace_access(
-                session,
-                workspace_id=agent_session.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(ArtifactAccessDenied())
-            workspace_id = agent_session.workspace_id
-            agent_id = agent_session.agent_id
-
+        scope_result = await self.operation_repository.authorize_user_create(
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(_map_create_failure(scope_result.error))
+        scope = scope_result.value
         artifact_id = uuid7().hex
         uploaded_object_key = artifact_storage_key(
-            workspace_id=workspace_id,
+            workspace_id=scope.workspace_id,
             session_id=session_id,
             created_run_index=created_run_index,
             artifact_id=artifact_id,
@@ -177,51 +154,36 @@ class ArtifactService:
                 body=body,
                 content_type=media_type,
             )
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
-                )
-                if agent_session is None:
-                    return Failure(ArtifactSessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(ArtifactAccessDenied())
-                if (
-                    agent_session.workspace_id != workspace_id
-                    or agent_session.agent_id != agent_id
-                ):
-                    return Failure(ArtifactSessionNotFound())
-
-                safe_filename = _sanitize_display_filename(filename)
-                sha256 = hashlib.sha256(body).hexdigest()
-                now = datetime.datetime.now(datetime.UTC)
-                created = await self.artifact_repository.create(
-                    session,
-                    ArtifactCreate(
-                        id=artifact_id,
-                        workspace_id=agent_session.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent_session.agent_id,
-                        created_run_id=created_run_id,
-                        created_run_index=created_run_index,
-                        expires_at=artifact_expires_at(now=now, config=self.config),
-                        name=safe_filename,
-                        media_type=media_type,
-                        size_bytes=len(body),
-                        sha256=sha256,
-                        source_tool_name=source_tool_name,
-                        source_call_id=source_call_id,
-                        source_part_index=source_part_index,
-                        description=description,
-                        metadata=_json_metadata(metadata),
+            created = await self.operation_repository.create_for_user(
+                session_id=session_id,
+                user_id=user_id,
+                expected_scope=scope,
+                create=ArtifactCreate(
+                    id=artifact_id,
+                    workspace_id=scope.workspace_id,
+                    session_id=session_id,
+                    agent_id=scope.agent_id,
+                    created_run_id=created_run_id,
+                    created_run_index=created_run_index,
+                    expires_at=artifact_expires_at(
+                        now=datetime.datetime.now(datetime.UTC),
+                        config=self.config,
                     ),
-                )
+                    name=_sanitize_display_filename(filename),
+                    media_type=media_type,
+                    size_bytes=len(body),
+                    sha256=hashlib.sha256(body).hexdigest(),
+                    source_tool_name=source_tool_name,
+                    source_call_id=source_call_id,
+                    source_part_index=source_part_index,
+                    description=description,
+                    metadata=_json_metadata(metadata),
+                ),
+            )
+            if isinstance(created, Failure):
+                return Failure(_map_create_failure(created.error))
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
@@ -240,9 +202,9 @@ class ArtifactService:
         metadata: dict[str, object] | None = None,
     ) -> Result[Artifact, ArtifactAccessDenied]:
         """Create an Artifact under validated canonical Session/Run authority."""
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ArtifactAccessDenied())
+        repository_authority = _repository_authority(authority)
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(ArtifactAccessDenied())
         artifact_id = uuid7().hex
         object_key = artifact_storage_key(
             workspace_id=authority.workspace_id,
@@ -258,37 +220,27 @@ class ArtifactService:
                 body=body,
                 content_type=media_type,
             )
-            async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(
-                    session,
-                    authority,
-                    lock=True,
-                ):
-                    return Failure(ArtifactAccessDenied())
-                now = datetime.datetime.now(datetime.UTC)
-                created = await self.artifact_repository.create(
-                    session,
-                    ArtifactCreate(
-                        id=artifact_id,
-                        workspace_id=authority.workspace_id,
-                        session_id=authority.session_id,
-                        agent_id=authority.agent_id,
-                        created_run_id=authority.run_id,
-                        created_run_index=authority.run_index,
-                        expires_at=artifact_expires_at(now=now, config=self.config),
-                        name=_sanitize_display_filename(filename),
-                        media_type=media_type,
-                        size_bytes=len(body),
-                        sha256=hashlib.sha256(body).hexdigest(),
-                        source_tool_name=source_tool_name,
-                        source_call_id=source_call_id,
-                        source_part_index=source_part_index,
-                        description=description,
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
+            created = await self.operation_repository.create_for_authority(
+                authority=repository_authority,
+                create=_authority_artifact_create(
+                    authority=authority,
+                    artifact_id=artifact_id,
+                    filename=filename,
+                    media_type=media_type,
+                    size_bytes=len(body),
+                    sha256=hashlib.sha256(body).hexdigest(),
+                    source_tool_name=source_tool_name,
+                    source_call_id=source_call_id,
+                    source_part_index=source_part_index,
+                    description=description,
+                    metadata=metadata,
+                    config=self.config,
+                ),
+            )
+            if isinstance(created, Failure):
+                return Failure(ArtifactAccessDenied())
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(object_key)
@@ -310,16 +262,17 @@ class ArtifactService:
         metadata: dict[str, object] | None = None,
     ) -> Result[Artifact, ArtifactAccessDenied]:
         """Publish a verified transfer object as an authority-owned Artifact."""
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ArtifactAccessDenied())
-        artifact_id = publication_id
-        async with self.session_manager() as session:
-            existing = await self.artifact_repository.get_by_id(session, artifact_id)
-        if existing is not None:
+        repository_authority = _repository_authority(authority)
+        existing_result = await self.operation_repository.load_verified_publication(
+            authority=repository_authority,
+            artifact_id=publication_id,
+        )
+        if isinstance(existing_result, Failure):
+            return Failure(ArtifactAccessDenied())
+        if existing_result.value is not None:
             return Success(
                 self._validated_existing_verified_publication(
-                    existing=existing,
+                    existing=existing_result.value,
                     authority=authority,
                     size_bytes=size_bytes,
                     sha256=sha256,
@@ -331,12 +284,12 @@ class ArtifactService:
             workspace_id=authority.workspace_id,
             session_id=authority.session_id,
             created_run_index=authority.run_index,
-            artifact_id=artifact_id,
+            artifact_id=publication_id,
         )
         publication_metadata = S3ProductPublicationMetadata(
             sha256=sha256,
             content_type=media_type,
-            publication_id=artifact_id,
+            publication_id=publication_id,
         )
         created_by_invocation = False
         committed = False
@@ -353,51 +306,33 @@ class ArtifactService:
                 )
             )
             created_by_invocation = publication.created
-            async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(
-                    session,
-                    authority,
-                    lock=True,
-                ):
-                    return Failure(ArtifactAccessDenied())
-                existing = await self.artifact_repository.get_by_id(
-                    session,
-                    artifact_id,
-                )
-                if existing is not None:
-                    committed = True
-                    return Success(
-                        self._validated_existing_verified_publication(
-                            existing=existing,
-                            authority=authority,
-                            size_bytes=size_bytes,
-                            sha256=sha256,
-                            media_type=media_type,
-                            publication_id=publication_id,
-                        )
-                    )
-                now = datetime.datetime.now(datetime.UTC)
-                created = await self.artifact_repository.create(
-                    session,
-                    ArtifactCreate(
-                        id=artifact_id,
-                        workspace_id=authority.workspace_id,
-                        session_id=authority.session_id,
-                        agent_id=authority.agent_id,
-                        created_run_id=authority.run_id,
-                        created_run_index=authority.run_index,
-                        expires_at=artifact_expires_at(now=now, config=self.config),
-                        name=_sanitize_display_filename(filename),
-                        media_type=media_type,
-                        size_bytes=size_bytes,
-                        sha256=sha256,
-                        source_tool_name=source_tool_name,
-                        source_call_id=source_call_id,
-                        source_part_index=source_part_index,
-                        description=description,
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
+            finalized = await self.operation_repository.finalize_verified_publication(
+                authority=repository_authority,
+                create=_authority_artifact_create(
+                    authority=authority,
+                    artifact_id=publication_id,
+                    filename=filename,
+                    media_type=media_type,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    source_tool_name=source_tool_name,
+                    source_call_id=source_call_id,
+                    source_part_index=source_part_index,
+                    description=description,
+                    metadata=metadata,
+                    config=self.config,
+                ),
+            )
+            if isinstance(finalized, Failure):
+                return Failure(ArtifactAccessDenied())
+            created = self._validated_existing_verified_publication(
+                existing=finalized.value,
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
+            )
             committed = True
             return Success(created)
         finally:
@@ -454,20 +389,19 @@ class ArtifactService:
     ) -> bool:
         """Preserve the final object when commit outcome cannot be disproven."""
         try:
-            async with self.session_manager() as session:
-                existing = await self.artifact_repository.get_by_id(
-                    session,
-                    publication_id,
-                )
+            existing = await self.operation_repository.load_verified_publication(
+                authority=_repository_authority(authority),
+                artifact_id=publication_id,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
             return True
-        if existing is None:
-            return False
+        if isinstance(existing, Failure) or existing.value is None:
+            return isinstance(existing, Failure)
         try:
             self._validated_existing_verified_publication(
-                existing=existing,
+                existing=existing.value,
                 authority=authority,
                 size_bytes=size_bytes,
                 sha256=sha256,
@@ -488,42 +422,25 @@ class ArtifactService:
         storage_key = artifact_storage_key_from_uri(uri)
         if storage_key is None:
             return Failure(ArtifactNotFound())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ArtifactAccessDenied())
-            artifact = await self.artifact_repository.get_by_storage_key(
-                session,
-                storage_key,
-            )
-            if (
-                artifact is None
-                or artifact.workspace_id != authority.workspace_id
-                or artifact.agent_id != authority.agent_id
-                or artifact.session_id != authority.session_id
-            ):
-                return Failure(ArtifactNotFound())
-            created_run = await self.agent_run_repository.get_by_id(
-                session,
-                artifact.created_run_id,
-            )
-            if (
-                created_run is None
-                or created_run.session_id != artifact.session_id
-                or created_run.run_index != artifact.created_run_index
-            ):
-                return Failure(ArtifactNotFound())
-        if artifact.status == ArtifactStatus.EXPIRED:
+        repository_authority = _repository_authority(authority)
+        artifact_result = await self.operation_repository.load_for_authority(
+            authority=repository_authority,
+            storage_key=storage_key,
+        )
+        artifact = _map_artifact_metadata_result(artifact_result)
+        if isinstance(artifact, Failure):
+            return Failure(artifact.error)
+        if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
             bucket=self.config.workspace_s3.bucket,
-            key=artifact.storage_key,
+            key=artifact.value.storage_key,
         )
         if body is None:
             return Failure(ArtifactUnavailable())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ArtifactAccessDenied())
-        return Success(ArtifactDownload(artifact=artifact, body=body))
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(ArtifactAccessDenied())
+        return Success(ArtifactDownload(artifact=artifact.value, body=body))
 
     async def resolve_transfer_source_for_authority(
         self,
@@ -535,33 +452,17 @@ class ArtifactService:
         storage_key = artifact_storage_key_from_uri(uri)
         if storage_key is None:
             return Failure(ArtifactNotFound())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ArtifactAccessDenied())
-            artifact = await self.artifact_repository.get_by_storage_key(
-                session,
-                storage_key,
+        artifact = _map_artifact_metadata_result(
+            await self.operation_repository.load_for_authority(
+                authority=_repository_authority(authority),
+                storage_key=storage_key,
             )
-            if (
-                artifact is None
-                or artifact.workspace_id != authority.workspace_id
-                or artifact.agent_id != authority.agent_id
-                or artifact.session_id != authority.session_id
-            ):
-                return Failure(ArtifactNotFound())
-            created_run = await self.agent_run_repository.get_by_id(
-                session,
-                artifact.created_run_id,
-            )
-            if (
-                created_run is None
-                or created_run.session_id != artifact.session_id
-                or created_run.run_index != artifact.created_run_index
-            ):
-                return Failure(ArtifactNotFound())
-        if artifact.status == ArtifactStatus.EXPIRED:
+        )
+        if isinstance(artifact, Failure):
+            return Failure(artifact.error)
+        if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
-        return Success(ArtifactTransferSource(artifact=artifact))
+        return Success(ArtifactTransferSource(artifact=artifact.value))
 
     async def resolve(
         self,
@@ -573,34 +474,13 @@ class ArtifactService:
         storage_key = artifact_storage_key_from_uri(uri)
         if storage_key is None:
             return Failure(ArtifactNotFound())
-        return await self._download_by_storage_key(
-            storage_key=storage_key,
-            user_id=user_id,
+        artifact = _map_artifact_metadata_result(
+            await self.operation_repository.load_for_user_by_storage_key(
+                storage_key=storage_key,
+                user_id=user_id,
+            )
         )
-
-    async def _download_by_storage_key(
-        self,
-        *,
-        storage_key: str,
-        user_id: str,
-    ) -> Result[ArtifactDownload, ArtifactError]:
-        """Fetch original bytes by Artifact storage key."""
-        artifact_result = await self._get_accessible_artifact_by_storage_key(
-            storage_key=storage_key,
-            user_id=user_id,
-        )
-        if isinstance(artifact_result, Failure):
-            return Failure(artifact_result.error)
-        artifact = artifact_result.value
-        if artifact.status == ArtifactStatus.EXPIRED:
-            return Failure(ArtifactExpired())
-        body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
-            key=artifact.storage_key,
-        )
-        if body is None:
-            return Failure(ArtifactUnavailable())
-        return Success(ArtifactDownload(artifact=artifact, body=body))
+        return await self._download_resolved_artifact(artifact)
 
     async def download(
         self,
@@ -609,140 +489,30 @@ class ArtifactService:
         user_id: str,
     ) -> Result[ArtifactDownload, ArtifactError]:
         """Fetch original Artifact bytes."""
-        artifact_result = await self._get_accessible_artifact(
-            artifact_id=artifact_id,
-            user_id=user_id,
+        artifact = _map_artifact_metadata_result(
+            await self.operation_repository.load_for_user_by_id(
+                artifact_id=artifact_id,
+                user_id=user_id,
+            )
         )
-        if isinstance(artifact_result, Failure):
-            return Failure(artifact_result.error)
-        artifact = artifact_result.value
-        if artifact.status == ArtifactStatus.EXPIRED:
+        return await self._download_resolved_artifact(artifact)
+
+    async def _download_resolved_artifact(
+        self,
+        artifact: Result[Artifact, ArtifactNotFound | ArtifactAccessDenied],
+    ) -> Result[ArtifactDownload, ArtifactError]:
+        """Download one completed, authorized Artifact metadata snapshot."""
+        if isinstance(artifact, Failure):
+            return Failure(artifact.error)
+        if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
             bucket=self.config.workspace_s3.bucket,
-            key=artifact.storage_key,
+            key=artifact.value.storage_key,
         )
         if body is None:
             return Failure(ArtifactUnavailable())
-        return Success(ArtifactDownload(artifact=artifact, body=body))
-
-    async def _get_accessible_artifact(
-        self,
-        *,
-        artifact_id: str,
-        user_id: str,
-    ) -> Result[Artifact, ArtifactNotFound | ArtifactAccessDenied]:
-        """Check Artifact metadata together with workspace access permission."""
-        async with self.session_manager() as session:
-            artifact = await self.artifact_repository.get_by_id(session, artifact_id)
-            if artifact is None:
-                return Failure(ArtifactNotFound())
-            if not await self._has_workspace_access(
-                session,
-                workspace_id=artifact.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(ArtifactAccessDenied())
-            return Success(artifact)
-
-    async def _get_accessible_artifact_by_storage_key(
-        self,
-        *,
-        storage_key: str,
-        user_id: str,
-    ) -> Result[Artifact, ArtifactNotFound | ArtifactAccessDenied]:
-        """Check Artifact file location together with workspace access permission."""
-        async with self.session_manager() as session:
-            artifact = await self.artifact_repository.get_by_storage_key(
-                session,
-                storage_key,
-            )
-            if artifact is None:
-                return Failure(ArtifactNotFound())
-            if not await self._has_workspace_access(
-                session,
-                workspace_id=artifact.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(ArtifactAccessDenied())
-            return Success(artifact)
-
-    async def _has_valid_resource_authority(
-        self,
-        session: AsyncSession,
-        authority: SessionResourceAuthority,
-        *,
-        lock: bool = False,
-    ) -> bool:
-        """Validate canonical identity for internal Artifact operations."""
-        if lock:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session,
-                authority.session_id,
-            )
-        else:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.session_id,
-            )
-        if (
-            agent_session is None
-            or agent_session.workspace_id != authority.workspace_id
-            or agent_session.agent_id != authority.agent_id
-            or agent_session.owner_generation != authority.owner_generation
-            or agent_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
-            session,
-            authority.session_id,
-        )
-        if root is None or root.agent_session_id != authority.root_session_id:
-            return False
-        if authority.root_session_id == authority.session_id:
-            root_session = agent_session
-        else:
-            root_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.root_session_id,
-            )
-        if (
-            root_session is None
-            or root_session.workspace_id != authority.workspace_id
-            or root_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        if lock:
-            run = await self.agent_run_repository.lock_by_id(
-                session,
-                authority.run_id,
-            )
-        else:
-            run = await self.agent_run_repository.get_by_id(
-                session,
-                authority.run_id,
-            )
-        return (
-            run is not None
-            and run.session_id == authority.session_id
-            and run.run_index == authority.run_index
-            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-        )
-
-    async def _has_workspace_access(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        user_id: str,
-    ) -> bool:
-        """Check whether user is workspace member."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
-        )
-        return workspace_user is not None
+        return Success(ArtifactDownload(artifact=artifact.value, body=body))
 
     async def _cleanup_uploaded_object(self, object_key: str | None) -> None:
         """Delete already uploaded object when metadata commit fails."""
@@ -752,6 +522,80 @@ class ArtifactService:
             bucket=self.config.workspace_s3.bucket,
             key=object_key,
         )
+
+
+def _repository_authority(
+    authority: SessionResourceAuthority,
+) -> FileResourceAuthority:
+    """Convert service authority to a repository operation input."""
+    return FileResourceAuthority(
+        workspace_id=authority.workspace_id,
+        agent_id=authority.agent_id,
+        session_id=authority.session_id,
+        root_session_id=authority.root_session_id,
+        run_id=authority.run_id,
+        run_index=authority.run_index,
+        owner_generation=authority.owner_generation,
+    )
+
+
+def _authority_artifact_create(
+    *,
+    authority: SessionResourceAuthority,
+    artifact_id: str,
+    filename: str | None,
+    media_type: str,
+    size_bytes: int,
+    sha256: str,
+    source_tool_name: str | None,
+    source_call_id: str | None,
+    source_part_index: int | None,
+    description: str | None,
+    metadata: dict[str, object] | None,
+    config: Config,
+) -> ArtifactCreate:
+    """Build stable authority-owned Artifact metadata."""
+    return ArtifactCreate(
+        id=artifact_id,
+        workspace_id=authority.workspace_id,
+        session_id=authority.session_id,
+        agent_id=authority.agent_id,
+        created_run_id=authority.run_id,
+        created_run_index=authority.run_index,
+        expires_at=artifact_expires_at(
+            now=datetime.datetime.now(datetime.UTC),
+            config=config,
+        ),
+        name=_sanitize_display_filename(filename),
+        media_type=media_type,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        source_tool_name=source_tool_name,
+        source_call_id=source_call_id,
+        source_part_index=source_part_index,
+        description=description,
+        metadata=_json_metadata(metadata),
+    )
+
+
+def _map_create_failure(
+    failure: ArtifactMetadataFailure,
+) -> ArtifactSessionNotFound | ArtifactAccessDenied:
+    """Map repository create failure to the stable service contract."""
+    if failure is ArtifactMetadataFailure.SESSION_NOT_FOUND:
+        return ArtifactSessionNotFound()
+    return ArtifactAccessDenied()
+
+
+def _map_artifact_metadata_result(
+    result: Result[Artifact, ArtifactMetadataFailure],
+) -> Result[Artifact, ArtifactNotFound | ArtifactAccessDenied]:
+    """Map repository metadata failures to the stable service contract."""
+    if isinstance(result, Success):
+        return result
+    if result.error is ArtifactMetadataFailure.NOT_FOUND:
+        return Failure(ArtifactNotFound())
+    return Failure(ArtifactAccessDenied())
 
 
 def _json_metadata(metadata: dict[str, object] | None) -> dict[str, JSONValue]:

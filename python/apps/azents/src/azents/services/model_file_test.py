@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
 from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
+from azents.repos.model_file.operations import ModelFileOperationRepository
 from azents.services.model_file import (
     ModelFileAccessDenied,
     ModelFileInvalidImage,
@@ -124,6 +125,21 @@ class _S3Service:
         self.objects.pop(key, None)
 
 
+def _make_service(**kwargs: Any) -> ModelFileService:  # noqa: ANN401
+    """Construct ModelFileService with an injected completed operation repository."""
+    operation_repository = ModelFileOperationRepository(
+        model_file_repository=kwargs["model_file_repository"],
+        agent_session_repository=kwargs.pop("agent_session_repository"),
+        agent_run_repository=kwargs["agent_run_repository"],
+        workspace_user_repository=kwargs.pop("workspace_user_repository"),
+        session_manager=kwargs["session_manager"],
+    )
+    return ModelFileService(
+        operation_repository=operation_repository,
+        **kwargs,
+    )
+
+
 def _png_bytes() -> bytes:
     """Create PNG bytes for tests."""
     image = Image.new("RGBA", (2, 2), (255, 0, 0, 128))
@@ -204,7 +220,7 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
     agent_run_repository.lock_by_id.return_value = (
         agent_run_repository.get_by_id.return_value
     )
-    service = ModelFileService(
+    service = _make_service(
         model_file_repository=cast(Any, _ModelFileRepository(boundary)),
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
@@ -258,7 +274,7 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
     )
     workspace_user_repository = AsyncMock()
     workspace_user_repository.get_by_workspace_and_user.return_value = None
-    service = ModelFileService(
+    service = _make_service(
         model_file_repository=cast(Any, _ModelFileRepository(boundary)),
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
@@ -316,7 +332,7 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
     ]
     model_file_repository = _ModelFileRepository(boundary)
     workspace_user_repository = AsyncMock()
-    service = ModelFileService(
+    service = _make_service(
         model_file_repository=cast(Any, model_file_repository),
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(
@@ -364,7 +380,7 @@ async def test_discard_pending_input_marks_files_for_lifecycle_cleanup() -> None
     """Failed input promotion marks created ModelFiles deleted in one DB scope."""
     boundary = _SessionBoundary()
     repository = _ModelFileRepository(boundary)
-    service = ModelFileService(
+    service = _make_service(
         model_file_repository=cast(Any, repository),
         agent_session_repository=AsyncMock(),
         agent_run_repository=AsyncMock(),

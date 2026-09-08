@@ -18,15 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
+from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.model_file.operations import (
+    ModelFileMetadataFailure,
+    ModelFileOperationRepository,
+)
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 _IMAGE_MEDIA_PREFIX = "image/"
@@ -109,24 +112,21 @@ def model_file_size_limit_message(error: ModelFileOversized) -> str:
 
 @dataclasses.dataclass
 class ModelFileService:
-    """Coordinate ModelFile metadata and object storage."""
+    """Coordinate ModelFile metadata and object storage.
 
+    The lower repository, Run repository, and session factory remain exposed solely
+    for the unresolved provider-output lane. Ordinary service operations use
+    ``operation_repository`` exclusively.
+    """
+
+    operation_repository: Annotated[
+        ModelFileOperationRepository,
+        Depends(ModelFileOperationRepository),
+    ]
     model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
-    agent_run_repository: Annotated[
-        AgentRunRepository,
-        Depends(AgentRunRepository),
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository,
-        Depends(WorkspaceUserRepository),
-    ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+        SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
@@ -145,9 +145,9 @@ class ModelFileService:
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
 
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ModelFileAccessDenied())
+        repository_authority = _repository_authority(authority)
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(ModelFileAccessDenied())
 
         normalized_body = normalized.value
         model_file_id = uuid7().hex
@@ -164,33 +164,28 @@ class ModelFileService:
                 body=normalized_body.body,
                 content_type=normalized_body.media_type,
             )
-            async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(
-                    session,
-                    authority,
-                    lock=True,
-                ):
-                    return Failure(ModelFileAccessDenied())
-                created = await self.model_file_repository.create(
-                    session,
-                    ModelFileCreate(
-                        id=model_file_id,
-                        workspace_id=authority.workspace_id,
-                        session_id=authority.session_id,
-                        agent_id=authority.agent_id,
-                        name=_sanitize_display_filename(filename),
-                        media_type=normalized_body.media_type,
-                        kind=normalized_body.kind,
-                        size_bytes=len(normalized_body.body),
-                        created_run_id=authority.run_id,
-                        created_run_index=authority.run_index,
-                        normalized_format=normalized_body.normalized_format,
-                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
+            created = await self.operation_repository.create_for_authority(
+                authority=repository_authority,
+                create=ModelFileCreate(
+                    id=model_file_id,
+                    workspace_id=authority.workspace_id,
+                    session_id=authority.session_id,
+                    agent_id=authority.agent_id,
+                    name=_sanitize_display_filename(filename),
+                    media_type=normalized_body.media_type,
+                    kind=normalized_body.kind,
+                    size_bytes=len(normalized_body.body),
+                    created_run_id=authority.run_id,
+                    created_run_index=authority.run_index,
+                    normalized_format=normalized_body.normalized_format,
+                    sha256=hashlib.sha256(normalized_body.body).hexdigest(),
+                    metadata=_json_metadata(metadata),
+                ),
+            )
+            if isinstance(created, Failure):
+                return Failure(ModelFileAccessDenied())
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
@@ -203,13 +198,10 @@ class ModelFileService:
         """Mark uncommitted input ModelFiles for lifecycle cleanup."""
         if not model_file_ids:
             return 0
-        async with self.session_manager() as session:
-            deleted = await self.model_file_repository.mark_deleted_if_unpinned(
-                session,
-                model_file_ids=model_file_ids,
-                deleted_at=datetime.datetime.now(datetime.UTC),
-            )
-        return len(deleted)
+        return await self.operation_repository.mark_deleted_if_unpinned(
+            model_file_ids=model_file_ids,
+            deleted_at=datetime.datetime.now(datetime.UTC),
+        )
 
     async def download(
         self,
@@ -218,9 +210,11 @@ class ModelFileService:
         user_id: str,
     ) -> Result[ModelFileDownload, ModelFileResolveError]:
         """Fetch ModelFile normalized blob."""
-        model_file_result = await self._get_accessible_model_file(
-            model_file_id=model_file_id,
-            user_id=user_id,
+        model_file_result = _map_metadata_result(
+            await self.operation_repository.load_for_user(
+                model_file_id=model_file_id,
+                user_id=user_id,
+            )
         )
         return await self._download_resolved_model_file(model_file_result)
 
@@ -232,10 +226,12 @@ class ModelFileService:
         user_id: str,
     ) -> Result[ModelFileDownload, ModelFileResolveError]:
         """Fetch ModelFile normalized blob inside current Agent namespace."""
-        model_file_result = await self._get_accessible_model_file_for_agent(
-            model_file_id=model_file_id,
-            agent_id=agent_id,
-            user_id=user_id,
+        model_file_result = _map_metadata_result(
+            await self.operation_repository.load_for_agent_user(
+                model_file_id=model_file_id,
+                agent_id=agent_id,
+                user_id=user_id,
+            )
         )
         return await self._download_resolved_model_file(model_file_result)
 
@@ -246,37 +242,18 @@ class ModelFileService:
         authority: SessionResourceAuthority,
     ) -> Result[ModelFileDownload, ModelFileResolveError]:
         """Fetch a same-session ModelFile under canonical Session/Run authority."""
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ModelFileAccessDenied())
-            model_file = await self.model_file_repository.get_by_id_for_agent(
-                session,
+        repository_authority = _repository_authority(authority)
+        model_file_result = _map_metadata_result(
+            await self.operation_repository.load_for_authority(
+                authority=repository_authority,
                 model_file_id=model_file_id,
-                agent_id=authority.agent_id,
             )
-            if (
-                model_file is None
-                or model_file.workspace_id != authority.workspace_id
-                or model_file.session_id != authority.session_id
-            ):
-                return Failure(ModelFileNotFound())
-            if model_file.created_run_id is not None:
-                created_run = await self.agent_run_repository.get_by_id(
-                    session,
-                    model_file.created_run_id,
-                )
-                if (
-                    created_run is None
-                    or created_run.session_id != model_file.session_id
-                    or created_run.run_index != model_file.created_run_index
-                ):
-                    return Failure(ModelFileNotFound())
-        downloaded = await self._download_resolved_model_file(Success(model_file))
+        )
+        downloaded = await self._download_resolved_model_file(model_file_result)
         if isinstance(downloaded, Failure):
             return downloaded
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(ModelFileAccessDenied())
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(ModelFileAccessDenied())
         return downloaded
 
     async def _download_resolved_model_file(
@@ -300,124 +277,6 @@ class ModelFileService:
             return Failure(ModelFileUnavailable())
         return Success(ModelFileDownload(model_file=model_file, body=body))
 
-    async def _get_accessible_model_file(
-        self,
-        *,
-        model_file_id: str,
-        user_id: str,
-    ) -> Result[ModelFile, ModelFileNotFound | ModelFileAccessDenied]:
-        """Check ModelFile metadata together with workspace access permission."""
-        async with self.session_manager() as session:
-            model_file = await self.model_file_repository.get_by_id(
-                session,
-                model_file_id,
-            )
-            return await self._authorize_model_file(
-                session,
-                model_file=model_file,
-                user_id=user_id,
-            )
-
-    async def _get_accessible_model_file_for_agent(
-        self,
-        *,
-        model_file_id: str,
-        agent_id: str,
-        user_id: str,
-    ) -> Result[ModelFile, ModelFileNotFound | ModelFileAccessDenied]:
-        """Check ModelFile metadata only inside current Agent namespace."""
-        async with self.session_manager() as session:
-            model_file = await self.model_file_repository.get_by_id_for_agent(
-                session,
-                model_file_id=model_file_id,
-                agent_id=agent_id,
-            )
-            return await self._authorize_model_file(
-                session,
-                model_file=model_file,
-                user_id=user_id,
-            )
-
-    async def _authorize_model_file(
-        self,
-        session: AsyncSession,
-        *,
-        model_file: ModelFile | None,
-        user_id: str,
-    ) -> Result[ModelFile, ModelFileNotFound | ModelFileAccessDenied]:
-        """Check workspace access permission of fetched ModelFile."""
-        if model_file is None:
-            return Failure(ModelFileNotFound())
-        if not await self._has_workspace_access(
-            session,
-            workspace_id=model_file.workspace_id,
-            user_id=user_id,
-        ):
-            return Failure(ModelFileAccessDenied())
-        return Success(model_file)
-
-    async def _has_valid_resource_authority(
-        self,
-        session: AsyncSession,
-        authority: SessionResourceAuthority,
-        *,
-        lock: bool = False,
-    ) -> bool:
-        """Validate canonical Session/Run authority for an internal operation."""
-        if lock:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session,
-                authority.session_id,
-            )
-        else:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.session_id,
-            )
-        if (
-            agent_session is None
-            or agent_session.workspace_id != authority.workspace_id
-            or agent_session.agent_id != authority.agent_id
-            or agent_session.owner_generation != authority.owner_generation
-            or agent_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
-            session,
-            authority.session_id,
-        )
-        if root is None or root.agent_session_id != authority.root_session_id:
-            return False
-        if authority.root_session_id == authority.session_id:
-            root_session = agent_session
-        else:
-            root_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.root_session_id,
-            )
-        if (
-            root_session is None
-            or root_session.workspace_id != authority.workspace_id
-            or root_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        if lock:
-            run = await self.agent_run_repository.lock_by_id(
-                session,
-                authority.run_id,
-            )
-        else:
-            run = await self.agent_run_repository.get_by_id(
-                session,
-                authority.run_id,
-            )
-        return (
-            run is not None
-            and run.session_id == authority.session_id
-            and run.run_index == authority.run_index
-            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-        )
-
     async def validate_resource_authority_in_session(
         self,
         session: AsyncSession,
@@ -426,26 +285,20 @@ class ModelFileService:
         lock: bool,
     ) -> bool:
         """Validate resource authority inside a caller-owned transaction."""
-        return await self._has_valid_resource_authority(
+        return await self.operation_repository.validate_authority_in_session(
             session,
-            authority,
+            _repository_authority(authority),
             lock=lock,
         )
 
-    async def _has_workspace_access(
+    async def validate_resource_authority(
         self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        user_id: str,
+        authority: SessionResourceAuthority,
     ) -> bool:
-        """Check whether user is workspace member."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
+        """Validate resource authority in one completed repository operation."""
+        return await self.operation_repository.validate_authority(
+            _repository_authority(authority)
         )
-        return workspace_user is not None
 
     async def _cleanup_uploaded_object(self, object_key: str | None) -> None:
         """Delete already uploaded object when metadata commit fails."""
@@ -455,6 +308,32 @@ class ModelFileService:
             bucket=self.config.workspace_s3.bucket,
             key=object_key,
         )
+
+
+def _repository_authority(
+    authority: SessionResourceAuthority,
+) -> FileResourceAuthority:
+    """Convert service authority to a repository operation input."""
+    return FileResourceAuthority(
+        workspace_id=authority.workspace_id,
+        agent_id=authority.agent_id,
+        session_id=authority.session_id,
+        root_session_id=authority.root_session_id,
+        run_id=authority.run_id,
+        run_index=authority.run_index,
+        owner_generation=authority.owner_generation,
+    )
+
+
+def _map_metadata_result(
+    result: Result[ModelFile, ModelFileMetadataFailure],
+) -> Result[ModelFile, ModelFileNotFound | ModelFileAccessDenied]:
+    """Map repository metadata failures to the stable service contract."""
+    if isinstance(result, Success):
+        return result
+    if result.error is ModelFileMetadataFailure.NOT_FOUND:
+        return Failure(ModelFileNotFound())
+    return Failure(ModelFileAccessDenied())
 
 
 def normalize_model_file_body(

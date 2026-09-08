@@ -45,6 +45,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/chat_write_request/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
+  - python/apps/azents/src/azents/repos/file_metadata_authority.py
   - python/apps/azents/src/azents/repos/session_title/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
@@ -120,7 +121,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-08
-spec_version: 162
+spec_version: 163
 ---
 
 # Conversation & Events
@@ -1295,6 +1296,12 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-09-08** — v163. Recorded repository-owned completed database operations
+  for ExchangeFile authorization, retention-root reads, expiration, atomic
+  source/preview persistence, and post-object-delete metadata authorization. The
+  provider-output dependency tunnel through file service session/repository
+  handles remains an explicitly unresolved ownership boundary.
 
 - **2026-09-08** — v162. Moved automatic title snapshots, retry ownership
   checks, and conditional replacement behind completed repository operations so
