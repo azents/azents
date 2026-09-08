@@ -56,6 +56,7 @@ interface McpConfigFieldsProps {
   hasCredentials: boolean;
   /** Workspace handle for connection test API call */
   handle?: string;
+  agentId?: string;
   /** Stored toolkit ID (edit mode) */
   toolkitConfigId?: string;
 }
@@ -76,6 +77,7 @@ export function McpConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: McpConfigFieldsProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.mcp");
@@ -97,6 +99,7 @@ export function McpConfigFields({
     try {
       const result = await testConnectionMutation.mutateAsync({
         handle,
+        ...(agentId != null && { agentId }),
         toolkitType: "mcp",
         toolkitConfigId: toolkitConfigId ?? null,
         config,

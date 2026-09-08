@@ -50,6 +50,8 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/repos/toolkit/**
+  - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
@@ -92,7 +94,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-08
-spec_version: 172
+spec_version: 173
 ---
 
 # Agent Execution Loop
@@ -191,7 +193,7 @@ User trees. A stale Worker cannot resume ordinary work after the capability vers
 
 `agent_runs.vfs_projection` is the durable authorization and content snapshot for `azents://` files. `RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed URI.
 
-The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers that have an enabled AgentToolkit attachment and enabled ToolkitConfig for the run's Agent and Workspace. Projection construction reads only local package resources and authoritative attachment metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
+The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers in the canonical enabled effective Toolkit relation for the run's Agent and Workspace. That relation unions enabled Workspace-shared `AgentToolkit` attachments with enabled direct Agent-owned ToolkitConfigs. Projection construction reads only local package resources and authoritative effective-relation metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
 
 Input promotion receives `active_run_id`. An absolute filesystem SkillAction
 resolves from the existing session `active` Skill projection outside the final
@@ -1422,10 +1424,13 @@ icon.
 
 ## Changelog
 
-- **2026-09-08** (spec_version 172) — Split Mailbox preparation from its
+- **2026-09-08** (spec_version 173) — Split Mailbox preparation from its
   repository-owned final transaction so managed VFS I/O occurs without an active
   transaction while FIFO, generation, Skill, event, action, Run, and delete
   authority remains atomically revalidated and applied.
+- **2026-09-07** (spec_version 172) — Made managed VFS release-bundle eligibility
+  consume the canonical effective Toolkit relation, including direct Agent-owned
+  ToolkitConfigs as well as Workspace-shared attachments.
 - **2026-09-06** (spec_version 171) — Distinguished unsupported or invalid
   public-price estimates from unexpected calculator defects that remain visible
   through the internal-error path.

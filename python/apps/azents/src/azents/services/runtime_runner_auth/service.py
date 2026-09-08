@@ -36,10 +36,18 @@ class RuntimeRunnerAuthenticationService:
     ) -> bool:
         """Return whether a credential still matches durable Runtime state."""
         async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_id(
-                session,
-                credential.runtime_id,
-            )
+            return await self.authorize_runner_in_transaction(session, credential)
+
+    async def authorize_runner_in_transaction(
+        self,
+        session: AsyncSession,
+        credential: RuntimeRunnerCredential,
+    ) -> bool:
+        """Validate Runner authority inside a caller-owned transaction."""
+        runtime = await self.runtime_repository.get_by_id_for_update(
+            session,
+            credential.runtime_id,
+        )
         return runtime is not None and runtime.desired_generation == (
             credential.desired_generation
         )

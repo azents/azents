@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgeContext,
@@ -29,7 +30,6 @@ from azents.repos.external_channel.lifecycle import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 _PARTICIPANT_KEY = "session.external-channel"
 

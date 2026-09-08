@@ -15,39 +15,39 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-07 | 73 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-08 | 163 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 73 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-08 | 74 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
-| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-07 | 10 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-08 | 11 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-08 | 110 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-03 | 13 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-08 | 111 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 14 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-08 | 81 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-08 | 172 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-07 | 75 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-08 | 173 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-08 | 77 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 45 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-08 | 46 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-08 | 39 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-07 | 59 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-08 | 60 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
-| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
+| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-06 | 18 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-06 | 20 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-07 | 44 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
@@ -156,6 +156,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord Activity Tracker Conversation Settings Access Requirements](requirements/discord-260829-tracker-settings-access.md) | discord-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Moving Activity Tracker Requirements](requirements/discord-260905-moving-activity-tracker.md) | discord-260905 | 2026-09-05 | 2026-09-05 |
 | [Discord Task-Change Tracker Relocation Requirements](requirements/discord-260907-task-change-tracker-relocation.md) | discord-260907 | 2026-09-07 | 2026-09-07 |
+| [Discord Provider Status Surfaces Requirements](requirements/discord-260908-provider-status-surfaces.md) | discord-260908 | 2026-09-08 | 2026-09-08 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -328,6 +329,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Runtime File Read Data Plane Requirements](requirements/read-260730-runtime-file-read-data-plane.md) | read-260730 | 2026-07-30 | 2026-07-30 |
 | [Memory Redesign: Filesystem → DB + Tool Call Historical Requirements Reconstruction](requirements/redesign-260426-memory-redesign-2026.md) | redesign-260426 | 2026-04-26 | 2026-04-26 |
+| [Ephemeral Redis Coordination Authority Requirements](requirements/redis-260907-ephemeral-coordination-authority.md) | redis-260907 | 2026-09-07 | 2026-09-08 |
 | [Re-Execution Preserves Model Target Intent Historical Requirements Reconstruction](requirements/reexecution-260710-reexecution-target-intent.md) | reexecution-260710 | 2026-07-10 | - |
 | [Register Project Picker Worktree UI Historical Requirements Reconstruction](requirements/register-260706-register-picker-worktree-ui.md) | register-260706 | 2026-07-06 | - |
 | [Remove Project Registration Requests Historical Requirements Reconstruction](requirements/registration-260707-registration-requests.md) | registration-260707 | 2026-07-07 | 2026-07-07 |
@@ -445,6 +447,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Always-Visible Toolkit Tools Requirements](requirements/toolkit-260818-always-visible-tools.md) | toolkit-260818 | 2026-08-18 | 2026-08-18 |
+| [Agent-Scoped Toolkit Management Requirements](requirements/toolkit-260907-agent-scoped-management.md) | toolkit-260907 | 2026-09-07 | 2026-09-07 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Task-Only Tracker Edit Requirements](requirements/tracker-260907-task-only-edit.md) | tracker-260907 | 2026-09-07 | 2026-09-07 |
@@ -573,6 +576,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord Activity Tracker Conversation Settings Access Decisions](adr/discord-260829-tracker-settings-access.md)
 - [Discord Moving Activity Tracker Decisions](adr/discord-260905-moving-activity-tracker.md)
 - [Discord Task-Change Tracker Relocation Decisions](adr/discord-260907-task-change-tracker-relocation.md)
+- [Discord Provider Status Surfaces Decisions](adr/discord-260908-provider-status-surfaces.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
@@ -745,6 +749,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Runtime File Read Data Plane](adr/read-260730-runtime-file-read-data-plane.md)
 - [Memory Redesign: Filesystem → DB + Tool Call Historical Decision Reconstruction](adr/redesign-260426-memory-redesign-2026.md)
+- [Ephemeral Redis Coordination Authority](adr/redis-260907-ephemeral-coordination-authority.md)
 - [Re-Execution Preserves Model Target Intent](adr/reexecution-260710-reexecution-target-intent.md)
 - [Register Project Picker Worktree UI](adr/register-260706-register-picker-worktree-ui.md)
 - [Remove Project Registration Requests Historical Decision Reconstruction](adr/registration-260707-registration-requests.md)
@@ -862,6 +867,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
 - [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
 - [Always-Visible Toolkit Tools](adr/toolkit-260818-always-visible-tools.md)
+- [Agent-Scoped Toolkit Management Decisions](adr/toolkit-260907-agent-scoped-management.md)
 - [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
 - [Discord Todo Work Activity Tracker Visibility Decisions](adr/tracker-260829-todo-work-visibility.md)
 - [Discord Task-Only Tracker Edit Decisions](adr/tracker-260907-task-only-edit.md)

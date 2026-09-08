@@ -21,6 +21,10 @@ from typing import (
 
 from redis.exceptions import WatchError
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_from_redis,
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.transfer.data import (
     RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
     RuntimeTransferAdmission,
@@ -47,8 +51,8 @@ from azents.runtime.transfer.data import (
 )
 from azents.runtime.transfer.policy import phase_transition_allowed
 
-_DEFAULT_NAMESPACE = "azents:runtime:transfer"
-_RECORD_SCHEMA_VERSION = 8
+_DEFAULT_NAMESPACE = "azents:runtime:transfer:v2"
+_RECORD_SCHEMA_VERSION = 9
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
@@ -415,7 +419,13 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         "created_at": _datetime_to_value(record.created_at),
         "updated_at": _datetime_to_value(record.updated_at),
         "logical_expires_at": _datetime_to_value(record.logical_expires_at),
-        "accepted_runner_generation": record.accepted_runner_generation,
+        "accepted_runner_generation": (
+            None
+            if record.accepted_runner_generation is None
+            else runtime_connection_generation_to_redis(
+                record.accepted_runner_generation
+            )
+        ),
         "dispatch_id": record.dispatch_id,
         "dispatch_status": record.dispatch_status.value,
         "dispatch_request_id": record.dispatch_request_id,
@@ -496,7 +506,7 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
             record["logical_expires_at"],
             "logical_expires_at",
         ),
-        accepted_runner_generation=_optional_int(
+        accepted_runner_generation=_optional_connection_generation(
             record["accepted_runner_generation"],
             "accepted_runner_generation",
         ),
@@ -812,6 +822,16 @@ def _require_int(value: object, name: str) -> int:
 def _optional_int(value: object, name: str) -> int | None:
     """Require an optional integer but reject booleans."""
     return None if value is None else _require_int(value, name)
+
+
+def _optional_connection_generation(value: object, name: str) -> int | None:
+    """Require an optional canonical Redis connection generation."""
+    if value is None:
+        return None
+    try:
+        return runtime_connection_generation_from_redis(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a connection-generation string") from error
 
 
 def _require_bool(value: object, name: str) -> bool:

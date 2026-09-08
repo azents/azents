@@ -59,24 +59,28 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
+  - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
+  - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
+  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-08
-spec_version: 110
+spec_version: 111
 ---
 
 # Toolkit
 
 ## Overview
 
-Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. Workspace managers create toolkits and expose them to agents through workspace-level `ToolkitScope`.
+Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig is either Workspace-shared and mounted through `AgentToolkit`, or directly owned by one Agent; the direct owner is the canonical Agent-only ownership relation.
 
 This domain covers four feature groups.
 
-1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by three tables: `ToolkitConfig` + `ToolkitScope` + `AgentToolkit`.
+1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by `ToolkitConfig`, Workspace-sharing `ToolkitScope`, and shared attachment `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
 3. **Auto-bound platform capabilities** — Runtime, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
 4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
@@ -103,6 +107,7 @@ contexts. User-brought credentials are not a Team capability.
 ```mermaid
 erDiagram
     WORKSPACE ||--o{ TOOLKIT_CONFIG : owns
+    AGENT ||--o{ TOOLKIT_CONFIG : directly_owns
     TOOLKIT_CONFIG ||--o{ TOOLKIT_SCOPE : has
     TOOLKIT_CONFIG ||--o{ AGENT_TOOLKIT : attached_to
     TOOLKIT_CONFIG ||--o| MCP_OAUTH_CONNECTION : oauth_connection
@@ -111,9 +116,9 @@ erDiagram
 
 ### Entities
 
-- **ToolkitConfig** — workspace-owned tool + setting bundle. Can be shared by multiple agents. (`workspace_id`, `toolkit_type`, `slug`, `config`, `prompt`, `encrypted_credentials`, `enabled`, `revision`). `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
-- **ToolkitScope** — workspace visibility scope for ToolkitConfig. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. WORKSPACE scope is automatically added on creation. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
-- **AgentToolkit** — Agent ↔ ToolkitConfig link. `(agent_id, toolkit_id)` is UNIQUE. Denormalized `toolkit_type` column supports enforcing **one toolkit type per Agent**.
+- **ToolkitConfig** — a Workspace-resident tool + setting bundle with a nullable canonical `owner_agent_id`. A null owner is `Workspace shared`; it can be mounted by multiple Agents through `AgentToolkit` and has a WORKSPACE scope. A non-null owner is `This Agent only`; it has no `AgentToolkit` or `ToolkitScope` projection and is reachable only through its exact owning Agent. Its local slug indexes are `(workspace_id, slug)` for shared rows and `(owner_agent_id, slug)` for Agent-owned rows. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
+- **ToolkitScope** — Workspace visibility scope for a Workspace-shared ToolkitConfig only. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. The common Workspace create path automatically adds this scope. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
+- **AgentToolkit** — shared Workspace ToolkitConfig ↔ Agent attachment. `(agent_id, toolkit_id)` is UNIQUE. It is not created for Agent-owned ToolkitConfigs.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
 
 ### Enum / Type
@@ -132,21 +137,26 @@ erDiagram
 
 ### Toolkit Type & Scope
 
-ToolkitConfig is created per workspace and starts with **at least one WORKSPACE scope**. Toolkit visibility is workspace-only; Team-scoped Toolkit visibility is not current behavior.
+Every ToolkitConfig belongs to one Workspace and has one explicit ownership kind:
 
-`list_available_for_workspace_user` verifies WorkspaceUser membership and returns enabled toolkits with a WORKSPACE scope for the requested workspace. (`enabled=True` required) ([`repos/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/repos/toolkit/__init__.py))
+- **Workspace shared** has `owner_agent_id = NULL`, begins with a WORKSPACE scope, is discoverable only through the existing Workspace list and available-list contracts, and is mounted with `AgentToolkit`.
+- **Agent-only** has `owner_agent_id = <owning Agent>`, begins without a scope or `AgentToolkit` row, is never returned by Workspace list/available/item/scope/setup paths, and resolves directly for that Agent.
 
-To mount toolkit on Agent:
+`list_available_for_workspace_user` verifies WorkspaceUser membership and returns only enabled, WORKSPACE-scoped Workspace-shared Toolkits for the requested Workspace. (`enabled=True` required) ([`repos/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/repos/toolkit/__init__.py))
+
+To mount a Workspace-shared Toolkit on an Agent:
 
 1. Call `attach_to_agent(agent_id, toolkit_id)`.
 2. Service checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list.
 3. INSERT `AgentToolkit` row. UNIQUE violation on `(agent_id, toolkit_id)` returns `DuplicateAgentToolkit`.
 
+`effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and rejects duplicate effective slugs before any partial catalog or VFS projection is published. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.
+
 ### Tool Name Prefixing
 
-ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It is unique within a workspace (`uq_toolkit_configs_workspace_slug`) and is used as the outer tool-name prefix for DB-registered toolkits.
+ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It is locally unique within the shared Workspace or owning Agent, and it must also be unique among every enabled effective Toolkit for one Agent. It is used as the outer tool-name prefix for DB-registered toolkits.
 
-`resolve_agent_tools()` resolves DB-registered `AgentToolkit` rows into `ToolkitBinding` records with `slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when `use_prefix=True`. The final model-visible name is therefore:
+`resolve_agent_tools()` resolves the canonical effective relation into `ToolkitBinding` records with `slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when `use_prefix=True`. The final model-visible name is therefore:
 
 ```text
 {toolkit_slug}__{tool_name}
@@ -254,7 +264,7 @@ Root and subagent executions use the same admission contract. Each AgentRun inde
 
 ### Toolkit CRUD / Setup UI
 
-azents-web provides workspace-scoped toolkit management screens.
+azents-web provides Workspace-shared Toolkit management screens and an authority-gated saved-Agent management flow.
 
 - `/w/[handle]/toolkits` — Toolkit list accessible to current user.
 - `/w/[handle]/toolkits/new` — config/credential input form per toolkit type.
@@ -264,6 +274,15 @@ azents-web provides workspace-scoped toolkit management screens.
 `features/toolkits` form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Shell, and EnvVar. `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
 
 The AWS Toolkit form describes the current AWS Managed MCP authorization model for its Access Key + SigV4 connection. It directs managers to grant only the downstream AWS service API permissions the Agent needs. It does not require the deprecated `aws-mcp:InvokeMcp`, `aws-mcp:CallReadOnlyTool`, or `aws-mcp:CallReadWriteTool` actions, which have no effect. MCP-specific restrictions use the `aws:ViaAWSMCPService` or `aws:CalledViaAWSMCP` IAM condition context keys.
+
+For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. The enhanced Toolkit section reads the Agent management projection and starts `Add Toolkit` with a persisted Toolkit type choice. After selection it shows only eligible Workspace-shared candidates for that type alongside the option to configure an Agent-only Toolkit. Saved cards label each item `Workspace shared` or `This Agent only`, show text readiness (`ready`, `authorization_required`, or `disabled`), and keep ownership-correct actions separate:
+
+- A Workspace-shared item can be detached only. Workspace object edits, disablement, authorization, and deletion remain in the Workspace Toolkit screens.
+- An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. Deletion is confirmed as removal from that Agent with stored credentials deleted.
+- The reusable Toolkit form is embedded only under a saved Agent. Unsaved validation and connection-test errors remain in that form; closing it creates no ToolkitConfig.
+- Requesters without the flag retain the legacy shared attachment section. They receive no Agent-only item, ownership/readiness detail, or Agent-only management action. Chat has no Toolkit management surface.
+
+The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 
 ### GitHub Multi-Installation Routing
 
@@ -317,6 +336,8 @@ sequenceDiagram
 Runtime loads `mcp_oauth_connections` by `toolkit_id`, refreshes near-expiry tokens lazily under `SELECT ... FOR UPDATE`, and retries MCP tool calls once after a 401-triggered refresh. `invalid_grant` marks the connection `reconnect_required`.
 
 Toolkit config responses include an `oauth_connection` summary for UI status/actions. The toolkit edit page exposes connect/reconnect/disconnect actions for generic MCP OAuth, Notion, and Sentry.
+
+For an Agent-owned Toolkit, the same encrypted connection row and provider flow are used through Agent-nested OAuth routes. Its distinct encrypted state binds Workspace, Agent, ToolkitConfig, initiating User, exact callback URI, PKCE verifier, nonce, and the fixed Agent settings callback target. Connect, exchange, and disconnect recheck that the Toolkit still belongs to the exact active Agent and that the current requester remains a Workspace Owner or explicit AgentAdmin. The Web callback dispatches the nested exchange only when `agent_id` is present and returns to the owning Agent settings context; the existing Workspace-shared callback path remains unchanged.
 
 ### MCP Tool Snapshot Lifecycle
 
@@ -695,13 +716,14 @@ credential injection path.
 
 ## Business Rules
 
-- `[toolkit-type-unique-per-agent]` At most one AgentToolkit with same `toolkit_type` per Agent. Enforced by denormalized `agent_toolkits.toolkit_type` column + application-level validation (currently no DB-level constraint, UNIQUE only on `(agent_id, toolkit_id)`). ([`rdb/models/toolkit.py` L150-163](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
-- `[toolkit-slug-unique-per-workspace]` `(workspace_id, slug)` is UNIQUE. Slug allows lowercase letters, numbers, and underscores only (`^[a-z0-9_]+$`); dashes are rejected because the slug becomes the outer model-visible tool namespace before the `__` tool separator. If slug omitted, default is `toolkit_type`. ([`services/toolkit/__init__.py` L124-125](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
-- `[workspace-scope-access]` WORKSPACE scope toolkit can be attached by workspace members. Toolkit visibility is workspace-only.
+- `[effective-toolkit-relation]` The canonical effective relation is the ordered union of Workspace-shared `AgentToolkit` attachments and direct Agent-owned ToolkitConfigs. Runtime, VFS, impact, and effective-slug checks consume this relation rather than constructing their own ownership lookup.
+- `[toolkit-slug-local-and-effective-unique]` Shared `(workspace_id, slug)` and Agent-owned `(owner_agent_id, slug)` values use separate partial unique indexes. Slug allows lowercase letters, numbers, and underscores only (`^[a-z0-9_]+$`); dashes are rejected because the slug becomes the outer model-visible tool namespace before the `__` tool separator. A create, attach, update, or enable operation also rejects a duplicate enabled slug in the Agent's effective relation. If omitted, a slug defaults to `toolkit_type`.
+- `[workspace-scope-access]` Only a Workspace-shared Toolkit has a WORKSPACE scope and can be attached by workspace members. Agent-only Toolkit visibility is the direct owning-Agent relation and has no scope or attachment row.
+- `[agent-toolkit-management-authority]` Agent-only management requires the Workspace Owner or an explicit AgentAdmin of the exact active Agent. Workspace Manager and Member roles alone grant neither item disclosure nor Agent-only action authority. Unauthorized Agent-owned item access uses the common not-found boundary.
 - `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Runtime tool availability is managed through Agent Runtime settings and Runtime Profile authority, not a persisted ToolkitConfig. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
 - `[mcp-oauth-toolkit-level]` MCP OAuth connection is UNIQUE by `toolkit_id`. All runs mounting the same ToolkitConfig use the same OAuth connection.
 - `[mcp-oauth-no-per-user]` `oauth2_per_user`, `MCPAuthRequest`, and `MCPOAuth2Token` are removed current behavior. Runtime does not emit per-user authorization request events for MCP OAuth.
-- `[oauth-state-encrypted]` State passed through OAuth connect/exchange is AES-GCM encrypted with a key derived from the credential encryption key. State payload binds toolkit_id, workspace_id, manager user_id, redirect_uri, and PKCE verifier.
+- `[oauth-state-encrypted]` State passed through OAuth connect/exchange is AES-GCM encrypted with a key derived from the credential encryption key. Workspace-shared state binds toolkit_id, workspace_id, manager user_id, redirect_uri, and PKCE verifier. Agent-owned state additionally binds agent_id and the fixed Agent settings callback target; exchange revalidates current Agent ownership and management authority.
 - `[oauth-dcr-when-needed]` If no existing/client credentials are available and the OAuth server exposes `registration_endpoint`, connect performs Dynamic Client Registration and stores the returned client fields in `MCPOAuthConnection`.
 - `[credential-encryption-required]` If `ToolkitRepository` is instantiated without cipher, credential field read/write raises exception — plaintext storage in DB impossible.
 - `[credentials-not-in-response]` ToolkitConfigResponse does not include plaintext credentials and exposes only `has_credentials: bool`.
@@ -755,12 +777,13 @@ All endpoints first pass `WorkspaceMember` authentication; subsequent permission
 
 | Permission | Target | Use |
 |---|---|---|
-| `TOOLKITS_WRITE` | Manager+ | Toolkit Config CRUD, Scope management, OAuth authorize, GitHub platform installations |
+| `TOOLKITS_WRITE` | Manager+ | Workspace-shared Toolkit Config CRUD, Scope management, OAuth authorize, GitHub platform installations |
 | `TOOLKITS_READ` | Member+ | available toolkit query, attach/detach toolkit to Agent, test-connection |
+| Workspace Owner or explicit AgentAdmin | Exact active Agent | Agent-only Toolkit management projection, CRUD, setup/test, and OAuth |
 
 Role mapping: Manager has READ + WRITE, Member has READ only ([`core/auth/roles.py` L26-39](../../../../python/apps/azents/src/azents/core/auth/roles.py)).
 
-Toolkit OAuth connect, exchange, and disconnect require `TOOLKITS_WRITE` because the OAuth connection is toolkit-level manager-owned state.
+Workspace-shared Toolkit OAuth connect, exchange, and disconnect require `TOOLKITS_WRITE` because that connection is Workspace-shared manager-owned state. Agent-owned OAuth uses the exact Agent Owner-or-Admin authority boundary.
 
 Unauthenticated endpoint: `GET /toolkits` (platform-provided ToolkitProvider catalog) — available even before login.
 
@@ -821,6 +844,9 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - `GET /agents/{agent_id}/toolkits` — list mounted toolkits
 - `POST /agents/{agent_id}/toolkits` — attach
 - `DELETE /agents/{agent_id}/toolkits/{agent_toolkit_id}` — detach
+- `GET /agents/{agent_id}/toolkit-configs` — authorized ownership-discriminated management projection and attachable shared candidates
+- `POST /agents/{agent_id}/toolkit-configs` — create Agent-owned ToolkitConfig
+- `GET|PATCH|DELETE /agents/{agent_id}/toolkit-configs/{id}` — manage an Agent-owned ToolkitConfig
 
 **OAuth / Test connection**
 - `POST /toolkit-configs/{id}/oauth/connect` — issue manager-owned toolkit OAuth authorization URL
@@ -828,6 +854,10 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - `DELETE /toolkit-configs/{id}/oauth/connection` — delete toolkit OAuth connection
 - `POST /toolkit-configs/{id}/test-connection` — test saved toolkit connection
 - `POST /toolkit-configs/test-connection` — test unsaved form values connection
+- `POST /agents/{agent_id}/toolkit-configs/{id}/oauth/connect` — issue Agent-owned toolkit OAuth authorization URL
+- `POST /agents/{agent_id}/toolkit-configs/{id}/oauth/exchange` — callback code → Agent-owned toolkit OAuth token exchange
+- `DELETE /agents/{agent_id}/toolkit-configs/{id}/oauth/connection` — delete Agent-owned OAuth connection
+- `POST /agents/{agent_id}/toolkit-configs/test-connection` — test unsaved Agent-owned form values connection
 - `GET /github/platform-install-url` — GitHub Platform App installation URL
 - `GET /github/platform-oauth-url` — GitHub Platform OAuth URL
 - `POST /github/platform-installations` — OAuth code → user's installation list
@@ -837,10 +867,10 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Glossary
 
-- **Toolkit** — tool bundle mounted by agent. Combination of platform provider + workspace `ToolkitConfig`.
-- **ToolkitConfig** — concrete toolkit instance created by workspace.
-- **ToolkitScope** — workspace visibility row. `scope_type` is `workspace`.
-- **AgentToolkit** — agent ↔ toolkitConfig mount relation.
+- **Toolkit** — tool bundle mounted by an Agent. Combination of a platform provider and an effective shared or Agent-owned `ToolkitConfig`.
+- **ToolkitConfig** — concrete toolkit instance that is either Workspace-shared (`owner_agent_id = null`) or Agent-only (`owner_agent_id = Agent ID`).
+- **ToolkitScope** — Workspace-shared Toolkit visibility row. `scope_type` is `workspace`.
+- **AgentToolkit** — Agent ↔ Workspace-shared ToolkitConfig mount relation.
 - **ToolkitProvider** — code-level toolkit implementation ABC. Creates executable `Toolkit` instance with `resolve()`.
 - **Toolkit (runtime)** — executable instance that session lifecycle registry enters/reuses/exits while active `AgentSession` lives. Returns tools/prompt every turn with `update_context()`. Controls LLM exposure with `ToolkitStatus.ENABLED/DISABLED`. Active Toolkit can register tool-call before/after hooks per [hook-260518/ADR](../../adr/hook-260518-hook.md) hook contract.
 - **MCP** — Model Context Protocol. Current production path uses remote HTTP / Streamable HTTP/SSE based MCP toolkit. Dormant per-agent stdio sidecar path was removed by [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-287).
@@ -945,11 +975,15 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
-- **2026-09-08** (spec_version 110) — Split pure Toolkit State, Goal, and Skill
+- **2026-09-08** (spec_version 111) — Split pure Toolkit State, Goal, and Skill
   models from repository-owned persistence, replaced application mutation
   callbacks with typed operations, moved managed Skill TurnAction VFS resolution
   outside the final Mailbox transaction, and separated Project snapshot reads
   from Runtime Skill scanning.
+- **2026-09-07** (spec_version 110) — Added canonical Agent-owned ToolkitConfig
+  ownership, effective-relation, Agent authorization, saved-Agent management UI,
+  and Agent-context MCP OAuth callback behavior while retaining Workspace-shared
+  management and non-administrator surfaces.
 - **2026-09-07** (spec_version 109) — Restricted Discord task-change relocation to
   Actions that also contain a conversational message; message-free task changes now
   update the current host in place or create only when the host is missing.

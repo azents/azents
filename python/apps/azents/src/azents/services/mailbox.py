@@ -80,14 +80,14 @@ from azents.repos.mailbox.promotion import (
     MailboxPromotionPlan,
     MailboxPromotionRepository,
 )
+from azents.repos.scheduled_task.presentation import (
+    render_scheduled_task_runtime_message,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.scheduled_task.rendering import (
-    render_scheduled_task_runtime_message,
-)
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import (
     initial_title_from_user_text,

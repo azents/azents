@@ -47,6 +47,8 @@ const meta = {
   ],
   args: {
     handle: "acme",
+    embedded: false,
+    toolkitTypeLocked: false,
     formState: { type: "CREATE" },
     mutationState: { type: "IDLE", error: null },
     scopeListState: { type: "READY", scopes: [] },
@@ -63,6 +65,7 @@ const meta = {
     onDisconnectOauth: () => {},
     onAddScope: () => {},
     onDeleteScope: () => {},
+    onCancel: () => {},
   },
 } satisfies Meta<typeof ToolkitFormStory>;
 

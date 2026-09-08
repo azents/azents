@@ -8,6 +8,10 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.discord_external_channel_presentation import (
+    render_discord_persisted_progress,
+    split_discord_markdown,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStatus,
@@ -25,6 +29,15 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_progress import ExternalChannelDesiredProgress
+from azents.core.external_channel_provider import (
+    decode_provider_connection_configuration,
+)
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.core.external_channel_session_presence import session_presence_payload
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.core.slack_external_channel_progress import (
@@ -60,22 +73,9 @@ from azents.repos.external_channel.work_state import (
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleRepository,
 )
-from azents.services.external_channel.data import (
-    decode_provider_connection_configuration,
-)
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
-)
-from azents.services.external_channel.discord_presentation import (
-    render_discord_persisted_progress,
-    split_discord_markdown,
-)
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectPlan,
-    ProviderMutationOutcome,
-    ProviderOperationKey,
-    ProviderTarget,
 )
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,

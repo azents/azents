@@ -30,6 +30,7 @@ from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     checking_progress,
 )
+from azents.core.external_channel_provider_effect import ProviderMutationOutcome
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
@@ -51,7 +52,6 @@ from azents.repos.external_channel.work_state import (
 )
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.services.external_channel.provider_effect import ProviderMutationOutcome
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )

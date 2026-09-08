@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
+from azents.core.external_channel_provider_effect import ProviderOperationKey
 from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordDeliveryResult,
@@ -25,7 +26,6 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKThread,
     DiscordSDKUnavailable,
 )
-from azents.services.external_channel.provider_effect import ProviderOperationKey
 
 
 @dataclass

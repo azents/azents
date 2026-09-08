@@ -807,19 +807,15 @@ def _discord_typing_channel_observed(
     return False
 
 
-def _completed_session_navigation_state(
+def _joined_session_navigation_state(
     provider_state: dict[str, object],
     expected_session_path: str,
 ) -> dict[str, object] | None:
-    """Return state after joined presence and Tracker navigation both arrive."""
-    if _successful_session_paths(provider_state) != [
-        expected_session_path,
-        expected_session_path,
-    ]:
+    """Return state after joined presence arrives without an automatic Tracker."""
+    if _successful_session_paths(provider_state) != [expected_session_path]:
         return None
     if _successful_session_navigation_categories(provider_state) != [
-        "session_presence_joined",
-        "activity_tracker",
+        "session_presence_joined"
     ]:
         return None
     return provider_state
@@ -4736,15 +4732,15 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         ).raise_for_status()
         state = _object(
             wait_until(
-                lambda: _completed_session_navigation_state(
+                lambda: _joined_session_navigation_state(
                     _discord_provider_state(discord_provider_fake_url),
                     expected_session_path,
                 ),
                 timeout=30,
                 interval=0.2,
                 message=(
-                    "Discord joined-presence and Activity Tracker controls were not "
-                    "delivered"
+                    "Discord joined presence did not arrive without an automatic "
+                    "Activity Tracker"
                 ),
             )
         )
@@ -4820,18 +4816,17 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert generated_detail.id == session.id
     assert generated_detail.title
     assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
-    assert _successful_session_paths(state) == [
-        expected_session_path,
-        expected_session_path,
-    ]
+    assert _successful_session_paths(state) == [expected_session_path]
     assert _successful_session_navigation_categories(state) == [
-        "session_presence_joined",
-        "activity_tracker",
+        "session_presence_joined"
     ]
-    assert _successful_session_navigation_action_ids(
-        state,
-        category="activity_tracker",
-    ) == [["view_azents_session", "azents_conversation_settings_open"]]
+    assert (
+        _successful_session_navigation_action_ids(
+            state,
+            category="activity_tracker",
+        )
+        == []
+    )
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = _int_dict(state["request_counts"])
     assert request_counts["create_thread"] >= 1
@@ -4898,11 +4893,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _successful_session_paths(terminal_state) == [
         expected_session_path,
         expected_session_path,
-        expected_session_path,
     ]
     assert _successful_session_navigation_categories(terminal_state) == [
         "session_presence_joined",
-        "activity_tracker",
         "session_presence_left",
     ]
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
@@ -5516,8 +5509,8 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 timeout=45,
                 interval=0.2,
                 message=(
-                    "Late explicit Discord mention did not publish the Activity "
-                    "Tracker while work remained active"
+                    "Late explicit Discord mention did not retain the explicit "
+                    "Activity Tracker while work remained active"
                 ),
             )
         )
@@ -6683,25 +6676,21 @@ def test_discord_message_command_selector_and_component_journey(
     )
     activation_state = _object(
         wait_until(
-            lambda: _completed_session_navigation_state(
+            lambda: _joined_session_navigation_state(
                 _discord_provider_state(discord_provider_fake_url),
                 expected_session_path,
             ),
             timeout=15,
             interval=0.2,
             message=(
-                "Discord HTTP selector replay did not deliver joined presence and "
-                "Activity Tracker controls"
+                "Discord HTTP selector replay did not deliver joined presence "
+                "without an automatic Activity Tracker"
             ),
         )
     )
-    assert _successful_session_paths(activation_state) == [
-        expected_session_path,
-        expected_session_path,
-    ]
+    assert _successful_session_paths(activation_state) == [expected_session_path]
     assert _successful_session_navigation_categories(activation_state) == [
-        "session_presence_joined",
-        "activity_tracker",
+        "session_presence_joined"
     ]
     assert _successful_session_presence_states(activation_state) == ["joined"]
     initial_response_mode = selected_channel.response_mode

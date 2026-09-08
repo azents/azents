@@ -28,16 +28,16 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.external_channel_provider import (
+    ExternalChannelCapabilitySnapshot,
+    ExternalChannelProviderIdentity,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
 from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
-from azents.services.external_channel.data import (
-    ExternalChannelCapabilitySnapshot,
-    ExternalChannelProviderIdentity,
-)
 from azents.services.external_channel.slack_blocks import projected_slack_blocks
 from azents.services.scheduled_task.control import ScheduledTaskEditInput
 

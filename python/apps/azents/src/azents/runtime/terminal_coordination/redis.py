@@ -15,6 +15,10 @@ from azents_runtime_control.runner_terminal import (
 )
 from redis.asyncio import Redis
 
+from azents.core.runtime_connection_generation import (
+    runtime_connection_generation_from_redis,
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.terminal_coordination.data import (
     MAX_ACTIVE_TERMINALS_PER_RUNTIME,
     MAX_ACTIVE_TERMINALS_PER_USER,
@@ -163,7 +167,7 @@ class RedisRuntimeTerminalCoordinationStore:
         self,
         redis: Redis,
         *,
-        key_prefix: str = "runtime-terminal:v1",
+        key_prefix: str = "runtime-terminal:v2",
     ) -> None:
         """Initialize the Redis namespace."""
         self._redis = redis
@@ -1258,7 +1262,9 @@ def _record_to_json(record: RuntimeTerminalRecord) -> str:
             "workspace_profile_version": admission.workspace_profile_version,
             "agent_policy_version": admission.agent_policy_version,
             "desired_generation": admission.desired_generation,
-            "runner_generation": admission.runner_generation,
+            "runner_generation": runtime_connection_generation_to_redis(
+                admission.runner_generation
+            ),
             "working_directory": admission.working_directory,
             "stream_nonce": admission.stream_nonce,
             "created_at": _datetime_text(admission.created_at),
@@ -1383,7 +1389,10 @@ def _record_from_json(raw: str) -> RuntimeTerminalRecord:
                 "agent_policy_version",
             ),
             desired_generation=_integer(admission_value, "desired_generation"),
-            runner_generation=_integer(admission_value, "runner_generation"),
+            runner_generation=_connection_generation(
+                admission_value,
+                "runner_generation",
+            ),
             working_directory=_string(admission_value, "working_directory"),
             stream_nonce=_string(admission_value, "stream_nonce"),
             created_at=_datetime(admission_value, "created_at"),
@@ -1661,6 +1670,13 @@ def _integer(payload: dict[str, Any], key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{key} must be an integer")
     return value
+
+
+def _connection_generation(payload: dict[str, Any], key: str) -> int:
+    try:
+        return runtime_connection_generation_from_redis(payload.get(key))
+    except ValueError as error:
+        raise ValueError(f"{key} must be a connection-generation string") from error
 
 
 def _optional_integer(payload: dict[str, Any], key: str) -> int | None:

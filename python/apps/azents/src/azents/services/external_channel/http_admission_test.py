@@ -23,6 +23,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -37,7 +38,6 @@ from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.http_admission import (
     SlackHTTPAdmissionService,
     SlackHTTPMessageIngressQuiesced,
