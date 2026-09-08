@@ -29,6 +29,7 @@ const reasoningModel: AgentModelSelection = {
     parameters: {},
     compatibility: {},
   },
+  supported_execution_options: ["fast"],
   model_snapshot: {},
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
@@ -75,6 +76,7 @@ const noEffortModel: AgentModelSelection = {
     built_in_tools: { supported: [] },
     context_window: { max_input_tokens: 128_000, max_output_tokens: null },
   },
+  supported_execution_options: [],
 };
 
 function settingsForModel(model: AgentModelSelection): SelectableModelSettings {
@@ -94,11 +96,21 @@ const selectableModelOptions: AgentResponse["selectable_model_options"] = [
     label: "Default",
     model_selection: reasoningModel,
     settings: settingsForModel(reasoningModel),
+    execution_option_definitions: [
+      {
+        id: "fast",
+        label: "Fast",
+        description: "Use faster processing for this model.",
+        cost_hint: "Higher usage",
+        control: "boolean",
+      },
+    ],
   },
   {
     label: "Fast",
     model_selection: noEffortModel,
     settings: settingsForModel(noEffortModel),
+    execution_option_definitions: [],
   },
 ];
 
@@ -189,6 +201,7 @@ const baseArgs = {
   defaultInferenceProfile: {
     model_target_label: "Default",
     reasoning_effort: null,
+    enabled_execution_options: [],
   },
   contextUsageEnabled: true,
   contextUsage: {
@@ -197,6 +210,7 @@ const baseArgs = {
       model_target_label: "Default",
       model_display_name: "GPT 5.5",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
     effectiveContextWindowTokens: 270_000,
     effectiveAutoCompactionThresholdTokens: 243_000,
@@ -230,11 +244,63 @@ export const Ready = {
   args: baseArgs,
 } satisfies Story;
 
+export const ExecutionOptionToggle = {
+  args: {
+    ...baseArgs,
+    sessionId: "option-confirm",
+    onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const toggle = await page.findByRole("switch", {
+      name: "Fast",
+    });
+    await userEvent.click(toggle);
+    await expect(toggle).toBeChecked();
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Apply model change" }),
+    );
+    await expect(args.onApplyInferenceProfile).toHaveBeenCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["fast"],
+    });
+  },
+} satisfies Story;
+
+export const MobileExecutionOptionDraft = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    sessionId: "mobile-option-draft",
+    onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const option = await page.findByRole("checkbox", {
+      name: "Fast",
+    });
+    await userEvent.click(option);
+    await expect(option).toHaveAttribute("aria-checked", "true");
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.click(option);
+    await expect(option).toHaveAttribute("aria-checked", "false");
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
 const modelChangeReviewMessage =
   "Summarize the latest deployment status and highlight any risks.";
 const appliedDefaultProfile: RequestedInferenceProfile = {
   model_target_label: "Default",
   reasoning_effort: null,
+  enabled_execution_options: [],
 };
 
 export const ModelChangeState1UnchangedWithText = {
@@ -311,6 +377,7 @@ export const DeletedAppliedModelLabelIsPreserved = {
     appliedInferenceProfile: {
       model_target_label: "Retired",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
   },
   play: async ({ canvasElement, args }) => {
@@ -327,6 +394,7 @@ export const DeletedAppliedModelLabelIsPreserved = {
       {
         model_target_label: "Retired",
         reasoning_effort: "high",
+        enabled_execution_options: [],
       },
     );
   },
@@ -536,6 +604,8 @@ export const LongModelLabel = {
         label: "Production reasoning model with a deliberately long label",
         model_selection: reasoningModel,
         settings: settingsForModel(reasoningModel),
+        execution_option_definitions:
+          selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       ...selectableModelOptions,
     ],
@@ -543,6 +613,7 @@ export const LongModelLabel = {
       model_target_label:
         "Production reasoning model with a deliberately long label",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
   },
 } satisfies Story;
@@ -553,6 +624,7 @@ export const TargetWithoutEffort = {
     defaultInferenceProfile: {
       model_target_label: "Fast",
       reasoning_effort: null,
+      enabled_execution_options: [],
     },
   },
 } satisfies Story;
@@ -566,6 +638,7 @@ export const EmptyEffortList = {
         label: "Default",
         model_selection: emptyEffortModel,
         settings: settingsForModel(emptyEffortModel),
+        execution_option_definitions: [],
       },
     ],
   },
@@ -586,11 +659,14 @@ export const DesktopFullReasoningEffort = {
         label: "Default",
         model_selection: fullReasoningModel,
         settings: settingsForModel(fullReasoningModel),
+        execution_option_definitions:
+          selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
         model_selection: noEffortModel,
         settings: settingsForModel(noEffortModel),
+        execution_option_definitions: [],
       },
     ],
   },
@@ -622,11 +698,14 @@ export const DesktopProfileKeyboardNavigation = {
         label: "Default",
         model_selection: fullReasoningModel,
         settings: settingsForModel(fullReasoningModel),
+        execution_option_definitions:
+          selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
         model_selection: noEffortModel,
         settings: settingsForModel(noEffortModel),
+        execution_option_definitions: [],
       },
     ],
   },
@@ -821,11 +900,14 @@ export const MobileFullReasoningEffort = {
         label: "Default",
         model_selection: fullReasoningModel,
         settings: settingsForModel(fullReasoningModel),
+        execution_option_definitions:
+          selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
         model_selection: noEffortModel,
         settings: settingsForModel(noEffortModel),
+        execution_option_definitions: [],
       },
     ],
   },
@@ -877,6 +959,7 @@ export const EditingMessage = {
     editingInferenceProfile: {
       model_target_label: "Default",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
   },
 } satisfies Story;
@@ -889,6 +972,7 @@ export const EditingWithUnsupportedEffort = {
     editingInferenceProfile: {
       model_target_label: "Fast",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
   },
 } satisfies Story;
@@ -901,6 +985,7 @@ export const EditingBlockedByRun = {
     editingInferenceProfile: {
       model_target_label: "Fast",
       reasoning_effort: null,
+      enabled_execution_options: [],
     },
     editSendDisabled: true,
   },

@@ -39,6 +39,7 @@ def test_requested_profile_requires_explicit_nullable_effort() -> None:
     profile = RequestedInferenceProfile(
         model_target_label="Quality",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
 
     assert profile.reasoning_effort is None
@@ -49,11 +50,13 @@ def test_session_applied_profile_contains_only_agent_owned_intent() -> None:
     profile = SessionAppliedInferenceProfile(
         model_target_label="Quality",
         reasoning_effort=ModelReasoningEffort.HIGH,
+        enabled_execution_options=[],
     )
 
     assert profile.model_dump(mode="json") == {
         "model_target_label": "Quality",
         "reasoning_effort": "high",
+        "enabled_execution_options": [],
     }
 
 
@@ -72,11 +75,13 @@ def test_requested_profile_accepts_supported_expanded_effort(
     profile = RequestedInferenceProfile(
         model_target_label="Quality",
         reasoning_effort=effort,
+        enabled_execution_options=[],
     )
 
     assert profile.model_dump(mode="json") == {
         "model_target_label": "Quality",
         "reasoning_effort": effort.value,
+        "enabled_execution_options": [],
     }
 
 
@@ -120,11 +125,13 @@ def test_session_state_projects_only_applied_public_settings() -> None:
         effective_context_window_tokens=100_000,
         effective_auto_compaction_threshold_tokens=80_000,
         resolved_at=datetime.datetime.now(datetime.UTC),
+        enabled_execution_options=[],
     )
 
     assert state.applied_profile.model_dump(mode="json") == {
         "model_target_label": "Quality",
         "model_display_name": "GPT-5.4",
         "reasoning_effort": "high",
+        "enabled_execution_options": [],
     }
     assert "llm_provider_integration_id" not in state.applied_profile.model_dump()

@@ -181,6 +181,7 @@ export function useWorkspacePanelContainer({
         agentSessionQuery.data?.current_model_target_label != null
           ? agentSessionQuery.data.current_reasoning_effort
           : (agentQuery.data?.model_parameters?.reasoning_effort ?? null),
+      enabled_execution_options: [],
     }),
     [
       agentQuery.data?.main_model_label,

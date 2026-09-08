@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 
 
 class NormalizedModelCandidate(BaseModel):
@@ -19,6 +20,9 @@ class NormalizedModelCandidate(BaseModel):
     model_family: str | None = Field(default=None, description="Model family")
     normalized_capabilities: ModelCapabilities = Field(
         description="Normalized capability contract"
+    )
+    supported_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Directly selectable execution options supported by this model"
     )
     model_snapshot: dict[str, Any] = Field(description="Normalized model snapshot")
     source_metadata: dict[str, Any] | None = Field(

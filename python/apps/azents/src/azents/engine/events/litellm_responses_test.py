@@ -36,6 +36,7 @@ from azents.core.llm_catalog import (
     ModelModality,
     ModelReasoningEffort,
 )
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.events.file_parts import ModelFileLoweringContent
@@ -233,9 +234,42 @@ def _response_stream_event(
 class TestLiteLLMResponsesLowerer:
     """LiteLLM Responses lowerer tests."""
 
+    def test_non_openai_provider_omits_service_tier(self) -> None:
+        """Unrelated providers never receive OpenAI execution tiers."""
+        request = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet",
+            provider_id=LLMProvider.ANTHROPIC,
+            supported_execution_options=[],
+            enabled_execution_options=[],
+        ).lower([], model="claude-sonnet")
+
+        assert "service_tier" not in request.kwargs
+
+    def test_non_openai_provider_rejects_fast(self) -> None:
+        """Fail closed if invalid Fast intent crosses runtime validation."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet",
+            provider_id=LLMProvider.ANTHROPIC,
+            supported_execution_options=[ModelExecutionOptionId.FAST],
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Fast execution is not supported by this provider",
+        ):
+            lowerer.lower([], model="claude-sonnet")
+
     def test_drops_tool_result_without_matching_call(self) -> None:
         """Remove tool result without matching tool call from Responses input."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
@@ -270,7 +304,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_skill_loaded_event_injects_skill_body_before_user_message(self) -> None:
         """Skill loaded events lower to model-visible Skill body injection."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.SKILL_LOADED,
@@ -311,7 +350,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_agent_message_with_task_envelope(self) -> None:
         """agent_message events become explicit parent-to-child task envelopes."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.AGENT_MESSAGE,
@@ -341,7 +385,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_send_message_as_message_envelope(self) -> None:
         """send_message mailbox events render as non-task messages."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.AGENT_MESSAGE,
@@ -371,7 +420,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_agent_result_as_terminal_envelope(self) -> None:
         """Terminal mailbox events render status without internal IDs."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.AGENT_MESSAGE,
@@ -407,6 +461,8 @@ class TestLiteLLMResponsesLowerer:
     def test_openai_prompt_cache_key_uses_session_scope(self) -> None:
         """OpenAI prompt cache key is stable and scoped to the session."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.OPENAI,
@@ -422,6 +478,8 @@ class TestLiteLLMResponsesLowerer:
         assert (
             key
             == LiteLLMResponsesLowerer(
+                supported_execution_options=[],
+                enabled_execution_options=[],
                 provider="openai",
                 model="gpt-5.1",
                 provider_id=LLMProvider.OPENAI,
@@ -433,6 +491,8 @@ class TestLiteLLMResponsesLowerer:
         assert (
             key
             != LiteLLMResponsesLowerer(
+                supported_execution_options=[],
+                enabled_execution_options=[],
                 provider="openai",
                 model="gpt-5.1",
                 provider_id=LLMProvider.OPENAI,
@@ -445,6 +505,8 @@ class TestLiteLLMResponsesLowerer:
     def test_openai_prompt_cache_key_respects_explicit_kwargs(self) -> None:
         """Explicit provider kwargs keep their default/overridden cache behavior."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.OPENAI,
@@ -459,6 +521,8 @@ class TestLiteLLMResponsesLowerer:
     def test_non_openai_does_not_force_prompt_cache_key(self) -> None:
         """Providers without request-level cache key support keep defaults."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="claude-sonnet-4-5",
             provider_id=LLMProvider.ANTHROPIC,
@@ -476,6 +540,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """Both xAI credential modes use the xAI Responses transport."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider=provider_id.value,
             model="grok-4.5",
             provider_id=provider_id,
@@ -498,6 +564,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """xAI requests keep Anthropic cache-control hints disabled."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider=provider_id.value,
             model="grok-4.5",
             provider_id=provider_id,
@@ -533,6 +601,8 @@ class TestLiteLLMResponsesLowerer:
     def test_openrouter_sets_provider_endpoint_and_attribution_kwargs(self) -> None:
         """OpenRouter stays on LiteLLM Responses with fixed credential kwargs."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openrouter",
             model="anthropic/claude-sonnet-4.6",
             provider_id=LLMProvider.OPENROUTER,
@@ -560,6 +630,8 @@ class TestLiteLLMResponsesLowerer:
     def test_openrouter_claude_does_not_add_anthropic_cache_control(self) -> None:
         """OpenRouter wire semantics override the selected model developer."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openrouter",
             model="anthropic/claude-sonnet-4.6",
             provider_id=LLMProvider.OPENROUTER,
@@ -590,6 +662,8 @@ class TestLiteLLMResponsesLowerer:
     def test_chatgpt_oauth_requests_encrypted_reasoning_content(self) -> None:
         """ChatGPT OAuth requests encrypted reasoning for stateless replay."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1-codex",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -609,6 +683,8 @@ class TestLiteLLMResponsesLowerer:
             "parameters": {"type": "object"},
         }
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.6-luna",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -627,6 +703,8 @@ class TestLiteLLMResponsesLowerer:
     def test_chatgpt_oauth_preserves_existing_include_values(self) -> None:
         """Append encrypted reasoning include without dropping caller values."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1-codex",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -643,6 +721,8 @@ class TestLiteLLMResponsesLowerer:
     def test_anthropic_adds_cache_control_hints_to_prefix(self) -> None:
         """Claude targets receive cache_control hints on stable prefix blocks."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="claude-sonnet-4-5",
             provider_id=LLMProvider.ANTHROPIC,
@@ -687,6 +767,8 @@ class TestLiteLLMResponsesLowerer:
     def test_anthropic_cache_control_preserves_existing_hints(self) -> None:
         """Do not overwrite explicit cache_control provided by callers/providers."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="claude-sonnet-4-5",
             provider_id=LLMProvider.ANTHROPIC,
@@ -723,6 +805,8 @@ class TestLiteLLMResponsesLowerer:
     def test_anthropic_skips_tool_call_items_for_cache_control(self) -> None:
         """Tool call/result items are not cache_control breakpoints."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="claude-sonnet-4-5",
             provider_id=LLMProvider.ANTHROPIC,
@@ -776,6 +860,8 @@ class TestLiteLLMResponsesLowerer:
     def test_custom_tool_call_drops_cross_dialect_output(self) -> None:
         """Do not pair a custom call with a JSON-function result sharing its ID."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             tools=[
@@ -831,6 +917,8 @@ class TestLiteLLMResponsesLowerer:
     def test_completed_custom_history_is_non_executable_on_later_route(self) -> None:
         """Project a completed custom pair without emitting custom wire items."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             tools=[
@@ -895,7 +983,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_skips_goal_briefing_for_model_input(self) -> None:
         """goal_briefing is UI-only durable event, so exclude it from model input."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.GOAL_BRIEFING,
@@ -914,7 +1007,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_goal_updated_with_goal_snapshot(self) -> None:
         """goal_updated renders prompt from Goal snapshot without stored prompt."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.GOAL_UPDATED,
@@ -937,7 +1035,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_goal_resume_with_hint(self) -> None:
         """resume goal_updated renders resume-specific prompt and hint."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.GOAL_UPDATED,
@@ -970,7 +1073,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_goal_continuation_without_stored_content(self) -> None:
         """goal_continuation renders prompt during lower phase without stored body."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.GOAL_CONTINUATION,
@@ -993,7 +1101,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_external_channel_continuation_with_dedicated_prompt(self) -> None:
         """External Channel continuation does not use Goal continuation semantics."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.EXTERNAL_CHANNEL_CONTINUATION,
@@ -1027,7 +1140,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_interrupted_event_as_system_reminder(self) -> None:
         """Lower interrupted event to synthetic system reminder."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.INTERRUPTED,
@@ -1133,7 +1251,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_plain_system_reminder_with_hyphenated_envelope(self) -> None:
         """Lower a plain system reminder to the model-facing envelope."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.SYSTEM_REMINDER,
@@ -1152,7 +1275,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_ignores_completed_run_marker(self) -> None:
         """Do not include completed run marker in model input."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.RUN_MARKER,
@@ -1170,7 +1298,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_tool_result_with_matching_call(self) -> None:
         """Convert tool result with matching tool call to Responses input."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.CLIENT_TOOL_CALL,
@@ -1226,6 +1359,8 @@ class TestLiteLLMResponsesLowerer:
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         )
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             model_capabilities=capabilities,
@@ -1298,6 +1433,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """Restore a valid generated-image item in same-native request memory."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=provider_id,
@@ -1376,6 +1513,8 @@ class TestLiteLLMResponsesLowerer:
     def test_degrades_unstored_failed_image_generation_without_result(self) -> None:
         """Keep failed image history without an invalid stateless native item."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -1423,6 +1562,8 @@ class TestLiteLLMResponsesLowerer:
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         )
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             model_capabilities=capabilities,
@@ -1496,7 +1637,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_cross_adapter_image_generation_uses_explicit_placeholder(self) -> None:
         """Describe generated images explicitly for models without image input."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="text-only")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="text-only",
+        )
         transcript = [
             _event(
                 EventKind.PROVIDER_TOOL_CALL,
@@ -1547,7 +1693,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_file_part_as_placeholder_when_unsupported(self) -> None:
         """Lower unsupported FilePart to bounded placeholder instead of silent omit."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="text-only")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="text-only",
+        )
         transcript = [
             _event(
                 EventKind.CLIENT_TOOL_CALL,
@@ -1607,6 +1758,8 @@ class TestLiteLLMResponsesLowerer:
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         )
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             model_capabilities=capabilities,
@@ -1661,7 +1814,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_compaction_summary_with_resume_prefix(self) -> None:
         """Inject compaction summary with user message prefix."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.COMPACTION_SUMMARY,
@@ -1685,7 +1843,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_drops_reasoning_when_native_compat_does_not_match(self) -> None:
         """Do not pass reasoning in cross-model lowering."""
-        lowerer = LiteLLMResponsesLowerer(provider="anthropic", model="claude")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="anthropic",
+            model="claude",
+        )
         transcript = [
             _event(
                 EventKind.REASONING,
@@ -1703,7 +1866,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_passes_through_same_native_artifact(self) -> None:
         """Use raw native item as-is when compat key is same."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.CLIENT_TOOL_CALL,
@@ -1723,7 +1891,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_passes_through_same_native_assistant_message_artifact(self) -> None:
         """Use assistant message native item as-is when compat key is same."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         raw_item: dict[str, object] = {
             "type": "message",
             "id": "msg-1",
@@ -1753,7 +1926,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_passes_through_same_native_provider_tool_call_artifact(self) -> None:
         """Use provider tool call native item as-is when compat key is same."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         raw_item: dict[str, object] = {
             "type": "web_search_call",
             "id": "ws-1",
@@ -1782,7 +1960,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_rebuilds_same_native_image_generation_result_artifact(self) -> None:
         """Rebuild provider image output as a valid Responses input item."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         raw_item: dict[str, object] = {
             "type": "image_generation_call",
             "id": "img-1",
@@ -1820,7 +2003,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_passes_through_same_native_reasoning_artifact(self) -> None:
         """Use reasoning native item as-is when compat key is same."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         raw_item: dict[str, object] = {
             "type": "reasoning",
             "id": "rs-1",
@@ -1844,6 +2032,8 @@ class TestLiteLLMResponsesLowerer:
     def test_omits_native_provider_item_id_when_store_is_false(self) -> None:
         """Omit unstored provider response item ids consistently."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -1871,6 +2061,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """Preserve tool continuity while omitting unstored provider item ids."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -1911,6 +2103,8 @@ class TestLiteLLMResponsesLowerer:
     def test_omits_all_response_item_ids_when_store_is_false(self) -> None:
         """Omit ids on native and canonical input items for unstored responses."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -1999,7 +2193,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_pass_through_preserves_null_native_fields(self) -> None:
         """Use native replay item as-is including null fields."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.CLIENT_TOOL_CALL,
@@ -2036,6 +2235,8 @@ class TestLiteLLMResponsesLowerer:
     def test_uses_responses_top_level_instructions(self) -> None:
         """Responses lowerer lowers system prompt to top-level instructions."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
         )
@@ -2060,6 +2261,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """Do not send empty instructions when Agent prompt is absent."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
         )
@@ -2083,6 +2286,8 @@ class TestLiteLLMResponsesLowerer:
     ) -> None:
         """Use a system input message when top-level instructions are unsupported."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider=provider,
             model="grok-4.20-0309-reasoning",
             provider_id=provider_id,
@@ -2109,6 +2314,8 @@ class TestLiteLLMResponsesLowerer:
     def test_uses_default_input_message_instructions_when_required(self) -> None:
         """Preserve default instructions for input-message instruction transport."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="xai_oauth",
             model="grok-4.20-0309-reasoning",
             provider_id=LLMProvider.XAI_OAUTH,
@@ -2126,6 +2333,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.OPENAI,
@@ -2148,6 +2357,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.6-luna",
             provider_id=provider_id,
@@ -2171,6 +2382,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["image_generation"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider=provider_id.value,
             model="gpt-5.6-luna",
             provider_id=provider_id,
@@ -2198,6 +2411,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["image_generation"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="future-image-model",
             provider_id=LLMProvider.ANTHROPIC,
@@ -2214,6 +2429,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["image_generation"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="unknown",
             model="future-image-model",
             hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
@@ -2228,6 +2445,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.OPENAI,
@@ -2256,6 +2475,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider=provider_id.value,
             model="grok-4.5",
             provider_id=provider_id,
@@ -2272,6 +2493,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openrouter",
             model="anthropic/claude-sonnet-4.6",
             provider_id=LLMProvider.OPENROUTER,
@@ -2292,6 +2515,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["image_generation"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openrouter",
             model="openai/gpt-5-image",
             provider_id=LLMProvider.OPENROUTER,
@@ -2307,6 +2532,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="google_gemini",
             model="gemini/gemini-3-pro",
             provider_id=LLMProvider.GOOGLE_GEMINI,
@@ -2324,6 +2551,8 @@ class TestLiteLLMResponsesLowerer:
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="anthropic",
             model="claude-sonnet-4-5",
             provider_id=LLMProvider.ANTHROPIC,
@@ -2339,6 +2568,8 @@ class TestLiteLLMResponsesLowerer:
     def test_required_hosted_tool_without_capability_fails(self) -> None:
         """Fail before model call when Agent opt-in tool is absent from capability."""
         lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
             provider_id=LLMProvider.OPENAI,
@@ -2353,7 +2584,12 @@ class TestLiteLLMResponsesLowerer:
         self,
     ) -> None:
         """Lower user FilePart to bounded placeholder when resolver is absent."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
@@ -2395,7 +2631,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_lowers_user_message_attachments_as_context_part(self) -> None:
         """Lower attachment to model context without polluting transcript."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
@@ -2439,7 +2680,12 @@ class TestLiteLLMResponsesLowerer:
 
     def test_degrades_cross_model_provider_tool_transcript(self) -> None:
         """Lower cross-model provider tool transcript to text."""
-        lowerer = LiteLLMResponsesLowerer(provider="anthropic", model="claude")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="anthropic",
+            model="claude",
+        )
         transcript = [
             _event(
                 EventKind.PROVIDER_TOOL_CALL,
@@ -3579,7 +3825,12 @@ class TestLiteLLMResponsesOutputNormalizer:
         }
         assert payload.native_artifact.schema_version == "1-partial"
 
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+        )
         request = lowerer.lower(interrupted.events, model="gpt-5.1")
 
         assert request.input == [{"role": "assistant", "content": "hello"}]
@@ -4539,6 +4790,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert reasoning.native_artifact.item["output_index"] == 0
 
         request = LiteLLMResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
             provider="openai",
             model="gpt-5.1",
         ).lower(output.events, model="gpt-5.1")
@@ -4634,7 +4887,12 @@ class TestLiteLLMResponsesOutputNormalizer:
 
 def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
     """Lower one contiguous invocation batch into one explicit user turn."""
-    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    lowerer = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        provider="openai",
+        model="gpt-5.1",
+    )
     transcript = [
         _event(
             EventKind.EXTERNAL_CHANNEL_MESSAGE,
@@ -4679,7 +4937,12 @@ def test_litellm_lowerer_keeps_noncontiguous_batch_segments_in_order(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Report a reused batch ID without reordering transcript segments."""
-    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    lowerer = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        provider="openai",
+        model="gpt-5.1",
+    )
     transcript = [
         _event(
             EventKind.EXTERNAL_CHANNEL_MESSAGE,

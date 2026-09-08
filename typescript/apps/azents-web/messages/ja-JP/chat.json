@@ -776,7 +776,11 @@
     "model": "モデル",
     "effortLabel": "推論レベル",
     "done": "完了",
-    "send": "送信"
+    "send": "送信",
+    "enabled": "オン",
+    "disabled": "オフ",
+    "executionOptionAriaLabel": "{label}、{state}。{costHint}",
+    "executionOptions": "実行オプション"
   },
   "inferenceProvenance": {
     "title": "推論プロファイル",

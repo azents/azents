@@ -776,7 +776,11 @@
     "model": "Modèle",
     "effortLabel": "Effort de raisonnement",
     "done": "Terminé",
-    "send": "Envoyer"
+    "send": "Envoyer",
+    "enabled": "activé",
+    "disabled": "désactivé",
+    "executionOptionAriaLabel": "{label}, {state}. {costHint}",
+    "executionOptions": "Options d’exécution"
   },
   "inferenceProvenance": {
     "title": "Profil d’inférence",

@@ -25,6 +25,7 @@ def test_live_run_dump_exposes_minimal_operation() -> None:
         model_target_label="main",
         model_display_name="Test model",
         reasoning_effort=None,
+        enabled_execution_options=[],
     )
     dumped = chat_live_run_updated_dump(
         "session-1",

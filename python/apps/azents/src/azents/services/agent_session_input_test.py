@@ -35,6 +35,7 @@ from azents.core.inference_profile import (
     SessionAppliedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -43,6 +44,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
 from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.chat_write_request import RDBChatWriteRequest
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -115,6 +117,7 @@ from .mailbox import (
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
     model_target_label="default",
     reasoning_effort=None,
+    enabled_execution_options=[],
 )
 
 
@@ -255,12 +258,14 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         session_id: str,
         model_target_label: str,
         reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentSession:
         """Persist applied profile in memory for input-admission tests."""
         del session
         self.applied_inference_profile = SessionAppliedInferenceProfile(
             model_target_label=model_target_label,
             reasoning_effort=reasoning_effort,
+            enabled_execution_options=enabled_execution_options,
         )
         self.applied_profile_calls.append(self.applied_inference_profile)
         return self._build_session(session_id)
@@ -327,6 +332,7 @@ class _MailboxServiceDouble(MailboxService):
             attachments=input.attachments,
             file_parts=input.file_parts,
             created_at=datetime.datetime.now(datetime.UTC),
+            requested_enabled_execution_options=[],
         )
         return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
@@ -708,6 +714,7 @@ class TestAgentSessionInputService:
             inference_profile=RequestedInferenceProfile(
                 model_target_label="missing",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             user_id=user_id,
             request_payload={"request": "invalid-profile"},
@@ -1987,6 +1994,10 @@ class TestAgentSessionInputService:
             session_manager=rdb_session_manager,
         )
 
+        request_payload: dict[str, object] = {
+            "request": "test",
+            "inference_profile": _TEST_INFERENCE_PROFILE.model_dump(mode="json"),
+        }
         first = await service.create_buffered_agent_input(
             agent_id=agent_id,
             agent_session_id=agent_session.id,
@@ -1998,11 +2009,27 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
-            request_payload={"request": "test"},
+            request_payload=request_payload,
             client_request_id="client-request-1",
         )
         assert isinstance(first, Success)
         async with rdb_session_manager() as session:
+            historical_profile = _TEST_INFERENCE_PROFILE.model_dump(mode="json")
+            historical_profile.pop("enabled_execution_options")
+            await session.execute(
+                sa.update(RDBChatWriteRequest)
+                .where(
+                    RDBChatWriteRequest.client_request_id == "client-request-1",
+                    RDBChatWriteRequest.requester_user_id == user_id,
+                )
+                .values(
+                    payload={
+                        **request_payload,
+                        "inference_profile": historical_profile,
+                        "sender_user_id": user_id,
+                    }
+                )
+            )
             await AgentSessionRepository().mark_idle(
                 session,
                 agent_session.id,
@@ -2018,7 +2045,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
-            request_payload={"request": "test"},
+            request_payload=request_payload,
             client_request_id="client-request-1",
         )
 

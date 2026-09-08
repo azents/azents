@@ -776,7 +776,11 @@
     "model": "Model",
     "effortLabel": "Reasoning effort",
     "done": "Done",
-    "send": "Send"
+    "send": "Send",
+    "enabled": "on",
+    "disabled": "off",
+    "executionOptionAriaLabel": "{label}, {state}. {costHint}",
+    "executionOptions": "Execution options"
   },
   "inferenceProvenance": {
     "title": "Inference profile",

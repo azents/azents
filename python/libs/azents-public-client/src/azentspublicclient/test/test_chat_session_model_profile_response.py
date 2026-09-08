@@ -37,13 +37,19 @@ class TestChatSessionModelProfileResponse(unittest.TestCase):
             return ChatSessionModelProfileResponse(
                 session_id = '',
                 model_target_label = '',
-                reasoning_effort = 'none'
+                reasoning_effort = 'none',
+                enabled_execution_options = [
+                    'fast'
+                    ]
             )
         else:
             return ChatSessionModelProfileResponse(
                 session_id = '',
                 model_target_label = '',
                 reasoning_effort = 'none',
+                enabled_execution_options = [
+                    'fast'
+                    ],
         )
         """
 

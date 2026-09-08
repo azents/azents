@@ -22,6 +22,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
+    normalize_historical_inference_profile_payload,
     validate_requested_profile_against_options,
 )
 from azents.engine.events.action_messages import (
@@ -145,6 +146,16 @@ AgentSessionInputError = (
     | ExchangeFileInputClaimError
     | InvalidProjectPath
 )
+
+
+def _idempotency_payloads_match(
+    existing: dict[str, object],
+    current: dict[str, object],
+) -> bool:
+    """Compare request payloads after the bounded historical profile upgrade."""
+    return normalize_historical_inference_profile_payload(
+        existing
+    ) == normalize_historical_inference_profile_payload(current)
 
 
 @dataclasses.dataclass
@@ -301,7 +312,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -387,6 +401,9 @@ class AgentSessionInputService:
                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
+                    requested_enabled_execution_options=(
+                        inference_profile.enabled_execution_options
+                    ),
                     sender_user_id=requester_user_id,
                     order_group=None,
                     order_sequence=0,
@@ -448,6 +465,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -506,7 +524,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -724,6 +745,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -782,7 +804,10 @@ class AgentSessionInputService:
                                 "Client request ID already used for another write type"
                             )
                         )
-                    if existing.payload != canonical_request_payload:
+                    if not _idempotency_payloads_match(
+                        existing.payload,
+                        canonical_request_payload,
+                    ):
                         return Failure(
                             AgentSessionInputIdempotencyConflict(
                                 "Client request ID already used for another payload"
@@ -1000,6 +1025,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -1034,6 +1060,7 @@ class AgentSessionInputService:
                     scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
+                    requested_enabled_execution_options=[],
                     sender_user_id=None,
                     order_group=None,
                     order_sequence=0,
@@ -1070,6 +1097,9 @@ class AgentSessionInputService:
                             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
+                            requested_enabled_execution_options=(
+                                inference_profile.enabled_execution_options
+                            ),
                             sender_user_id=user_id,
                             order_group=None,
                             order_sequence=0,
@@ -1122,6 +1152,7 @@ class AgentSessionInputService:
                 scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=None,
                 order_group=None,
                 order_sequence=0,
@@ -1156,6 +1187,9 @@ class AgentSessionInputService:
                 scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
+                requested_enabled_execution_options=(
+                    inference_profile.enabled_execution_options
+                ),
                 sender_user_id=user_id,
                 order_group=None,
                 order_sequence=0,
@@ -1344,7 +1378,10 @@ class AgentSessionInputService:
                     "Client request ID already used for another write type"
                 )
             )
-        if existing.payload != canonical_request_payload:
+        if not _idempotency_payloads_match(
+            existing.payload,
+            canonical_request_payload,
+        ):
             return Failure(
                 AgentSessionInputIdempotencyConflict(
                     "Client request ID already used for another payload"

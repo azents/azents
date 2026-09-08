@@ -119,6 +119,7 @@ async def _archive_with_scheduled_continuation(
         parent_agent_run_id=None,
         requested_model_target_label=None,
         requested_reasoning_effort=None,
+        requested_enabled_execution_options=[],
         status=AgentRunStatus.COMPLETED,
     )
     session.add(run)
@@ -169,6 +170,7 @@ async def _archive_with_scheduled_continuation(
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             sender_user_id=None,
             order_group=None,
             order_sequence=0,
@@ -272,6 +274,7 @@ class TestSessionExecutionRepository:
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
         rdb_session.add(run)
@@ -382,6 +385,7 @@ class TestSessionExecutionRepository:
                 scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=None,
                 order_group=None,
                 order_sequence=0,

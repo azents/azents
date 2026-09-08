@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
@@ -31,8 +32,9 @@ class ChatSessionModelProfileUpdateRequest(BaseModel):
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned selectable model target label")
     reasoning_effort: Optional[ModelReasoningEffort]
+    enabled_execution_options: List[ModelExecutionOptionId] = Field(description="Explicitly enabled model execution option IDs")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["client_request_id", "model_target_label", "reasoning_effort"]
+    __properties: ClassVar[List[str]] = ["client_request_id", "model_target_label", "reasoning_effort", "enabled_execution_options"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -99,7 +101,8 @@ class ChatSessionModelProfileUpdateRequest(BaseModel):
         _obj = cls.model_validate({
             "client_request_id": obj.get("client_request_id"),
             "model_target_label": obj.get("model_target_label"),
-            "reasoning_effort": obj.get("reasoning_effort")
+            "reasoning_effort": obj.get("reasoning_effort"),
+            "enabled_execution_options": obj.get("enabled_execution_options")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

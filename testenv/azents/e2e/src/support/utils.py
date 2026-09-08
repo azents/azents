@@ -403,6 +403,7 @@ def create_agent_session_setup(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,

@@ -32,6 +32,10 @@ from azents.core.enums import ExchangeFileStatus, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    validate_execution_options,
+)
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -260,6 +264,14 @@ class ReasoningEffortUnsupported:
     reasoning_effort: ModelReasoningEffort
 
 
+@dataclasses.dataclass(frozen=True)
+class ExecutionOptionUnsupported:
+    """Requested execution option is unsupported by the selected model target."""
+
+    model_target_label: str
+    enabled_execution_options: tuple[ModelExecutionOptionId, ...]
+
+
 ResolveError = (
     AgentNotFound
     | AgentDisabled
@@ -268,6 +280,7 @@ ResolveError = (
     | InvalidModelParameters
     | ModelTargetNotFound
     | ReasoningEffortUnsupported
+    | ExecutionOptionUnsupported
 )
 RuntimeTokenRefreshError = (
     ChatGPTOAuthProviderRejected
@@ -413,6 +426,7 @@ async def resolve_invoke_input(
         requested_profile=None,
         resolved_model_selection=None,
         resolved_model_settings=None,
+        resolved_enabled_execution_options=None,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -445,6 +459,7 @@ async def resolve_invoke_input_with_profile(
         requested_profile=requested_profile,
         resolved_model_selection=None,
         resolved_model_settings=None,
+        resolved_enabled_execution_options=None,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -473,6 +488,7 @@ async def resolve_invoke_input_with_resolved_profile(
     resolved_model_selection: AgentModelSelection,
     resolved_model_settings: SelectableModelSettings,
     resolved_reasoning_effort: ModelReasoningEffort | None,
+    resolved_enabled_execution_options: list[ModelExecutionOptionId],
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
@@ -486,6 +502,7 @@ async def resolve_invoke_input_with_resolved_profile(
         requested_profile=None,
         resolved_model_selection=resolved_model_selection,
         resolved_model_settings=resolved_model_settings,
+        resolved_enabled_execution_options=resolved_enabled_execution_options,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -513,6 +530,7 @@ async def resolve_invoke_input_with_model_source(
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
+    resolved_enabled_execution_options: list[ModelExecutionOptionId] | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
@@ -692,6 +710,29 @@ async def resolve_invoke_input_with_model_source(
         case _:
             assert_never(settings_result)
 
+    requested_enabled_execution_options = (
+        requested_profile.enabled_execution_options
+        if requested_profile is not None
+        else resolved_enabled_execution_options or []
+    )
+    try:
+        enabled_execution_options = validate_execution_options(
+            provider=main_selection.provider,
+            supported=main_selection.supported_execution_options,
+            enabled=requested_enabled_execution_options,
+        )
+    except ValueError:
+        return Failure(
+            ExecutionOptionUnsupported(
+                model_target_label=(
+                    requested_profile.model_target_label
+                    if requested_profile is not None
+                    else main_option.label
+                ),
+                enabled_execution_options=tuple(requested_enabled_execution_options),
+            )
+        )
+
     user_messages: list[RunUserMessage] = []
     for msg in invoke_input.messages:
         msg_attachments: list[RuntimeAttachment] = []
@@ -756,6 +797,7 @@ async def resolve_invoke_input_with_model_source(
                 agent_id=invoke_input.agent_id,
                 tool_search_enabled=agent.tool_search_enabled,
                 auto_compaction_threshold_tokens=None,
+                enabled_execution_options=enabled_execution_options,
                 inference_state=None,
                 compaction_provider_integration_id=(
                     lightweight_selection.llm_provider_integration_id

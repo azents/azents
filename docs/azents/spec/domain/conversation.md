@@ -28,6 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/inference_profile_types.py
   - python/apps/azents/src/azents/rdb/models/event.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/629612c66084_remove_event_model_order.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
   - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
@@ -1101,14 +1102,33 @@ pending command, and other typed actions enter the turn-action flow. The route r
 `session_kind = subagent` before creating a chat write request, mailbox item, pending command, live
 projection, or broker wake-up.
 `PUT /chat/v1/sessions/{session_id}/model-profile` is the transcript-free full replacement for the
-applied Session profile. It validates the label and effort against the current Agent options while
-holding the Session write lock, records the required client idempotency key, and returns only the
-accepted `session_id`, label, and effort. A matching replay returns the original accepted result
+applied Session profile. It validates the label, effort, and enabled execution-option IDs against the
+current Agent option snapshot and implemented option registry while holding the Session write lock,
+records the required client idempotency key, and returns the accepted `session_id`, label, effort,
+and enabled execution-option list. A matching replay returns the original accepted result
 before revalidating mutable Agent options; reusing the key with a different payload is a conflict.
 Success changes only the durable applied Session intent: it creates no mailbox item, transcript
 event, pending command, Run, wake-up, provider call, or prepared-turn snapshot. The current
 prepared snapshot remains authoritative for an already-started provider call, while future implicit
 turn boundaries resolve the newly applied intent against the current Agent option mapping.
+
+Composer execution-option controls are separate from static model capabilities and built-in tools.
+The first boolean option, Fast, is off by default and appears only for supported selected model
+snapshots with qualitative API-cost or ChatGPT-usage guidance. Options appear inside the existing
+model picker rather than as extra composer toolbar buttons. Desktop uses switches; mobile uses
+independently selectable rows styled like model-selection rows, with a checkmark when selected.
+Toggling edits the shared draft profile without a network write or save loading state. The existing
+pending-profile highlight and Send/Confirm flow apply the complete displayed profile. New-session
+composers retain the choice locally until first input admission. Switching the draft model retains
+only enabled options supported by the new model. Read-only composers do not expose writable options.
+
+Applied Session intent, mailbox-requested intent, original Run intent, and prepared inference state
+retain enabled IDs independently. Requested/applied provenance survives REST, live events, history,
+and reload. An explicit submitted option becoming unavailable before preparation fails validation;
+it is not silently removed. Retrying an already prepared call retains its original selection rather
+than reading a later composer preference. Historical missing option state is all-off, and non-empty
+persisted option intent requires a corresponding model target.
+
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/retry-failed-run`, and command actions submitted through the
 input route are idle-only control boundaries. Message, edit, command, and failed-run retry write paths
@@ -1118,7 +1138,7 @@ requests require `client_request_id`; accepted writes are recorded in `chat_writ
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, requester_user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
-session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` mailbox envelope
+session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort, enabled_execution_options }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` mailbox envelope
 to the explicit path session only after the admission transaction locks and reauthorizes the current
 requester against the active Session, Agent, Workspace, root lineage, idempotency record, and any
 claimed ExchangeFiles. The new Human mailbox envelope records the authenticated `sender_user_id`; command and

@@ -478,6 +478,7 @@ def _run_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,
@@ -552,6 +553,7 @@ def _edit_user_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,
@@ -1133,6 +1135,7 @@ class TestAgentExecutionPersistence:
         expected_profile = {
             "model_target_label": "default",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
         ws_events = [*first_ws_events, *second_ws_events]
         ws_event_ids: list[str] = []
@@ -1295,6 +1298,7 @@ class TestAgentExecutionPersistence:
                     "inference_profile": {
                         "model_target_label": "default",
                         "reasoning_effort": None,
+                        "enabled_execution_options": [],
                     },
                 },
                 timeout=10,

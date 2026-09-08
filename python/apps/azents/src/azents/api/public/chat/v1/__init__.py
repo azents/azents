@@ -1088,6 +1088,9 @@ async def replace_session_model_profile(
             if request.reasoning_effort is not None
             else None
         ),
+        "enabled_execution_options": [
+            option.value for option in request.enabled_execution_options
+        ],
     }
     try:
         accepted = await chat_write_service.replace_session_model_profile(
@@ -1097,6 +1100,7 @@ async def replace_session_model_profile(
             client_request_id=request.client_request_id,
             model_target_label=request.model_target_label,
             reasoning_effort=request.reasoning_effort,
+            enabled_execution_options=request.enabled_execution_options,
             payload=payload,
         )
     except ValueError as error:
@@ -1119,6 +1123,7 @@ async def replace_session_model_profile(
         session_id=accepted.request.session_id,
         model_target_label=accepted.model_target_label,
         reasoning_effort=accepted.reasoning_effort,
+        enabled_execution_options=accepted.enabled_execution_options,
     )
 
 

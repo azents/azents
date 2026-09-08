@@ -43,6 +43,7 @@ const options: AgentResponse["selectable_model_options"] = [
       subagent_enabled: true,
       subagent_guidance: null,
     },
+    execution_option_definitions: [],
   },
 ];
 
@@ -92,6 +93,7 @@ void test("selected model resolves and switches its provider integration", () =>
         subagent_enabled: true,
         subagent_guidance: null,
       },
+      execution_option_definitions: [],
     },
     {
       label: "OpenRouter",
@@ -107,6 +109,7 @@ void test("selected model resolves and switches its provider integration", () =>
         subagent_enabled: true,
         subagent_guidance: null,
       },
+      execution_option_definitions: [],
     },
     {
       label: "Kimi",
@@ -122,6 +125,7 @@ void test("selected model resolves and switches its provider integration", () =>
         subagent_enabled: true,
         subagent_guidance: null,
       },
+      execution_option_definitions: [],
     },
   ];
 
@@ -174,6 +178,7 @@ void test("selected model resolves and switches its provider integration", () =>
             subagent_enabled: true,
             subagent_guidance: null,
           },
+          execution_option_definitions: [],
         },
       ],
       "API key",

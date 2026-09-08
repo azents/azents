@@ -155,6 +155,7 @@ def _add_run(
             requested_reasoning_effort=None,
             phase=AgentRunPhase.IDLE,
             status=status,
+            requested_enabled_execution_options=[],
         )
     )
 
@@ -237,6 +238,7 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
         sender_user_id=None,
         idempotency_key=None,
         payload={},
+        requested_enabled_execution_options=[],
     )
     mailbox_item.order_group = mailbox_item.id
     mailbox_item.order_sequence = 0
