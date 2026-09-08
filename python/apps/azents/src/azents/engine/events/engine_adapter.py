@@ -796,6 +796,17 @@ class AgentEngineAdapter:
                         "run_id": context.run_id,
                         "provider": request.provider.value,
                         "model": model,
+                        "supported_execution_options": [
+                            option.value
+                            for option in (
+                                model_selection.supported_execution_options
+                                if model_selection is not None
+                                else []
+                            )
+                        ],
+                        "enabled_execution_options": [
+                            option.value for option in request.enabled_execution_options
+                        ],
                         "tool_budget_rule_id": (
                             budget.rule.rule_id if budget.rule is not None else None
                         ),
@@ -848,6 +859,12 @@ class AgentEngineAdapter:
                 top_p=request.top_p,
                 stop=request.stop,
                 reasoning_effort=request.reasoning_effort,
+                supported_execution_options=(
+                    model_selection.supported_execution_options
+                    if model_selection is not None
+                    else []
+                ),
+                enabled_execution_options=request.enabled_execution_options,
                 hosted_tools=resolved_builtin_tools.provider_hosted,
                 prompt_cache_scope=request.session_id,
                 model_developer=request.model_developer,

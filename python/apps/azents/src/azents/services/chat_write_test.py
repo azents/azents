@@ -561,6 +561,7 @@ class TestChatWriteService:
                 effective_context_window_tokens=1000,
                 effective_auto_compaction_threshold_tokens=500,
                 resolved_at=datetime.datetime(2026, 8, 19, tzinfo=datetime.UTC),
+                enabled_execution_options=[],
             )
             await AgentSessionRepository().set_inference_state(
                 session,
@@ -587,6 +588,7 @@ class TestChatWriteService:
             model_target_label="default",
             reasoning_effort=None,
             payload=payload,
+            enabled_execution_options=[],
         )
         assert accepted.request.created is True
 
@@ -618,6 +620,7 @@ class TestChatWriteService:
                 session_id=agent_session.id,
                 model_target_label="later-profile",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             )
             mailbox_count = await session.scalar(
                 sa.select(sa.func.count())
@@ -633,6 +636,7 @@ class TestChatWriteService:
             model_target_label="default",
             reasoning_effort=None,
             payload=payload,
+            enabled_execution_options=[],
         )
         assert replay.request.created is False
         assert replay.model_target_label == "default"
@@ -649,6 +653,7 @@ class TestChatWriteService:
                     "model_target_label": "different",
                     "reasoning_effort": None,
                 },
+                enabled_execution_options=[],
             )
 
         async with rdb_session_manager() as session:
@@ -710,6 +715,7 @@ class TestChatWriteService:
             model_target_label="default",
             reasoning_effort=None,
             payload=payload,
+            enabled_execution_options=[],
         )
         assert accepted.request.created is True
 
@@ -722,6 +728,7 @@ class TestChatWriteService:
                 model_target_label="default",
                 reasoning_effort=None,
                 payload=payload,
+                enabled_execution_options=[],
             )
 
     async def test_model_profile_rejects_invalid_profile_and_subagent(
@@ -761,6 +768,7 @@ class TestChatWriteService:
                 model_target_label="missing",
                 reasoning_effort=None,
                 payload={"model_target_label": "missing", "reasoning_effort": None},
+                enabled_execution_options=[],
             )
         with pytest.raises(ValueError, match="not supported"):
             await service.replace_session_model_profile(
@@ -771,6 +779,7 @@ class TestChatWriteService:
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
                 payload={"model_target_label": "default", "reasoning_effort": "high"},
+                enabled_execution_options=[],
             )
 
         subagent_service, _, _, _ = _control_service(
@@ -789,6 +798,7 @@ class TestChatWriteService:
                 model_target_label="default",
                 reasoning_effort=None,
                 payload={"model_target_label": "default", "reasoning_effort": None},
+                enabled_execution_options=[],
             )
 
     async def test_edit_reauthorizes_before_idempotency_lookup(
@@ -814,6 +824,7 @@ class TestChatWriteService:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=ModelReasoningEffort.HIGH,
+                    enabled_execution_options=[],
                 ),
                 metadata={},
                 attachments=[],
@@ -954,6 +965,7 @@ class TestChatWriteService:
             inference_profile=RequestedInferenceProfile(
                 model_target_label="Primary",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             metadata={},
             attachments=[],
@@ -1233,6 +1245,7 @@ class TestChatWriteService:
             inference_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             metadata={"source": "chat"},
             attachments=[],

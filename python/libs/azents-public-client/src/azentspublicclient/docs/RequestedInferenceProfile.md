@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **model_target_label** | **str** | Agent-owned selectable model target label | 
 **reasoning_effort** | **str** |  | 
+**enabled_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Explicitly enabled model execution option IDs | 
 
 ## Example
 

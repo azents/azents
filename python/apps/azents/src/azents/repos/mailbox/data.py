@@ -11,6 +11,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.types import FileOutputPart
 from azents.rdb.models.event import JSONValue
 
@@ -259,6 +260,9 @@ class MailboxItem(BaseModel):
     requested_reasoning_effort: ModelReasoningEffort | None = Field(
         description="Requested reasoning effort, or null for Default/inheritance",
     )
+    requested_enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Requested model execution option IDs",
+    )
     sender_user_id: str | None = Field(description="Author User ID")
     order_group: str = Field(description="Stable FIFO order group")
     order_sequence: int = Field(ge=0, description="Sequence within the FIFO group")
@@ -315,6 +319,9 @@ class MailboxItemCreate(BaseModel):
     )
     requested_reasoning_effort: ModelReasoningEffort | None = Field(
         description="Requested reasoning effort, or null for Default/inheritance",
+    )
+    requested_enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Requested model execution option IDs",
     )
     sender_user_id: str | None = Field(description="Author User ID")
     order_group: str | None = Field(

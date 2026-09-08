@@ -20,6 +20,7 @@ function createLiveRun(
       model_target_label: "planning",
       model_display_name: "Planning model",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
     modelCallStartedAt: null,
     retry: {

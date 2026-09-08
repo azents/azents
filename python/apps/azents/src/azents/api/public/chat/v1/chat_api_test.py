@@ -92,6 +92,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.action_messages import (
     CommandAction,
     CreateGitWorktreeAction,
@@ -172,6 +173,7 @@ _OBJECT = TypeAdapter(dict[str, object])
 _STRING_OBJECT = TypeAdapter(dict[str, str])
 _STRING_LIST = TypeAdapter(list[str])
 _REASONING_EFFORT = TypeAdapter(ModelReasoningEffort | None)
+_EXECUTION_OPTIONS = TypeAdapter(list[ModelExecutionOptionId])
 
 
 def _typed_fake(value: object, expected: type[T]) -> T:
@@ -471,6 +473,7 @@ class _BufferedInputService(AgentSessionInputService):
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             sender_user_id=str(kwargs["user_id"]),
             order_group="0123456789abcdef0123456789abcdef",
             order_sequence=0,
@@ -554,6 +557,7 @@ class _BufferedInputService(AgentSessionInputService):
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             sender_user_id=str(kwargs["user_id"]),
             order_group="0123456789abcdef0123456789abcdef",
             order_sequence=0,
@@ -615,6 +619,7 @@ class _RestWriteChatService(ChatSessionService):
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             sender_user_id="user-1",
             order_group="0123456789abcdef0123456789abcdef",
             order_sequence=0,
@@ -937,6 +942,9 @@ class _ModelProfileWriteService(ChatWriteService):
             ),
             model_target_label=model_target_label,
             reasoning_effort=reasoning_effort,
+            enabled_execution_options=_EXECUTION_OPTIONS.validate_python(
+                kwargs["enabled_execution_options"]
+            ),
         )
 
 
@@ -966,6 +974,7 @@ class _RestWriteIdempotencyService(ChatWriteService):
                 scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=str(kwargs["user_id"]),
                 order_group="0123456789abcdef0123456789abcdef",
                 order_sequence=0,
@@ -1088,6 +1097,7 @@ class _EventService(ChatSessionService):
                 requested_inference_profile=RequestedInferenceProfile(
                     model_target_label="quality",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             external_id="input-1",
@@ -1102,6 +1112,7 @@ class _EventService(ChatSessionService):
             model_target_label="reasoning",
             model_display_name="Reasoning Model",
             reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[],
         )
 
     async def get_session(
@@ -1585,6 +1596,7 @@ class TestAgentSessionRoutes:
                     client_request_id=f"profile-{product_mode.value}",
                     model_target_label="default",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 current_user=CurrentUser(
                     user_id="user-1",
@@ -1597,6 +1609,7 @@ class TestAgentSessionRoutes:
             assert response.session_id == chat_service.result.value.id
             assert response.model_target_label == "default"
             assert response.reasoning_effort is None
+            assert response.enabled_execution_options == []
             assert write_service.calls[-1]["agent_id"] == "agent-1"
 
     async def test_replace_session_model_profile_maps_access_and_validation_errors(
@@ -1612,6 +1625,7 @@ class TestAgentSessionRoutes:
                     client_request_id="profile-denied",
                     model_target_label="default",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 current_user=CurrentUser(
                     user_id="other-user",
@@ -1641,6 +1655,7 @@ class TestAgentSessionRoutes:
                     client_request_id="profile-owner-denied",
                     model_target_label="default",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 current_user=CurrentUser(
                     user_id="other-user",
@@ -1672,6 +1687,7 @@ class TestAgentSessionRoutes:
                     client_request_id="profile-subagent",
                     model_target_label="default",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 current_user=CurrentUser(
                     user_id="user-1",
@@ -1698,6 +1714,7 @@ class TestAgentSessionRoutes:
                         client_request_id=f"profile-invalid-{error[:5]}",
                         model_target_label="default",
                         reasoning_effort=None,
+                        enabled_execution_options=[],
                     ),
                     current_user=CurrentUser(
                         user_id="user-1",
@@ -1718,6 +1735,7 @@ class TestAgentSessionRoutes:
                     client_request_id="profile-conflict",
                     model_target_label="default",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 current_user=CurrentUser(
                     user_id="user-1",
@@ -2335,6 +2353,7 @@ class TestEventRoutes:
                         "requested_inference_profile": {
                             "model_target_label": "quality",
                             "reasoning_effort": None,
+                            "enabled_execution_options": [],
                         },
                     },
                     "external_id": "input-1",
@@ -2373,6 +2392,7 @@ class TestEventRoutes:
                 "model_target_label": "reasoning",
                 "model_display_name": "Reasoning Model",
                 "reasoning_effort": "high",
+                "enabled_execution_options": [],
             },
             "model_call_started_at": "2026-07-14T00:00:00Z",
         }
@@ -2494,6 +2514,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -2540,6 +2561,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -2571,6 +2593,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -2606,6 +2629,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -2640,6 +2664,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 existing_project_paths=["/workspace/agent/app"],
                 setup_actions=[],
@@ -2692,6 +2717,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 existing_project_paths=["/workspace/agent/app"],
                 setup_actions=[action],
@@ -2729,6 +2755,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 existing_project_paths=[],
                 setup_actions=[],
@@ -2765,6 +2792,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 existing_project_paths=[],
                 setup_actions=[],
@@ -2822,6 +2850,7 @@ class TestRestMessageWriteContract:
                     inference_profile=RequestedInferenceProfile(
                         model_target_label="Primary",
                         reasoning_effort=None,
+                        enabled_execution_options=[],
                     ),
                 ),
                 session_id="2223456789abcdef0123456789abcdef",
@@ -2861,6 +2890,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 action=CreateGitWorktreeAction(
                     source_project_path="/workspace/agent/source",
@@ -2908,6 +2938,7 @@ class TestRestMessageWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
                 action=SkillAction(
                     skill_path="/workspace/agent/app/.claude/skills/review/SKILL.md"
@@ -2952,6 +2983,7 @@ class TestRestEditCommandWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -2989,6 +3021,7 @@ class TestRestEditCommandWriteContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
@@ -3081,6 +3114,7 @@ class TestChatInferenceProfileRequestContract:
                 inference_profile=RequestedInferenceProfile(
                     model_target_label="Primary",
                     reasoning_effort=None,
+                    enabled_execution_options=[],
                 ),
             )
         except ValidationError as exc:

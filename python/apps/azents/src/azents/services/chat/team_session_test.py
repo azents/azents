@@ -292,6 +292,7 @@ async def _start_scheduled_cycle(
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
         session.add(run)

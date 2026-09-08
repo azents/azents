@@ -91,6 +91,7 @@ class MailboxPromotionPlan:
     owner_generation: int
     expected_buffer_id: str | None
     active_run_id: str | None
+    consume_buffer: bool
     success_events: list[MailboxPromotionEvent]
     failure_events: list[MailboxPromotionEvent]
     goal_create: MailboxGoalCreate | None
@@ -168,6 +169,18 @@ class MailboxPromotionRepository:
                     deduped_count=0,
                     handled_failure=False,
                     deferred=False,
+                )
+            if not plan.consume_buffer:
+                return MailboxPromotionResult(
+                    buffer=buffer,
+                    events=[],
+                    promoted_event_ids=[],
+                    deleted_buffer_ids=[],
+                    changed_session_agent_ids=[],
+                    action_execution=None,
+                    deduped_count=0,
+                    handled_failure=False,
+                    deferred=True,
                 )
 
             if plan.continuation_predecessor_run_id is not None:

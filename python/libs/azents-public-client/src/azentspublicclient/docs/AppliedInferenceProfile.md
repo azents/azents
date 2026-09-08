@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **model_target_label** | **str** | Agent-owned model target label applied by the message | 
 **model_display_name** | **str** |  | [optional] 
 **reasoning_effort** | **str** |  | 
+**enabled_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Model execution option IDs applied by the message | 
 
 ## Example
 

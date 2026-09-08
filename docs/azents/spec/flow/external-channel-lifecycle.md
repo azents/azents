@@ -8,8 +8,10 @@ touches_domains: [external-channel, agent, conversation]
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/management.py
@@ -35,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-05
-spec_version: 42
+last_verified_at: 2026-09-08
+spec_version: 43
 ---
 
 # External Channel Lifecycle
@@ -190,7 +192,10 @@ provider identity and credentials. Cleanup targets are captured before the purge
 attempted after the terminal commit. A repeated uninstall is idempotent and creates
 no duplicate presence control. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
-Transient `degraded` or `reconnect_required` ingress health does not disconnect a
+The connection service reads its Workspace-owned configuration through a completed
+repository operation, performs provider validation with no active database
+transaction, and returns its fenced health outcome through a second completed
+repository operation. Transient `degraded` or `reconnect_required` ingress health does not disconnect a
 binding or block an otherwise authorized outbound REST delivery. Terminal connection
 disconnect still clears credentials and sets binding terminal timestamps.
 
@@ -316,6 +321,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 43) — Made connection configuration reads and fenced
+  health persistence completed repository operations, preserving provider validation
+  after the read transaction closes.
 - **2026-09-05** (spec_version 42) — Made Discord lifecycle cleanup host-aware:
   standalone Trackers are deleted while reply-hosted Trackers are detached without
   deleting conversational content.

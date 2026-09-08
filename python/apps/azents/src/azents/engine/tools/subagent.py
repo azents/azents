@@ -23,6 +23,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
+from azents.core.model_execution_options import validate_execution_options
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -380,6 +381,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session_id=child.agent_session_id,
                     model_target_label=profile.state.model_target_label,
                     reasoning_effort=profile.state.reasoning_effort,
+                    enabled_execution_options=(profile.state.enabled_execution_options),
                 )
                 await self.agent_session_repository.set_inference_state(
                     session,
@@ -488,6 +490,20 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         else:
             resolved_effort = parent_state.reasoning_effort
 
+        enabled_execution_options = (
+            parent_state.enabled_execution_options
+            if model_target_label is None
+            else validate_execution_options(
+                provider=selection.provider,
+                supported=selection.supported_execution_options,
+                enabled=[
+                    option
+                    for option in parent_state.enabled_execution_options
+                    if option in selection.supported_execution_options
+                ],
+            )
+        )
+
         if model_target_label is None:
             effective_context_window_tokens = (
                 parent_state.effective_context_window_tokens
@@ -546,6 +562,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 model_selection=selection,
                 model_settings=settings,
                 reasoning_effort=resolved_effort,
+                enabled_execution_options=enabled_execution_options,
                 effective_context_window_tokens=effective_context_window_tokens,
                 effective_auto_compaction_threshold_tokens=(
                     effective_auto_compaction_threshold_tokens

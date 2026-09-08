@@ -344,6 +344,7 @@ async def _create_scheduled_admission_fixture(
                         )
                     ],
                 ),
+                requested_enabled_execution_options=[],
             ),
         )
         return _ScheduledAdmissionFixture(
@@ -402,6 +403,7 @@ async def _create_buffer(
                 action=None,
                 attachments=attachments if attachments is not None else [],
                 file_parts=file_parts if file_parts is not None else [],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -434,6 +436,7 @@ async def _create_action_buffer(
                 action=action.model_dump(mode="json"),
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -472,6 +475,7 @@ async def _create_agent_message_buffer(
                 action=None,
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -518,6 +522,7 @@ async def _create_agent_result_buffer(
                 action=None,
                 attachments=[],
                 file_parts=[],
+                requested_enabled_execution_options=[],
             ),
         )
         return created.id
@@ -1075,6 +1080,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         attachments=[attachment_uri],
         file_parts=[],
         created_at=tznow(),
+        requested_enabled_execution_options=[],
     )
     exchange_file = _exchange_file(
         file_id="1234567890abcdef1234567890abcdef",
@@ -1239,6 +1245,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         attachments=["exchange://exchange/workspace-001/session/image.png"],
         file_parts=[],
         created_at=tznow(),
+        requested_enabled_execution_options=[],
     )
     mailbox_item_repository: MailboxRepository = AsyncMock(spec=MailboxRepository)
     mailbox_item_repository.list_for_flush.return_value = [buffer]
@@ -1402,6 +1409,37 @@ async def test_admit_scheduled_trigger_starts_cycle_and_binds_run(
     assert persisted_run is not None
     assert persisted_run.scheduled_task_cycle_id == fixture.cycle_id
     assert pending_mailbox == []
+
+
+@pytest.mark.asyncio
+async def test_generic_flush_preserves_scheduled_trigger_head(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Generic model-input flush leaves Scheduled Task work to its admission path."""
+    fixture = await _create_scheduled_admission_fixture(
+        rdb_session_manager,
+        slug="scheduled-trigger-generic-flush",
+    )
+
+    result = await _mailbox_item_service(
+        rdb_session_manager
+    ).flush_session_mailbox_items(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        model="gpt-5.4",
+        required_inference_profile=None,
+        expected_buffer_id=fixture.buffer_id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=None,
+    )
+
+    assert result.claimed_count == 0
+    assert result.deleted_buffer_ids == []
+    async with rdb_session_manager() as session:
+        assert (
+            await MailboxRepository().get_by_id(session, fixture.buffer_id) is not None
+        )
 
 
 @pytest.mark.asyncio
@@ -1608,6 +1646,7 @@ async def test_admit_scheduled_continuation_rebinds_started_cycle(
                         )
                     ],
                 ),
+                requested_enabled_execution_options=[],
             ),
         )
 
@@ -1704,6 +1743,7 @@ class TestMailboxService:
                 attachments=[],
                 file_parts=[],
                 created_at=first_at,
+                requested_enabled_execution_options=[],
             )
 
         promoted = [
@@ -1788,6 +1828,7 @@ class TestMailboxService:
                     created_at=datetime.datetime(
                         2026, 8, 17, 12, 0, tzinfo=datetime.UTC
                     ),
+                    requested_enabled_execution_options=[],
                 ),
                 user_message=None,
             )
@@ -1887,6 +1928,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
             after = await AgentSessionRepository().get_by_id(
@@ -1929,6 +1971,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
             after = await AgentSessionRepository().get_by_id(
@@ -1965,6 +2008,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         async with rdb_session_manager() as session:
@@ -2037,6 +2081,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         async with rdb_session_manager() as session:
@@ -2107,6 +2152,7 @@ class TestMailboxService:
             attachments=[],
             file_parts=[],
             created_at=datetime.datetime.now(datetime.UTC),
+            requested_enabled_execution_options=[],
         )
         agent_session_repository = AgentSessionRepository()
         service = MailboxService(
@@ -2144,6 +2190,7 @@ class TestMailboxService:
             action=None,
             attachments=[],
             file_parts=[],
+            requested_enabled_execution_options=[],
         )
 
         with pytest.raises(
@@ -2188,6 +2235,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert result.promoted_event_ids == [result.events[0].id]
         assert len(result.user_messages) == 1
@@ -2198,11 +2246,13 @@ class TestMailboxService:
         assert event_payload.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert event_payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         promoted = result.user_messages[0]
         assert promoted.external_id == f"{buffer_id}:user_message"
@@ -2212,12 +2262,14 @@ class TestMailboxService:
             == RequestedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             )
         )
         assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         async with rdb_session_manager() as session:
             remaining = await session.scalar(
@@ -2231,6 +2283,7 @@ class TestMailboxService:
         assert stored_event.payload["requested_inference_profile"] == {
             "model_target_label": "Quality",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
 
     async def test_flush_promotes_external_channel_continuation_event(
@@ -2263,6 +2316,7 @@ class TestMailboxService:
                     action=None,
                     attachments=[],
                     file_parts=[],
+                    requested_enabled_execution_options=[],
                 ),
             )
 
@@ -2275,6 +2329,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer.id,
             prepared_inference_state=None,
@@ -2317,6 +2372,7 @@ class TestMailboxService:
                 activated_at=tznow(),
                 requested_model_target_label="default",
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
             )
             buffer = await MailboxRepository().create(
                 session,
@@ -2360,6 +2416,7 @@ class TestMailboxService:
                             branch_name="agent/generated",
                         ),
                     ),
+                    requested_enabled_execution_options=[],
                 ),
             )
 
@@ -2590,6 +2647,7 @@ class TestMailboxService:
             effective_context_window_tokens=100_000,
             effective_auto_compaction_threshold_tokens=80_000,
             resolved_at=datetime.datetime.now(datetime.UTC),
+            enabled_execution_options=[],
         )
         event_repository = EventTranscriptRepository()
         monkeypatch.setattr(
@@ -2610,6 +2668,7 @@ class TestMailboxService:
                 required_inference_profile=RequestedInferenceProfile(
                     model_target_label="Fast",
                     reasoning_effort=ModelReasoningEffort.HIGH,
+                    enabled_execution_options=[],
                 ),
                 expected_buffer_id=buffer_id,
                 prepared_inference_state=prepared_state,
@@ -2630,6 +2689,50 @@ class TestMailboxService:
         )
         assert agent_session.inference_state is None
         assert remaining is not None
+        assert goal.objective is None
+        assert goal.status is None
+
+    async def test_profile_failure_does_not_create_goal(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A failed Goal action reports the failure without mutating Goal state."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-goal-profile-failure",
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="Prepare the release",
+            action=GoalAction(),
+        )
+        agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
+
+        result = await _mailbox_item_service(
+            rdb_session_manager
+        ).flush_session_mailbox_items(
+            session_id=session_id,
+            owner_generation=0,
+            model="unavailable-model",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Unavailable",
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure="Selected model is temporarily unavailable.",
+            active_run_id=None,
+        )
+
+        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+            agent_id,
+            session_id,
+        )
+        assert result.turn_effect is TurnEffect.FAILED
+        assert result.deleted_buffer_ids == [buffer_id]
         assert goal.objective is None
         assert goal.status is None
 
@@ -2668,6 +2771,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Quality",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -2735,6 +2839,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Fast",
             reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[],
         )
         assert result.promoted_event_ids == [event.id for event in result.events]
         async with rdb_session_manager() as session:
@@ -2776,6 +2881,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -2787,6 +2893,7 @@ class TestMailboxService:
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         assert len(result.promoted_event_ids) == 1
         async with rdb_session_manager() as session:
@@ -2817,6 +2924,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3165,6 +3273,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3232,6 +3341,7 @@ class TestMailboxService:
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
@@ -3717,6 +3827,7 @@ async def test_external_channel_message_projection() -> None:
             attachments=[],
             file_parts=[],
             created_at=at(0),
+            requested_enabled_execution_options=[],
         )
 
     processor = ExternalChannelMessageMailboxProcessor(

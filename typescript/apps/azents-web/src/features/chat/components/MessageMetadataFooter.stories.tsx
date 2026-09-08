@@ -12,11 +12,13 @@ const appliedProfile = {
   model_target_label: "Quality",
   model_display_name: "GPT 5.5",
   reasoning_effort: "high",
+  enabled_execution_options: [],
 } satisfies AppliedInferenceProfile;
 
 const unresolvedProfile = {
   model_target_label: "Quality",
   reasoning_effort: "high",
+  enabled_execution_options: [],
 } satisfies AppliedInferenceProfile;
 
 const meta = {

@@ -776,7 +776,11 @@
     "model": "모델",
     "effortLabel": "추론 수준",
     "done": "완료",
-    "send": "보내기"
+    "send": "보내기",
+    "enabled": "켜짐",
+    "disabled": "꺼짐",
+    "executionOptionAriaLabel": "{label}, {state}. {costHint}",
+    "executionOptions": "실행 옵션"
   },
   "inferenceProvenance": {
     "title": "추론 프로필",

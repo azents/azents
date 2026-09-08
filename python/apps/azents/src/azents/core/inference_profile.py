@@ -4,7 +4,14 @@ import datetime
 import enum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -12,11 +19,42 @@ from azents.core.agent import (
     SelectableModelSettings,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    validate_execution_options,
+)
 
 PublicReasoningEffort = Annotated[
     ModelReasoningEffort | None,
     WithJsonSchema({"anyOf": [{"type": "string"}, {"type": "null"}]}),
 ]
+
+
+def _canonical_enabled_execution_options(
+    enabled: list[ModelExecutionOptionId],
+) -> list[ModelExecutionOptionId]:
+    """Validate unique option IDs and return canonical ordering."""
+    if len(enabled) != len(set(enabled)):
+        raise ValueError("Enabled execution options must be unique.")
+    return sorted(enabled, key=lambda option: option.value)
+
+
+def default_historical_execution_options(data: object) -> object:
+    """Decode historical profile payloads that predate execution options."""
+    if not isinstance(data, dict) or "enabled_execution_options" in data:
+        return data
+    return {**data, "enabled_execution_options": []}
+
+
+def normalize_historical_inference_profile_payload(
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Normalize a nested historical inference profile for equality checks."""
+    profile = payload.get("inference_profile")
+    normalized_profile = default_historical_execution_options(profile)
+    if normalized_profile is profile:
+        return payload
+    return {**payload, "inference_profile": normalized_profile}
 
 
 class InferenceProfileSource(enum.StrEnum):
@@ -36,6 +74,7 @@ class InferenceProfileFailureCode(enum.StrEnum):
     MODEL_TARGET_NOT_FOUND = "model_target_not_found"
     MODEL_TARGET_RESOLUTION_FAILED = "model_target_resolution_failed"
     REASONING_EFFORT_UNSUPPORTED = "reasoning_effort_unsupported"
+    EXECUTION_OPTION_UNSUPPORTED = "execution_option_unsupported"
 
 
 class RequestedInferenceProfile(BaseModel):
@@ -49,6 +88,16 @@ class RequestedInferenceProfile(BaseModel):
     )
     reasoning_effort: PublicReasoningEffort = Field(
         description="Explicit reasoning effort, or null for model Default",
+    )
+    enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Explicitly enabled model execution option IDs",
+    )
+
+    _decode_historical_execution_options = model_validator(mode="before")(
+        default_historical_execution_options
+    )
+    _validate_enabled_execution_options = field_validator("enabled_execution_options")(
+        _canonical_enabled_execution_options
     )
 
 
@@ -69,6 +118,16 @@ class AppliedInferenceProfile(BaseModel):
     reasoning_effort: PublicReasoningEffort = Field(
         description="Applied explicit effort, or null for model Default",
     )
+    enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Model execution option IDs applied by the message",
+    )
+
+    _decode_historical_execution_options = model_validator(mode="before")(
+        default_historical_execution_options
+    )
+    _validate_enabled_execution_options = field_validator("enabled_execution_options")(
+        _canonical_enabled_execution_options
+    )
 
 
 class SessionAppliedInferenceProfile(BaseModel):
@@ -82,6 +141,13 @@ class SessionAppliedInferenceProfile(BaseModel):
     )
     reasoning_effort: PublicReasoningEffort = Field(
         description="Applied explicit effort, or null for model Default",
+    )
+    enabled_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Model execution option IDs applied to the Session",
+    )
+
+    _validate_enabled_execution_options = field_validator("enabled_execution_options")(
+        _canonical_enabled_execution_options
     )
 
 
@@ -106,6 +172,11 @@ def validate_requested_profile_against_options(
         not in option.model_selection.normalized_capabilities.reasoning.effort_levels
     ):
         raise ValueError("Reasoning effort is not supported by model target")
+    validate_execution_options(
+        provider=option.model_selection.provider,
+        supported=option.model_selection.supported_execution_options,
+        enabled=profile.enabled_execution_options,
+    )
     return option
 
 
@@ -118,9 +189,14 @@ class SessionInferenceState(BaseModel):
     model_selection: AgentModelSelection
     model_settings: SelectableModelSettings
     reasoning_effort: ModelReasoningEffort | None
+    enabled_execution_options: list[ModelExecutionOptionId]
     effective_context_window_tokens: int = Field(gt=0)
     effective_auto_compaction_threshold_tokens: int = Field(gt=0)
     resolved_at: datetime.datetime
+
+    _validate_enabled_execution_options = field_validator("enabled_execution_options")(
+        _canonical_enabled_execution_options
+    )
 
     @property
     def applied_profile(self) -> AppliedInferenceProfile:
@@ -129,4 +205,5 @@ class SessionInferenceState(BaseModel):
             model_target_label=self.model_target_label,
             model_display_name=self.model_selection.model_display_name,
             reasoning_effort=self.reasoning_effort,
+            enabled_execution_options=self.enabled_execution_options,
         )

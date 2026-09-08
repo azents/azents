@@ -97,6 +97,9 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                                 provider_family = '', 
                                 responses_api = True, 
                                 unsupported_media_policy = 'text_substitution', ), ), 
+                        supported_execution_options = [
+                            'fast'
+                            ], 
                         lifecycle_status = '', 
                         visibility_status = '', 
                         publisher = '', 
@@ -172,6 +175,9 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                                 provider_family = '', 
                                 responses_api = True, 
                                 unsupported_media_policy = 'text_substitution', ), ), 
+                        supported_execution_options = [
+                            'fast'
+                            ], 
                         lifecycle_status = '', 
                         visibility_status = '', 
                         publisher = '', 

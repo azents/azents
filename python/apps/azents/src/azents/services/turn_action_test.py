@@ -37,6 +37,7 @@ from .turn_action import (
 _PROFILE = RequestedInferenceProfile(
     model_target_label="default",
     reasoning_effort=None,
+    enabled_execution_options=[],
 )
 
 

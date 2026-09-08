@@ -258,6 +258,7 @@ const baseArgs = {
   defaultInferenceProfile: {
     model_target_label: "default",
     reasoning_effort: null,
+    enabled_execution_options: [],
   },
   isResponsePending: false,
   isModelResponsePending: false,
@@ -1077,6 +1078,7 @@ export const WithLiveRunRetry = {
         model_target_label: "default",
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
       modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
       retry: {
@@ -1118,6 +1120,7 @@ export const WithPreparingContext = {
         model_target_label: "default",
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
       modelCallStartedAt: null,
       retry: null,
@@ -1153,6 +1156,7 @@ export const EmptyStreamingModelHidesWaitingRow = {
         model_target_label: "default",
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
       modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
       retry: null,
@@ -1213,6 +1217,7 @@ export const StreamingModelWithPartialOutput = {
         model_target_label: "default",
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
       modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
       retry: null,
@@ -1340,6 +1345,7 @@ export const WithPendingInputBuffer = {
         requestedInferenceProfile: {
           model_target_label: "default",
           reasoning_effort: null,
+          enabled_execution_options: [],
         },
       },
     ],
@@ -1363,6 +1369,7 @@ export const PendingInputDoesNotRenderAgentRunIndicator = {
         requestedInferenceProfile: {
           model_target_label: "default",
           reasoning_effort: null,
+          enabled_execution_options: [],
         },
       },
     ],
@@ -1390,6 +1397,7 @@ export const LiveOperationRendersAbovePendingInput = {
         requestedInferenceProfile: {
           model_target_label: "default",
           reasoning_effort: null,
+          enabled_execution_options: [],
         },
       },
     ],

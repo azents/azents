@@ -26,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import (
     ResolveContext,
@@ -68,6 +69,7 @@ from azents.testing.model_selection import (
 
 from . import resolve as resolve_module
 from .resolve import (
+    ExecutionOptionUnsupported,
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
     resolve_agent_tools,
@@ -145,12 +147,16 @@ def _make_agent(
     reasoning_supported: bool = False,
     effort_levels: list[ModelReasoningEffort] | None = None,
     tool_search_enabled: bool = False,
+    fast_supported: bool = False,
 ) -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection(integration_id="integ-1")
     selection.normalized_capabilities.reasoning.supported = reasoning_supported
     selection.normalized_capabilities.reasoning.effort_levels = (
         [] if effort_levels is None else effort_levels
+    )
+    selection.supported_execution_options = (
+        [ModelExecutionOptionId.FAST] if fast_supported else []
     )
     return Agent(
         id="agent-1",
@@ -727,6 +733,7 @@ class TestResolveInvokeInput:
                 messages=[],
             ),
             requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
                 model_target_label="default",
                 reasoning_effort=None,
             ),
@@ -742,6 +749,68 @@ class TestResolveInvokeInput:
         assert result.value.run_request.reasoning_effort is None
         assert result.value.model_selection == _make_agent().model_selection
         assert agent_repository.get_by_id.await_count == 1
+
+    async def test_profile_resolution_preserves_fast_intent(self) -> None:
+        """Carry validated Fast intent into the immutable RunRequest."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent(fast_supported=True)
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+                enabled_execution_options=[ModelExecutionOptionId.FAST],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.run_request.enabled_execution_options == [
+            ModelExecutionOptionId.FAST
+        ]
+
+    async def test_profile_resolution_rejects_unsupported_fast(self) -> None:
+        """Reject explicit unsupported intent through typed profile failure."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent()
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+                enabled_execution_options=[ModelExecutionOptionId.FAST],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert result == Failure(
+            ExecutionOptionUnsupported(
+                model_target_label="default",
+                enabled_execution_options=(ModelExecutionOptionId.FAST,),
+            )
+        )
 
     async def test_profile_resolution_rejects_missing_target(self) -> None:
         """Missing requested labels fail instead of using another target."""
@@ -759,6 +828,7 @@ class TestResolveInvokeInput:
                 messages=[],
             ),
             requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
                 model_target_label="deleted",
                 reasoning_effort=None,
             ),
@@ -793,6 +863,7 @@ class TestResolveInvokeInput:
                 messages=[],
             ),
             requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
@@ -828,6 +899,7 @@ class TestResolveInvokeInput:
                 messages=[],
             ),
             requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
@@ -864,6 +936,7 @@ class TestResolveInvokeInput:
                 messages=[],
             ),
             requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),

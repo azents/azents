@@ -55,6 +55,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
@@ -133,6 +134,81 @@ def _event(content: str = "hello") -> Event:
         payload=UserMessagePayload(sender_user_id=None, content=content),
         created_at=datetime.datetime.now(datetime.UTC),
     )
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "supported", "enabled", "expected_tier"),
+    [
+        (LLMProvider.OPENAI, [ModelExecutionOptionId.FAST], [], "default"),
+        (
+            LLMProvider.OPENAI,
+            [ModelExecutionOptionId.FAST],
+            [ModelExecutionOptionId.FAST],
+            "priority",
+        ),
+        (LLMProvider.OPENAI, [], [], None),
+        (LLMProvider.CHATGPT_OAUTH, [ModelExecutionOptionId.FAST], [], None),
+        (
+            LLMProvider.CHATGPT_OAUTH,
+            [ModelExecutionOptionId.FAST],
+            [ModelExecutionOptionId.FAST],
+            "priority",
+        ),
+    ],
+)
+def test_openai_lowerer_maps_bounded_fast_service_tier(
+    provider_id: LLMProvider,
+    supported: list[ModelExecutionOptionId],
+    enabled: list[ModelExecutionOptionId],
+    expected_tier: str | None,
+) -> None:
+    """Map Fast only for a supported OpenAI authentication path."""
+    request = OpenAIResponsesLowerer(
+        provider=provider_id.value,
+        model="gpt-5.1",
+        provider_id=provider_id,
+        credential_kwargs={},
+        supported_execution_options=supported,
+        enabled_execution_options=enabled,
+    ).lower([_event()], model="gpt-5.1")
+
+    if expected_tier is None:
+        assert "service_tier" not in request.options
+    else:
+        assert request.options["service_tier"] == expected_tier
+
+
+def test_openai_lowerer_rejects_unbounded_service_tier_kwarg() -> None:
+    """Prevent lowerer kwargs from becoming a second tier authority."""
+    with pytest.raises(
+        ValueError,
+        match="service_tier must be derived from model execution options",
+    ):
+        OpenAIResponsesLowerer(
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.OPENAI,
+            kwargs={"service_tier": "priority"},
+        )
+
+
+def test_openai_lowerer_rejects_enabled_unsupported_fast() -> None:
+    """Fail before dispatch instead of silently dropping accepted Fast intent."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1",
+        provider_id=LLMProvider.OPENAI,
+        supported_execution_options=[],
+        enabled_execution_options=[ModelExecutionOptionId.FAST],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Enabled execution option is not supported by the model",
+    ):
+        lowerer.lower([_event()], model="gpt-5.1")
 
 
 def _external_payload(
@@ -398,6 +474,8 @@ def _sampling_context(
 def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
     """API-key logical requests retain semantics without client credentials."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -418,6 +496,8 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
 def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
     """Official SDK lowering uses the shared compaction continuation reminder."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -448,6 +528,8 @@ def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
 def test_openai_lowerer_renders_agent_result_terminal_envelope() -> None:
     """Official SDK lowering shares terminal mailbox envelope semantics."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -498,6 +580,8 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
         "parameters": {"type": "object"},
     }
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="chatgpt_oauth",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -536,6 +620,8 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
         "format": {"type": "text"},
     }
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
         provider_id=LLMProvider.OPENAI,
@@ -551,6 +637,8 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
 def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
     """Do not emit a historical custom call on a function-only SDK request."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
         provider_id=LLMProvider.OPENAI,
@@ -617,6 +705,8 @@ def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["web_search"]
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="chatgpt_oauth",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -647,6 +737,8 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["image_generation"]
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider=provider,
         model="gpt-5.6-luna",
         provider_id=provider_id,
@@ -677,6 +769,8 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
 def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     """Complete legacy running image state when replaying stateless ChatGPT."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="chatgpt_oauth",
         model="gpt-5.1",
         provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -746,6 +840,8 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
 def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None:
     """Keep failed image history without emitting an invalid stateless item."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="chatgpt_oauth",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -806,6 +902,8 @@ def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None
 def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
     """Keep valid native failed-image replay when stored identity is available."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.OPENAI,
@@ -864,6 +962,8 @@ def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
 def test_openai_sdk_rehydrates_image_generation_call() -> None:
     """Replay a generated-image call through the SDK lowerer."""
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
         provider_id=LLMProvider.OPENAI,
@@ -936,6 +1036,8 @@ def test_openai_sdk_lowerer_rejects_invalid_image_generation_config() -> None:
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["image_generation"]
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.OPENAI,
@@ -1133,6 +1235,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
         tools=[],
         options={
             "instructions": None,
+            "service_tier": "priority",
             "stop": ["END"],
         },
     )
@@ -1162,6 +1265,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     assert call["store"] is omit
     assert call["tools"] is omit
     assert call["previous_response_id"] is omit
+    assert call["service_tier"] == "priority"
     assert call["extra_body"] == {"stop": ["END"]}
     assert stream.closed is True
     await adapter.close()
@@ -1374,7 +1478,7 @@ async def test_websocket_reuses_one_connection_for_sequential_responses() -> Non
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "first"}],
         tools=[],
-        options={"store": False},
+        options={"service_tier": "priority", "store": False},
     )
     second = first.model_copy(update={"input": [{"role": "user", "content": "second"}]})
 
@@ -1399,6 +1503,8 @@ async def test_websocket_reuses_one_connection_for_sequential_responses() -> Non
 
     assert len(first_events) == 1
     assert len(second_events) == 1
+    assert connection.calls[0]["service_tier"] == "priority"
+    assert connection.calls[1]["service_tier"] == "priority"
     assert client.connect_count == 1
     assert client.http_calls == []
     assert len(connection.calls) == 2
@@ -2081,6 +2187,8 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
         )
 
     lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="chatgpt_oauth",
         model="gpt-5.1",
         provider_id=LLMProvider.CHATGPT_OAUTH,
@@ -2267,6 +2375,8 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
     request = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -2442,6 +2552,8 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
     assert isinstance(payload, AssistantMessagePayload)
     assert "output_index" not in payload.native_artifact.item
     request = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -2543,6 +2655,76 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     ] == ["message"]
     assert "done" not in str(minimal_response)
     assert "resp_synthetic" not in str(minimal_response)
+
+
+def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use LiteLLM's priority alias for an older Fast response label."""
+    captured: dict[str, object] = {}
+
+    def fake_completion_cost(**kwargs: object) -> float:
+        captured.update(kwargs)
+        return 0.5
+
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.model_cost",
+        {
+            "gpt-5.1-codex": {
+                "input_cost_per_token_priority": 0.1,
+                "cache_read_input_token_cost_priority": 0.01,
+                "output_cost_per_token_priority": 0.2,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost",
+        fake_completion_cost,
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+    output.process_event(
+        _completed_event(_response().model_copy(update={"service_tier": "fast"}))
+    )
+
+    completed = output.complete()
+
+    assert completed.usage is not None
+    assert completed.usage.cost_usd == 0.5
+    assert captured["service_tier"] == "priority"
+
+
+def test_typed_normalizer_omits_cost_without_priority_pricing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not present standard-rate pricing for a premium response."""
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.model_cost",
+        {
+            "gpt-5.1-codex": {
+                "input_cost_per_token": 0.1,
+                "output_cost_per_token": 0.2,
+            }
+        },
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+    output.process_event(
+        _completed_event(_response().model_copy(update={"service_tier": "priority"}))
+    )
+
+    completed = output.complete()
+
+    assert completed.usage is not None
+    assert completed.usage.cost_usd is None
 
 
 def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
@@ -2985,6 +3167,8 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
     lite_request = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
@@ -3240,7 +3424,12 @@ async def test_missing_previous_response_retries_full_input_once(
 
 def test_openai_lowerer_groups_external_invocation_batch() -> None:
     """OpenAI lowerer uses the same explicit external-turn envelope."""
-    lowerer = OpenAIResponsesLowerer(provider="openai", model="gpt-5.1")
+    lowerer = OpenAIResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        provider="openai",
+        model="gpt-5.1",
+    )
     transcript = [
         Event(
             id="1" * 32,
