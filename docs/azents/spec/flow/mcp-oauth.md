@@ -15,17 +15,19 @@ code_paths:
   - python/apps/azents/src/azents/api/public/toolkit/v1/oauth.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
+  - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
+  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-09-04
-spec_version: 5
+last_verified_at: 2026-09-07
+spec_version: 6
 ---
 
 # MCP OAuth Flow
 
 ## Overview
 
-MCP OAuth is a **toolkit-level** OAuth connection flow. A workspace manager connects OAuth once for a `ToolkitConfig`; every run that mounts that toolkit uses the same OAuth connection. This replaces the removed per-user MCP OAuth flow.
+MCP OAuth is a **toolkit-level** OAuth connection flow. A Workspace-shared Toolkit is connected once by a Workspace manager; an Agent-owned Toolkit is connected once by a Workspace Owner or explicit AgentAdmin of its exact owning Agent. Every run that resolves that Toolkit uses the same OAuth connection. This replaces the removed per-user MCP OAuth flow.
 
 Supported toolkit types:
 
@@ -46,12 +48,12 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 
 ## Preconditions
 
-- `ToolkitConfig` exists in a workspace and is accessible to a manager.
+- `ToolkitConfig` exists in a Workspace and is either a Workspace-shared item accessible to a manager or an Agent-owned item accessible through its exact owning Agent by an Owner or explicit AgentAdmin.
 - MCP config resolves to `auth_type="oauth2"`.
 - OAuth metadata can be discovered, or both `auth_url` and `token_url` are configured.
 - Either an existing OAuth connection/client registration exists, manager-provided OAuth client credentials exist in `ToolkitConfig.encrypted_credentials`, or the authorization server supports DCR.
 - `AZ_CREDENTIAL_ENCRYPTION_KEY` is configured.
-- Frontend callback URL is `web_url + "/oauth/mcp/callback?handle={handle}&toolkit_config_id={toolkit_id}"` for the active connection flow.
+- The Workspace-shared callback URL is `web_url + "/oauth/mcp/callback?handle={handle}&toolkit_config_id={toolkit_id}"`. The Agent-owned callback URL additionally includes `agent_id={agent_id}`.
 
 ## Discovery and Registration Validation
 
@@ -96,19 +98,23 @@ Removed per-user tables:
 - `mcp_oauth2_tokens`
 - `mcp_auth_requests`
 
-## Manager Connection Flow
+## Authorized Connection Flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Manager
+    participant Administrator
     participant FE as azents-web
     participant API as azents API
     participant DB as PostgreSQL
     participant AS as OAuth AS
 
-    Manager->>FE: Click Connect/Reconnect
-    FE->>API: POST /toolkit-configs/{id}/oauth/connect
+    Administrator->>FE: Click Connect/Reconnect
+    alt Workspace shared
+        FE->>API: POST /toolkit-configs/{id}/oauth/connect
+    else Agent owned
+        FE->>API: POST /agents/{agent_id}/toolkit-configs/{id}/oauth/connect
+    end
     API->>DB: Load ToolkitConfig and current connection
     API->>API: Resolve MCP config
     API->>AS: Discover metadata if needed
@@ -117,13 +123,17 @@ sequenceDiagram
         AS-->>API: client_id/client_secret
     end
     API->>API: Generate PKCE verifier/challenge
-    API->>API: Encrypt toolkit OAuth state
+    API->>API: Encrypt ownership-context OAuth state
     API->>DB: Upsert pending connected metadata/client row
     API-->>FE: authorization_url
     FE->>AS: Browser redirect
-    AS-->>FE: callback?handle=...&toolkit_config_id=...&code=...&state=...
-    FE->>API: POST /toolkit-configs/{id}/oauth/exchange
-    API->>API: Verify state toolkit/workspace/redirect/verifier binding
+    AS-->>FE: callback?handle=...&toolkit_config_id=...&agent_id?&code=...&state=...
+    alt Workspace shared
+        FE->>API: POST /toolkit-configs/{id}/oauth/exchange
+    else Agent owned
+        FE->>API: POST /agents/{agent_id}/toolkit-configs/{id}/oauth/exchange
+    end
+    API->>API: Verify state, path identities, requester, redirect URI, PKCE binding, and current authority
     API->>AS: Exchange authorization code + PKCE verifier
     AS-->>API: access_token/refresh_token/expires_in
     API->>DB: Upsert connected token fields
@@ -192,6 +202,21 @@ Returns `204 No Content`.
 
 Requires `TOOLKITS_WRITE`. Deletes the local OAuth connection row and returns `204 No Content`.
 
+### Agent-owned Toolkit OAuth
+
+```http
+POST   /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connect
+POST   /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/exchange
+DELETE /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connection
+```
+
+These routes require the current requester to be a Workspace Owner or explicit AgentAdmin
+of the exact active path Agent. The encrypted Agent state binds the state kind, Workspace ID,
+Agent ID, ToolkitConfig ID, initiating User ID, exact redirect URI, PKCE verifier, nonce, and
+fixed Agent-settings callback target. Exchange and disconnect revalidate the exact Toolkit owner
+and current authority. An ownership mismatch, other Agent, cross-Workspace ID, or unauthorized
+item resolves through the common not-found boundary.
+
 ### Toolkit config response
 
 Toolkit config responses include `oauth_connection` when a toolkit has a connection row:
@@ -215,7 +240,8 @@ Toolkit config responses include `oauth_connection` when a toolkit has a connect
 | Invalid auth type | Toolkit does not resolve to `auth_type=oauth2` | 400 | Manager selects OAuth2 or uses another auth mode |
 | Discovery failed | Metadata unavailable and endpoints not configured | 400 | Manager configures `auth_url` and `token_url` |
 | DCR unavailable | No client credentials and no `registration_endpoint` | 400 | Manager provides OAuth client credentials |
-| Invalid state | Tampered callback or wrong toolkit/workspace | 400 | Restart connect |
+| Invalid state | Tampered callback, wrong toolkit/workspace, or Agent callback context mismatch | 400 | Restart connect |
+| Authority revoked | Owner/AgentAdmin authority removed after Agent-owned connect | 404 | An authorized administrator starts connect again |
 | Token exchange rejected | Provider returns 4xx or OAuth error | 422 | Restart connect or fix provider setup |
 | Missing connection | Exchange without prior connect | 404 | Restart connect |
 | Refresh invalid_grant | Provider revoked or rotated away refresh token | `reconnect_required` | Manager reconnects |
@@ -229,14 +255,14 @@ loading/error prompt or retry pseudo-tool is added to the model-visible surface.
 
 | Mechanism | Target | Purpose |
 | --- | --- | --- |
-| AES-GCM state encryption | `{toolkit_id, workspace_id, user_id, redirect_uri, code_verifier, nonce}` | Callback integrity and PKCE verifier storage |
+| AES-GCM state encryption | Workspace-shared: `{toolkit_id, workspace_id, user_id, redirect_uri, code_verifier, nonce}`; Agent-owned: adds state kind, `agent_id`, and callback target | Callback integrity and PKCE verifier storage |
 | PKCE S256 | Authorization code flow | Authorization code interception protection |
 | Fernet via `CredentialCipher` | DB client/token fields | Protect OAuth credentials at rest |
 | RFC 8707 resource | Authorization/token request | Bind issued token to MCP resource |
 
 ## UI Behavior
 
-Toolkit edit pages show OAuth connection state for `mcp` with `auth_type=oauth2`, `notion`, and `sentry`.
+Workspace Toolkit edit pages and the authority-gated saved-Agent Toolkit form show OAuth connection state for `mcp` with `auth_type=oauth2`, `notion`, and `sentry`.
 
 Displayed fields:
 
@@ -247,10 +273,13 @@ Displayed fields:
 - expiration
 - connect/reconnect/disconnect actions
 
-The UI does not display account identity and does not add warning copy.
+The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
 
 ## Changelog
 
+- **2026-09-07** (spec_version 6) — Added Agent-owned MCP OAuth nested routes,
+  encrypted Agent callback context, current Owner-or-AgentAdmin revalidation, and
+  saved-Agent callback return behavior while retaining Workspace-shared OAuth.
 - **2026-09-04** (spec_version 5) — Documented fail-closed typed validation for
   protected-resource metadata, authorization-server metadata, and DCR response
   payloads.

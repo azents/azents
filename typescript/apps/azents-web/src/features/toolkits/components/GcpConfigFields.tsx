@@ -53,6 +53,7 @@ interface GcpConfigFieldsProps {
   /** Existing credentials existence in edit mode */
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   /** Existing toolkit config ID in edit mode */
   toolkitConfigId?: string;
 }
@@ -193,6 +194,7 @@ export function GcpConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: GcpConfigFieldsProps): React.ReactElement {
   const projectId =
@@ -227,12 +229,20 @@ export function GcpConfigFields({
   const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "gcp",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   // Service toggle
   const handleServiceToggle = useCallback(
