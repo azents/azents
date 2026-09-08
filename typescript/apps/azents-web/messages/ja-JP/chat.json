@@ -780,7 +780,7 @@
     "enabled": "オン",
     "disabled": "オフ",
     "executionOptionAriaLabel": "{label}、{state}。{costHint}",
-    "executionOptionSaveFailed": "実行オプションを保存できませんでした。以前の設定に戻しました。"
+    "executionOptions": "実行オプション"
   },
   "inferenceProvenance": {
     "title": "推論プロファイル",

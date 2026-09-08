@@ -11,6 +11,7 @@ import {
   Popover,
   rem,
   Stack,
+  Switch,
   Text,
   Textarea,
   UnstyledButton,
@@ -83,8 +84,6 @@ function ChatInputView({
     contextUsageActiveRun,
     onApplyInferenceProfile,
     selectableExecutionOptions,
-    executionOptionSavePending,
-    executionOptionSaveErrorVisible,
     isUploading,
     pendingFiles,
     goal,
@@ -158,11 +157,7 @@ function ChatInputView({
       variant="light"
       size="compact-sm"
       radius={rem(12)}
-      disabled={
-        inputDisabled ||
-        executionOptionSavePending ||
-        selectableModelOptions.length === 0
-      }
+      disabled={inputDisabled || selectableModelOptions.length === 0}
       ref={profileTriggerRef}
       onClick={() => {
         setProfilePickerOpened(!profilePickerOpened);
@@ -213,44 +208,82 @@ function ChatInputView({
     </Button>
   );
   const executionOptionControls = selectableExecutionOptions.map(
-    (definition) => {
+    (definition, index) => {
       const selected = inferenceProfile.enabled_execution_options.includes(
         definition.id,
       );
       const disabled =
-        inputDisabled ||
-        editSendDisabled ||
-        editingMessageId !== null ||
-        executionOptionSavePending;
+        inputDisabled || editSendDisabled || editingMessageId !== null;
+      if (isMobile) {
+        return (
+          <UnstyledButton
+            key={definition.id}
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={definition.label}
+            disabled={disabled}
+            onClick={() => handleExecutionOptionToggle(definition.id)}
+            style={{
+              width: "100%",
+              padding: `${rem(9)} ${rem(12)}`,
+              display: "block",
+              textAlign: "left",
+              borderTop:
+                index === 0
+                  ? "none"
+                  : `${rem(1)} solid var(--mantine-color-default-border)`,
+              background: selected
+                ? "var(--mantine-color-default-hover)"
+                : "var(--mantine-color-body)",
+            }}
+          >
+            <Group gap="sm" justify="space-between" wrap="nowrap">
+              <Stack gap={rem(1)} style={{ minWidth: 0 }}>
+                <Text size="sm" fw={600} lh={rem(18)} truncate>
+                  {definition.label}
+                </Text>
+                <Text size="xs" c="dimmed" lh={rem(16)} truncate>
+                  {definition.cost_hint}
+                </Text>
+              </Stack>
+              {selected ? (
+                <IconCheck
+                  aria-hidden="true"
+                  size={16}
+                  color="var(--mantine-color-blue-6)"
+                  style={{ flexShrink: 0 }}
+                />
+              ) : null}
+            </Group>
+          </UnstyledButton>
+        );
+      }
       return (
-        <Button
+        <Group
           key={definition.id}
-          variant={selected ? "light" : "subtle"}
-          size="compact-sm"
-          radius={rem(12)}
-          disabled={disabled}
-          loading={executionOptionSavePending && selected}
-          aria-pressed={selected}
-          aria-label={t("composerProfile.executionOptionAriaLabel", {
-            label: definition.label,
-            state: selected
-              ? t("composerProfile.enabled")
-              : t("composerProfile.disabled"),
-            costHint: definition.cost_hint,
-          })}
-          title={definition.description}
-          onClick={() => handleExecutionOptionToggle(definition.id)}
-          style={{ minHeight: rem(36), maxWidth: rem(220) }}
+          justify="space-between"
+          wrap="nowrap"
+          px="xs"
+          py="xs"
         >
-          <Group gap={rem(4)} wrap="nowrap">
-            <Text size="xs" fw={600} truncate>
+          <Stack gap={rem(2)}>
+            <Text size="sm" fw={500}>
               {definition.label}
             </Text>
-            <Text size="xs" c="dimmed" truncate visibleFrom="sm">
+            <Text size="xs" c="dimmed">
               {definition.cost_hint}
             </Text>
-          </Group>
-        </Button>
+          </Stack>
+          <Switch
+            checked={selected}
+            disabled={disabled}
+            onChange={() => handleExecutionOptionToggle(definition.id)}
+            aria-label={definition.label}
+            onLabel="ON"
+            offLabel="OFF"
+            size="md"
+          />
+        </Group>
       );
     },
   );
@@ -270,7 +303,6 @@ function ChatInputView({
           }
         }}
         onClick={() => handleModelChange(option.label)}
-        disabled={executionOptionSavePending}
         onKeyDown={(event) => {
           if (!isMobile) {
             handleDesktopProfileOptionKeyDown("model", index, event);
@@ -325,7 +357,6 @@ function ChatInputView({
           }
         }}
         onClick={() => handleEffortChange(effort)}
-        disabled={executionOptionSavePending}
         onKeyDown={(event) => {
           if (!isMobile) {
             handleDesktopProfileOptionKeyDown("effort", index, event);
@@ -394,6 +425,26 @@ function ChatInputView({
             </Stack>
           ) : null}
         </>
+      ) : null}
+      {selectableExecutionOptions.length > 0 ? (
+        <Stack gap="xs">
+          <Divider />
+          <Text size="xs" c="dimmed" fw={600}>
+            {t("composerProfile.executionOptions")}
+          </Text>
+          <Stack
+            gap={0}
+            role="group"
+            aria-label={t("composerProfile.executionOptions")}
+            style={{
+              border: `${rem(1)} solid var(--mantine-color-default-border)`,
+              borderRadius: rem(12),
+              overflow: "hidden",
+            }}
+          >
+            {executionOptionControls}
+          </Stack>
+        </Stack>
       ) : null}
       {contextUsageEnabled ? (
         <Box ref={contextUsageDetailsRef}>
@@ -522,6 +573,15 @@ function ChatInputView({
               )}
             </>
           ) : null}
+          {selectableExecutionOptions.length > 0 ? (
+            <>
+              <Divider my="xs" />
+              <Text size="xs" c="dimmed" fw={600} px="xs">
+                {t("composerProfile.executionOptions")}
+              </Text>
+              {executionOptionControls}
+            </>
+          ) : null}
         </Stack>
       </Paper>
       {inferenceProfileSelectionEnabled &&
@@ -601,7 +661,6 @@ function ChatInputView({
     selectedAction === null &&
     !inputDisabled &&
     !editSendDisabled &&
-    !executionOptionSavePending &&
     onApplyInferenceProfile != null;
   const stopAvailableAlongsideApply =
     isStopAvailable &&
@@ -629,11 +688,6 @@ function ChatInputView({
             {selectedAction
               ? `${selectedAction.label} action failed. Edit it or try again.`
               : "Message failed to send. Try again."}
-          </Text>
-        )}
-        {executionOptionSaveErrorVisible && (
-          <Text size="xs" c="red">
-            {t("composerProfile.executionOptionSaveFailed")}
           </Text>
         )}
         {editingMessageId && (
@@ -884,9 +938,6 @@ function ChatInputView({
               {isMobile ? (
                 <>
                   {inferenceProfileSelectionEnabled ? profileTrigger : null}
-                  {inferenceProfileSelectionEnabled
-                    ? executionOptionControls
-                    : null}
                   {contextUsageTrigger}
                   {inferenceProfileSelectionEnabled || contextUsageEnabled ? (
                     <Drawer
@@ -955,9 +1006,6 @@ function ChatInputView({
                   <Popover.Target>
                     <Group gap="xs" wrap="nowrap">
                       {inferenceProfileSelectionEnabled ? profileTrigger : null}
-                      {inferenceProfileSelectionEnabled
-                        ? executionOptionControls
-                        : null}
                       {contextUsageTrigger}
                     </Group>
                   </Popover.Target>
@@ -999,7 +1047,6 @@ function ChatInputView({
                   disabled={
                     inputDisabled ||
                     editSendDisabled ||
-                    executionOptionSavePending ||
                     (!inputValue.trim() &&
                       pendingFiles.length === 0 &&
                       selectedAction?.message.policy === "required")

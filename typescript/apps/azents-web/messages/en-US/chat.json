@@ -780,7 +780,7 @@
     "enabled": "on",
     "disabled": "off",
     "executionOptionAriaLabel": "{label}, {state}. {costHint}",
-    "executionOptionSaveFailed": "Could not save the execution option. Your previous setting was restored."
+    "executionOptions": "Execution options"
   },
   "inferenceProvenance": {
     "title": "Inference profile",

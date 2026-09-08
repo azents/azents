@@ -247,16 +247,23 @@ export const Ready = {
 export const ExecutionOptionToggle = {
   args: {
     ...baseArgs,
-    sessionId: "story-session-execution-option-toggle",
+    sessionId: "option-confirm",
     onApplyInferenceProfile: fn(() => Promise.resolve(true)),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    const toggle = canvas.getByRole("button", {
-      name: "Fast, off. Higher usage",
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const toggle = await page.findByRole("switch", {
+      name: "Fast",
     });
     await userEvent.click(toggle);
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeChecked();
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Apply model change" }),
+    );
     await expect(args.onApplyInferenceProfile).toHaveBeenCalledWith({
       model_target_label: "Default",
       reasoning_effort: null,
@@ -265,24 +272,26 @@ export const ExecutionOptionToggle = {
   },
 } satisfies Story;
 
-export const ExecutionOptionSaveFailure = {
+export const MobileExecutionOptionDraft = {
   args: {
     ...baseArgs,
-    sessionId: "story-session-execution-option-failure",
-    onApplyInferenceProfile: fn(() => Promise.resolve(false)),
+    isMobile: true,
+    sessionId: "mobile-option-draft",
+    onApplyInferenceProfile: fn(() => Promise.resolve(true)),
   },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    const toggle = canvas.getByRole("button", {
-      name: "Fast, off. Higher usage",
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const option = await page.findByRole("checkbox", {
+      name: "Fast",
     });
-    await userEvent.click(toggle);
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await expect(
-      canvas.getByText(
-        "Could not save the execution option. Your previous setting was restored.",
-      ),
-    ).toBeVisible();
+    await userEvent.click(option);
+    await expect(option).toHaveAttribute("aria-checked", "true");
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.click(option);
+    await expect(option).toHaveAttribute("aria-checked", "false");
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
   },
 } satisfies Story;
 
