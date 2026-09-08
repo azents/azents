@@ -326,6 +326,8 @@ __all__ = [
     "ModelCatalogSyncResponse",
     "ModelCompatibilityCapabilities",
     "ModelContextWindow",
+    "ModelExecutionOptionDefinition",
+    "ModelExecutionOptionId",
     "ModelModalities",
     "ModelModality",
     "ModelParameterCapabilities",
@@ -443,6 +445,7 @@ __all__ = [
     "SelectableInfrastructureProfileResponse",
     "SelectableModelOption",
     "SelectableModelOptionInput",
+    "SelectableModelOptionResponse",
     "SelectableModelSettings",
     "SelectableModelSettingsInput",
     "SendCodeRequest",
@@ -842,6 +845,8 @@ from azentspublicclient.models.model_catalog_sync_attempt_response import ModelC
 from azentspublicclient.models.model_catalog_sync_response import ModelCatalogSyncResponse as ModelCatalogSyncResponse
 from azentspublicclient.models.model_compatibility_capabilities import ModelCompatibilityCapabilities as ModelCompatibilityCapabilities
 from azentspublicclient.models.model_context_window import ModelContextWindow as ModelContextWindow
+from azentspublicclient.models.model_execution_option_definition import ModelExecutionOptionDefinition as ModelExecutionOptionDefinition
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId as ModelExecutionOptionId
 from azentspublicclient.models.model_modalities import ModelModalities as ModelModalities
 from azentspublicclient.models.model_modality import ModelModality as ModelModality
 from azentspublicclient.models.model_parameter_capabilities import ModelParameterCapabilities as ModelParameterCapabilities
@@ -959,6 +964,7 @@ from azentspublicclient.models.selectable_infrastructure_profile_list_response i
 from azentspublicclient.models.selectable_infrastructure_profile_response import SelectableInfrastructureProfileResponse as SelectableInfrastructureProfileResponse
 from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
+from azentspublicclient.models.selectable_model_option_response import SelectableModelOptionResponse as SelectableModelOptionResponse
 from azentspublicclient.models.selectable_model_settings import SelectableModelSettings as SelectableModelSettings
 from azentspublicclient.models.selectable_model_settings_input import SelectableModelSettingsInput as SelectableModelSettingsInput
 from azentspublicclient.models.send_code_request import SendCodeRequest as SendCodeRequest

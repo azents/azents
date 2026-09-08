@@ -14,6 +14,7 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.services.model_listing.data import (
     ModelListingOutput,
     ModelListingSkipSummary,
@@ -256,6 +257,13 @@ def _candidate(
                     )
                 )
             ),
+        ),
+        supported_execution_options=(
+            [ModelExecutionOptionId.FAST]
+            if provider == LLMProvider.OPENAI
+            and identifier == "gpt-5.5"
+            and not lightweight
+            else []
         ),
         model_snapshot={
             "source": source,

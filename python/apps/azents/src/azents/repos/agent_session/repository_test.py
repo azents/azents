@@ -905,6 +905,7 @@ class TestAgentSessionRepository:
             effective_context_window_tokens=100_000,
             effective_auto_compaction_threshold_tokens=80_000,
             resolved_at=resolved_at,
+            enabled_execution_options=[],
         )
         default_profile = await repo.set_inference_state(
             rdb_session,

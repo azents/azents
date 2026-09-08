@@ -18,6 +18,7 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.repos.llm_provider_integration.data import LLMProviderIntegration
 from azents.services.llm_catalog import (
     ModelCatalogEntryListOutput,
@@ -51,6 +52,7 @@ class ModelCatalogEntryResponse(BaseModel):
     runtime_model_identifier: str
     display_name: str
     normalized_capabilities: ModelCapabilities
+    supported_execution_options: list[ModelExecutionOptionId]
     lifecycle_status: str
     visibility_status: str
     publisher: str | None
@@ -71,6 +73,7 @@ class ModelCatalogEntryResponse(BaseModel):
             runtime_model_identifier=entry.runtime_model_identifier,
             display_name=entry.display_name,
             normalized_capabilities=entry.normalized_capabilities,
+            supported_execution_options=entry.supported_execution_options,
             lifecycle_status=entry.lifecycle_status.value,
             visibility_status=entry.visibility_status.value,
             publisher=entry.publisher,

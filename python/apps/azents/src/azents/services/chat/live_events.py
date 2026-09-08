@@ -314,6 +314,7 @@ def _mailbox_item_requested_profile(
     return RequestedInferenceProfile(
         model_target_label=mailbox_item.requested_model_target_label,
         reasoning_effort=mailbox_item.requested_reasoning_effort,
+        enabled_execution_options=(mailbox_item.requested_enabled_execution_options),
     )
 
 
@@ -535,6 +536,9 @@ def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
                         model_target_label=requested_profile.model_target_label,
                         model_display_name=None,
                         reasoning_effort=requested_profile.reasoning_effort,
+                        enabled_execution_options=(
+                            requested_profile.enabled_execution_options
+                        ),
                     )
                     if requested_profile is not None
                     else None

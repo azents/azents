@@ -731,6 +731,7 @@ class ExternalChannelIngressDrainService:
                                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                                     requested_model_target_label=None,
                                     requested_reasoning_effort=None,
+                                    requested_enabled_execution_options=[],
                                     sender_user_id=None,
                                     order_group=order_group,
                                     order_sequence=order_sequence,

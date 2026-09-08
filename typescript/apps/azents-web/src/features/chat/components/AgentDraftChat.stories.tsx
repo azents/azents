@@ -50,6 +50,7 @@ const agent: AgentResponse = {
         subagent_enabled: true,
         subagent_guidance: "Use for release coordination.",
       },
+      execution_option_definitions: [],
     },
   ],
   main_model_label: "default",
@@ -132,6 +133,7 @@ const args: AgentDraftChatContainerOutput = {
   defaultInferenceProfile: {
     model_target_label: "default",
     reasoning_effort: "medium",
+    enabled_execution_options: [],
   },
   subscriptionUsage,
   selectedProjectPaths: [],

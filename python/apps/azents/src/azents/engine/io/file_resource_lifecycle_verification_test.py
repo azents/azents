@@ -381,7 +381,12 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     assert isinstance(created, Success)
     artifact = created.value
 
-    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    lowerer = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        provider="openai",
+        model="gpt-5.1",
+    )
     request = lowerer.lower(
         [
             _event(
@@ -464,7 +469,12 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
 @pytest.mark.asyncio
 async def test_attachment_output_lowers_as_metadata_only() -> None:
     """Attachment lowers to bounded metadata text, not rich input."""
-    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    lowerer = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        provider="openai",
+        model="gpt-5.1",
+    )
     request = lowerer.lower(
         [
             _event(
@@ -541,6 +551,8 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     image_request = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
         model_capabilities=ModelCapabilities(
@@ -557,6 +569,8 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     text_only_request = LiteLLMResponsesLowerer(
+        supported_execution_options=[],
+        enabled_execution_options=[],
         provider="openai",
         model="text-only",
     ).lower(transcript, model="text-only")

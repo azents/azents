@@ -102,6 +102,7 @@ from azents.engine.run.provider_failure import (
     model_provider_error_log_fields,
 )
 from azents.engine.run.resolve import (
+    ExecutionOptionUnsupported,
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
     resolve_agent_tools,
@@ -818,6 +819,9 @@ class RunExecutor:
                 profile=RequestedInferenceProfile(
                     model_target_label=turn_inference_state.model_target_label,
                     reasoning_effort=turn_inference_state.reasoning_effort,
+                    enabled_execution_options=(
+                        turn_inference_state.enabled_execution_options
+                    ),
                 ),
                 source=InferenceProfileSource.SESSION_LAST_USED,
             )
@@ -863,10 +867,16 @@ class RunExecutor:
                 if recoverable_run is not None
                 else None
             )
+            retry_enabled_execution_options = (
+                recoverable_run.requested_enabled_execution_options
+                if recoverable_run is not None
+                else []
+            )
             if explicit_profile is None and retry_model_target_label is not None:
                 explicit_profile = RequestedInferenceProfile(
                     model_target_label=retry_model_target_label,
                     reasoning_effort=retry_reasoning_effort,
+                    enabled_execution_options=retry_enabled_execution_options,
                 )
 
             if (
@@ -1100,6 +1110,9 @@ class RunExecutor:
                 resolved_model_selection=turn_inference_state.model_selection,
                 resolved_model_settings=turn_inference_state.model_settings,
                 resolved_reasoning_effort=turn_inference_state.reasoning_effort,
+                resolved_enabled_execution_options=(
+                    turn_inference_state.enabled_execution_options
+                ),
                 agent_repository=self.agent_repository,
                 integration_repository=self.integration_repository,
                 session_manager=self.session_manager,
@@ -1793,6 +1806,9 @@ class RunExecutor:
                                 reasoning_effort=(
                                     prepared_value.profile.reasoning_effort
                                 ),
+                                enabled_execution_options=(
+                                    prepared_value.profile.enabled_execution_options
+                                ),
                             ),
                             source=prepared_value.source,
                         )
@@ -2273,6 +2289,9 @@ class RunExecutor:
                         reasoning_effort=(
                             agent_session.applied_inference_profile.reasoning_effort
                         ),
+                        enabled_execution_options=(
+                            agent_session.applied_inference_profile.enabled_execution_options
+                        ),
                     ),
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )
@@ -2288,6 +2307,7 @@ class RunExecutor:
                         and agent.model_parameters.reasoning_effort is not None
                         else None
                     ),
+                    enabled_execution_options=[],
                 ),
                 source=InferenceProfileSource.AGENT_DEFAULT,
             )
@@ -2329,6 +2349,7 @@ class RunExecutor:
                     profile=RequestedInferenceProfile(
                         model_target_label=applied.model_target_label,
                         reasoning_effort=applied.reasoning_effort,
+                        enabled_execution_options=applied.enabled_execution_options,
                     ),
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )
@@ -2344,6 +2365,7 @@ class RunExecutor:
                             and agent.model_parameters.reasoning_effort is not None
                             else None
                         ),
+                        enabled_execution_options=[],
                     ),
                     source=InferenceProfileSource.AGENT_DEFAULT,
                 )
@@ -2370,6 +2392,7 @@ class RunExecutor:
                     if selected.profile.reasoning_effort is not None
                     else resolved_profile.reasoning_effort
                 ),
+                enabled_execution_options=selected.profile.enabled_execution_options,
                 effective_context_window_tokens=(
                     resolved_profile.run_request.effective_max_input_tokens
                 ),
@@ -2406,6 +2429,7 @@ class RunExecutor:
                     expected = RequestedInferenceProfile(
                         model_target_label=applied.model_target_label,
                         reasoning_effort=applied.reasoning_effort,
+                        enabled_execution_options=applied.enabled_execution_options,
                     )
                 else:
                     expected = RequestedInferenceProfile(
@@ -2419,6 +2443,7 @@ class RunExecutor:
                             is not None
                             else None
                         ),
+                        enabled_execution_options=[],
                     )
 
                 if expected != selected.profile:
@@ -2980,6 +3005,11 @@ def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
         return ProfileResolutionFailure(
             code=InferenceProfileFailureCode.REASONING_EFFORT_UNSUPPORTED,
             message="The selected reasoning effort is not supported by this model.",
+        )
+    if isinstance(error, ExecutionOptionUnsupported):
+        return ProfileResolutionFailure(
+            code=InferenceProfileFailureCode.EXECUTION_OPTION_UNSUPPORTED,
+            message="The selected execution option is not supported by this model.",
         )
     return ProfileResolutionFailure(
         code=InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,

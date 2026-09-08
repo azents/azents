@@ -776,7 +776,11 @@
     "model": "Model",
     "effortLabel": "Reasoning effort",
     "done": "Done",
-    "send": "Send"
+    "send": "Send",
+    "enabled": "on",
+    "disabled": "off",
+    "executionOptionAriaLabel": "{label}, {state}. {costHint}",
+    "executionOptionSaveFailed": "Could not save the execution option. Your previous setting was restored."
   },
   "inferenceProvenance": {
     "title": "Inference profile",

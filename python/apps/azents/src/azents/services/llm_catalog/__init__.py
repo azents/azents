@@ -50,6 +50,7 @@ from azents.core.llm_catalog_sync import (
     evaluate_integration_catalog_sync_policy,
 )
 from azents.core.llm_mapping import to_runtime_model
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import (
@@ -83,6 +84,7 @@ from azents.services.model_listing.data import (
 from azents.services.model_listing.providers import (
     ListingProviderError,
     XaiListingProviderError,
+    _openai_supported_execution_options,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
     list_kimi_models_for_integration,
@@ -316,6 +318,9 @@ class ModelCatalogEntryOutput(BaseModel):
     normalized_capabilities: ModelCapabilities = Field(
         description="Normalized capability contract"
     )
+    supported_execution_options: list[ModelExecutionOptionId] = Field(
+        description="Directly selectable execution options supported by this model"
+    )
     lifecycle_status: LLMModelLifecycleStatus = Field(description="Lifecycle status")
     visibility_status: LLMCatalogEntryVisibility = Field(description="Visibility state")
     publisher: str | None = Field(description="Publisher/developer identifier")
@@ -338,6 +343,10 @@ class ModelCatalogEntryOutput(BaseModel):
             normalized_capabilities=ModelCapabilities.model_validate(
                 entry.normalized_capabilities
             ),
+            supported_execution_options=[
+                ModelExecutionOptionId(option)
+                for option in entry.supported_execution_options
+            ],
             lifecycle_status=entry.lifecycle_status,
             visibility_status=entry.visibility_status,
             publisher=entry.publisher,
@@ -480,6 +489,10 @@ class ModelCatalogReadService:
                 normalized_capabilities=ModelCapabilities.model_validate(
                     entry.normalized_capabilities
                 ),
+                supported_execution_options=[
+                    ModelExecutionOptionId(option)
+                    for option in entry.supported_execution_options
+                ],
                 model_snapshot={
                     "source": "stored_catalog_projection",
                     "catalog_id": catalog.id,
@@ -1453,6 +1466,9 @@ def project_deterministic_integration_entries(
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
                 ),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
@@ -1489,6 +1505,9 @@ def project_chatgpt_integration_entries(
                 runtime_model_identifier=candidate.model_identifier,
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
@@ -1529,6 +1548,9 @@ def project_kimi_integration_entries(
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
                 ),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
@@ -1570,6 +1592,9 @@ def project_openrouter_integration_entries(
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
                 ),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
@@ -1626,6 +1651,9 @@ def project_xai_integration_entries(
                 ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
@@ -1765,6 +1793,9 @@ def project_integration_entries(
                 runtime_model_identifier=source_key,
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
+                supported_execution_options=[
+                    option.value for option in candidate.supported_execution_options
+                ],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=visibility,
                 provider_integration_id=integration_id,
@@ -1827,6 +1858,14 @@ def project_system_entries(
                     provider=provider,
                     model_identifier=_provider_model_identifier(provider, model_key),
                 ).model_dump(mode="json"),
+                supported_execution_options=[
+                    option.value
+                    for option in _openai_supported_execution_options(
+                        _provider_model_identifier(provider, model_key)
+                    )
+                ]
+                if provider == LLMProvider.OPENAI
+                else [],
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=visibility,
                 provider_integration_id=None,

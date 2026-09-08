@@ -104,6 +104,7 @@ const baseAgent: AgentResponse = {
         subagent_enabled: true,
         subagent_guidance: "Use for complex synthesis tasks.",
       },
+      execution_option_definitions: [],
     },
     {
       label: "lightweight",
@@ -115,6 +116,7 @@ const baseAgent: AgentResponse = {
         subagent_enabled: false,
         subagent_guidance: null,
       },
+      execution_option_definitions: [],
     },
   ],
   main_model_label: "default",

@@ -313,6 +313,8 @@ azentspublicclient/docs/ModelCatalogSyncAttemptResponse.md
 azentspublicclient/docs/ModelCatalogSyncResponse.md
 azentspublicclient/docs/ModelCompatibilityCapabilities.md
 azentspublicclient/docs/ModelContextWindow.md
+azentspublicclient/docs/ModelExecutionOptionDefinition.md
+azentspublicclient/docs/ModelExecutionOptionId.md
 azentspublicclient/docs/ModelModalities.md
 azentspublicclient/docs/ModelModality.md
 azentspublicclient/docs/ModelParameterCapabilities.md
@@ -435,6 +437,7 @@ azentspublicclient/docs/SelectableInfrastructureProfileListResponse.md
 azentspublicclient/docs/SelectableInfrastructureProfileResponse.md
 azentspublicclient/docs/SelectableModelOption.md
 azentspublicclient/docs/SelectableModelOptionInput.md
+azentspublicclient/docs/SelectableModelOptionResponse.md
 azentspublicclient/docs/SelectableModelSettings.md
 azentspublicclient/docs/SelectableModelSettingsInput.md
 azentspublicclient/docs/SendCodeRequest.md
@@ -804,6 +807,8 @@ azentspublicclient/models/model_catalog_sync_attempt_response.py
 azentspublicclient/models/model_catalog_sync_response.py
 azentspublicclient/models/model_compatibility_capabilities.py
 azentspublicclient/models/model_context_window.py
+azentspublicclient/models/model_execution_option_definition.py
+azentspublicclient/models/model_execution_option_id.py
 azentspublicclient/models/model_modalities.py
 azentspublicclient/models/model_modality.py
 azentspublicclient/models/model_parameter_capabilities.py
@@ -921,6 +926,7 @@ azentspublicclient/models/selectable_infrastructure_profile_list_response.py
 azentspublicclient/models/selectable_infrastructure_profile_response.py
 azentspublicclient/models/selectable_model_option.py
 azentspublicclient/models/selectable_model_option_input.py
+azentspublicclient/models/selectable_model_option_response.py
 azentspublicclient/models/selectable_model_settings.py
 azentspublicclient/models/selectable_model_settings_input.py
 azentspublicclient/models/send_code_request.py
@@ -1293,6 +1299,8 @@ azentspublicclient/test/test_model_catalog_sync_attempt_response.py
 azentspublicclient/test/test_model_catalog_sync_response.py
 azentspublicclient/test/test_model_compatibility_capabilities.py
 azentspublicclient/test/test_model_context_window.py
+azentspublicclient/test/test_model_execution_option_definition.py
+azentspublicclient/test/test_model_execution_option_id.py
 azentspublicclient/test/test_model_modalities.py
 azentspublicclient/test/test_model_modality.py
 azentspublicclient/test/test_model_parameter_capabilities.py
@@ -1415,6 +1423,7 @@ azentspublicclient/test/test_selectable_infrastructure_profile_list_response.py
 azentspublicclient/test/test_selectable_infrastructure_profile_response.py
 azentspublicclient/test/test_selectable_model_option.py
 azentspublicclient/test/test_selectable_model_option_input.py
+azentspublicclient/test/test_selectable_model_option_response.py
 azentspublicclient/test/test_selectable_model_settings.py
 azentspublicclient/test/test_selectable_model_settings_input.py
 azentspublicclient/test/test_send_code_request.py

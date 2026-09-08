@@ -14653,6 +14653,14 @@
             "title": "Model Snapshot",
             "description": "Normalized model snapshot"
           },
+          "supported_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Supported Execution Options",
+            "description": "Directly selectable execution options supported by this model"
+          },
           "source_metadata": {
             "anyOf": [
               {
@@ -14880,7 +14888,7 @@
           },
           "selectable_model_options": {
             "items": {
-              "$ref": "#/components/schemas/SelectableModelOption"
+              "$ref": "#/components/schemas/SelectableModelOptionResponse"
             },
             "type": "array",
             "title": "Selectable Model Options"
@@ -16403,6 +16411,14 @@
             ],
             "description": "Reasoning effort prepared for the next turn, or null for Default"
           },
+          "current_enabled_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Current Enabled Execution Options",
+            "description": "Execution options applied to future Session turns"
+          },
           "title": {
             "anyOf": [
               {
@@ -16543,6 +16559,7 @@
           "agent_id",
           "current_model_target_label",
           "current_reasoning_effort",
+          "current_enabled_execution_options",
           "title",
           "title_source",
           "status",
@@ -17795,13 +17812,22 @@
               }
             ],
             "description": "Applied explicit effort, or null for model Default"
+          },
+          "enabled_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Enabled Execution Options",
+            "description": "Model execution option IDs applied by the message"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "model_target_label",
-          "reasoning_effort"
+          "reasoning_effort",
+          "enabled_execution_options"
         ],
         "title": "AppliedInferenceProfile",
         "description": "Resolved user-visible inference settings applied by one message."
@@ -19181,13 +19207,22 @@
               }
             ],
             "description": "Explicit reasoning effort, or null for model Default"
+          },
+          "enabled_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Enabled Execution Options",
+            "description": "Enabled model execution option IDs"
           }
         },
         "type": "object",
         "required": [
           "session_id",
           "model_target_label",
-          "reasoning_effort"
+          "reasoning_effort",
+          "enabled_execution_options"
         ],
         "title": "ChatSessionModelProfileResponse",
         "description": "REST Session model-profile replacement response."
@@ -19217,13 +19252,22 @@
               }
             ],
             "description": "Explicit reasoning effort, or null for model Default"
+          },
+          "enabled_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Enabled Execution Options",
+            "description": "Explicitly enabled model execution option IDs"
           }
         },
         "type": "object",
         "required": [
           "client_request_id",
           "model_target_label",
-          "reasoning_effort"
+          "reasoning_effort",
+          "enabled_execution_options"
         ],
         "title": "ChatSessionModelProfileUpdateRequest",
         "description": "REST Session model-profile replacement request."
@@ -24487,6 +24531,13 @@
           "normalized_capabilities": {
             "$ref": "#/components/schemas/ModelCapabilities"
           },
+          "supported_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Supported Execution Options"
+          },
           "lifecycle_status": {
             "type": "string",
             "title": "Lifecycle Status"
@@ -24550,6 +24601,7 @@
           "runtime_model_identifier",
           "display_name",
           "normalized_capabilities",
+          "supported_execution_options",
           "lifecycle_status",
           "visibility_status",
           "publisher",
@@ -24816,6 +24868,52 @@
         "type": "object",
         "title": "ModelContextWindow",
         "description": "Model context window capability."
+      },
+      "ModelExecutionOptionDefinition": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ModelExecutionOptionId"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Description"
+          },
+          "cost_hint": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Cost Hint"
+          },
+          "control": {
+            "type": "string",
+            "const": "boolean",
+            "title": "Control"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "cost_hint",
+          "control"
+        ],
+        "title": "ModelExecutionOptionDefinition",
+        "description": "Public metadata for one model execution option."
+      },
+      "ModelExecutionOptionId": {
+        "type": "string",
+        "enum": [
+          "fast"
+        ],
+        "title": "ModelExecutionOptionId",
+        "description": "Stable identifier for a directly selectable model execution option."
       },
       "ModelModalities": {
         "properties": {
@@ -26547,13 +26645,22 @@
               }
             ],
             "description": "Explicit reasoning effort, or null for model Default"
+          },
+          "enabled_execution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionId"
+            },
+            "type": "array",
+            "title": "Enabled Execution Options",
+            "description": "Explicitly enabled model execution option IDs"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "model_target_label",
-          "reasoning_effort"
+          "reasoning_effort",
+          "enabled_execution_options"
         ],
         "title": "RequestedInferenceProfile",
         "description": "Agent-owned target label and optional explicit reasoning effort."
@@ -28515,6 +28622,36 @@
         ],
         "title": "SelectableModelOptionInput",
         "description": "Selectable model option input keyed by label."
+      },
+      "SelectableModelOptionResponse": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelection"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SelectableModelSettings"
+          },
+          "execution_option_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelExecutionOptionDefinition"
+            },
+            "type": "array",
+            "title": "Execution Option Definitions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "model_selection",
+          "settings",
+          "execution_option_definitions"
+        ],
+        "title": "SelectableModelOptionResponse",
+        "description": "Public selectable model option with execution descriptors."
       },
       "SelectableModelSettings": {
         "properties": {

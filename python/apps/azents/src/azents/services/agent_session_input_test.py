@@ -35,6 +35,7 @@ from azents.core.inference_profile import (
     SessionAppliedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -115,6 +116,7 @@ from .mailbox import (
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
     model_target_label="default",
     reasoning_effort=None,
+    enabled_execution_options=[],
 )
 
 
@@ -255,12 +257,14 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         session_id: str,
         model_target_label: str,
         reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentSession:
         """Persist applied profile in memory for input-admission tests."""
         del session
         self.applied_inference_profile = SessionAppliedInferenceProfile(
             model_target_label=model_target_label,
             reasoning_effort=reasoning_effort,
+            enabled_execution_options=enabled_execution_options,
         )
         self.applied_profile_calls.append(self.applied_inference_profile)
         return self._build_session(session_id)
@@ -327,6 +331,7 @@ class _MailboxServiceDouble(MailboxService):
             attachments=input.attachments,
             file_parts=input.file_parts,
             created_at=datetime.datetime.now(datetime.UTC),
+            requested_enabled_execution_options=[],
         )
         return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
@@ -708,6 +713,7 @@ class TestAgentSessionInputService:
             inference_profile=RequestedInferenceProfile(
                 model_target_label="missing",
                 reasoning_effort=None,
+                enabled_execution_options=[],
             ),
             user_id=user_id,
             request_payload={"request": "invalid-profile"},

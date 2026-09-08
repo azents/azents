@@ -2321,6 +2321,43 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Per prompt quality standard profile",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Quality standard profile response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Per prompt Fast retry preserves prepared option",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic Fast retry.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Per prompt Fast retry preserves prepared option",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Fast retry preserved response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Per prompt fast profile",
         "hasToolResult": false
       },

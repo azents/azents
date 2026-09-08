@@ -184,6 +184,7 @@ def test_run_tool_to_file_stores_full_read_output_without_model_body(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,

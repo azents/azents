@@ -24,7 +24,7 @@ from azentspublicclient.models.agent_model_selection import AgentModelSelection
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
-from azentspublicclient.models.selectable_model_option import SelectableModelOption
+from azentspublicclient.models.selectable_model_option_response import SelectableModelOptionResponse
 from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.uploaded_image import UploadedImage
 from typing import Optional, Set
@@ -39,7 +39,7 @@ class AgentResponse(BaseModel):
     description: Optional[StrictStr]
     model_selection: Optional[AgentModelSelection]
     lightweight_model_selection: Optional[AgentModelSelection]
-    selectable_model_options: List[SelectableModelOption]
+    selectable_model_options: List[SelectableModelOptionResponse]
     main_model_label: StrictStr
     lightweight_model_label: StrictStr
     effective_context_window_tokens: Optional[StrictInt]
@@ -245,7 +245,7 @@ class AgentResponse(BaseModel):
             "description": obj.get("description"),
             "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
             "lightweight_model_selection": AgentModelSelection.from_dict(obj["lightweight_model_selection"]) if obj.get("lightweight_model_selection") is not None else None,
-            "selectable_model_options": [SelectableModelOption.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
+            "selectable_model_options": [SelectableModelOptionResponse.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
             "main_model_label": obj.get("main_model_label"),
             "lightweight_model_label": obj.get("lightweight_model_label"),
             "effective_context_window_tokens": obj.get("effective_context_window_tokens"),

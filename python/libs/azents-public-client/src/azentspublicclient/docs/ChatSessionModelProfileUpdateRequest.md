@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **client_request_id** | **str** | Client-generated idempotency key | 
 **model_target_label** | **str** | Agent-owned selectable model target label | 
 **reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | 
+**enabled_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Explicitly enabled model execution option IDs | 
 
 ## Example
 

@@ -776,7 +776,11 @@
     "model": "Modèle",
     "effortLabel": "Effort de raisonnement",
     "done": "Terminé",
-    "send": "Envoyer"
+    "send": "Envoyer",
+    "enabled": "activé",
+    "disabled": "désactivé",
+    "executionOptionAriaLabel": "{label}, {state}. {costHint}",
+    "executionOptionSaveFailed": "Impossible d’enregistrer l’option d’exécution. Le réglage précédent a été restauré."
   },
   "inferenceProvenance": {
     "title": "Profil d’inférence",

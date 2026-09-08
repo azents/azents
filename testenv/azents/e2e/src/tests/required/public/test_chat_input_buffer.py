@@ -263,6 +263,7 @@ def _write_new_session_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
     )
@@ -289,6 +290,7 @@ def _write_session_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
     )
@@ -317,6 +319,7 @@ def _write_edit_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
     )

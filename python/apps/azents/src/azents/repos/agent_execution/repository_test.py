@@ -195,11 +195,13 @@ class TestEventExecutionRepositories:
         requested_profile = RequestedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         applied_profile = AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name="GPT 5.5",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
 
         appended = await transcript_repo.append(
@@ -229,11 +231,13 @@ class TestEventExecutionRepositories:
         assert stored.payload["requested_inference_profile"] == {
             "model_target_label": "Quality",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
         assert stored.payload["applied_inference_profile"] == {
             "model_target_label": "Quality",
             "model_display_name": "GPT 5.5",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
 
     async def test_external_message_updates_last_user_input_at(
@@ -464,6 +468,7 @@ class TestEventExecutionRepositories:
             model_target_label="Quality",
             model_display_name="GPT 5.5",
             reasoning_effort=None,
+            enabled_execution_options=[],
         )
         turn_marker = TurnMarkerPayload(
             run_id="run-1",
@@ -498,6 +503,7 @@ class TestEventExecutionRepositories:
             "model_target_label": "Quality",
             "model_display_name": "GPT 5.5",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
 
     async def test_append_read_and_move_head(
@@ -947,6 +953,7 @@ class TestEventExecutionRepositories:
             activated_at=activated_at,
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            requested_enabled_execution_options=[],
         )
 
         assert activated.status == AgentRunStatus.RUNNING
@@ -990,6 +997,7 @@ class TestEventExecutionRepositories:
             activated_at=datetime.datetime.now(datetime.UTC),
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            requested_enabled_execution_options=[],
         )
         await repo.mark_terminal(
             rdb_session,
@@ -1059,6 +1067,7 @@ class TestEventExecutionRepositories:
             effective_context_window_tokens=128_000,
             effective_auto_compaction_threshold_tokens=115_200,
             resolved_at=datetime.datetime.now(datetime.UTC),
+            enabled_execution_options=[],
         )
         await session_repo.set_inference_state(
             rdb_session,
@@ -1086,6 +1095,7 @@ class TestEventExecutionRepositories:
             activated_at=datetime.datetime.now(datetime.UTC),
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            requested_enabled_execution_options=[],
         )
         refreshed_session = await session_repo.get_by_id(
             rdb_session,
@@ -1569,6 +1579,7 @@ class TestEventExecutionRepositories:
             activated_at=datetime.datetime.now(datetime.UTC),
             requested_model_target_label="default",
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
         )
 
         await rdb_session.refresh(rdb_agent_session)

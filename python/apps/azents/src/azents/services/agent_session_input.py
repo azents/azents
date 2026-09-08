@@ -387,6 +387,9 @@ class AgentSessionInputService:
                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
+                    requested_enabled_execution_options=(
+                        inference_profile.enabled_execution_options
+                    ),
                     sender_user_id=requester_user_id,
                     order_group=None,
                     order_sequence=0,
@@ -448,6 +451,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -724,6 +728,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -1000,6 +1005,7 @@ class AgentSessionInputService:
                 session_id=agent_session.id,
                 model_target_label=inference_profile.model_target_label,
                 reasoning_effort=inference_profile.reasoning_effort,
+                enabled_execution_options=inference_profile.enabled_execution_options,
             )
 
         return Success(
@@ -1034,6 +1040,7 @@ class AgentSessionInputService:
                     scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
+                    requested_enabled_execution_options=[],
                     sender_user_id=None,
                     order_group=None,
                     order_sequence=0,
@@ -1070,6 +1077,9 @@ class AgentSessionInputService:
                             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
+                            requested_enabled_execution_options=(
+                                inference_profile.enabled_execution_options
+                            ),
                             sender_user_id=user_id,
                             order_group=None,
                             order_sequence=0,
@@ -1122,6 +1132,7 @@ class AgentSessionInputService:
                 scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=None,
                 order_group=None,
                 order_sequence=0,
@@ -1156,6 +1167,9 @@ class AgentSessionInputService:
                 scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
+                requested_enabled_execution_options=(
+                    inference_profile.enabled_execution_options
+                ),
                 sender_user_id=user_id,
                 order_group=None,
                 order_sequence=0,

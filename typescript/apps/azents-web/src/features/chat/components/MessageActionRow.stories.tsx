@@ -32,6 +32,7 @@ export const User: Story = {
     inferenceProfile: {
       model_target_label: "quality",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
   },
 };
@@ -41,6 +42,7 @@ export const UserEditable: Story = {
     inferenceProfile: {
       model_target_label: "quality",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
     additionalActions: (
       <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Edit">
@@ -55,6 +57,7 @@ export const UserPendingDeletion: Story = {
     inferenceProfile: {
       model_target_label: "quality",
       reasoning_effort: "high",
+      enabled_execution_options: [],
     },
     additionalActions: (
       <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Delete">

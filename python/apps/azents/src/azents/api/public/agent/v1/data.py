@@ -12,9 +12,14 @@ from azents.core.agent import (
     ModelParameters,
     SelectableModelOption,
     SelectableModelOptionInput,
+    SelectableModelSettings,
     SubagentSettings,
 )
 from azents.core.enums import AgentRuntimeCapability, AgentType
+from azents.core.model_execution_options import (
+    ModelExecutionOptionDefinition,
+    list_model_execution_option_definitions,
+)
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
@@ -27,6 +32,30 @@ from azents.services.memory.data import MemoryOutput
 from azents.services.uploads.schema import UploadedImage
 
 
+class SelectableModelOptionResponse(BaseModel):
+    """Public selectable model option with execution descriptors."""
+
+    label: str
+    model_selection: AgentModelSelection
+    settings: SelectableModelSettings
+    execution_option_definitions: list[ModelExecutionOptionDefinition]
+
+    @classmethod
+    def convert_from(
+        cls, option: SelectableModelOption
+    ) -> "SelectableModelOptionResponse":
+        """Convert a persisted selectable model option."""
+        return cls(
+            label=option.label,
+            model_selection=option.model_selection,
+            settings=option.settings,
+            execution_option_definitions=list_model_execution_option_definitions(
+                provider=option.model_selection.provider,
+                supported=option.model_selection.supported_execution_options,
+            ),
+        )
+
+
 class AgentResponse(BaseModel):
     """Agent response."""
 
@@ -35,7 +64,7 @@ class AgentResponse(BaseModel):
     description: str | None
     model_selection: AgentModelSelection | None
     lightweight_model_selection: AgentModelSelection | None
-    selectable_model_options: list[SelectableModelOption]
+    selectable_model_options: list[SelectableModelOptionResponse]
     main_model_label: str
     lightweight_model_label: str
     effective_context_window_tokens: int | None
@@ -92,7 +121,10 @@ class AgentResponse(BaseModel):
             description=data.description,
             model_selection=data.model_selection,
             lightweight_model_selection=data.lightweight_model_selection,
-            selectable_model_options=data.selectable_model_options,
+            selectable_model_options=[
+                SelectableModelOptionResponse.convert_from(option)
+                for option in data.selectable_model_options
+            ],
             main_model_label=data.main_model_label,
             lightweight_model_label=data.lightweight_model_label,
             effective_context_window_tokens=data.effective_context_window_tokens,

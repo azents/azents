@@ -12,6 +12,7 @@ Name | Type | Description | Notes
 **runtime_model_identifier** | **str** |  | 
 **display_name** | **str** |  | 
 **normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) |  | 
+**supported_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) |  | 
 **lifecycle_status** | **str** |  | 
 **visibility_status** | **str** |  | 
 **publisher** | **str** |  | 

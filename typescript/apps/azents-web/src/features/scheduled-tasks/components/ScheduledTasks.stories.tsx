@@ -55,6 +55,7 @@ const teamSession: AgentSessionResponse = {
   agent_id: agent.id,
   current_model_target_label: null,
   current_reasoning_effort: null,
+  current_enabled_execution_options: [],
   title: "Release coordination",
   title_source: "manual",
   status: "active",

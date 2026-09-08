@@ -15,6 +15,12 @@ import {
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
+import {
+  executionOptionDefinitionsForModel,
+  normalizeComposerProfile,
+  normalizeEnabledExecutionOptions,
+  supportedExecutionOptionIds,
+} from "../executionOptions";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
 import type {
   ChatAction,
@@ -30,6 +36,7 @@ import type {
 } from "@/shared/file-upload/useFileUpload";
 import type {
   AgentResponse,
+  ModelExecutionOptionId,
   ModelReasoningEffort,
   RequestedInferenceProfile,
 } from "@azents/public-client";
@@ -276,6 +283,13 @@ function effortLevelsForTarget(
   return reasoningEffortLevels(capabilities);
 }
 
+function modelOptionForTarget(
+  options: AgentResponse["selectable_model_options"],
+  targetLabel: string,
+): AgentResponse["selectable_model_options"][number] | null {
+  return options.find((option) => option.label === targetLabel) ?? null;
+}
+
 function normalizeDefaultProfileForOptions(
   profile: RequestedInferenceProfile | null,
   options: AgentResponse["selectable_model_options"],
@@ -297,9 +311,22 @@ function normalizeDefaultProfileForOptions(
       : fallback.model_target_label === modelTargetLabel
         ? fallback.reasoning_effort
         : null;
+  const normalized = normalizeComposerProfile(
+    profile?.model_target_label === modelTargetLabel
+      ? profile
+      : fallback.model_target_label === modelTargetLabel
+        ? fallback
+        : {
+            model_target_label: modelTargetLabel,
+            reasoning_effort: requestedEffort,
+            enabled_execution_options: [],
+          },
+    supportedExecutionOptionIds(option),
+  );
   return {
     model_target_label: modelTargetLabel,
     reasoning_effort: requestedEffort,
+    enabled_execution_options: normalized.enabled_execution_options,
   };
 }
 
@@ -490,13 +517,13 @@ function useChatInputContainerImplementation({
     appliedInferenceProfile,
     normalizedDefaultProfile,
   );
+  const effectiveAppliedComposerProfile = effectiveAppliedInferenceProfile;
   const profileIdentity = `${agentId ?? ""}:${sessionId ?? "new"}`;
   const [inputValue, setInputValue] = useState(
     initialInputValue ?? parsedDraft.message,
   );
-  const [inferenceProfile, setInferenceProfile] = useState(
-    effectiveAppliedInferenceProfile,
-  );
+  const [inferenceProfile, setInferenceProfile] =
+    useState<RequestedInferenceProfile>(effectiveAppliedComposerProfile);
   const profileDirtyRef = useRef(false);
   const profileIdentityRef = useRef(profileIdentity);
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
@@ -509,6 +536,10 @@ function useChatInputContainerImplementation({
   const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
     useState<DesktopProfileFocusTarget | null>(null);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
+  const [executionOptionSavePending, setExecutionOptionSavePending] =
+    useState(false);
+  const [executionOptionSaveErrorVisible, setExecutionOptionSaveErrorVisible] =
+    useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -529,6 +560,26 @@ function useChatInputContainerImplementation({
   );
   const desktopModelOptionRefs = useRef(new Map<number, HTMLButtonElement>());
   const desktopEffortOptionRefs = useRef(new Map<number, HTMLButtonElement>());
+  const selectedModelOption = modelOptionForTarget(
+    selectableModelOptions,
+    inferenceProfile.model_target_label,
+  );
+  const supportedExecutionOptions = useMemo(
+    () =>
+      selectedModelOption === null
+        ? []
+        : supportedExecutionOptionIds(selectedModelOption),
+    [selectedModelOption],
+  );
+  const selectableExecutionOptions = useMemo(
+    () =>
+      selectedModelOption === null
+        ? []
+        : executionOptionDefinitionsForModel(selectedModelOption).filter(
+            (definition) => supportedExecutionOptions.includes(definition.id),
+          ),
+    [selectedModelOption, supportedExecutionOptions],
+  );
   const selectableEfforts = useMemo(
     () =>
       effortLevelsForTarget(
@@ -546,7 +597,9 @@ function useChatInputContainerImplementation({
     effectiveAppliedInferenceProfile.model_target_label !==
       inferenceProfile.model_target_label ||
     effectiveAppliedInferenceProfile.reasoning_effort !==
-      inferenceProfile.reasoning_effort;
+      inferenceProfile.reasoning_effort ||
+    effectiveAppliedComposerProfile.enabled_execution_options.join(",") !==
+      inferenceProfile.enabled_execution_options.join(",");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousEditingMessageIdRef = useRef<string | null>(null);
@@ -611,21 +664,23 @@ function useChatInputContainerImplementation({
   useEffect(() => {
     const identityChanged = profileIdentityRef.current !== profileIdentity;
     const matchesEffectiveBaseline =
-      effectiveAppliedInferenceProfile.model_target_label ===
+      effectiveAppliedComposerProfile.model_target_label ===
         inferenceProfile.model_target_label &&
-      effectiveAppliedInferenceProfile.reasoning_effort ===
-        inferenceProfile.reasoning_effort;
+      effectiveAppliedComposerProfile.reasoning_effort ===
+        inferenceProfile.reasoning_effort &&
+      effectiveAppliedComposerProfile.enabled_execution_options.join(",") ===
+        inferenceProfile.enabled_execution_options.join(",");
     if (identityChanged) {
       profileIdentityRef.current = profileIdentity;
       profileDirtyRef.current = false;
-      setInferenceProfile(effectiveAppliedInferenceProfile);
+      setInferenceProfile(effectiveAppliedComposerProfile);
       return;
     }
     if (!profileDirtyRef.current || matchesEffectiveBaseline) {
       profileDirtyRef.current = false;
-      setInferenceProfile(effectiveAppliedInferenceProfile);
+      setInferenceProfile(effectiveAppliedComposerProfile);
     }
-  }, [effectiveAppliedInferenceProfile, inferenceProfile, profileIdentity]);
+  }, [effectiveAppliedComposerProfile, inferenceProfile, profileIdentity]);
 
   useEffect(() => {
     if (selectedAction === null) {
@@ -702,9 +757,9 @@ function useChatInputContainerImplementation({
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-    setInferenceProfile(effectiveAppliedInferenceProfile);
+    setInferenceProfile(effectiveAppliedComposerProfile);
     profileDirtyRef.current = false;
-  }, [effectiveAppliedInferenceProfile, inputActions, parsedDraft]);
+  }, [effectiveAppliedComposerProfile, inputActions, parsedDraft]);
 
   const handleCancelEdit = useCallback((): void => {
     restorePersistedDraft();
@@ -736,7 +791,12 @@ function useChatInputContainerImplementation({
       const trimmed = inputValue.trim();
       const normalizedAction =
         selectedAction === null ? null : normalizeAction(selectedAction.action);
-      if (inputDisabled || isUploading || editSendDisabled) {
+      if (
+        inputDisabled ||
+        isUploading ||
+        editSendDisabled ||
+        executionOptionSavePending
+      ) {
         return;
       }
 
@@ -831,6 +891,7 @@ function useChatInputContainerImplementation({
     inferenceProfile,
     isUploading,
     editSendDisabled,
+    executionOptionSavePending,
     inputDisabled,
     pendingFiles,
     agentId,
@@ -950,19 +1011,25 @@ function useChatInputContainerImplementation({
         selectableModelOptions,
         modelTargetLabel,
       );
+      const nextModelOption = modelOptionForTarget(
+        selectableModelOptions,
+        modelTargetLabel,
+      );
       updateInferenceProfile({
         model_target_label: modelTargetLabel,
         reasoning_effort: normalizeReasoningEffort(
           knownReasoningEffort(inferenceProfile.reasoning_effort),
           nextEfforts,
         ),
+        enabled_execution_options: normalizeEnabledExecutionOptions(
+          inferenceProfile,
+          nextModelOption === null
+            ? []
+            : supportedExecutionOptionIds(nextModelOption),
+        ),
       });
     },
-    [
-      inferenceProfile.reasoning_effort,
-      selectableModelOptions,
-      updateInferenceProfile,
-    ],
+    [inferenceProfile, selectableModelOptions, updateInferenceProfile],
   );
 
   const handleEffortChange = useCallback(
@@ -977,6 +1044,60 @@ function useChatInputContainerImplementation({
       });
     },
     [inferenceProfile, selectableEfforts, updateInferenceProfile],
+  );
+
+  const handleExecutionOptionToggle = useCallback(
+    (optionId: ModelExecutionOptionId): void => {
+      if (
+        executionOptionSavePending ||
+        inputDisabled ||
+        editSendDisabled ||
+        editingMessageId !== null ||
+        !supportedExecutionOptions.includes(optionId)
+      ) {
+        return;
+      }
+      const previousProfile = inferenceProfile;
+      const enabled = new Set(inferenceProfile.enabled_execution_options);
+      if (enabled.has(optionId)) {
+        enabled.delete(optionId);
+      } else {
+        enabled.add(optionId);
+      }
+      const nextProfile: RequestedInferenceProfile = {
+        ...inferenceProfile,
+        enabled_execution_options: supportedExecutionOptions.filter((id) =>
+          enabled.has(id),
+        ),
+      };
+      setExecutionOptionSaveErrorVisible(false);
+      updateInferenceProfile(nextProfile);
+      if (!onApplyInferenceProfile) {
+        return;
+      }
+      setExecutionOptionSavePending(true);
+      void onApplyInferenceProfile(nextProfile)
+        .then((applied) => {
+          if (!applied) {
+            setInferenceProfile(previousProfile);
+            profileDirtyRef.current = true;
+            setExecutionOptionSaveErrorVisible(true);
+          }
+        })
+        .finally(() => {
+          setExecutionOptionSavePending(false);
+        });
+    },
+    [
+      editSendDisabled,
+      editingMessageId,
+      executionOptionSavePending,
+      inferenceProfile,
+      inputDisabled,
+      onApplyInferenceProfile,
+      supportedExecutionOptions,
+      updateInferenceProfile,
+    ],
   );
 
   const handleOpenContextUsage = useCallback((): void => {
@@ -1231,6 +1352,9 @@ function useChatInputContainerImplementation({
     contextUsage,
     contextUsageActiveRun,
     onApplyInferenceProfile,
+    selectableExecutionOptions,
+    executionOptionSavePending,
+    executionOptionSaveErrorVisible,
     isUploading,
     pendingFiles,
     goal,
@@ -1272,6 +1396,7 @@ function useChatInputContainerImplementation({
     selectableEfforts,
     selectedModelLabel,
     selectedEffortLabel,
+    supportedExecutionOptions,
     hasPendingInferenceProfileChange,
     fileInputRef,
     textareaRef,
@@ -1293,6 +1418,7 @@ function useChatInputContainerImplementation({
     handleFileChange,
     handleModelChange,
     handleEffortChange,
+    handleExecutionOptionToggle,
     handleOpenContextUsage,
     handleProfilePickerEnterTransitionEnd,
     desktopProfileSections,

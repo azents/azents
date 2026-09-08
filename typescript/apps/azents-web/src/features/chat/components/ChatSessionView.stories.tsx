@@ -61,6 +61,7 @@ const agent: AgentResponse = {
         subagent_enabled: true,
         subagent_guidance: "Use for release coordination.",
       },
+      execution_option_definitions: [],
     },
   ],
   main_model_label: "default",
@@ -97,6 +98,7 @@ const session: AgentSessionResponse = {
   agent_id: agent.id,
   current_model_target_label: "default",
   current_reasoning_effort: "medium",
+  current_enabled_execution_options: [],
   title: "Release readiness review",
   title_source: "manual",
   status: "active",
@@ -215,6 +217,7 @@ const chatSession: ChatSessionContainerOutput = {
   defaultInferenceProfile: {
     model_target_label: "default",
     reasoning_effort: "medium",
+    enabled_execution_options: [],
   },
   onApplyInferenceProfile: sendMessage,
   onSendInput: sendMessage,
