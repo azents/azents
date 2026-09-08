@@ -40,6 +40,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/repos/mailbox/**
+  - python/apps/azents/src/azents/repos/goal/**
+  - python/apps/azents/src/azents/repos/skill_state/**
+  - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/subagent_coordination/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
@@ -83,7 +86,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py
   - python/apps/azents/src/azents/engine/tools/skill.py
-  - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
+  - python/apps/azents/src/azents/core/goal.py
+  - python/apps/azents/src/azents/core/skill_projection.py
+  - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/session/**
@@ -121,7 +126,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-08
-spec_version: 162
+spec_version: 163
 ---
 
 # Conversation & Events
@@ -571,14 +576,25 @@ for browser and new-session preview UI; session Project rows remain the prompt-e
 RuntimeToolkit loads registered project prompt content from the current logical `AgentSession` ID.
 Runtime context sharing affects shell/file operations; it must not make project registry ownership or
 project prompt selection fall back to a parent, team-primary, or runtime session.
+Project finalization preserves the shared `Agent -> AgentSession` lock prefix,
+then locks membership, binding/context, and Project/path authority in that order.
+This matches input and promotion paths and prevents opposing Session-then-Agent
+waits.
 
 ### ActionExecution and SessionGitWorktree
 
 The supported TurnAction set is a closed typed product contract. One service-layer
 capability registry owns the policy used by public composer discovery and REST
 admission, including visibility, message, attachment, and inference requirements.
-The same registry performs Goal and Skill preparation and hands operation-backed
-actions to Worker execution without changing their persisted discriminators.
+The same registry performs detached Goal and Skill preparation and hands
+operation-backed actions to Worker execution without changing their persisted
+discriminators. Attachment and managed Skill VFS resolution complete before the
+final Mailbox transaction. The final database-only promotion operation re-locks
+the Session followed by the FIFO head, revalidates owner generation and expected
+head identity, revalidates an exact filesystem Skill projection when applicable,
+and atomically applies Goal/Skill effects, appends events, creates operation
+execution state, associates Run input, acknowledges agent results, and deletes
+the source row.
 Internal working-folder and Agent-managed worktree actions are executable but are
 not public composer definitions.
 
@@ -1317,6 +1333,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-08** — v163. Moved attachment and managed Skill preparation outside
+  final Mailbox database work and made one composing repository own FIFO and
+  generation revalidation plus atomic Goal/Skill/event/action/Run/delete effects.
 - **2026-09-08** — v162. Moved automatic title snapshots, retry ownership
   checks, and conditional replacement behind completed repository operations so
   OAuth, model, and External Channel work does not span a database transaction.

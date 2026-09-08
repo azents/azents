@@ -1496,8 +1496,6 @@ def _executor(
     if vfs_projection_service is None:
         vfs_projection_service = _VfsProjectionService()
     capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
-        "agent_session_repository": agent_session_repository,
-        "goal_store": object(),
         "skill_store": object(),
         "vfs_projection_service": None,
     }
@@ -3723,9 +3721,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
     ]
     processor_service: Any = SimpleNamespace()
     processor = ExternalChannelMessageMailboxProcessor(processor_service)
-    db_session: Any = object()
     preparation_context = MailboxPreparationContext(
-        session=db_session,
         session_id="session-1",
         active_run_id=None,
         required_inference_profile=None,
@@ -3735,6 +3731,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
             file_parts=[],
             created_model_file_ids=[],
         ),
+        prepared_turn_action=None,
     )
     promoted_buffer_ids: list[str] = []
     promoted_events: list[Event] = []

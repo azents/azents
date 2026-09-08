@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
+from azents.core.goal import GoalStateSnapshot, GoalStatus
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -18,7 +19,6 @@ from azents.engine.run.failure import (
     FailedRunErrorKind,
     FailedRunRetryability,
 )
-from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.repos.action_execution.data import ActionExecutionProjection
 from azents.repos.agent_session.data import AgentSessionUnreadTerminalRunProjection

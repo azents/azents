@@ -31,6 +31,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.skill_projection import SkillProjectionState
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -41,7 +42,7 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
-from azents.engine.tools.skill import SkillProjectionState, SkillStateStore
+from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
@@ -77,8 +78,15 @@ from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
+from azents.repos.session_working_folder_binding import (
+    SessionWorkingFolderBindingRepository,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.repos.session_workspace_project_operations import (
+    SessionWorkspaceProjectOperationsRepository,
+)
+from azents.repos.skill_state import SkillStateRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -128,7 +136,10 @@ from azents.services.session_working_folder_binding import (
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
-from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.turn_action import (
+    make_test_mailbox_promotion_repository,
+    make_test_turn_action_capabilities,
+)
 from azents.testing.types import is_string_object_dict
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
@@ -189,6 +200,9 @@ def _readonly_service() -> SessionGitWorktreeService:
         agent_runtime_repository=AgentRuntimeRepository(),
         session_git_worktree_repository=SessionGitWorktreeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        session_workspace_project_operations_repository=(
+            _project_operations_repository(_session_manager_double)
+        ),
         agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_catalog_service=_CatalogRefreshService(
             AgentProjectCatalogStatus.AVAILABLE
@@ -859,10 +873,15 @@ def _service(
 ) -> SessionGitWorktreeService:
     """Build the service under test."""
     runtime_repository = _RuntimeRepository()
+    project_repository = (
+        session_workspace_project_repository or SessionWorkspaceProjectRepository()
+    )
     binding_service = SessionWorkingFolderBindingService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        session_manager=session_manager,
+        repository=SessionWorkingFolderBindingRepository(
+            agent_repository=AgentRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            session_manager=session_manager,
+        )
     )
     return SessionGitWorktreeService(
         agent_repository=AgentRepository(),
@@ -870,8 +889,12 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         agent_runtime_repository=runtime_repository,
         session_git_worktree_repository=SessionGitWorktreeRepository(),
-        session_workspace_project_repository=(
-            session_workspace_project_repository or SessionWorkspaceProjectRepository()
+        session_workspace_project_repository=project_repository,
+        session_workspace_project_operations_repository=(
+            _project_operations_repository(
+                session_manager,
+                project_repository=project_repository,
+            )
         ),
         agent_project_catalog_repository=catalog_repository
         or AgentProjectCatalogRepository(),
@@ -886,6 +909,31 @@ def _service(
         ),
         session_working_folder_binding_service=binding_service,
         runner_operations=runner,
+    )
+
+
+def _project_operations_repository(
+    session_manager: SessionManager[AsyncSession],
+    *,
+    project_repository: SessionWorkspaceProjectRepository | None = None,
+) -> SessionWorkspaceProjectOperationsRepository:
+    """Build the Project database composition used by Skill synchronization."""
+    return SessionWorkspaceProjectOperationsRepository(
+        project_repository=(project_repository or SessionWorkspaceProjectRepository()),
+        agent_repository=AgentRepository(),
+        preset_repository=AgentProjectPresetRepository(),
+        catalog_repository=AgentProjectCatalogRepository(),
+        agent_session_repository=AgentSessionRepository(),
+        workspace_user_repository=WorkspaceUserRepository(),
+        binding_repository=SessionWorkingFolderBindingRepository(
+            agent_repository=AgentRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            session_manager=session_manager,
+        ),
+        skill_state_repository=SkillStateRepository(
+            session_manager=session_manager,
+        ),
+        session_manager=session_manager,
     )
 
 
@@ -928,6 +976,9 @@ def _input_service(
             turn_action_capabilities=make_test_turn_action_capabilities(
                 session_manager
             ),
+            promotion_repository=make_test_mailbox_promotion_repository(
+                session_manager
+            ),
             external_channel_repository=ExternalChannelRepository(),
         ),
         session_manager=session_manager,
@@ -952,6 +1003,7 @@ def _mailbox_service(
         ),
         action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(session_manager),
+        promotion_repository=make_test_mailbox_promotion_repository(session_manager),
         external_channel_repository=ExternalChannelRepository(),
     )
 
@@ -1015,6 +1067,9 @@ async def _execute_first_setup_action(
         turn_action_capabilities=make_test_turn_action_capabilities(
             rdb_session_manager
         ),
+        promotion_repository=make_test_mailbox_promotion_repository(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
@@ -1061,6 +1116,9 @@ async def _execute_first_setup_action(
         ),
         action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
+        promotion_repository=make_test_mailbox_promotion_repository(
             rdb_session_manager
         ),
         external_channel_repository=ExternalChannelRepository(),

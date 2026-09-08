@@ -1,10 +1,10 @@
 """Session goal Toolkit State tool tests."""
 
-from collections.abc import Callable
 from unittest.mock import AsyncMock
 
 import pytest
 
+from azents.core.goal import GoalState, GoalStatus
 from azents.core.tools import TurnContext
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
@@ -13,12 +13,11 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.goal import (
-    GoalState,
-    GoalStatus,
     GoalToolkit,
     render_goal_prompt,
     render_goal_snapshot,
 )
+from azents.repos.goal.store import GoalAlreadyExistsError, GoalStatusUpdate
 
 
 def _compaction_context(
@@ -201,17 +200,11 @@ async def test_goal_idle_hook_skips_inactive_goal(status: GoalStatus) -> None:
 
 
 async def test_create_goal_rejects_existing_unfinished_goal() -> None:
-    """create_goal mutator fails when unfinished Goal exists."""
+    """create_goal reports the typed repository conflict."""
     store = AsyncMock()
-
-    async def update(
-        _agent_id: str,
-        _session_id: str,
-        mutator: Callable[[GoalState], GoalState],
-    ) -> GoalState:
-        return mutator(GoalState(objective="Existing", status="active"))
-
-    store.update.side_effect = update
+    store.create.side_effect = GoalAlreadyExistsError(
+        "An unfinished goal already exists."
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
@@ -232,21 +225,21 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
     """Complete Goal stores completion briefing event."""
     store = AsyncMock()
 
-    async def update(
-        _agent_id: str,
-        _session_id: str,
-        mutator: Callable[[GoalState], GoalState],
-    ) -> GoalState:
-        return mutator(
-            GoalState(
-                objective="Ship the feature",
-                status="active",
-                created_at="2026-06-15T12:00:00+00:00",
-                updated_at="2026-06-15T12:00:00+00:00",
-            )
-        )
-
-    store.update.side_effect = update
+    previous = GoalState(
+        objective="Ship the feature",
+        status="active",
+        created_at="2026-06-15T12:00:00+00:00",
+        updated_at="2026-06-15T12:00:00+00:00",
+    )
+    store.set_status.return_value = GoalStatusUpdate(
+        previous=previous,
+        updated=previous.model_copy(
+            update={
+                "status": "complete",
+                "updated_at": "2026-09-08T00:00:00+00:00",
+            }
+        ),
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
@@ -273,14 +266,11 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
     """Blocked Goal does not store completion briefing event."""
     store = AsyncMock()
 
-    async def update(
-        _agent_id: str,
-        _session_id: str,
-        mutator: Callable[[GoalState], GoalState],
-    ) -> GoalState:
-        return mutator(GoalState(objective="Blocked goal", status="active"))
-
-    store.update.side_effect = update
+    previous = GoalState(objective="Blocked goal", status="active")
+    store.set_status.return_value = GoalStatusUpdate(
+        previous=previous,
+        updated=previous.model_copy(update={"status": "blocked"}),
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(

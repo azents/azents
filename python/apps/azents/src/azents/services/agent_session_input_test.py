@@ -96,7 +96,10 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
 )
-from azents.testing.turn_action import make_test_turn_action_capabilities
+from azents.testing.turn_action import (
+    make_test_mailbox_promotion_repository,
+    make_test_turn_action_capabilities,
+)
 from azents.testing.types import require_instance
 
 from .agent_session_input import (
@@ -429,6 +432,9 @@ def _mailbox_item_service(
         ),
         action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
+        promotion_repository=make_test_mailbox_promotion_repository(
             rdb_session_manager
         ),
         external_channel_repository=ExternalChannelRepository(),

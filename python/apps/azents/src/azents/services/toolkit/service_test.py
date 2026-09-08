@@ -17,9 +17,23 @@ from azents.engine.tools.mcp import McpToolkitProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.github_user_installation import GithubUserInstallationRepository
+from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.repos.toolkit import (
+    AgentToolkitRepository,
+    ToolkitRepository,
+    ToolkitScopeRepository,
+)
 from azents.repos.toolkit.data import NotFound, ToolkitConfig
+from azents.repos.toolkit_operations import ToolkitOperationsRepository
+from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent.data import NotAdmin
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
+)
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -101,7 +115,7 @@ class TestMergeEnvVarCredentials:
         toolkit_repo.update_by_id = AsyncMock(return_value=Success(existing))
         session_manager = MagicMock()
         session_manager.return_value = AsyncMock()
-        service = ToolkitService(
+        service = _build_service(
             toolkit_repo=toolkit_repo,
             mcp_oauth_connection_repo=MagicMock(),
             scope_repo=MagicMock(),
@@ -162,7 +176,7 @@ def _service(
     """Build a ToolkitService with isolated repository doubles."""
     session_manager = MagicMock()
     session_manager.return_value = AsyncMock()
-    return ToolkitService(
+    return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
         scope_repo=MagicMock(),
@@ -200,7 +214,7 @@ def _agent_management_service(
     """Build a ToolkitService for Agent-owned management tests."""
     session_manager = MagicMock()
     session_manager.return_value = AsyncMock()
-    return ToolkitService(
+    return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
         scope_repo=MagicMock(),
@@ -344,7 +358,7 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
         agent_toolkit_repo=agent_toolkit_repo,
         toolkit_registry={"mcp": provider},
     )
-    service.scope_repo = scope_repo
+    service.operations_repository.scope_repository = scope_repo
 
     result = await service.create_agent_owned(
         "agent-1",
@@ -417,7 +431,7 @@ async def test_agent_github_installation_sync_rechecks_current_authority() -> No
         agent_toolkit_repo=MagicMock(),
         toolkit_registry={},
     )
-    service.github_user_installation_repo = github_repo
+    service.owned_operations.github_user_installation_repo = github_repo
 
     result = await service.sync_agent_github_installations(
         "agent-1",
@@ -453,7 +467,7 @@ async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None
         agent_toolkit_repo=MagicMock(),
         toolkit_registry={},
     )
-    service.mcp_oauth_connection_repo = oauth_repo
+    service.owned_operations.mcp_oauth_connection_repo = oauth_repo
 
     result = await service.store_agent_oauth_connection(
         "agent-1",
@@ -502,7 +516,7 @@ async def test_agent_oauth_delete_rejects_another_agents_toolkit() -> None:
         agent_toolkit_repo=MagicMock(),
         toolkit_registry={},
     )
-    service.mcp_oauth_connection_repo = oauth_repo
+    service.owned_operations.mcp_oauth_connection_repo = oauth_repo
 
     result = await service.delete_agent_oauth_connection(
         "agent-1",
@@ -717,7 +731,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
         return SimpleNamespace(workspace_id=workspace_id)
 
     agent_repo.lock_by_id = AsyncMock(side_effect=lock_agent)
-    service = ToolkitService(
+    service = _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
         scope_repo=MagicMock(),
@@ -780,3 +794,45 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
             await session.execute(
                 sa.text("DELETE FROM workspaces WHERE id = 'workspace-race'")
             )
+
+
+def _build_service(
+    *,
+    toolkit_repo: ToolkitRepository,
+    mcp_oauth_connection_repo: MCPOAuthConnectionRepository,
+    scope_repo: ToolkitScopeRepository,
+    agent_toolkit_repo: AgentToolkitRepository,
+    agent_repo: AgentRepository,
+    agent_admin_repo: AgentAdminRepository,
+    github_user_installation_repo: GithubUserInstallationRepository,
+    session_manager: SessionManager[AsyncSession],
+    toolkit_registry: dict[str, Any],
+    github_runtime: PlatformGitHubAppRuntimeService,
+) -> ToolkitService:
+    """Compose test-owned repositories while preserving narrow collaborator probes."""
+    operations = ToolkitOperationsRepository(
+        toolkit_repository=toolkit_repo,
+        scope_repository=scope_repo,
+        agent_toolkit_repository=agent_toolkit_repo,
+        agent_repository=agent_repo,
+        workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
+        github_installation_repository=github_user_installation_repo,
+        oauth_connection_repository=mcp_oauth_connection_repo,
+        system_setting_repository=AsyncMock(spec=SystemSettingRepository),
+        session_manager=session_manager,
+    )
+    owned = AgentToolkitOperationsRepository(
+        toolkit_repo=toolkit_repo,
+        mcp_oauth_connection_repo=mcp_oauth_connection_repo,
+        agent_repo=agent_repo,
+        agent_admin_repo=agent_admin_repo,
+        github_user_installation_repo=github_user_installation_repo,
+        session_manager=session_manager,
+        shared_operations=operations,
+    )
+    return ToolkitService(
+        operations_repository=operations,
+        owned_operations=owned,
+        toolkit_registry=toolkit_registry,
+        github_runtime=github_runtime,
+    )

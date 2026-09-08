@@ -14,6 +14,7 @@ from azents.api.public.toolkit.v1.oauth import (
 from azents.core.auth.deps import WorkspaceMember
 from azents.core.config import Config
 from azents.core.oauth2 import create_platform_oauth_state
+from azents.core.system_setting import SystemSettingFieldSource
 from azents.rdb.session import SessionManager
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
@@ -40,6 +41,7 @@ async def test_changed_generation_rejects_callback_before_code_exchange(
             client_id="client-id",
             private_key="private-key",
             client_secret="client-secret",
+            app_id_source=SystemSettingFieldSource.ADMIN,
             effective_generation="generation-after",
         )
     )

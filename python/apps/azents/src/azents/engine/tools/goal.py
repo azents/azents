@@ -2,13 +2,10 @@
 
 import datetime
 import json
-from collections.abc import Callable
-from typing import Literal, Self
 
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import EventKind
+from azents.core.goal import GOAL_TOOLKIT_NAMESPACE, GoalState, GoalUpdateStatus
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -27,21 +24,11 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.engine.tooling.toolkit_state import (
-    ToolkitStateHandle,
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-    ToolkitStateStore,
+from azents.repos.goal.store import (
+    GoalAlreadyExistsError,
+    GoalNotActiveError,
+    GoalStateStore,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
-
-GOAL_TOOLKIT_NAMESPACE = "goal"
-GOAL_TOOLKIT_STATE_NAME = "goal"
-GOAL_STATE_SCHEMA_VERSION = 1
-GoalStatus = Literal["active", "paused", "blocked", "complete"]
-GoalUpdateStatus = Literal["complete", "blocked"]
 
 _GOAL_PROMPT = """### Goal
 
@@ -65,16 +52,6 @@ Rules:
 """
 
 
-class GoalState(ToolkitStateModel):
-    """Session-scoped Goal Toolkit State payload."""
-
-    schema_version: int = GOAL_STATE_SCHEMA_VERSION
-    objective: str | None = None
-    status: GoalStatus | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-
-
 class CreateGoalInput(BaseModel):
     """create_goal tool input."""
 
@@ -85,114 +62,6 @@ class UpdateGoalInput(BaseModel):
     """update_goal tool input."""
 
     status: GoalUpdateStatus = Field(description="New goal status")
-
-
-class GoalStateStore:
-    """goal state store based on Toolkit State."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Create goal state store."""
-        self.session_manager = session_manager
-
-    async def load(self, agent_id: str, session_id: str) -> GoalState:
-        """Fetch session goal state."""
-        async with self.session_manager() as session:
-            return await self.load_in_session(session, agent_id, session_id)
-
-    async def load_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> GoalState:
-        """Fetch session goal state inside the caller's transaction."""
-        handle = await self._make_handle(session, agent_id, session_id)
-        if handle is None:
-            return GoalState()
-        return await handle.load(default_factory=GoalState)
-
-    async def update(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[GoalState], GoalState],
-    ) -> GoalState:
-        """Update session goal state with optimistic retry."""
-        async with self.session_manager() as session:
-            return await self.update_in_session(
-                session,
-                agent_id,
-                session_id,
-                mutator,
-            )
-
-    async def update_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[GoalState], GoalState],
-    ) -> GoalState:
-        """Update session goal state inside the caller's transaction."""
-        handle = await self._make_handle(session, agent_id, session_id)
-        if handle is None:
-            return GoalState()
-        saved_state: GoalState | None = None
-
-        def capture(current: GoalState) -> GoalState:
-            nonlocal saved_state
-            saved_state = mutator(current)
-            return saved_state
-
-        await handle.update(default_factory=GoalState, mutator=capture)
-        return saved_state or GoalState()
-
-    async def append_briefing_event(
-        self,
-        session_id: str,
-        *,
-        objective: str,
-        created_at: str,
-        completed_at: str,
-        duration_seconds: int | None,
-    ) -> None:
-        """Add Goal completion briefing event to durable transcript."""
-        async with self.session_manager() as session:
-            await EventTranscriptRepository().append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.GOAL_BRIEFING,
-                    payload={
-                        "objective": objective,
-                        "created_at": created_at,
-                        "completed_at": completed_at,
-                        "duration_seconds": duration_seconds,
-                    },
-                ),
-            )
-            await session.commit()
-
-    async def _make_handle(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolkitStateHandle[GoalState] | None:
-        """Create goal Toolkit State handle corresponding to agent/session identity."""
-        if not agent_id or not session_id:
-            return None
-        identity = ToolkitStateIdentity(
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=GOAL_TOOLKIT_NAMESPACE,
-            state_name=GOAL_TOOLKIT_STATE_NAME,
-        )
-        return ToolkitStateStore(session=session).handle(identity, GoalState)
 
 
 class GoalToolkitConfig(BaseModel):
@@ -405,18 +274,15 @@ def make_create_goal_tool(
         if not session_id:
             raise FunctionToolError("Session ID is not available.")
 
-        def mutate(current: GoalState) -> GoalState:
-            if _unfinished(current):
-                raise FunctionToolError("An unfinished goal already exists.")
-            now = _now_iso()
-            return GoalState(
+        try:
+            updated = await store.create(
+                agent_id=agent_id,
+                session_id=session_id,
                 objective=args.objective,
-                status="active",
-                created_at=now,
-                updated_at=now,
+                updated_at=_now_iso(),
             )
-
-        updated = await store.update(agent_id, session_id, mutate)
+        except GoalAlreadyExistsError as exc:
+            raise FunctionToolError(str(exc)) from exc
         return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
 
     return make_tool(create_goal, input_model=CreateGoalInput)
@@ -435,20 +301,18 @@ def make_update_goal_tool(
         if not session_id:
             raise FunctionToolError("Session ID is not available.")
 
-        previous: GoalState | None = None
         completed_at = _now_iso()
-
-        def mutate(current: GoalState) -> GoalState:
-            nonlocal previous
-            if current.status != "active" or not current.objective:
-                raise FunctionToolError("No active goal exists.")
-            previous = current
-            return current.model_copy(
-                update={"status": args.status, "updated_at": completed_at}
+        try:
+            result = await store.set_status(
+                agent_id=agent_id,
+                session_id=session_id,
+                status=args.status,
+                updated_at=completed_at,
             )
-
-        updated = await store.update(agent_id, session_id, mutate)
-        if args.status == "complete" and previous is not None and previous.objective:
+        except GoalNotActiveError as exc:
+            raise FunctionToolError(str(exc)) from exc
+        previous = result.previous
+        if args.status == "complete" and previous.objective:
             await store.append_briefing_event(
                 session_id,
                 objective=previous.objective,
@@ -456,26 +320,6 @@ def make_update_goal_tool(
                 completed_at=completed_at,
                 duration_seconds=_duration_seconds(previous.created_at, completed_at),
             )
-        return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
+        return json.dumps(result.updated.model_dump(mode="json"), ensure_ascii=False)
 
     return make_tool(update_goal, input_model=UpdateGoalInput)
-
-
-class GoalStateSnapshot(ToolkitStateModel):
-    """Goal state exposed to Chat live snapshot."""
-
-    schema_version: int = GOAL_STATE_SCHEMA_VERSION
-    objective: str | None = None
-    status: GoalStatus | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-
-    @classmethod
-    def from_state(cls, state: GoalState) -> Self:
-        """Create snapshot from stored state."""
-        return cls(
-            objective=state.objective,
-            status=state.status,
-            created_at=state.created_at,
-            updated_at=state.updated_at,
-        )
