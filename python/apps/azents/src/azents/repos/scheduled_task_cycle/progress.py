@@ -28,6 +28,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.scheduled_task.presentation import render_scheduled_task_schedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
 from azents.repos.scheduled_task_cycle.progress_data import (
@@ -306,6 +307,13 @@ class ScheduledTaskProgressRepository:
         discord = render_scheduled_task_discord_progress(
             progress,
             scheduled_task_title=record.state.title,
+            scheduled_task_schedule=render_scheduled_task_schedule(
+                schedule_type=record.state.schedule_type,
+                scheduled_at=record.state.scheduled_at,
+                cron_expression=record.state.cron_expression,
+                timezone=record.state.timezone,
+                scheduled_for=record.state.scheduled_for,
+            ).summary,
             work_id=record.state.cycle_id,
             desired_progress_revision=desired_revision,
         )

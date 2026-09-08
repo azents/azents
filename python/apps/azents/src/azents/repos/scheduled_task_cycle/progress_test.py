@@ -298,7 +298,7 @@ async def test_initial_tracker_preserves_scheduled_presentation_and_seed() -> No
         "Agent is running a scheduled task…\nDaily report"
     )
     assert kwargs["discord_payload"]["embeds"][0]["description"] == (
-        "◉ Agent is running a scheduled task…\nDaily report"
+        "Daily report\nSeptember 8, 2026 at 12:00 PM UTC"
     )
     assert kwargs["discord_payload"]["tracker_kind"] == "scheduled_task"
     assert "Prepare the report." not in str(kwargs)

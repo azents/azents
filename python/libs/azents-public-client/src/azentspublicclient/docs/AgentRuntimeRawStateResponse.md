@@ -20,7 +20,7 @@ Name | Type | Description | Notes
 **provider_observed_generation** | **int** |  | 
 **provider_connection_state** | [**RuntimeProviderConnectionState**](RuntimeProviderConnectionState.md) |  | 
 **runner_state** | [**RuntimeRunnerState**](RuntimeRunnerState.md) |  | 
-**runner_generation** | **int** |  | 
+**runner_generation** | **str** |  | 
 **workspace_path** | **str** |  | 
 **failure_generation** | **int** |  | 
 **failure_code** | **str** |  | 

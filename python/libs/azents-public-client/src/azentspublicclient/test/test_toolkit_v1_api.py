@@ -33,6 +33,13 @@ class TestToolkitV1Api(unittest.TestCase):
         """
         pass
 
+    def test_toolkit_v1_create_agent_toolkit_config(self) -> None:
+        """Test case for toolkit_v1_create_agent_toolkit_config
+
+        Create Agent Toolkit Config
+        """
+        pass
+
     def test_toolkit_v1_create_toolkit_config(self) -> None:
         """Test case for toolkit_v1_create_toolkit_config
 
@@ -44,6 +51,13 @@ class TestToolkitV1Api(unittest.TestCase):
         """Test case for toolkit_v1_create_toolkit_scope
 
         Create Toolkit Scope
+        """
+        pass
+
+    def test_toolkit_v1_delete_agent_toolkit_config(self) -> None:
+        """Test case for toolkit_v1_delete_agent_toolkit_config
+
+        Delete Agent Toolkit Config
         """
         pass
 
@@ -68,10 +82,24 @@ class TestToolkitV1Api(unittest.TestCase):
         """
         pass
 
+    def test_toolkit_v1_get_agent_toolkit_config(self) -> None:
+        """Test case for toolkit_v1_get_agent_toolkit_config
+
+        Get Agent Toolkit Config
+        """
+        pass
+
     def test_toolkit_v1_get_toolkit_config(self) -> None:
         """Test case for toolkit_v1_get_toolkit_config
 
         Get Toolkit Config
+        """
+        pass
+
+    def test_toolkit_v1_list_agent_toolkit_management(self) -> None:
+        """Test case for toolkit_v1_list_agent_toolkit_management
+
+        List Agent Toolkit Management
         """
         pass
 
@@ -107,6 +135,13 @@ class TestToolkitV1Api(unittest.TestCase):
         """Test case for toolkit_v1_list_toolkits
 
         List Toolkits
+        """
+        pass
+
+    def test_toolkit_v1_update_agent_toolkit_config(self) -> None:
+        """Test case for toolkit_v1_update_agent_toolkit_config
+
+        Update Agent Toolkit Config
         """
         pass
 

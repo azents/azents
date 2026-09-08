@@ -10,7 +10,6 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
 )
-from azents.runtime.control_protocol.service import RuntimeControlProtocolService
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.terminal_coordination.data import (
     RuntimeTerminalAdmission,
@@ -21,6 +20,9 @@ from azents.runtime.terminal_coordination.memory import (
     InMemoryRuntimeTerminalCoordinationStore,
 )
 from azents.runtime.terminal_dispatcher import RuntimeTerminalControlDispatcherAdapter
+from azents.testing.runtime_coordination import (
+    FakeRuntimeControlProtocolService,
+)
 
 _NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
@@ -28,7 +30,7 @@ _NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 @pytest.mark.asyncio
 async def test_dispatcher_routes_typed_open_and_terminate_intents() -> None:
     runtime_coordination = InMemoryRuntimeCoordinationStore()
-    control = RuntimeControlProtocolService(
+    control = FakeRuntimeControlProtocolService(
         runtime_coordination,
         request_id_factory=iter(("open-1", "terminate-1")).__next__,
     )
@@ -98,7 +100,7 @@ async def test_dispatcher_terminates_coordination_when_runner_route_is_missing()
     None
 ):
     runtime_coordination = InMemoryRuntimeCoordinationStore()
-    control = RuntimeControlProtocolService(runtime_coordination)
+    control = FakeRuntimeControlProtocolService(runtime_coordination)
     coordination = InMemoryRuntimeTerminalCoordinationStore()
     admitted = await coordination.admit_or_get(_admission(), admitted_at=_NOW)
     assert admitted.status is RuntimeTerminalMutationStatus.APPLIED

@@ -28,6 +28,7 @@ interface NotionConfigFieldsProps {
   /** Existing credentials existence in edit mode */
   hasCredentials: boolean;
   handle: string;
+  agentId?: string;
   /** Existing toolkit config ID in edit mode */
   toolkitConfigId?: string;
 }
@@ -37,6 +38,7 @@ export function NotionConfigFields({
   onConfigChange,
   credentials,
   handle,
+  agentId,
   toolkitConfigId,
 }: NotionConfigFieldsProps): React.ReactElement {
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
@@ -47,12 +49,20 @@ export function NotionConfigFields({
   const handleTestConnection = useCallback(() => {
     testConnectionMutation.mutate({
       handle,
+      ...(agentId != null && { agentId }),
       toolkitType: "notion",
       toolkitConfigId: toolkitConfigId ?? null,
       config,
       credentials,
     });
-  }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
+  }, [
+    agentId,
+    handle,
+    toolkitConfigId,
+    config,
+    credentials,
+    testConnectionMutation,
+  ]);
 
   return (
     <Stack gap="md">

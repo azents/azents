@@ -31,12 +31,16 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/core/runtime_connection_generation.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_control.py
+  - python/apps/azents/src/azents/rdb/models/runtime_connection_generation.py
   - python/apps/azents/src/azents/repos/runtime_provider_binding/**
   - python/apps/azents/src/azents/repos/runtime_provider_control/**
+  - python/apps/azents/src/azents/repos/runtime_connection_generation/**
   - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_runner_auth/**
+  - python/apps/azents/src/azents/services/runtime_connection_registration/**
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
@@ -63,7 +67,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-08
-spec_version: 76
+spec_version: 77
 ---
 
 # Agent Runtime Control
@@ -154,6 +158,9 @@ sequence, replay, quota, heartbeat, and revocation state only. PostgreSQL receiv
 Terminal bytes or transcript. Structured logs and metrics retain identifiers, bounded
 lifecycle reasons, durations, byte counts, truncation, quota, and cleanup outcomes,
 never command, output, environment, or working-directory content.
+The Redis implementation uses the `runtime-terminal:v2` namespace and stores accepted
+Runner connection generations as canonical fixed-width decimal strings. It does not
+read or migrate the retired volatile namespace.
 
 ## Runtime File Transfer
 
@@ -234,7 +241,9 @@ evidence. Each later failed repair updates the observation and saturating attemp
 count; successful cleanup clears the evidence and marks cleanup complete. The
 Memory and Redis stores enforce the same invariant. Redis transfer record schema
 changes use the existing coordinated cutover and do not add a compatibility
-reader or relational transfer entity.
+reader or relational transfer entity. The current cutover uses the
+`azents:runtime:transfer:v2` namespace and record schema version 9; accepted Runner
+connection generations are canonical fixed-width decimal strings.
 
 The handling boundary for each failed cleanup attempt emits one structured
 warning with origin traceback frames, a static replacement exception message,
@@ -324,21 +333,39 @@ The Runtime Coordination Store is the only cross-replica volatile coordination a
 The store owns:
 
 - provider and runner connection registry
+- one-shot unpublished connection candidates and atomic candidate promotion
 - provider generation-scoped request/reply streams
 - runner generation-scoped operation request/reply streams and operation body streams
 - operation metadata, heartbeat/progress/final events
-- generation fencing data used to reject stale provider/runner messages
+- volatile current-connection fencing used to reject stale provider/runner messages
 - request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
 
-Each Provider- or Runner-subject connection generation counter remains persistent
-within the selected coordination-store instance and is separate from the
-short-lived current-connection TTL. Redis does not expire these counters, and
-the in-memory implementation retains them for its process lifetime, so a
-reconnect cannot reuse a lower generation after a long offline period. Each
-Redis registration atomically increments the counter, removes a legacy expiry
-that an earlier deployment may have left on the key, and installs that exact
-generation as the current connection. Concurrent registration cannot restore a
-lower generation after a higher generation becomes current.
+PostgreSQL owns one durable high-water and accepted-generation row for each Provider
+resource and Agent Runtime subject. Runtime Control allocates the next positive signed
+`BIGINT` generation in a short database-only transaction. Existing subjects at the
+Home cutover begin above the legacy band at `2^48`; subjects created after activation
+begin at generation one. Generation rows survive connection expiry, Redis replacement,
+and logical Runtime lifecycle changes for the same subject identity.
+
+Registration then stages a complete short-lived candidate in the coordination store.
+The candidate is invisible to routing, heartbeat, reports, results, and close handling.
+After a database-only authority recheck, one atomic store operation consumes the exact
+candidate token and promotes it only when no equal-or-higher current generation exists.
+A final database-only transaction records durable acceptance and Provider connection
+evidence. If final acceptance fails, Control revokes the promoted volatile connection.
+No Redis, HTTP, gRPC, filesystem, object-store, or other external call occurs while any
+of these database transactions is open.
+
+Redis and in-memory coordination do not allocate, persist, restore, infer, or fall back
+for connection generations. An empty coordination store therefore makes prior streams
+unavailable and requires fresh registration without permitting generation reuse.
+Production Redis coordination uses the
+`azents:agent-runtime:coordination:v2` namespace and never reads or migrates legacy
+counters, numeric generation records, streams, operations, metrics, or consumer groups.
+Connection generations are integers in PostgreSQL, Python, and protobuf. Redis stores
+them as canonical 19-character zero-padded decimal strings so lexical ordering remains
+exact through `9223372036854775807`; public and browser JSON use canonical unpadded
+decimal strings and never JavaScript numbers.
 
 Generation fencing is enforced atomically with volatile operation mutations. One
 store transaction verifies the current connection generation while it creates
@@ -487,6 +514,12 @@ Every Provider stream declares exactly one authentication method in gRPC metadat
 - `kubernetes_service_account`, which verifies a Kubernetes ServiceAccount projected token and resolves its durable bootstrap-owned binding.
 
 The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
+
+The public Provider enrollment exchange rate limit is a best-effort Redis abuse-control
+window, not credential authority. Replacing Redis empty opens a fresh counting window.
+Every exchange still applies PostgreSQL-backed grant consumption, expiry, revocation,
+binding, subject, and Provider checks, so lost rate-limit state cannot make invalid
+enrollment evidence usable.
 
 Authenticated Kubernetes Provider registration accepts protocol
 `agent-runtime-provider-kubernetes-v2` for retained legacy direct operation and
@@ -840,18 +873,25 @@ Required deterministic coverage:
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 - credential-free runtime-provider E2E for explicit/default/unconfigured Profile precedence, exact
   binding, applied evidence, Provider loss without fallback, recreation, and recovery
+- credential-free Runtime E2E that clears every Valkey key while a Runtime is ready,
+  observes automatic Provider/Runner reconnection with a higher durable Runner
+  generation, and completes new Agent Workspace work without restoring old keys
 - credential-free runtime-provider E2E for multi-file `apply_patch`, typed results, final manifests, and traversal rejection
 
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
 
-- **2026-09-08 (spec_version=76)** — Moved Runtime lifecycle preflight,
+- **2026-09-08 (spec_version=77)** — Moved Runtime lifecycle preflight,
   post-connection claim/configuration admission, and outcome persistence into
   completed repository-owned transactions. Coordination and Provider dispatch
   now run without an active database transaction or retained Agent/Runtime row
   lock; unavailable Providers do not consume lifecycle claims, and stale outcomes
   are rejected by existing generation and claim authority.
+- **2026-09-08 (spec_version=76)** — Moved Provider and Runner connection-generation
+  authority to PostgreSQL, added one-shot volatile candidate promotion and final durable
+  acceptance, cut Runtime/Transfer/Terminal Redis state to fresh v2 schemas, and made
+  Redis and public/browser generation strings exact through signed `BIGINT`.
 - **2026-09-07 (spec_version=75)** — Made Provider stream closure revoke live and
   durable connection authority before waiting for stream-local relay cleanup, preventing
   a blocked claim from retaining stale Runtime Profile availability.

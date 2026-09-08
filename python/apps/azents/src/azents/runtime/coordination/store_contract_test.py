@@ -15,10 +15,15 @@ from azents_runtime_control.system_metrics import (
 )
 from redis.asyncio import Redis
 
+from azents.core.runtime_connection_generation import (
+    MAX_RUNTIME_CONNECTION_GENERATION,
+    runtime_connection_generation_to_redis,
+)
 from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunk,
     RuntimeConnectionKind,
+    RuntimeConnectionPromotionStatus,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
     RuntimeFencedMutationStatus,
@@ -75,8 +80,17 @@ class FakeRedisConnectionStore:
         del key, seconds
         return True
 
-    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
         del ex
+        if nx and key in self.data:
+            return False
         self.data[key] = value
         return True
 
@@ -96,18 +110,36 @@ class FakeRedisConnectionStore:
         script: str,
         numkeys: int,
         *args: object,
-    ) -> int | str:
+    ) -> object:
         keys = [str(value) for value in args[:numkeys]]
         values = args[numkeys:]
-        if "INCR" in script:
-            generation_key, connection_key = keys
-            generation = int(self.data.get(generation_key, "0")) + 1
-            self.data[generation_key] = str(generation)
-            payload = _json_object(str(values[0]))
-            payload["generation"] = generation
-            encoded = json.dumps(payload)
+        if "candidate_missing" in script:
+            candidate_key, connection_key = keys
+            candidate_raw = self.data.get(candidate_key)
+            if candidate_raw is None:
+                return ["candidate_missing"]
+            candidate = _json_object(candidate_raw)
+            record = candidate.get("record")
+            if (
+                candidate.get("publication_token") != values[0]
+                or not isinstance(record, dict)
+                or record.get("kind") != values[1]
+                or record.get("subject_id") != values[2]
+                or int(str(record.get("generation"))) != int(str(values[3]))
+            ):
+                self.data.pop(candidate_key, None)
+                return ["candidate_missing"]
+            current_raw = self.data.get(connection_key)
+            if current_raw is not None:
+                current = _json_object(current_raw)
+                if int(str(current["generation"])) >= int(str(values[3])):
+                    self.data.pop(candidate_key, None)
+                    return ["stale_generation", current_raw]
+            record["expires_at"] = str(values[4])
+            encoded = json.dumps(record)
             self.data[connection_key] = encoded
-            return encoded
+            self.data.pop(candidate_key, None)
+            return ["applied", encoded, current_raw or ""]
         key = keys[0]
         raw = self.data.get(key)
         if raw is None:
@@ -603,19 +635,36 @@ async def test_concurrent_registration_keeps_highest_generation_current(
 ) -> None:
     """Concurrent registration cannot restore a lower current generation."""
     connected_at = _now()
-    registered = await asyncio.gather(
+    candidates = [
+        RuntimeConnectionRecord(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id="runtime-1",
+            connection_id=f"runner-{index}",
+            owner_replica_id=f"control-{index}",
+            generation=index + 1,
+            connected_at=connected_at,
+            heartbeat_at=connected_at,
+            expires_at=connected_at + timedelta(seconds=60),
+            metadata={},
+        )
+        for index in range(20)
+    ]
+    for candidate in candidates:
+        assert await store.stage_connection_candidate(
+            record=candidate,
+            publication_token=f"token-{candidate.generation}",
+            ttl_seconds=60,
+        )
+    results = await asyncio.gather(
         *(
-            store.register_connection(
-                kind=RuntimeConnectionKind.RUNNER,
-                subject_id="runtime-1",
-                connection_id=f"runner-{index}",
-                owner_replica_id=f"control-{index}",
-                connected_at=connected_at,
-                heartbeat_at=connected_at,
+            store.promote_connection_candidate(
+                kind=candidate.kind,
+                subject_id=candidate.subject_id,
+                generation=candidate.generation,
+                publication_token=f"token-{candidate.generation}",
                 ttl_seconds=60,
-                metadata={},
             )
-            for index in range(20)
+            for candidate in candidates
         )
     )
 
@@ -625,7 +674,16 @@ async def test_concurrent_registration_keeps_highest_generation_current(
     )
 
     assert current is not None
-    assert current.generation == max(record.generation for record in registered)
+    assert current.generation == 20
+    assert results[-1].status is RuntimeConnectionPromotionStatus.APPLIED
+    assert all(
+        result.status
+        in {
+            RuntimeConnectionPromotionStatus.APPLIED,
+            RuntimeConnectionPromotionStatus.STALE_GENERATION,
+        }
+        for result in results
+    )
 
 
 @pytest.mark.asyncio
@@ -958,23 +1016,25 @@ async def test_connection_registry_issues_generation_fences(
 ) -> None:
     """A newer connection generation fences out stale heartbeats and revokes."""
     connected_at = _now()
-    first = await store.register_connection(
+    first = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-a",
         owner_replica_id="control-a",
+        generation=1,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
-    second = await store.register_connection(
+    second = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-b",
         owner_replica_id="control-b",
+        generation=2,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
@@ -1041,23 +1101,25 @@ async def test_redis_connection_revoke_is_generation_fenced() -> None:
         fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
     )
     connected_at = _now()
-    first = await store.register_connection(
+    first = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-a",
         owner_replica_id="control-a",
+        generation=1,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
-    second = await store.register_connection(
+    second = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-b",
         owner_replica_id="control-a",
+        generation=2,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
@@ -1086,23 +1148,25 @@ async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
         fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
     )
     connected_at = _now()
-    first = await store.register_connection(
+    first = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-a",
         owner_replica_id="control-a",
+        generation=1,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
-    second = await store.register_connection(
+    second = await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-b",
         owner_replica_id="control-a",
+        generation=2,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={"workspace_path": "/workspace/agent"},
     )
@@ -1132,7 +1196,7 @@ async def test_redis_get_connection_does_not_delete_reconnected_generation() -> 
     store = RedisRuntimeCoordinationStore(
         fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
     )
-    key = "azents:agent-runtime:coordination:connection:runner:runtime-1"
+    key = "azents:agent-runtime:coordination:v2:connection:runner:runtime-1"
     now = _now()
     fake_redis.data[key] = _fake_connection_json(
         generation=1,
@@ -1188,16 +1252,17 @@ async def test_redis_streams_have_ttl(
 
     assert (
         await redis.ttl(
-            "azents:agent-runtime:coordination:stream:request:runner:runtime-1"
+            "azents:agent-runtime:coordination:v2:stream:request:runner:runtime-1"
         )
         > 0
     )
     assert (
-        await redis.ttl("azents:agent-runtime:coordination:stream:reply:reply:req-1")
+        await redis.ttl("azents:agent-runtime:coordination:v2:stream:reply:reply:req-1")
         > 0
     )
     assert (
-        await redis.ttl("azents:agent-runtime:coordination:stream:body:body:req-1") > 0
+        await redis.ttl("azents:agent-runtime:coordination:v2:stream:body:body:req-1")
+        > 0
     )
 
 
@@ -1218,77 +1283,223 @@ async def test_redis_empty_request_stream_created_by_group_has_ttl(
     assert claimed is None
     assert (
         await redis.ttl(
-            "azents:agent-runtime:coordination:stream:request:runner:runtime-1"
+            "azents:agent-runtime:coordination:v2:stream:request:runner:runtime-1"
         )
         > 0
     )
 
 
 @pytest.mark.asyncio
-async def test_redis_connection_generation_is_persistent(
-    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+async def test_connection_candidate_is_invisible_and_one_shot(
+    store: RuntimeCoordinationStore,
 ) -> None:
-    """Connection generation counters remain after current connections expire."""
-    store, redis = redis_store
+    """A candidate cannot route before one exact successful promotion."""
     connected_at = _now()
-
-    await store.register_connection(
+    record = RuntimeConnectionRecord(
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="runner-a",
         owner_replica_id="control-a",
+        generation=7,
         connected_at=connected_at,
         heartbeat_at=connected_at,
-        ttl_seconds=60,
+        expires_at=connected_at + timedelta(seconds=60),
         metadata={"workspace_path": "/workspace/agent"},
     )
+    token = "candidate-token"
 
-    assert (
-        await redis.ttl(
-            "azents:agent-runtime:coordination:connection-generation:runner:runtime-1"
-        )
-        == -1
+    assert await store.stage_connection_candidate(
+        record=record,
+        publication_token=token,
+        ttl_seconds=60,
     )
+    assert (
+        await store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id="runtime-1",
+        )
+        is None
+    )
+
+    promoted = await store.promote_connection_candidate(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        generation=7,
+        publication_token=token,
+        ttl_seconds=60,
+    )
+    replayed = await store.promote_connection_candidate(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        generation=7,
+        publication_token=token,
+        ttl_seconds=60,
+    )
+
+    assert promoted.status is RuntimeConnectionPromotionStatus.APPLIED
+    assert promoted.connection is not None
+    assert promoted.connection.generation == 7
+    assert replayed.status is RuntimeConnectionPromotionStatus.CANDIDATE_MISSING
 
 
 @pytest.mark.asyncio
-async def test_redis_registration_removes_legacy_generation_counter_ttl(
+async def test_lower_candidate_cannot_replace_visible_higher_generation(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Promotion consumes and rejects a candidate below the visible current fence."""
+    connected_at = _now()
+    lower = RuntimeConnectionRecord(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-lower",
+        owner_replica_id="control-a",
+        generation=7,
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        expires_at=connected_at + timedelta(seconds=60),
+        metadata={},
+    )
+    assert await store.stage_connection_candidate(
+        record=lower,
+        publication_token="lower-token",
+        ttl_seconds=60,
+    )
+    higher = await _publish_connection(
+        store,
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-higher",
+        owner_replica_id="control-b",
+        generation=8,
+        connected_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+    result = await store.promote_connection_candidate(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        generation=7,
+        publication_token="lower-token",
+        ttl_seconds=60,
+    )
+
+    assert result.status is RuntimeConnectionPromotionStatus.STALE_GENERATION
+    assert result.previous_connection == higher
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+    assert current == higher
+
+
+@pytest.mark.asyncio
+async def test_redis_empty_store_invalidates_staged_candidate(
     redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
 ) -> None:
-    """Registration increments a legacy counter and atomically removes its TTL."""
+    """An empty Redis instance cannot reconstruct a pre-reset publication token."""
     store, redis = redis_store
-    key = "azents:agent-runtime:coordination:connection-generation:provider:provider-1"
-    await redis.set(key, "41", ex=60)
-    assert await redis.ttl(key) > 0
-
     connected_at = _now()
-    first = await store.register_connection(
+    record = RuntimeConnectionRecord(
         kind=RuntimeConnectionKind.PROVIDER,
         subject_id="provider-1",
         connection_id="provider-a",
         owner_replica_id="control-a",
+        generation=7,
         connected_at=connected_at,
         heartbeat_at=connected_at,
-        ttl_seconds=60,
+        expires_at=connected_at + timedelta(seconds=60),
         metadata={},
     )
+    assert await store.stage_connection_candidate(
+        record=record,
+        publication_token="reset-token",
+        ttl_seconds=60,
+    )
 
-    assert first.generation == 42
-    assert await redis.ttl(key) == -1
-
-    second = await store.register_connection(
+    await redis.flushall()
+    result = await store.promote_connection_candidate(
         kind=RuntimeConnectionKind.PROVIDER,
         subject_id="provider-1",
-        connection_id="provider-b",
-        owner_replica_id="control-b",
+        generation=7,
+        publication_token="reset-token",
+        ttl_seconds=60,
+    )
+
+    assert result.status is RuntimeConnectionPromotionStatus.CANDIDATE_MISSING
+    assert result.connection is None
+
+
+@pytest.mark.asyncio
+async def test_redis_cutover_ignores_legacy_generation_counter(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """The v2 store neither reads nor mutates the legacy allocator namespace."""
+    store, redis = redis_store
+    legacy_key = (
+        "azents:agent-runtime:coordination:connection-generation:provider:provider-1"
+    )
+    await redis.set(legacy_key, "41", ex=60)
+    connected_at = _now()
+
+    connection = await _publish_connection(
+        store,
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+        connection_id="provider-a",
+        owner_replica_id="control-a",
+        generation=281474976710656,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={},
     )
 
-    assert second.generation == 43
-    assert await redis.ttl(key) == -1
+    assert connection.generation == 281474976710656
+    assert await redis.get(legacy_key) == b"41"
+    assert await redis.ttl(legacy_key) > 0
+    active_keys = {
+        key.decode() if isinstance(key, bytes) else str(key)
+        for key in await redis.keys("azents:agent-runtime:coordination:v2:*")
+    }
+    assert active_keys
+    assert not any("connection-generation" in key for key in active_keys)
+
+
+@pytest.mark.asyncio
+async def test_redis_connection_generation_strings_round_trip_high_boundaries(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """Redis preserves consecutive migration and signed-BIGINT boundary values."""
+    store, _ = redis_store
+    connected_at = _now()
+    generations = (
+        2**48 - 1,
+        2**48,
+        2**48 + 1,
+        MAX_RUNTIME_CONNECTION_GENERATION - 1,
+        MAX_RUNTIME_CONNECTION_GENERATION,
+    )
+
+    for generation in generations:
+        connection = await _publish_connection(
+            store,
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id="runtime-high-generation",
+            connection_id=f"runner-{generation}",
+            owner_replica_id="control-a",
+            generation=generation,
+            connected_at=connected_at,
+            ttl_seconds=60,
+            metadata={},
+        )
+        assert connection.generation == generation
+
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-high-generation",
+    )
+    assert current is not None
+    assert current.generation == MAX_RUNTIME_CONNECTION_GENERATION
 
 
 def _fake_connection_json(
@@ -1304,7 +1515,7 @@ def _fake_connection_json(
             "subject_id": "runtime-1",
             "connection_id": connection_id,
             "owner_replica_id": "control-a",
-            "generation": generation,
+            "generation": runtime_connection_generation_to_redis(generation),
             "connected_at": now.isoformat(),
             "heartbeat_at": now.isoformat(),
             "expires_at": expires_at.isoformat(),
@@ -1384,16 +1595,63 @@ async def _register_runner(
     *,
     connected_at: datetime,
 ) -> RuntimeConnectionRecord:
-    return await store.register_connection(
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+    generation = current.generation + 1 if current is not None else 1
+    return await _publish_connection(
+        store,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id=f"runner-{connected_at.timestamp()}",
         owner_replica_id="control-a",
+        generation=generation,
         connected_at=connected_at,
-        heartbeat_at=connected_at,
         ttl_seconds=60,
         metadata={},
     )
+
+
+async def _publish_connection(
+    store: RuntimeCoordinationStore,
+    *,
+    kind: RuntimeConnectionKind,
+    subject_id: str,
+    connection_id: str,
+    owner_replica_id: str,
+    generation: int,
+    connected_at: datetime,
+    ttl_seconds: int,
+    metadata: dict[str, JsonValue],
+) -> RuntimeConnectionRecord:
+    record = RuntimeConnectionRecord(
+        kind=kind,
+        subject_id=subject_id,
+        connection_id=connection_id,
+        owner_replica_id=owner_replica_id,
+        generation=generation,
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        expires_at=connected_at + timedelta(seconds=ttl_seconds),
+        metadata=metadata,
+    )
+    token = f"test:{kind.value}:{subject_id}:{generation}:{connection_id}"
+    assert await store.stage_connection_candidate(
+        record=record,
+        publication_token=token,
+        ttl_seconds=ttl_seconds,
+    )
+    result = await store.promote_connection_candidate(
+        kind=kind,
+        subject_id=subject_id,
+        generation=generation,
+        publication_token=token,
+        ttl_seconds=ttl_seconds,
+    )
+    assert result.status is RuntimeConnectionPromotionStatus.APPLIED
+    assert result.connection is not None
+    return result.connection
 
 
 def _operation_envelope(
@@ -1402,6 +1660,7 @@ def _operation_envelope(
     generation: int,
 ) -> RuntimeRequestEnvelope:
     deadline_at = _now() + timedelta(seconds=30)
+    generation_value = runtime_connection_generation_to_redis(generation)
     return RuntimeRequestEnvelope(
         request_id=request_id,
         runtime_id="runtime-1",
@@ -1409,7 +1668,7 @@ def _operation_envelope(
         generation=generation,
         operation_type="bash",
         payload={"command": "echo ok"},
-        reply_stream_id=f"runner:runtime-1:generation:{generation}:replies",
+        reply_stream_id=(f"runner:runtime-1:generation:{generation_value}:replies"),
         deadline_at=deadline_at,
         body_stream_id=None,
     )
@@ -1419,6 +1678,7 @@ def _operation_metadata(
     envelope: RuntimeRequestEnvelope,
 ) -> RuntimeOperationMetadata:
     created_at = _now()
+    generation_value = runtime_connection_generation_to_redis(envelope.generation)
     return RuntimeOperationMetadata(
         operation_id=f"operation:{envelope.request_id}",
         request_id=envelope.request_id,
@@ -1431,9 +1691,7 @@ def _operation_metadata(
         transfer_attempt_id=None,
         transfer_dispatch_id=None,
         transfer_direction=None,
-        request_stream_id=(
-            f"runner:runtime-1:generation:{envelope.generation}:requests"
-        ),
+        request_stream_id=f"runner:runtime-1:generation:{generation_value}:requests",
         request_cursor=None,
         reply_stream_id=envelope.reply_stream_id,
         status=RuntimeOperationStatus.ACTIVE,

@@ -3,9 +3,7 @@
 import datetime
 
 from azents.core.enums import ScheduledTaskScheduleType
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
-
-from .rendering import (
+from azents.repos.scheduled_task.presentation import (
     SCHEDULED_COMPACTION_HEADING,
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,
@@ -13,6 +11,7 @@ from .rendering import (
     render_scheduled_task_schedule,
     replace_scheduled_compaction_snapshot,
 )
+from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 

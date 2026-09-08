@@ -55,6 +55,11 @@ class RDBToolkitConfig(RDBModel):
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
     )
+    owner_agent_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     toolkit_type: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     slug: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
@@ -93,11 +98,31 @@ class RDBToolkitConfig(RDBModel):
     )
 
     IX_WORKSPACE_ID = sa.Index("ix_toolkit_configs_workspace_id", "workspace_id")
-    UQ_WORKSPACE_SLUG = sa.UniqueConstraint(
-        "workspace_id", "slug", name="uq_toolkit_configs_workspace_slug"
+    IX_OWNER_AGENT_ID = sa.Index(
+        "ix_toolkit_configs_owner_agent_id",
+        "owner_agent_id",
+    )
+    UQ_SHARED_WORKSPACE_SLUG = sa.Index(
+        "uq_toolkit_configs_shared_workspace_slug",
+        "workspace_id",
+        "slug",
+        unique=True,
+        postgresql_where=sa.text("owner_agent_id IS NULL"),
+    )
+    UQ_OWNER_AGENT_SLUG = sa.Index(
+        "uq_toolkit_configs_owner_agent_slug",
+        "owner_agent_id",
+        "slug",
+        unique=True,
+        postgresql_where=sa.text("owner_agent_id IS NOT NULL"),
     )
 
-    __table_args__ = (IX_WORKSPACE_ID, UQ_WORKSPACE_SLUG)
+    __table_args__ = (
+        IX_WORKSPACE_ID,
+        IX_OWNER_AGENT_ID,
+        UQ_SHARED_WORKSPACE_SLUG,
+        UQ_OWNER_AGENT_SLUG,
+    )
 
 
 class RDBToolkitScope(RDBModel):

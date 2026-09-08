@@ -1399,6 +1399,34 @@
       "provider_profile": "infrastructure Profile",
       "workspace_profile": "Workspace Runtime Profile",
       "agent": "Agent"
+    },
+    "toolkitManagement": {
+      "description": "Attach a workspace-shared toolkit or configure one only for this agent.",
+      "addToolkit": "Add Toolkit",
+      "toolLabel": "Tool",
+      "toolPlaceholder": "Select a tool",
+      "configureForAgent": "Configure for this agent",
+      "attachShared": "Attach workspace toolkit",
+      "attachSharedDescription": "Shared toolkit settings and credentials remain managed from Workspace settings.",
+      "noSharedForType": "No workspace toolkit is available for this tool.",
+      "agentOnlyDescription": "Settings and credentials belong only to this agent.",
+      "attach": "Attach",
+      "workspaceShared": "Workspace shared",
+      "agentOnly": "This agent only",
+      "workspaceBoundary": "Edit, authorization, and deletion remain in Workspace Toolkit management.",
+      "detach": "Detach",
+      "edit": "Edit",
+      "disable": "Disable",
+      "enable": "Enable",
+      "delete": "Delete",
+      "deleteTitle": "Delete agent-only toolkit",
+      "deleteDescription": "Delete {name} from this agent and permanently remove its stored credentials?",
+      "deleteConfirm": "Delete toolkit",
+      "readiness": {
+        "ready": "Ready",
+        "authorization_required": "Authorization required",
+        "disabled": "Disabled"
+      }
     }
   },
   "toolkits": {
@@ -1547,7 +1575,8 @@
       "connect": "Connect",
       "reconnect": "Reconnect",
       "disconnect": "Disconnect"
-    }
+    },
+    "agentSlugDescription": "Unique within this agent’s effective toolkit namespace. Use lowercase letters, numbers, and underscores."
   },
   "dashboard": {
     "headline": "Workspace",

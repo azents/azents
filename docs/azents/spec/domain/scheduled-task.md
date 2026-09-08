@@ -240,6 +240,10 @@ A Task may target one exact connected Slack or Discord Binding.
   Missing-host recovery creation uses the same silent path, while updates edit the
   retained Tracker. Registration, deletion, progress replies, and terminal results
   retain their existing notification behavior.
+- The initial Discord Tracker Embed is titled `Scheduled Task`. Its body shows the
+  Schedule title on the first line and the existing human-readable recurring schedule
+  or one-time execution time on the next line. The objective remains omitted, and
+  later Agent-authored progress retains its explicit progress title and task list.
 - Progress messages and Tracker updates are immediate one-attempt effects.
 - Scheduled progress preparation and Tracker claim commit in one repository-owned
   database transaction. A second completed database-only admission operation locks

@@ -2,5 +2,6 @@
   "title": "Authorization",
   "callbackSuccess": "Authorization complete. You can close this tab.",
   "callbackError": "Authorization failed. Please try again.",
-  "githubAppInstalled": "GitHub App installed successfully. You can close this tab."
+  "githubAppInstalled": "GitHub App installed successfully. You can close this tab.",
+  "returnToAgentSettings": "Return to Agent settings"
 }

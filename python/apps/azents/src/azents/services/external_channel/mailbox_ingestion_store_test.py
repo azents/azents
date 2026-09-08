@@ -629,7 +629,7 @@ async def test_existing_discord_binding_uses_tracker_without_settings_message() 
         (ExternalChannelProvider.SLACK, False, "hidden"),
         (ExternalChannelProvider.SLACK, True, "visible"),
         (ExternalChannelProvider.DISCORD, False, "hidden"),
-        (ExternalChannelProvider.DISCORD, True, "visible"),
+        (ExternalChannelProvider.DISCORD, True, "hidden"),
     ],
 )
 async def test_admission_derives_tracker_visibility_from_provider_invocation(
@@ -637,7 +637,7 @@ async def test_admission_derives_tracker_visibility_from_provider_invocation(
     invocation: bool,
     tracker_visibility: str,
 ) -> None:
-    """Ordinary all-messages input starts hidden until explicit invocation."""
+    """Discord stays typing-only while Slack mentions retain visible Trackers."""
     case = await _accepted_control_plan_case(
         existing_binding=True,
         provider=provider,

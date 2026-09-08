@@ -4,15 +4,106 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**toolkit_oauth_v1_connect_agent_oauth**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_connect_agent_oauth) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connect | Connect Agent Oauth
 [**toolkit_oauth_v1_connect_oauth**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_connect_oauth) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connect | Connect Oauth
+[**toolkit_oauth_v1_disconnect_agent_oauth_connection**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_disconnect_agent_oauth_connection) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/connection | Disconnect Agent Oauth Connection
 [**toolkit_oauth_v1_disconnect_oauth_connection**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_disconnect_oauth_connection) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connection | Disconnect Oauth Connection
+[**toolkit_oauth_v1_exchange_agent_oauth_connection**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_exchange_agent_oauth_connection) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/oauth/exchange | Exchange Agent Oauth Connection
 [**toolkit_oauth_v1_exchange_oauth_connection**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_exchange_oauth_connection) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/exchange | Exchange Oauth Connection
+[**toolkit_oauth_v1_get_agent_github_platform_install_url**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_agent_github_platform_install_url) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-install-url | Get Agent Github Platform Install Url
+[**toolkit_oauth_v1_get_agent_github_platform_installations**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_agent_github_platform_installations) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-installations | Get Agent Github Platform Installations
+[**toolkit_oauth_v1_get_agent_github_platform_oauth_url**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_agent_github_platform_oauth_url) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/platform-oauth-url | Get Agent Github Platform Oauth Url
 [**toolkit_oauth_v1_get_github_platform_install_url**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_install_url) | **GET** /toolkit/v1/workspaces/{handle}/github/platform-install-url | Get Github Platform Install Url
 [**toolkit_oauth_v1_get_github_platform_installations**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_installations) | **POST** /toolkit/v1/workspaces/{handle}/github/platform-installations | Get Github Platform Installations
 [**toolkit_oauth_v1_get_github_platform_oauth_url**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_oauth_url) | **GET** /toolkit/v1/workspaces/{handle}/github/platform-oauth-url | Get Github Platform Oauth Url
+[**toolkit_oauth_v1_test_agent_connection_saved**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_agent_connection_saved) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}/test-connection | Test Agent Connection Saved
+[**toolkit_oauth_v1_test_agent_connection_unsaved**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_agent_connection_unsaved) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/test-connection | Test Agent Connection Unsaved
 [**toolkit_oauth_v1_test_connection_saved**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_connection_saved) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/test-connection | Test Connection Saved
 [**toolkit_oauth_v1_test_connection_unsaved**](ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_connection_unsaved) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/test-connection | Test Connection Unsaved
 
+
+# **toolkit_oauth_v1_connect_agent_oauth**
+> OAuthAuthorizeResponse toolkit_oauth_v1_connect_agent_oauth(handle, agent_id, toolkit_config_id)
+
+Connect Agent Oauth
+
+Create an OAuth authorization URL for an Agent-owned Toolkit.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+
+    try:
+        # Connect Agent Oauth
+        api_response = api_instance.toolkit_oauth_v1_connect_agent_oauth(handle, agent_id, toolkit_config_id)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_connect_agent_oauth:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_connect_agent_oauth: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+
+### Return type
+
+[**OAuthAuthorizeResponse**](OAuthAuthorizeResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **toolkit_oauth_v1_connect_oauth**
 > OAuthAuthorizeResponse toolkit_oauth_v1_connect_oauth(handle, toolkit_config_id)
@@ -97,6 +188,86 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **toolkit_oauth_v1_disconnect_agent_oauth_connection**
+> toolkit_oauth_v1_disconnect_agent_oauth_connection(handle, agent_id, toolkit_config_id)
+
+Disconnect Agent Oauth Connection
+
+Delete an Agent-owned Toolkit OAuth connection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+
+    try:
+        # Disconnect Agent Oauth Connection
+        api_instance.toolkit_oauth_v1_disconnect_agent_oauth_connection(handle, agent_id, toolkit_config_id)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_disconnect_agent_oauth_connection: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **toolkit_oauth_v1_disconnect_oauth_connection**
 > toolkit_oauth_v1_disconnect_oauth_connection(handle, toolkit_config_id)
 
@@ -164,6 +335,89 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_exchange_agent_oauth_connection**
+> toolkit_oauth_v1_exchange_agent_oauth_connection(handle, agent_id, toolkit_config_id, o_auth_exchange_request)
+
+Exchange Agent Oauth Connection
+
+Exchange OAuth code for an Agent-owned Toolkit connection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    o_auth_exchange_request = azentspublicclient.OAuthExchangeRequest() # OAuthExchangeRequest | 
+
+    try:
+        # Exchange Agent Oauth Connection
+        api_instance.toolkit_oauth_v1_exchange_agent_oauth_connection(handle, agent_id, toolkit_config_id, o_auth_exchange_request)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_exchange_agent_oauth_connection: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **o_auth_exchange_request** | [**OAuthExchangeRequest**](OAuthExchangeRequest.md)|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 ### HTTP response details
@@ -252,6 +506,252 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_get_agent_github_platform_install_url**
+> GitHubPlatformInstallUrlResponse toolkit_oauth_v1_get_agent_github_platform_install_url(handle, agent_id)
+
+Get Agent Github Platform Install Url
+
+Return the Platform GitHub App install URL for Agent Toolkit setup.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.git_hub_platform_install_url_response import GitHubPlatformInstallUrlResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+
+    try:
+        # Get Agent Github Platform Install Url
+        api_response = api_instance.toolkit_oauth_v1_get_agent_github_platform_install_url(handle, agent_id)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_install_url:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_install_url: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+
+### Return type
+
+[**GitHubPlatformInstallUrlResponse**](GitHubPlatformInstallUrlResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_get_agent_github_platform_installations**
+> GitHubPlatformInstallationsResponse toolkit_oauth_v1_get_agent_github_platform_installations(handle, agent_id, git_hub_platform_installations_request)
+
+Get Agent Github Platform Installations
+
+Return GitHub installations for authorized Agent Toolkit setup.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest
+from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    git_hub_platform_installations_request = azentspublicclient.GitHubPlatformInstallationsRequest() # GitHubPlatformInstallationsRequest | 
+
+    try:
+        # Get Agent Github Platform Installations
+        api_response = api_instance.toolkit_oauth_v1_get_agent_github_platform_installations(handle, agent_id, git_hub_platform_installations_request)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_installations:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_installations: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **git_hub_platform_installations_request** | [**GitHubPlatformInstallationsRequest**](GitHubPlatformInstallationsRequest.md)|  | 
+
+### Return type
+
+[**GitHubPlatformInstallationsResponse**](GitHubPlatformInstallationsResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_get_agent_github_platform_oauth_url**
+> GitHubPlatformOAuthUrlResponse toolkit_oauth_v1_get_agent_github_platform_oauth_url(handle, agent_id)
+
+Get Agent Github Platform Oauth Url
+
+Return the Platform GitHub user OAuth URL for Agent Toolkit setup.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+
+    try:
+        # Get Agent Github Platform Oauth Url
+        api_response = api_instance.toolkit_oauth_v1_get_agent_github_platform_oauth_url(handle, agent_id)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_oauth_url:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_get_agent_github_platform_oauth_url: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+
+### Return type
+
+[**GitHubPlatformOAuthUrlResponse**](GitHubPlatformOAuthUrlResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -496,6 +996,173 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_test_agent_connection_saved**
+> TestConnectionResponse toolkit_oauth_v1_test_agent_connection_saved(agent_id, toolkit_config_id, handle)
+
+Test Agent Connection Saved
+
+Test one stored Agent-owned Toolkit connection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.test_connection_response import TestConnectionResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Test Agent Connection Saved
+        api_response = api_instance.toolkit_oauth_v1_test_agent_connection_saved(agent_id, toolkit_config_id, handle)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_test_agent_connection_saved:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_test_agent_connection_saved: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**TestConnectionResponse**](TestConnectionResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **toolkit_oauth_v1_test_agent_connection_unsaved**
+> TestConnectionResponse toolkit_oauth_v1_test_agent_connection_unsaved(agent_id, handle, test_connection_request)
+
+Test Agent Connection Unsaved
+
+Test unsaved Agent-owned Toolkit settings without creating a resource.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.test_connection_request import TestConnectionRequest
+from azentspublicclient.models.test_connection_response import TestConnectionResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    test_connection_request = azentspublicclient.TestConnectionRequest() # TestConnectionRequest | 
+
+    try:
+        # Test Agent Connection Unsaved
+        api_response = api_instance.toolkit_oauth_v1_test_agent_connection_unsaved(agent_id, handle, test_connection_request)
+        print("The response of ToolkitOAuthV1Api->toolkit_oauth_v1_test_agent_connection_unsaved:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolkitOAuthV1Api->toolkit_oauth_v1_test_agent_connection_unsaved: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **test_connection_request** | [**TestConnectionRequest**](TestConnectionRequest.md)|  | 
+
+### Return type
+
+[**TestConnectionResponse**](TestConnectionResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 ### HTTP response details

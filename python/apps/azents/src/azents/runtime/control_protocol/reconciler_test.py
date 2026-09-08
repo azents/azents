@@ -100,6 +100,9 @@ from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.runtime_coordination import (
+    FakeRuntimeControlProtocolService,
+)
 
 
 class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
@@ -354,7 +357,7 @@ async def test_stop_without_provider_keeps_claim_for_reconnect_dispatch(
     runtime_repository = AgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "stop-after-reconnect-request",
     )
@@ -414,7 +417,7 @@ async def test_dispatch_releases_database_transaction_before_coordination_and_pr
     profile_repository = RuntimeProfileRepository()
     probe = SessionBoundaryProbe(rdb_session_manager)
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "transaction-boundary-request",
     )
@@ -495,7 +498,7 @@ async def test_dispatch_success_does_not_apply_stale_connection_outcome(
     runtime_repository = AgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "stale-outcome-request",
     )
@@ -578,7 +581,7 @@ async def test_dispatch_route_unavailable_records_disconnected_after_revalidatio
         )
         assert connected is not None
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(store)
+    control_protocol = FakeRuntimeControlProtocolService(store)
     accepted = await control_protocol.register_provider(
         _provider_registration(),
         registered_at=datetime.datetime.now(datetime.UTC),
@@ -647,7 +650,7 @@ async def test_dispatch_unknown_outcome_propagates_without_connection_write(
     runtime_repository = AgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(store)
+    control_protocol = FakeRuntimeControlProtocolService(store)
     accepted = await control_protocol.register_provider(
         _provider_registration(),
         registered_at=datetime.datetime.now(datetime.UTC),
@@ -720,7 +723,7 @@ async def test_dispatch_cancellation_propagates_without_connection_write(
     runtime_repository = AgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(store)
+    control_protocol = FakeRuntimeControlProtocolService(store)
     accepted = await control_protocol.register_provider(
         _provider_registration(),
         registered_at=datetime.datetime.now(datetime.UTC),
@@ -851,7 +854,7 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
             session_manager=rdb_session_manager,
         ),
         coordination_store=store,
-        control_protocol=RuntimeControlProtocolService(store),
+        control_protocol=FakeRuntimeControlProtocolService(store),
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
@@ -941,7 +944,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
             )
         )
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "request-1",
     )
@@ -1080,7 +1083,7 @@ async def test_reconciler_repairs_current_network_drift_once(
         assert running is not None
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "request-network-policy-repair",
     )
@@ -1201,7 +1204,7 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
         assert observed is not None
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "request-stale-network-policy-repair",
     )
@@ -1301,7 +1304,7 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
         assert replacement is not None
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(store)
+    control_protocol = FakeRuntimeControlProtocolService(store)
     accepted = await control_protocol.register_provider(
         _provider_registration(),
         registered_at=datetime.datetime.now(datetime.UTC),
@@ -1418,7 +1421,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
         )
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "request-restart-replacement",
     )
@@ -1539,7 +1542,7 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
         assert repeated.desired_generation == stop.desired_generation
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "stop-repair-request",
     )
@@ -1737,7 +1740,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         )
 
     store = InMemoryRuntimeCoordinationStore()
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "request-disconnected-stopping",
     )
@@ -1848,7 +1851,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
 
     store = InMemoryRuntimeCoordinationStore()
     request_ids = iter(("terminal-request-1", "terminal-request-2"))
-    control_protocol = RuntimeControlProtocolService(
+    control_protocol = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=lambda: next(request_ids),
     )

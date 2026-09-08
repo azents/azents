@@ -317,14 +317,16 @@ Session title and Agent execution.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing new conversational input while a binding has no unanswered work creates a
-  Channel Work cycle before Session wake-up. Slack and Discord cycles are visible for
-  an eligible explicit invocation and hidden for an ordinary message admitted by an
-  existing all-messages Binding. Initial checking visibility does not depend on a
-  `channel_action` call.
+  Channel Work cycle before Session wake-up. Slack cycles are visible for an eligible
+  explicit invocation and hidden for an ordinary message admitted by an existing
+  all-messages Binding. Discord cycles are always initially hidden; active connected
+  ready Work is projected through Gateway typing instead. Initial Slack checking
+  visibility does not depend on a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
-  eligible initial Activity Tracker plan in the same transaction as the triggering
-  mailbox input. Every Binding creation is mention-gated, so its initial cycle is
-  visible. The versioned presence control replaces the former button-only Session link.
+  eligible Slack initial Activity Tracker plan in the same transaction as the
+  triggering mailbox input. Every Binding creation remains mention-gated, but Discord
+  does not create an automatic Activity Tracker. The versioned presence control
+  replaces the former button-only Session link.
   Slack uses Block Kit and Discord uses an Embed; both state that the current Agent
   joined the conversation and place `View session` and provider-native
   `Conversation settings` actions below the message while the Binding remains
@@ -335,11 +337,12 @@ Session title and Agent execution.
   joined-presence mutation, and Activity Tracker desired state never contains the
   Session URL.
 - The initial conversational Tracker states that the Agent is checking the message
-  with one `task_card` carrying the `in_progress` state. A Scheduled Task run instead
-  states `Agent is running a scheduled task…` on the first line and the task title on
-  the second line while keeping the objective out of the initial status. Once Channel
-  Work exists, one `plan` block carries the Agent-authored title and complete ordered
-  task list.
+  with one `task_card` carrying the `in_progress` state. A Discord Scheduled Task run
+  instead uses `Scheduled Task` as the initial Embed title, followed by the Schedule
+  title and its human-readable recurring schedule or one-time execution time in the
+  body while keeping the objective out of the initial status. Once Channel Work
+  exists, one `plan` block carries the Agent-authored title and complete ordered task
+  list.
   Nested tasks use `task_id`, literal title, Slack status, and optional literal
   rich-text details/output plus labeled URL sources. They omit standalone
   `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
@@ -351,24 +354,25 @@ Session title and Agent execution.
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
   not used.
-- Hidden Slack or Discord Work commits initial checking state without a Tracker. A valid
-  Agent-authored `continue` transition with at least one unfinished task promotes the
-  same cycle to visible inside the canonical Work mutation and plans a create from the
-  complete title and ordered task snapshot. A later eligible mention also promotes
-  still-hidden active Work and claims one create from its latest complete desired
-  snapshot. Visibility is monotonic; concurrent progress updates are re-read and
-  re-rendered through a bounded CAS loop, so promotion cannot leave visible Work
-  without its latest Tracker claim.
+- Hidden Slack or Discord Work commits initial checking state without a Tracker. A
+  valid Agent-authored `continue` transition with at least one unfinished task promotes
+  the same cycle to visible inside the canonical Work mutation and plans a create from
+  the complete title and ordered task snapshot. A later eligible Slack mention also
+  promotes still-hidden active Work and claims one create from its latest complete
+  desired snapshot. A Discord mention keeps Work hidden so typing remains the only
+  automatic activity signal. Visibility is monotonic; concurrent progress updates are
+  re-read and re-rendered through a bounded CAS loop, so explicit promotion cannot
+  leave visible Work without its latest Tracker claim.
 - Finishing requires a final reply. Reply effects are attempted first; only
   `delivered` results permit `chat.delete` for the Tracker. Failed, unknown, or
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one joined-presence control and, for a visible cycle, an initial
-  compact Channel Work Embed containing `◉ Agent is checking your message` from the
-  same accepted binding transaction. Hidden cycles omit the Embed until promoted. A
-  Scheduled Task-owned Tracker instead contains
-  `◉ Agent is running a scheduled task…` followed by the task title on the next line.
+- Discord creates one joined-presence control while conversational cycles remain
+  hidden until Agent-authored progress promotes them. A promoted cycle uses a compact
+  Channel Work Embed. A Scheduled Task-owned initial Tracker instead uses
+  `Scheduled Task` as the Embed title and places the Schedule title followed by the
+  human-readable schedule timing in its body.
   A state-only conversational progress change updates the current Tracker host in
   place even when tasks changed, or creates one notification-suppressed standalone
   Tracker when none exists.

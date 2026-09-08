@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | 
 **message_kind** | **str** |  | 
+**source_path** | **str** |  | 
 **content** | **str** |  | 
 
 ## Example
