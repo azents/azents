@@ -446,6 +446,7 @@ class ExternalChannelRepository:
         capabilities: dict[str, object] | None,
         checked_at: datetime.datetime,
         expected_encrypted_credentials: str,
+        expected_configuration_generation: int,
     ) -> ExternalChannelConnection | None:
         """Update redacted provider identity and health after validation."""
         rdb = await session.scalar(
@@ -454,6 +455,8 @@ class ExternalChannelRepository:
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.encrypted_credentials
                 == expected_encrypted_credentials,
+                RDBExternalChannelConnection.configuration_generation
+                == expected_configuration_generation,
                 RDBExternalChannelConnection.status.not_in(
                     (
                         ExternalChannelConnectionStatus.DISCONNECTING,

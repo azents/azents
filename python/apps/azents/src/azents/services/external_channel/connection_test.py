@@ -1,13 +1,10 @@
 """External Channel connection setup and validation tests."""
 
 import datetime
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
@@ -17,13 +14,17 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.repos.external_channel.connection import (
+    ExternalChannelConnectionRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
+    ExternalChannelConnectionHealthUpdate,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
+    ExternalChannelConnectionNotFound,
     ExternalChannelConnectionService,
     ExternalChannelConnectionStateChanged,
     external_channel_capabilities_from_storage,
@@ -41,7 +42,6 @@ from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
 )
-from azents.testing.types import require_instance
 
 
 def test_discord_persisted_configuration_defaults_url_preview_suppression() -> None:
@@ -70,18 +70,8 @@ def test_discord_new_configuration_defaults_url_preview_suppression() -> None:
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 
 
-class _SessionDouble:
-    """Record connection transaction commits."""
-
-    def __init__(self) -> None:
-        self.commits = 0
-
-    async def commit(self) -> None:
-        self.commits += 1
-
-
-class _RepositoryDouble:
-    """Persist one in-memory connection projection."""
+class _ConnectionRepositoryDouble(ExternalChannelConnectionRepository):
+    """Return completed connection operations without exposing a live transaction."""
 
     def __init__(self) -> None:
         self.create: ExternalChannelConnectionCreate | None = None
@@ -91,29 +81,45 @@ class _RepositoryDouble:
         self.health_bot_user_id: str | None = None
         self.health_capabilities: dict[str, object] | None = None
         self.health_expected_encrypted_credentials: str | None = None
+        self.health_expected_configuration_generation: int | None = None
         self.apply_health_update = True
+        self.connection_exists = True
+        self.active_operation = False
 
     async def create_connection(
         self,
-        session: AsyncSession,
+        *,
         create: ExternalChannelConnectionCreate,
     ) -> ExternalChannelConnection:
-        del session
-        self.create = create
-        return _connection_from_create(create)
+        assert not self.active_operation
+        self.active_operation = True
+        try:
+            self.create = create
+            return _connection_from_create(create)
+        finally:
+            self.active_operation = False
 
-    async def get_connection_configuration(
+    async def load_connection_configuration(
         self,
-        session: AsyncSession,
         *,
+        workspace_id: str,
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
-        del session, connection_id
-        return self.configuration
+        del connection_id
+        assert not self.active_operation
+        self.active_operation = True
+        try:
+            if (
+                self.configuration is None
+                or self.configuration.workspace_id != workspace_id
+            ):
+                return None
+            return self.configuration
+        finally:
+            self.active_operation = False
 
     async def update_connection_health(
         self,
-        session: AsyncSession,
         *,
         connection_id: str,
         status: ExternalChannelConnectionStatus,
@@ -122,66 +128,81 @@ class _RepositoryDouble:
         capabilities: dict[str, object] | None,
         checked_at: datetime.datetime,
         expected_encrypted_credentials: str,
-    ) -> ExternalChannelConnection | None:
-        del session, connection_id
+        expected_configuration_generation: int,
+    ) -> ExternalChannelConnectionHealthUpdate:
+        del connection_id
         assert self.configuration is not None
-        self.health_expected_encrypted_credentials = expected_encrypted_credentials
-        if not self.apply_health_update:
-            return None
-        self.health_status = status
-        self.health_tenant_id = provider_tenant_id
-        self.health_bot_user_id = provider_bot_user_id
-        self.health_capabilities = capabilities
-        tenant_id = provider_tenant_id or self.configuration.provider_tenant_id
-        bot_user_id = provider_bot_user_id or self.configuration.provider_bot_user_id
-        return ExternalChannelConnection(
-            id=self.configuration.id,
-            workspace_id=self.configuration.workspace_id,
-            provider=self.configuration.provider,
-            transport=self.configuration.transport,
-            status=status,
-            app_mode=self.configuration.app_mode,
-            provider_app_id=self.configuration.provider_app_id,
-            provider_tenant_id=tenant_id,
-            provider_bot_user_id=bot_user_id,
-            http_callback_selector_hash=(
-                self.configuration.http_callback_selector_hash
-            ),
-            capabilities=capabilities or self.configuration.capabilities,
-            provider_config=self.configuration.provider_config,
-            last_verified_at=(
-                checked_at
-                if status is ExternalChannelConnectionStatus.ACTIVE
-                else self.configuration.last_verified_at
-            ),
-            last_health_at=checked_at,
-            disconnected_at=self.configuration.disconnected_at,
-            socket_lease_owner=self.configuration.socket_lease_owner,
-            socket_lease_until=self.configuration.socket_lease_until,
-            socket_heartbeat_at=self.configuration.socket_heartbeat_at,
-            socket_gap_detected_at=self.configuration.socket_gap_detected_at,
-            socket_gap_reason=self.configuration.socket_gap_reason,
-            created_at=self.configuration.created_at,
-            updated_at=checked_at,
-        )
-
-    async def get_connection(
-        self,
-        session: AsyncSession,
-        *,
-        connection_id: str,
-    ) -> ExternalChannelConnection | None:
-        del session, connection_id
-        if self.configuration is None:
-            return None
-        return ExternalChannelConnection.model_validate(self.configuration)
+        assert not self.active_operation
+        self.active_operation = True
+        try:
+            self.health_expected_encrypted_credentials = expected_encrypted_credentials
+            self.health_expected_configuration_generation = (
+                expected_configuration_generation
+            )
+            if not self.apply_health_update:
+                return ExternalChannelConnectionHealthUpdate(
+                    connection=None,
+                    connection_exists=self.connection_exists,
+                )
+            self.health_status = status
+            self.health_tenant_id = provider_tenant_id
+            self.health_bot_user_id = provider_bot_user_id
+            self.health_capabilities = capabilities
+            tenant_id = provider_tenant_id or self.configuration.provider_tenant_id
+            bot_user_id = (
+                provider_bot_user_id or self.configuration.provider_bot_user_id
+            )
+            return ExternalChannelConnectionHealthUpdate(
+                connection=ExternalChannelConnection(
+                    id=self.configuration.id,
+                    workspace_id=self.configuration.workspace_id,
+                    provider=self.configuration.provider,
+                    transport=self.configuration.transport,
+                    ingress_profile=self.configuration.ingress_profile,
+                    configuration_generation=(
+                        self.configuration.configuration_generation
+                    ),
+                    status=status,
+                    app_mode=self.configuration.app_mode,
+                    provider_app_id=self.configuration.provider_app_id,
+                    provider_tenant_id=tenant_id,
+                    provider_bot_user_id=bot_user_id,
+                    http_callback_selector_hash=(
+                        self.configuration.http_callback_selector_hash
+                    ),
+                    capabilities=capabilities or self.configuration.capabilities,
+                    provider_config=self.configuration.provider_config,
+                    last_verified_at=(
+                        checked_at
+                        if status is ExternalChannelConnectionStatus.ACTIVE
+                        else self.configuration.last_verified_at
+                    ),
+                    last_health_at=checked_at,
+                    disconnected_at=self.configuration.disconnected_at,
+                    socket_lease_owner=self.configuration.socket_lease_owner,
+                    socket_lease_until=self.configuration.socket_lease_until,
+                    socket_heartbeat_at=self.configuration.socket_heartbeat_at,
+                    socket_gap_detected_at=(self.configuration.socket_gap_detected_at),
+                    socket_gap_reason=self.configuration.socket_gap_reason,
+                    created_at=self.configuration.created_at,
+                    updated_at=checked_at,
+                ),
+                connection_exists=True,
+            )
+        finally:
+            self.active_operation = False
 
 
 class _SlackClientDouble:
     """Return one configured sanitized Slack validation result."""
 
-    def __init__(self, result: SlackConnectionValidation) -> None:
+    def __init__(
+        self,
+        result: SlackConnectionValidation,
+        repository: _ConnectionRepositoryDouble,
+    ) -> None:
         self.result = result
+        self.repository = repository
         self.bot_tokens: list[str] = []
 
     async def validate_connection(
@@ -191,6 +212,7 @@ class _SlackClientDouble:
         app_id: str,
         transport: ExternalChannelTransport,
     ) -> SlackConnectionValidation:
+        assert not self.repository.active_operation
         assert app_id == "A-1"
         assert transport is ExternalChannelTransport.HTTP
         self.bot_tokens.append(bot_token)
@@ -205,6 +227,8 @@ def _connection_from_create(
         workspace_id=create.workspace_id,
         provider=create.provider,
         transport=create.transport,
+        ingress_profile=create.ingress_profile,
+        configuration_generation=create.configuration_generation,
         status=create.status,
         app_mode=create.app_mode,
         provider_app_id=create.provider_app_id,
@@ -215,6 +239,7 @@ def _connection_from_create(
         provider_config=create.provider_config,
         last_verified_at=create.last_verified_at,
         last_health_at=create.last_health_at,
+        last_health_code=create.last_health_code,
         disconnected_at=create.disconnected_at,
         socket_lease_owner=create.socket_lease_owner,
         socket_lease_until=create.socket_lease_until,
@@ -234,6 +259,8 @@ def _configuration(
         workspace_id="workspace-1",
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
+        ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+        configuration_generation=7,
         app_mode=ExternalChannelAppMode.SINGLE,
         status=ExternalChannelConnectionStatus.CONFIGURING,
         provider_app_id="A-1",
@@ -266,20 +293,12 @@ def _credentials() -> SlackConnectionCredentials:
 
 def _service(
     *,
-    repository: _RepositoryDouble,
+    repository: _ConnectionRepositoryDouble,
     codec: ExternalChannelCredentialsCodec,
     slack_client: _SlackClientDouble,
-    session: _SessionDouble,
 ) -> ExternalChannelConnectionService:
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield require_instance(
-            MagicMock(spec=AsyncSession, wraps=session), AsyncSession
-        )
-
     return ExternalChannelConnectionService(
-        session_manager=session_manager,
-        repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+        connection_repository=repository,
         credentials_codec=codec,
         slack_client=MagicMock(spec=SlackWebAPIClient, wraps=slack_client),
     )
@@ -298,8 +317,7 @@ async def test_http_setup_uses_fixed_callback_and_encrypts_credentials(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
     """Persist no selector while keeping provider credentials encrypted."""
-    repository = _RepositoryDouble()
-    session = _SessionDouble()
+    repository = _ConnectionRepositoryDouble()
     service = _service(
         repository=repository,
         codec=codec,
@@ -311,9 +329,9 @@ async def test_http_setup_uses_fixed_callback_and_encrypts_credentials(
                 action_hint=None,
                 identity=None,
                 capabilities=None,
-            )
+            ),
+            repository,
         ),
-        session=session,
     )
 
     setup = await service.create_slack_connection(
@@ -328,7 +346,7 @@ async def test_http_setup_uses_fixed_callback_and_encrypts_credentials(
     assert repository.create.http_callback_selector_hash is None
     assert "xoxb-secret" not in repr(repository.create)
     assert repository.create.encrypted_credentials is not None
-    assert session.commits == 1
+    assert not repository.active_operation
 
 
 @pytest.mark.asyncio
@@ -336,8 +354,7 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
     """Persist Discord Guild configuration without treating it as tenant identity."""
-    repository = _RepositoryDouble()
-    session = _SessionDouble()
+    repository = _ConnectionRepositoryDouble()
     service = _service(
         repository=repository,
         codec=codec,
@@ -349,9 +366,9 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
                 action_hint=None,
                 identity=None,
                 capabilities=None,
-            )
+            ),
+            repository,
         ),
-        session=session,
     )
 
     await service.create_discord_connection(
@@ -382,14 +399,14 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
         "thread_auto_archive_duration_minutes": 1440,
     }
     assert "discord-bot-token" not in repr(repository.create)
-    assert session.commits == 1
+    assert not repository.active_operation
 
 
 @pytest.mark.asyncio
-async def test_valid_connection_activation_persists_identity_and_redacts_secrets(
+async def test_valid_connection_activation_persists_identity_after_completed_read(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
-    """Activate a verified Slack connection without exposing its bot token."""
+    """Call the provider only after the completed configuration operation ends."""
     capabilities = ExternalChannelCapabilitySnapshot(
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
@@ -401,32 +418,35 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
         download_files=True,
         upload_files=False,
     )
-    validation = SlackConnectionValidation(
-        status="valid",
-        code=None,
-        message=None,
-        action_hint=None,
-        identity=ExternalChannelProviderIdentity(
-            provider=ExternalChannelProvider.SLACK,
-            app_id="A-1",
-            tenant_id="T-1",
-            bot_user_id="B-1",
-        ),
-        capabilities=capabilities,
-        customize_messages=True,
-    )
-    repository = _RepositoryDouble()
+    repository = _ConnectionRepositoryDouble()
     repository.configuration = _configuration(codec)
-    session = _SessionDouble()
-    slack_client = _SlackClientDouble(validation)
+    slack_client = _SlackClientDouble(
+        SlackConnectionValidation(
+            status="valid",
+            code=None,
+            message=None,
+            action_hint=None,
+            identity=ExternalChannelProviderIdentity(
+                provider=ExternalChannelProvider.SLACK,
+                app_id="A-1",
+                tenant_id="T-1",
+                bot_user_id="B-1",
+            ),
+            capabilities=capabilities,
+            customize_messages=True,
+        ),
+        repository,
+    )
     service = _service(
         repository=repository,
         codec=codec,
         slack_client=slack_client,
-        session=session,
     )
 
-    snapshot = await service.validate_connection(connection_id="connection-1")
+    snapshot = await service.validate_connection(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+    )
 
     assert snapshot.status is ExternalChannelConnectionStatus.ACTIVE
     assert snapshot.identity is not None
@@ -446,9 +466,43 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
     assert repository.health_expected_encrypted_credentials == (
         repository.configuration.encrypted_credentials
     )
+    assert repository.health_expected_configuration_generation == 7
     assert slack_client.bot_tokens == ["xoxb-secret"]
     assert "xoxb-secret" not in repr(snapshot)
-    assert session.commits == 1
+    assert not repository.active_operation
+
+
+@pytest.mark.asyncio
+async def test_validation_hides_connection_in_another_workspace(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Treat a cross-Workspace connection as absent before provider validation."""
+    repository = _ConnectionRepositoryDouble()
+    repository.configuration = _configuration(codec)
+    slack_client = _SlackClientDouble(
+        SlackConnectionValidation(
+            status="valid",
+            code=None,
+            message=None,
+            action_hint=None,
+            identity=None,
+            capabilities=None,
+        ),
+        repository,
+    )
+    service = _service(
+        repository=repository,
+        codec=codec,
+        slack_client=slack_client,
+    )
+
+    with pytest.raises(ExternalChannelConnectionNotFound):
+        await service.validate_connection(
+            workspace_id="workspace-2",
+            connection_id="connection-1",
+        )
+
+    assert slack_client.bot_tokens == []
 
 
 def test_legacy_capability_snapshot_defaults_file_directions_to_unavailable() -> None:
@@ -497,14 +551,13 @@ def test_legacy_capability_snapshot_defaults_file_directions_to_unavailable() ->
 
 
 @pytest.mark.asyncio
-async def test_stale_validation_cannot_overwrite_newer_connection_state(
+async def test_stale_generation_validation_cannot_overwrite_newer_connection_state(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
     """Reject a provider result when the connection changed during validation."""
-    repository = _RepositoryDouble()
+    repository = _ConnectionRepositoryDouble()
     repository.configuration = _configuration(codec)
     repository.apply_health_update = False
-    session = _SessionDouble()
     service = _service(
         repository=repository,
         codec=codec,
@@ -521,19 +574,22 @@ async def test_stale_validation_cannot_overwrite_newer_connection_state(
                     bot_user_id="B-1",
                 ),
                 capabilities=None,
-            )
+            ),
+            repository,
         ),
-        session=session,
     )
 
     with pytest.raises(
         ExternalChannelConnectionStateChanged,
         match="changed during validation",
     ):
-        await service.validate_connection(connection_id="connection-1")
+        await service.validate_connection(
+            workspace_id="workspace-1",
+            connection_id="connection-1",
+        )
 
     assert repository.configuration is not None
     assert repository.health_expected_encrypted_credentials == (
         repository.configuration.encrypted_credentials
     )
-    assert session.commits == 0
+    assert repository.health_expected_configuration_generation == 7

@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-08 | 162 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 73 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-08 | 74 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
@@ -40,7 +40,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 43 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-07 | 59 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |

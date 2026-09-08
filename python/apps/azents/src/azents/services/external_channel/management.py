@@ -359,7 +359,8 @@ class ExternalChannelManagementService:
             )
             await session.commit()
         await self.connection_service.validate_connection(
-            connection_id=setup.connection.id
+            workspace_id=workspace_id,
+            connection_id=setup.connection.id,
         )
         connections = await self.list_connections(
             workspace_id=workspace_id,
@@ -478,7 +479,8 @@ class ExternalChannelManagementService:
             app_mode=ExternalChannelAppMode.MULTI,
         )
         await self.connection_service.validate_connection(
-            connection_id=setup.connection.id
+            workspace_id=workspace_id,
+            connection_id=setup.connection.id,
         )
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
@@ -531,7 +533,8 @@ class ExternalChannelManagementService:
                 connection_id=connection_id
             )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_multi_slack(
@@ -573,7 +576,8 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_multi_discord(
@@ -1122,7 +1126,8 @@ class ExternalChannelManagementService:
                 connection_id=connection_id
             )
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_slack(
@@ -1172,7 +1177,8 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         return await self.connection_service.validate_connection(
-            connection_id=connection_id
+            workspace_id=workspace_id,
+            connection_id=connection_id,
         )
 
     async def update_discord(
