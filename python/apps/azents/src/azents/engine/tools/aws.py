@@ -572,8 +572,6 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate Access Key structure."""

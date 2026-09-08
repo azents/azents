@@ -50,9 +50,6 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotState, wrap_mcp_tool
 from azents.rdb.session import SessionManager
-from azents.repos.github_user_installation import (
-    GithubUserInstallationRepository,
-)
 from azents.repos.toolkit_state.store import (
     ToolkitStateStore,
 )
@@ -970,25 +967,11 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
-        """Validate ownership of installation_id for GitHub Platform App.
-
-        :param session: DB session
-        :param user_id: User ID
-        :param credentials: Toolkit credentials
-        :return: Error message or None
-        """
+        """Validate the local GitHub credential structure."""
         if credentials is None:
             return None
-
-        if credentials.get("type") == "github_app_platform":
-            platform = await self.platform_runtime.resolve()
-            if platform.app_id is None:
-                return "GitHub Platform App is not configured."
-            credentials["app_id"] = platform.app_id
 
         try:
             secrets = _github_secrets_adapter.validate_python(credentials)
@@ -1003,8 +986,6 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         installations_raw = credentials.get("installations")
         if not isinstance(installations_raw, list):
             return "At least one GitHub installation must be selected."
-
-        repo = GithubUserInstallationRepository()
         for item in installations_raw:
             if not isinstance(item, dict):
                 return "GitHub installation is not accessible to this user."
@@ -1012,16 +993,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             if not isinstance(installation_id_raw, (int, str)):
                 return "GitHub installation is not accessible to this user."
             try:
-                installation_id = int(installation_id_raw)
+                int(installation_id_raw)
             except ValueError:
-                return "GitHub installation is not accessible to this user."
-            has_access = await repo.has_access(
-                session,
-                user_id,
-                secrets.app_id,
-                installation_id,
-            )
-            if not has_access:
                 return "GitHub installation is not accessible to this user."
 
         return None

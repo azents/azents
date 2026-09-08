@@ -12,7 +12,6 @@ import logging
 import re
 
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
     ResolveContext,
@@ -196,8 +195,6 @@ class EnvVarToolkitProvider(ToolkitProvider[EnvVarToolkitConfig]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,  # noqa: ARG002
-        user_id: str,  # noqa: ARG002
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate Credentials.
@@ -210,8 +207,6 @@ class EnvVarToolkitProvider(ToolkitProvider[EnvVarToolkitConfig]):
         - Total entry count (maximum 50)
         - Total payload size (maximum 100KB)
 
-        :param session: DB session (unused, protocol compatibility)
-        :param user_id: User ID (unused, protocol compatibility)
         :param credentials: Plaintext credentials dict before encryption, or None
         :return: Error message on failure, or None on success
         """

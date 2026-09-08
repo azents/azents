@@ -4,9 +4,9 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.tools.github as github_module
+from azents.core.system_setting import SystemSettingFieldSource
 from azents.core.tools import GitHubToolkitConfig, ResolveContext
 from azents.engine.tools.github import GitHubToolkitProvider
 from azents.services.github_platform_system_setting.runtime import (
@@ -22,6 +22,7 @@ def _resolved(
         client_id="client-id",
         private_key=private_key,
         client_secret="client-secret",
+        app_id_source=SystemSettingFieldSource.ADMIN,
         effective_generation=generation,
     )
 
@@ -54,40 +55,13 @@ def _context() -> ResolveContext:
     )
 
 
-async def test_platform_credentials_use_server_app_id_for_ownership(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Browser-provided App identity is overwritten before validation/storage."""
-    calls: list[tuple[str, str, int]] = []
-
-    class InstallationRepository:
-        async def has_access(
-            self,
-            _session: AsyncSession,
-            user_id: str,
-            platform_app_id: str,
-            installation_id: int,
-        ) -> bool:
-            calls.append((user_id, platform_app_id, installation_id))
-            return True
-
-    monkeypatch.setattr(
-        github_module,
-        "GithubUserInstallationRepository",
-        InstallationRepository,
-    )
+async def test_platform_credentials_validation_is_database_free() -> None:
+    """Provider validation accepts a server-bound local credential shape."""
     runtime = Mock()
-    runtime.resolve = AsyncMock(
-        return_value=_resolved(
-            app_id="123",
-            private_key="private-key",
-            generation="generation-1",
-        )
-    )
     provider = GitHubToolkitProvider(platform_runtime=runtime)
     credentials: dict[str, object] = {
         "type": "github_app_platform",
-        "app_id": "browser-controlled",
+        "app_id": "123",
         "installations": [
             {
                 "installation_id": "456",
@@ -98,15 +72,11 @@ async def test_platform_credentials_use_server_app_id_for_ownership(
         ],
     }
 
-    error = await provider.validate_credentials(
-        AsyncMock(spec=AsyncSession),
-        "user-1",
-        credentials,
-    )
+    error = await provider.validate_credentials(credentials)
 
     assert error is None
     assert credentials["app_id"] == "123"
-    assert calls == [("user-1", "123", 456)]
+    runtime.resolve.assert_not_called()
 
 
 async def test_platform_token_issuance_rechecks_app_identity(

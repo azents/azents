@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/core/skill_projection.py
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
+  - python/apps/azents/src/azents/repos/toolkit_operations/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
@@ -69,7 +70,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-08
-spec_version: 111
+spec_version: 112
 ---
 
 # Toolkit
@@ -974,6 +975,15 @@ the immutable `azents://` VFS. The Skill is projected for eligible root Runs
 without requiring a separate Toolkit setup row.
 
 ## Changelog
+
+- **2026-09-08** (spec_version 112) — Toolkit shared and Agent-owned management
+  now calls completed repository operations. Provider validation and Platform
+  settings resolution run outside DB transactions; final credential mutations
+  revalidate App-scoped installation authority. Shared namespace mutations keep
+  Toolkit-before-Agent locking and existing effective-slug conflict checks.
+  Agent-owned OAuth persistence retains exact owner and current management
+  authorization checks. Shared creation composes its automatic Workspace scope
+  and public OAuth summary in one DB transaction. No distributed lock is added.
 
 - **2026-09-08** (spec_version 111) — Split pure Toolkit State, Goal, and Skill
   models from repository-owned persistence, replaced application mutation
