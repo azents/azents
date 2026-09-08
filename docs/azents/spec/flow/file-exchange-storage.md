@@ -22,6 +22,8 @@ code_paths:
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/exchange_file/**
+  - python/apps/azents/src/azents/repos/file_metadata_authority.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/artifact.py
@@ -56,8 +58,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-05
-spec_version: 47
+last_verified_at: 2026-09-08
+spec_version: 48
 ---
 
 # File Exchange Storage
@@ -308,6 +310,19 @@ later `import_file` must explicitly copy them into the new Runtime.
   unowned prepared objects, while a verification query failure or any existing committed identity
   retains the uploaded objects to avoid deleting data that may already be durable. No DB transaction
   spans object-storage I/O.
+- Artifact, ExchangeFile, and ModelFile services use completed metadata operation
+  repositories for those reads and writes. Provider-output materialization remains
+  a separate unresolved transaction-ownership lane: it temporarily reaches through
+  file service objects for a session factory and lower repositories. Those exposed
+  handles are not an approved service ownership boundary and do not change the
+  completed-operation contract of ordinary file service flows.
+- The Engine builtin file-authority recheck uses a completed ModelFile repository
+  operation and does not open an Engine-owned database session. Verified Exchange
+  recovery reads only the preallocated publication identity without requiring
+  now-stale mutation authority or exposing file metadata. Confirmed absence
+  deletes random previews while retaining the deterministic product object for
+  stable retry. A database recovery-read failure retains both because commit
+  state is uncertain.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.
 - Trusted object operations use the internal Workspace S3 endpoint. When a separate
@@ -347,6 +362,15 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-09-08** — v48. Moved Artifact, ExchangeFile, and ModelFile metadata,
+  authorization, expiration, and final publication transactions into completed
+  repository operations. S3 and Runtime-facing work remains outside database
+  transactions, and final publication or deletion revalidates current authority
+  before metadata mutation. Recorded provider-output's temporary dependency tunnel
+  as an unresolved, separately owned boundary rather than completed migration,
+  removed the unrelated Engine builtin session tunnel, and separated
+  authority-independent recovery reads from mutation authorization.
 
 - **2026-09-05** — v47. Added `run_tool_to_file` Runtime bundles for complete
   visible client Tool output, authorized text/Exchange/Artifact/ModelFile/generated

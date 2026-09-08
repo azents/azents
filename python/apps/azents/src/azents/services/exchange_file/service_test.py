@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +16,7 @@ from azcommon.infra.s3.service import (
 )
 from azcommon.result import Failure, Result, Success
 from PIL import Image
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -43,6 +44,11 @@ from azents.repos.exchange_file.data import (
     ExchangeFileClaimUnavailable,
     ExchangeFileClaimWrongScope,
     ExchangeFileCreate,
+)
+from azents.repos.exchange_file.operations import (
+    ExchangeFileCreateBatch,
+    ExchangeFileMetadataFailure,
+    ExchangeFileOperationRepository,
 )
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -552,13 +558,19 @@ def _make_service(
     exchange_file_repository = _FakeExchangeFileRepository()
     session_boundary = _SessionBoundary()
     s3_service = _FakeS3Service(session_boundary)
-    service = _make_exchange_file_service(
-        exchange_file_repository=exchange_file_repository,
+    operation_repository = ExchangeFileOperationRepository(
+        exchange_file_repository=cast(Any, exchange_file_repository),
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_boundary.session_manager,
+    )
+    service = _make_exchange_file_service(
+        operation_repository=operation_repository,
+        exchange_file_repository=exchange_file_repository,
+        agent_session_repository=agent_session_repository,
+        workspace_user_repository=workspace_user_repository,
         s3_service=s3_service,
         config=_Config(),
     )
@@ -577,13 +589,40 @@ def _make_authority_service(
     service, repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
     )
+    operations = AsyncMock(spec=ExchangeFileOperationRepository)
+
+    async def load_verified_publication(
+        *,
+        authority: object,
+        file_id: str,
+    ) -> Result[ExchangeFile | None, ExchangeFileMetadataFailure]:
+        del authority
+        if authority_results and not authority_results.pop(0):
+            return Failure(ExchangeFileMetadataFailure.ACCESS_DENIED)
+        return Success(repository.files.get(file_id))
+
+    async def finalize_authority_create(
+        *,
+        authority: object,
+        batch: ExchangeFileCreateBatch,
+    ) -> Result[ExchangeFile, ExchangeFileMetadataFailure]:
+        del authority
+        if not authority_results.pop(0):
+            return Failure(ExchangeFileMetadataFailure.ACCESS_DENIED)
+        async with service.operation_repository.session_manager() as session:
+            created = await service.operation_repository._persist_batch(session, batch)
+        return Success(created)
+
+    operations.load_verified_publication.side_effect = load_verified_publication
+    operations.load_publication_for_recovery.side_effect = lambda *, file_id: (
+        repository.files.get(file_id)
+    )
+    operations.finalize_authority_create.side_effect = finalize_authority_create
     authority_service = _AuthorityExchangeFileService(
+        operation_repository=operations,
         exchange_file_repository=service.exchange_file_repository,
-        agent_repository=service.agent_repository,
         agent_session_repository=service.agent_session_repository,
-        agent_run_repository=service.agent_run_repository,
         workspace_user_repository=service.workspace_user_repository,
-        session_manager=service.session_manager,
         s3_service=service.s3_service,
         config=service.config,
     )
@@ -768,9 +807,9 @@ async def test_authority_thumbnail_response_loss_cleans_registered_thumbnail_onl
     assert len(s3_service.product_copy_calls) == 1
     original_key = s3_service.product_copy_calls[0][1].key
     assert original_key in s3_service.objects
+    assert s3_service.product_cleanup_calls == []
     assert len(s3_service.uploaded_keys) == 1
     assert s3_service.uploaded_keys[0] not in s3_service.objects
-    assert s3_service.product_cleanup_calls == []
 
 
 @pytest.mark.asyncio
@@ -810,6 +849,100 @@ async def test_authority_verified_publication_compensates_final_object() -> None
     assert repository.files == {}
     assert len(s3_service.product_copy_calls) == 1
     assert s3_service.product_cleanup_calls == []
+    assert s3_service.product_copy_calls[0][1].key in s3_service.objects
+
+
+@pytest.mark.asyncio
+async def test_stale_final_authority_cleans_unowned_verified_preview() -> None:
+    """Confirmed absent metadata cleans the random preview after stale authority."""
+    service, repository, s3_service = _make_authority_service(
+        authority_results=[True, False]
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
+    body = _jpeg_bytes()
+    s3_service.objects[source.key] = body
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=authority,
+        source=source,
+        size_bytes=len(body),
+        sha256=hashlib.sha256(body).hexdigest(),
+        publication_id="exchange-publication",
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_tool_name="present_file",
+        source_provider=None,
+        filename="published.jpg",
+        media_type="image/jpeg",
+    )
+
+    assert isinstance(result, Failure)
+    assert repository.files == {}
+    assert "exchange/workspace-1/files/exchange-publication/original" in (
+        s3_service.objects
+    )
+    assert s3_service.product_cleanup_calls == []
+    preview_keys = [
+        key
+        for key in s3_service.uploaded_keys
+        if key != "exchange/workspace-1/files/exchange-publication/original"
+    ]
+    assert preview_keys
+    assert all(key not in s3_service.objects for key in preview_keys)
+
+
+@pytest.mark.asyncio
+async def test_uncertain_recovery_read_retains_verified_preview() -> None:
+    """A database recovery-read failure conservatively retains derived objects."""
+    service, repository, s3_service = _make_authority_service(
+        authority_results=[True, False]
+    )
+    cast(
+        AsyncMock,
+        service.operation_repository.load_publication_for_recovery,
+    ).side_effect = SQLAlchemyError("recovery read failed")
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
+    body = _jpeg_bytes()
+    s3_service.objects[source.key] = body
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=SessionResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="root-session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=0,
+        ),
+        source=source,
+        size_bytes=len(body),
+        sha256=hashlib.sha256(body).hexdigest(),
+        publication_id="exchange-publication",
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_tool_name="present_file",
+        source_provider=None,
+        filename="published.jpg",
+        media_type="image/jpeg",
+    )
+
+    assert isinstance(result, Failure)
+    assert repository.files == {}
+    preview_keys = [
+        key
+        for key in s3_service.uploaded_keys
+        if key != "exchange/workspace-1/files/exchange-publication/original"
+    ]
+    assert preview_keys
+    assert all(key in s3_service.objects for key in preview_keys)
 
 
 @pytest.mark.asyncio

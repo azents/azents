@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStartReason,
@@ -44,9 +45,10 @@ from azents.engine.tools.import_file import (
 )
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
+from azents.repos.artifact.operations import ArtifactOperationRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
@@ -166,7 +168,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
         if agent_session_id != "session-1":
             return None
         return AgentSession(
-            owner_generation=0,
+            owner_generation=1,
             inference_state=None,
             id="session-1",
             workspace_id="workspace-1",
@@ -190,6 +192,25 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
             created_at=_NOW,
             updated_at=_NOW,
         )
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Fetch and lock the deterministic fixture Session."""
+        return await self.get_by_id(session, agent_session_id)
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> SessionAgent | None:
+        """Return the deterministic root Session identity."""
+        del session
+        if agent_session_id != "session-1":
+            return None
+        return SessionAgent.model_construct(agent_session_id="session-1")
 
 
 class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
@@ -350,13 +371,19 @@ def _artifact_service() -> tuple[
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
         session_id="session-1",
         run_index=1,
+        status=AgentRunStatus.RUNNING,
+    )
+    agent_run_repository.lock_by_id.return_value = (
+        agent_run_repository.get_by_id.return_value
     )
     service = _AuthorityArtifactService(
-        artifact_repository=artifact_repo,
-        agent_session_repository=_FakeAgentSessionRepository(),
-        agent_run_repository=agent_run_repository,
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
-        session_manager=_session_manager,
+        operation_repository=ArtifactOperationRepository(
+            artifact_repository=artifact_repo,
+            agent_session_repository=_FakeAgentSessionRepository(),
+            agent_run_repository=agent_run_repository,
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         s3_service=s3_service,
         config=_config(),
     )

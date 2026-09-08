@@ -27,17 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
-    AgentRunStatus,
-    AgentSessionStatus,
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
 from azents.core.s3.deps import get_s3_service
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
@@ -49,6 +43,13 @@ from azents.repos.exchange_file.data import (
     ExchangeFileClaimWrongScope,
     ExchangeFileCreate,
 )
+from azents.repos.exchange_file.operations import (
+    ExchangeFileCreateBatch,
+    ExchangeFileMetadataFailure,
+    ExchangeFileOperationRepository,
+    ExchangeFilePreviewCreate,
+)
+from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -415,21 +416,25 @@ def _thumbnail_from_loaded_image(img: Image.Image) -> ExchangePreviewThumbnail:
 
 @dataclasses.dataclass
 class ExchangeFileService:
-    """Coordinate Exchange file metadata and object storage."""
+    """Coordinate Exchange file metadata and object storage.
 
+    Narrow repositories support caller-owned input admission. The ExchangeFile
+    repository also remains exposed solely for the unresolved provider-output lane.
+    Ordinary service operations use ``operation_repository`` exclusively.
+    """
+
+    operation_repository: Annotated[
+        ExchangeFileOperationRepository,
+        Depends(ExchangeFileOperationRepository),
+    ]
     exchange_file_repository: Annotated[
         ExchangeFileRepository, Depends(ExchangeFileRepository)
     ]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
@@ -510,9 +515,9 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin = ExchangeFileOrigin.ARTIFACT,
     ) -> Result[ExchangeFile, FileAccessDenied]:
         """Create an internal ExchangeFile under canonical Session/Run authority."""
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(FileAccessDenied())
+        repository_authority = _repository_authority(authority)
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(FileAccessDenied())
         prepared = self._prepare_files(
             workspace_id=authority.workspace_id,
             agent_id=authority.agent_id,
@@ -530,16 +535,14 @@ class ExchangeFileService:
         succeeded = False
         try:
             await self._upload_prepared_files(prepared)
-            async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(
-                    session,
-                    authority,
-                    lock=True,
-                ):
-                    return Failure(FileAccessDenied())
-                created = await self._persist_prepared_files(session, prepared)
+            created = await self.operation_repository.finalize_authority_create(
+                authority=repository_authority,
+                batch=self._create_batch(prepared),
+            )
+            if isinstance(created, Failure):
+                return Failure(FileAccessDenied())
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_objects(
@@ -562,17 +565,17 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin = ExchangeFileOrigin.ARTIFACT,
     ) -> Result[ExchangeFile, FileAccessDenied]:
         """Publish a verified transfer object as an internal ExchangeFile."""
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(FileAccessDenied())
-            existing = await self.exchange_file_repository.get_by_id(
-                session,
-                publication_id,
-            )
-        if existing is not None:
+        repository_authority = _repository_authority(authority)
+        existing_result = await self.operation_repository.load_verified_publication(
+            authority=repository_authority,
+            file_id=publication_id,
+        )
+        if isinstance(existing_result, Failure):
+            return Failure(FileAccessDenied())
+        if existing_result.value is not None:
             return Success(
                 self._validated_existing_verified_publication(
-                    existing=existing,
+                    existing=existing_result.value,
                     authority=authority,
                     size_bytes=size_bytes,
                     sha256=sha256,
@@ -597,30 +600,20 @@ class ExchangeFileService:
         committed = False
         try:
             await self._upload_prepared_files(prepared, published=published)
-            async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(
-                    session,
-                    authority,
-                    lock=True,
-                ):
-                    return Failure(FileAccessDenied())
-                existing = await self.exchange_file_repository.get_by_id(
-                    session,
-                    publication_id,
-                )
-                if existing is not None:
-                    committed = True
-                    return Success(
-                        self._validated_existing_verified_publication(
-                            existing=existing,
-                            authority=authority,
-                            size_bytes=size_bytes,
-                            sha256=sha256,
-                            media_type=media_type,
-                            publication_id=publication_id,
-                        )
-                    )
-                created = await self._persist_prepared_files(session, prepared)
+            finalized = await self.operation_repository.finalize_authority_create(
+                authority=repository_authority,
+                batch=self._create_batch(prepared),
+            )
+            if isinstance(finalized, Failure):
+                return Failure(FileAccessDenied())
+            created = self._validated_existing_verified_publication(
+                existing=finalized.value,
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
+            )
             committed = True
             return Success(created)
         finally:
@@ -643,30 +636,21 @@ class ExchangeFileService:
         object_key = exchange_object_key_from_uri(uri)
         if object_key is None:
             return Failure(FileNotFound())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(FileAccessDenied())
-            file = await self.exchange_file_repository.get_by_object_key_for_agent(
-                session,
+        repository_authority = _repository_authority(authority)
+        file = _map_metadata_result(
+            await self.operation_repository.load_for_authority(
+                authority=repository_authority,
                 object_key=object_key,
-                agent_id=authority.agent_id,
             )
-        if file is None:
-            return Failure(FileNotFound())
-        if file.retention_root_session_id != authority.root_session_id:
-            return Failure(FileAccessDenied())
-        if file.status == ExchangeFileStatus.EXPIRED:
-            return Failure(FileExpired())
-        body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
-            key=file.object_key,
         )
-        if body is None:
-            return Failure(FileUnavailable())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(FileAccessDenied())
-        return Success(ExchangeFileDownload(file=file, body=body))
+        if isinstance(file, Failure):
+            return Failure(file.error)
+        downloaded = await self._download_resolved_file(file)
+        if isinstance(downloaded, Failure):
+            return downloaded
+        if not await self.operation_repository.validate_authority(repository_authority):
+            return Failure(FileAccessDenied())
+        return downloaded
 
     async def resolve_transfer_source_for_authority(
         self,
@@ -678,29 +662,26 @@ class ExchangeFileService:
         object_key = exchange_object_key_from_uri(uri)
         if object_key is None:
             return Failure(FileNotFound())
-        async with self.session_manager() as session:
-            if not await self._has_valid_resource_authority(session, authority):
-                return Failure(FileAccessDenied())
-            file = await self.exchange_file_repository.get_by_object_key_for_agent(
-                session,
+        file = _map_metadata_result(
+            await self.operation_repository.load_for_authority(
+                authority=_repository_authority(authority),
                 object_key=object_key,
-                agent_id=authority.agent_id,
             )
-        if file is None:
-            return Failure(FileNotFound())
-        if file.retention_root_session_id != authority.root_session_id:
-            return Failure(FileAccessDenied())
-        if file.status == ExchangeFileStatus.EXPIRED:
+        )
+        if isinstance(file, Failure):
+            return Failure(file.error)
+        if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
-        return Success(ExchangeFileTransferSource(file=file))
+        return Success(ExchangeFileTransferSource(file=file.value))
 
     async def validate_resource_authority(
         self,
         authority: SessionResourceAuthority,
     ) -> bool:
         """Revalidate authority for an internal non-Exchange resource operation."""
-        async with self.session_manager() as session:
-            return await self._has_valid_resource_authority(session, authority)
+        return await self.operation_repository.validate_authority(
+            _repository_authority(authority)
+        )
 
     async def claim_input_attachments(
         self,
@@ -777,19 +758,16 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange upload file without session by Agent."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return Failure(SessionNotFound())
-            if not await self._has_workspace_access(
-                session, workspace_id=agent.workspace_id, user_id=user_id
-            ):
-                return Failure(FileAccessDenied())
-            workspace_id = agent.workspace_id
-
-        prepared = self._prepare_files(
-            workspace_id=workspace_id,
+        scope_result = await self.operation_repository.authorize_agent_create(
             agent_id=agent_id,
+            user_id=user_id,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(_map_create_failure(scope_result.error))
+        scope = scope_result.value
+        prepared = self._prepare_files(
+            workspace_id=scope.workspace_id,
+            agent_id=scope.agent_id,
             source_user_id=user_id,
             source_run_id=None,
             source_tool_name=None,
@@ -804,19 +782,16 @@ class ExchangeFileService:
         succeeded = False
         try:
             await self._upload_prepared_files(prepared)
-            async with self.session_manager() as session:
-                agent = await self.agent_repository.get_by_id(session, agent_id)
-                if agent is None or agent.workspace_id != workspace_id:
-                    return Failure(SessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(FileAccessDenied())
-                created = await self._persist_prepared_files(session, prepared)
+            created = await self.operation_repository.finalize_agent_create(
+                agent_id=agent_id,
+                user_id=user_id,
+                expected_scope=scope,
+                batch=self._create_batch(prepared),
+            )
+            if isinstance(created, Failure):
+                return Failure(_map_create_failure(created.error))
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_objects(
@@ -835,74 +810,15 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange file by AgentSession."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session, session_id
-            )
-            if agent_session is None or agent_session.agent_id != agent_id:
-                return Failure(SessionNotFound())
-            if not await self._has_workspace_access(
-                session, workspace_id=agent_session.workspace_id, user_id=user_id
-            ):
-                return Failure(FileAccessDenied())
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root = await get_root(session, session_id)
-            if root is None:
-                return Failure(SessionNotFound())
-            workspace_id = agent_session.workspace_id
-            retention_root_session_id = root.agent_session_id
-
-        prepared = self._prepare_files(
-            workspace_id=workspace_id,
+        return await self._create_session_file(
             agent_id=agent_id,
-            source_user_id=user_id,
-            source_run_id=None,
-            source_tool_name=None,
-            source_provider=None,
-            provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+            session_id=session_id,
+            user_id=user_id,
             filename=filename,
             media_type=media_type,
             body=body,
             origin_type=origin_type,
-            retention_root_session_id=retention_root_session_id,
         )
-        succeeded = False
-        try:
-            await self._upload_prepared_files(prepared)
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session, session_id
-                )
-                if (
-                    agent_session is None
-                    or agent_session.agent_id != agent_id
-                    or agent_session.workspace_id != workspace_id
-                ):
-                    return Failure(SessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(FileAccessDenied())
-                root = await (
-                    self.agent_session_repository.get_root_session_agent_by_session_id
-                )(
-                    session,
-                    session_id,
-                )
-                if root is None or root.agent_session_id != retention_root_session_id:
-                    return Failure(SessionNotFound())
-                created = await self._persist_prepared_files(session, prepared)
-            succeeded = True
-            return Success(created)
-        finally:
-            if not succeeded:
-                await self._cleanup_uploaded_objects(
-                    [file.object_key for file in prepared]
-                )
 
     async def _create_file(
         self,
@@ -915,29 +831,39 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange file metadata and object."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session, session_id
-            )
-            if agent_session is None:
-                return Failure(SessionNotFound())
-            if not await self._has_workspace_access(
-                session, workspace_id=agent_session.workspace_id, user_id=user_id
-            ):
-                return Failure(FileAccessDenied())
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root = await get_root(session, session_id)
-            if root is None:
-                return Failure(SessionNotFound())
-            workspace_id = agent_session.workspace_id
-            agent_id = agent_session.agent_id
-            retention_root_session_id = root.agent_session_id
+        return await self._create_session_file(
+            agent_id=None,
+            session_id=session_id,
+            user_id=user_id,
+            filename=filename,
+            media_type=media_type,
+            body=body,
+            origin_type=origin_type,
+        )
 
+    async def _create_session_file(
+        self,
+        *,
+        agent_id: str | None,
+        session_id: str,
+        user_id: str,
+        filename: str | None,
+        media_type: str,
+        body: bytes,
+        origin_type: ExchangeFileOrigin,
+    ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
+        """Create one Session-scoped Exchange file around completed DB operations."""
+        scope_result = await self.operation_repository.authorize_session_create(
+            session_id=session_id,
+            user_id=user_id,
+            expected_agent_id=agent_id,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(_map_create_failure(scope_result.error))
+        scope = scope_result.value
         prepared = self._prepare_files(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
+            workspace_id=scope.workspace_id,
+            agent_id=scope.agent_id,
             source_user_id=user_id,
             source_run_id=None,
             source_tool_name=None,
@@ -947,38 +873,21 @@ class ExchangeFileService:
             media_type=media_type,
             body=body,
             origin_type=origin_type,
-            retention_root_session_id=retention_root_session_id,
+            retention_root_session_id=scope.retention_root_session_id,
         )
         succeeded = False
         try:
             await self._upload_prepared_files(prepared)
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session, session_id
-                )
-                if (
-                    agent_session is None
-                    or agent_session.agent_id != agent_id
-                    or agent_session.workspace_id != workspace_id
-                ):
-                    return Failure(SessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(FileAccessDenied())
-                root = await (
-                    self.agent_session_repository.get_root_session_agent_by_session_id
-                )(
-                    session,
-                    session_id,
-                )
-                if root is None or root.agent_session_id != retention_root_session_id:
-                    return Failure(SessionNotFound())
-                created = await self._persist_prepared_files(session, prepared)
+            created = await self.operation_repository.finalize_session_create(
+                session_id=session_id,
+                user_id=user_id,
+                expected_scope=scope,
+                batch=self._create_batch(prepared),
+            )
+            if isinstance(created, Failure):
+                return Failure(_map_create_failure(created.error))
             succeeded = True
-            return Success(created)
+            return Success(created.value)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_objects(
@@ -1327,7 +1236,7 @@ class ExchangeFileService:
         self,
         prepared: list[_PreparedExchangeFile],
     ) -> None:
-        """Compensate an uncommitted verified publication and derived previews."""
+        """Remove random previews while retaining the stable retry source."""
         for file in prepared:
             if file.publication_metadata is None:
                 await self.s3_service.delete(
@@ -1378,11 +1287,9 @@ class ExchangeFileService:
     ) -> bool:
         """Preserve the final object when commit outcome cannot be disproven."""
         try:
-            async with self.session_manager() as session:
-                existing = await self.exchange_file_repository.get_by_id(
-                    session,
-                    publication_id,
-                )
+            existing = await self.operation_repository.load_publication_for_recovery(
+                file_id=publication_id,
+            )
         except asyncio.CancelledError:
             raise
         except SQLAlchemyError as error:
@@ -1412,38 +1319,29 @@ class ExchangeFileService:
             return True
         return True
 
-    async def _persist_prepared_files(
+    def _create_batch(
         self,
-        session: AsyncSession,
         prepared: list[_PreparedExchangeFile],
-    ) -> ExchangeFile:
-        """Persist uploaded file metadata atomically in the verified scope."""
-        source = await self.exchange_file_repository.create(
-            session,
-            prepared[0].create,
-        )
+    ) -> ExchangeFileCreateBatch:
+        """Convert prepared external objects to typed atomic metadata input."""
+        source = prepared[0]
         if len(prepared) == 1:
-            return source
-
-        thumbnail_prepared = prepared[1]
-        thumbnail = await self.exchange_file_repository.create(
-            session,
-            thumbnail_prepared.create,
-        )
+            return ExchangeFileCreateBatch(source=source.create, preview=None)
+        preview = prepared[1]
         if (
-            thumbnail_prepared.preview_width is None
-            or thumbnail_prepared.preview_height is None
-            or thumbnail_prepared.preview_generated_at is None
+            preview.preview_width is None
+            or preview.preview_height is None
+            or preview.preview_generated_at is None
         ):
             raise ValueError("Prepared thumbnail metadata is incomplete")
-        return await self.exchange_file_repository.set_preview_thumbnail_file_id(
-            session,
-            file_id=source.id,
-            preview_thumbnail_file_id=thumbnail.id,
-            preview_thumbnail_media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
-            preview_thumbnail_width=thumbnail_prepared.preview_width,
-            preview_thumbnail_height=thumbnail_prepared.preview_height,
-            preview_generated_at=thumbnail_prepared.preview_generated_at,
+        return ExchangeFileCreateBatch(
+            source=source.create,
+            preview=ExchangeFilePreviewCreate(
+                create=preview.create,
+                width=preview.preview_width,
+                height=preview.preview_height,
+                generated_at=preview.preview_generated_at,
+            ),
         )
 
     async def download(
@@ -1489,9 +1387,13 @@ class ExchangeFileService:
                 bucket=self.config.workspace_s3.bucket,
                 key=file.object_key,
             )
-        async with self.session_manager() as session:
-            for file in files_to_delete:
-                await self.exchange_file_repository.delete_by_id(session, file.id)
+        deleted = await self.operation_repository.delete_family_for_user(
+            file_ids=[file.id for file in files_to_delete],
+            workspace_id=target.value.file.workspace_id,
+            user_id=user_id,
+        )
+        if isinstance(deleted, Failure):
+            return Failure(_map_metadata_failure(deleted.error))
         return Success(None)
 
     async def resolve_attachment(
@@ -1664,17 +1566,13 @@ class ExchangeFileService:
         file_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
-        """Check file metadata together with workspace access permission."""
-        async with self.session_manager() as session:
-            file = await self.exchange_file_repository.get_by_id(session, file_id)
-            if file is None:
-                return Failure(FileNotFound())
-            if not await self._has_workspace_access(
-                session, workspace_id=file.workspace_id, user_id=user_id
-            ):
-                return Failure(FileAccessDenied())
-            file = await self._expire_if_due(session, file)
-            return Success(file)
+        """Load completed file metadata with current Workspace permission."""
+        return _map_metadata_result(
+            await self.operation_repository.load_for_user_by_id(
+                file_id=file_id,
+                user_id=user_id,
+            )
+        )
 
     async def _get_accessible_file_by_object_key(
         self,
@@ -1682,17 +1580,13 @@ class ExchangeFileService:
         object_key: str,
         user_id: str,
     ) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
-        """Check file location together with workspace access permission."""
-        async with self.session_manager() as session:
-            file = await self.exchange_file_repository.get_by_object_key(
-                session,
-                object_key,
-            )
-            return await self._authorize_and_expire_file(
-                session,
-                file=file,
+        """Load completed file metadata by object key."""
+        return _map_metadata_result(
+            await self.operation_repository.load_for_user_by_object_key(
+                object_key=object_key,
                 user_id=user_id,
             )
+        )
 
     async def _get_accessible_file_by_object_key_for_agent(
         self,
@@ -1702,35 +1596,15 @@ class ExchangeFileService:
         session_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
-        """Check file location inside the current root retention unit."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None or agent_session.agent_id != agent_id:
-                return Failure(FileAccessDenied())
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root = await get_root(session, session_id)
-            if root is None:
-                return Failure(FileAccessDenied())
-            file = await self.exchange_file_repository.get_by_object_key_for_agent(
-                session,
+        """Load completed file metadata in the current retention root."""
+        return _map_metadata_result(
+            await self.operation_repository.load_for_agent_user(
                 object_key=object_key,
                 agent_id=agent_id,
-            )
-            if (
-                file is not None
-                and file.retention_root_session_id != root.agent_session_id
-            ):
-                return Failure(FileAccessDenied())
-            return await self._authorize_and_expire_file(
-                session,
-                file=file,
+                session_id=session_id,
                 user_id=user_id,
             )
+        )
 
     async def _get_admitted_input_file_by_object_key(
         self,
@@ -1739,52 +1613,14 @@ class ExchangeFileService:
         agent_id: str,
         session_id: str,
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
-        """Resolve a file only when its claim matches this exact Session root."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None:
-                return Failure(SessionNotFound())
-            if agent_session.agent_id != agent_id:
-                return Failure(FileAccessDenied())
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root = await get_root(session, session_id)
-            if root is None:
-                return Failure(FileAccessDenied())
-            file = await self.exchange_file_repository.get_by_object_key_for_agent(
-                session,
+        """Load an admitted file only when its durable root claim matches."""
+        return _map_admitted_metadata_result(
+            await self.operation_repository.load_admitted_input(
                 object_key=object_key,
                 agent_id=agent_id,
+                session_id=session_id,
             )
-            if file is None:
-                return Failure(FileNotFound())
-            if (
-                file.workspace_id != agent_session.workspace_id
-                or file.retention_root_session_id != root.agent_session_id
-            ):
-                return Failure(FileAccessDenied())
-            return Success(await self._expire_if_due(session, file))
-
-    async def _authorize_and_expire_file(
-        self,
-        session: AsyncSession,
-        *,
-        file: ExchangeFile | None,
-        user_id: str,
-    ) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
-        """Check workspace permission and expiration status of fetched ExchangeFile."""
-        if file is None:
-            return Failure(FileNotFound())
-        if not await self._has_workspace_access(
-            session, workspace_id=file.workspace_id, user_id=user_id
-        ):
-            return Failure(FileAccessDenied())
-        file = await self._expire_if_due(session, file)
-        return Success(file)
+        )
 
     async def _get_accessible_file_with_preview(
         self,
@@ -1795,123 +1631,18 @@ class ExchangeFileService:
         ExchangeFileWithPreview,
         FileNotFound | FileAccessDenied,
     ]:
-        """Fetch file metadata together with linked preview thumbnail metadata."""
-        async with self.session_manager() as session:
-            file = await self.exchange_file_repository.get_by_id(session, file_id)
-            if file is None:
-                return Failure(FileNotFound())
-            if not await self._has_workspace_access(
-                session, workspace_id=file.workspace_id, user_id=user_id
-            ):
-                return Failure(FileAccessDenied())
-
-            file = await self._expire_if_due(session, file)
-            preview_thumbnail: ExchangeFile | None = None
-            if file.preview_thumbnail_file_id is not None:
-                preview_thumbnail = await self.exchange_file_repository.get_by_id(
-                    session,
-                    file.preview_thumbnail_file_id,
-                )
-                if preview_thumbnail is None:
-                    logger.warning(
-                        "Exchange file preview thumbnail metadata is missing",
-                        extra={
-                            "file_id": file.id,
-                            "preview_thumbnail_file_id": (
-                                file.preview_thumbnail_file_id
-                            ),
-                        },
-                    )
-            return Success(
-                ExchangeFileWithPreview(
-                    file=file,
-                    preview_thumbnail=preview_thumbnail,
-                )
-            )
-
-    async def _expire_if_due(
-        self,
-        session: AsyncSession,
-        file: ExchangeFile,
-    ) -> ExchangeFile:
-        """Transition expired file to expired and return latest metadata."""
-        if file.status == ExchangeFileStatus.EXPIRED:
-            return file
-        now = datetime.datetime.now(datetime.UTC)
-        if file.expires_at > now:
-            return file
-        expired = await self.exchange_file_repository.expire_file_family(
-            session,
-            file_id=file.id,
-            expired_at=now,
+        """Load completed source and linked preview metadata."""
+        family = await self.operation_repository.load_family_for_user(
+            file_id=file_id,
+            user_id=user_id,
         )
-        for item in expired:
-            if item.id == file.id:
-                return item
-        return file.model_copy(
-            update={"status": ExchangeFileStatus.EXPIRED, "expired_at": now}
-        )
-
-    async def _has_valid_resource_authority(
-        self,
-        session: AsyncSession,
-        authority: SessionResourceAuthority,
-        *,
-        lock: bool = False,
-    ) -> bool:
-        """Validate canonical Session/Run authority for internal file access."""
-        if lock:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session,
-                authority.session_id,
+        if isinstance(family, Failure):
+            return Failure(_map_metadata_failure(family.error))
+        return Success(
+            ExchangeFileWithPreview(
+                file=family.value.file,
+                preview_thumbnail=family.value.preview,
             )
-        else:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.session_id,
-            )
-        if (
-            agent_session is None
-            or agent_session.workspace_id != authority.workspace_id
-            or agent_session.agent_id != authority.agent_id
-            or agent_session.owner_generation != authority.owner_generation
-            or agent_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
-            session,
-            authority.session_id,
-        )
-        if root is None or root.agent_session_id != authority.root_session_id:
-            return False
-        if authority.root_session_id == authority.session_id:
-            root_session = agent_session
-        else:
-            root_session = await self.agent_session_repository.get_by_id(
-                session,
-                authority.root_session_id,
-            )
-        if (
-            root_session is None
-            or root_session.workspace_id != authority.workspace_id
-            or root_session.status is not AgentSessionStatus.ACTIVE
-        ):
-            return False
-        if lock:
-            run = await self.agent_run_repository.lock_by_id(
-                session,
-                authority.run_id,
-            )
-        else:
-            run = await self.agent_run_repository.get_by_id(
-                session,
-                authority.run_id,
-            )
-        return (
-            run is not None
-            and run.session_id == authority.session_id
-            and run.run_index == authority.run_index
-            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
         )
 
     async def _has_workspace_access(
@@ -1936,3 +1667,56 @@ class ExchangeFileService:
                 bucket=self.config.workspace_s3.bucket,
                 key=object_key,
             )
+
+
+def _repository_authority(
+    authority: SessionResourceAuthority,
+) -> FileResourceAuthority:
+    """Convert service authority to a repository operation input."""
+    return FileResourceAuthority(
+        workspace_id=authority.workspace_id,
+        agent_id=authority.agent_id,
+        session_id=authority.session_id,
+        root_session_id=authority.root_session_id,
+        run_id=authority.run_id,
+        run_index=authority.run_index,
+        owner_generation=authority.owner_generation,
+    )
+
+
+def _map_create_failure(
+    failure: ExchangeFileMetadataFailure,
+) -> SessionNotFound | FileAccessDenied:
+    """Map repository create failures to the stable service contract."""
+    if failure is ExchangeFileMetadataFailure.SESSION_NOT_FOUND:
+        return SessionNotFound()
+    return FileAccessDenied()
+
+
+def _map_metadata_failure(
+    failure: ExchangeFileMetadataFailure,
+) -> FileNotFound | FileAccessDenied:
+    """Map repository metadata failures to the stable service contract."""
+    if failure is ExchangeFileMetadataFailure.NOT_FOUND:
+        return FileNotFound()
+    return FileAccessDenied()
+
+
+def _map_metadata_result(
+    result: Result[ExchangeFile, ExchangeFileMetadataFailure],
+) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
+    """Map one typed repository result to the service contract."""
+    if isinstance(result, Success):
+        return result
+    return Failure(_map_metadata_failure(result.error))
+
+
+def _map_admitted_metadata_result(
+    result: Result[ExchangeFile, ExchangeFileMetadataFailure],
+) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
+    """Map an admitted-input repository result to the service contract."""
+    if isinstance(result, Success):
+        return result
+    if result.error is ExchangeFileMetadataFailure.SESSION_NOT_FOUND:
+        return Failure(SessionNotFound())
+    return Failure(_map_metadata_failure(result.error))

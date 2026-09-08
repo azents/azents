@@ -23,6 +23,10 @@ from azents.core.enums import (
 )
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact, ArtifactCreate
+from azents.repos.artifact.operations import (
+    ArtifactMetadataFailure,
+    ArtifactOperationRepository,
+)
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -361,17 +365,17 @@ def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Se
     artifact_repo = _FakeArtifactRepository()
     session_boundary = _SessionBoundary()
     s3 = _FakeS3Service(session_boundary)
+    agent_session_repository = _FakeAgentSessionRepository(_make_agent_session())
+    agent_run_repository = AsyncMock()
+    workspace_user_repository = _FakeWorkspaceUserRepository(_make_workspace_user())
     service = ArtifactService(
-        artifact_repository=cast(Any, artifact_repo),
-        agent_session_repository=cast(
-            Any, _FakeAgentSessionRepository(_make_agent_session())
+        operation_repository=ArtifactOperationRepository(
+            artifact_repository=cast(Any, artifact_repo),
+            agent_session_repository=cast(Any, agent_session_repository),
+            agent_run_repository=agent_run_repository,
+            workspace_user_repository=cast(Any, workspace_user_repository),
+            session_manager=session_boundary.session_manager,
         ),
-        agent_run_repository=cast(Any, object()),
-        workspace_user_repository=cast(
-            Any,
-            _FakeWorkspaceUserRepository(_make_workspace_user()),
-        ),
-        session_manager=session_boundary.session_manager,
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
@@ -386,17 +390,35 @@ def _make_authority_service(
     artifact_repo = _FakeArtifactRepository()
     session_boundary = _SessionBoundary()
     s3 = _FakeS3Service(session_boundary)
+    operations = AsyncMock(spec=ArtifactOperationRepository)
+
+    async def load_verified_publication(
+        *,
+        authority: object,
+        artifact_id: str,
+    ) -> Result[Artifact | None, ArtifactMetadataFailure]:
+        del authority
+        if not authority_results.pop(0):
+            return Failure(ArtifactMetadataFailure.ACCESS_DENIED)
+        return Success(artifact_repo.artifacts.get(artifact_id))
+
+    async def finalize_verified_publication(
+        *,
+        authority: object,
+        create: ArtifactCreate,
+    ) -> Result[Artifact, ArtifactMetadataFailure]:
+        del authority
+        if not authority_results.pop(0):
+            return Failure(ArtifactMetadataFailure.ACCESS_DENIED)
+        existing = artifact_repo.artifacts.get(create.id)
+        if existing is not None:
+            return Success(existing)
+        return Success(await artifact_repo.create(cast(AsyncSession, object()), create))
+
+    operations.load_verified_publication.side_effect = load_verified_publication
+    operations.finalize_verified_publication.side_effect = finalize_verified_publication
     service = _AuthorityArtifactService(
-        artifact_repository=cast(Any, artifact_repo),
-        agent_session_repository=cast(
-            Any, _FakeAgentSessionRepository(_make_agent_session())
-        ),
-        agent_run_repository=cast(Any, object()),
-        workspace_user_repository=cast(
-            Any,
-            _FakeWorkspaceUserRepository(_make_workspace_user()),
-        ),
-        session_manager=session_boundary.session_manager,
+        operation_repository=operations,
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
@@ -501,7 +523,7 @@ async def test_authority_resolves_artifact_created_by_previous_session_run() -> 
         return None
 
     run_repository.get_by_id.side_effect = get_run
-    service.agent_run_repository = run_repository
+    service.operation_repository.agent_run_repository = run_repository
 
     resolved = await service.resolve_for_authority(
         uri=created.value.uri,

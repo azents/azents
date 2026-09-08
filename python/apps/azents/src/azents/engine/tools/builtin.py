@@ -984,14 +984,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             authority = context.resource_authority
             if authority is None:
                 return False
-            async with self.session_manager() as session:
-                return await (
-                    self.model_file_service.validate_resource_authority_in_session(
-                        session,
-                        authority,
-                        lock=False,
-                    )
-                )
+            return await self.model_file_service.validate_resource_authority(authority)
 
         async def resolve_edit_target() -> RuntimeEditTarget:
             runtime = await resolve_exact_runtime_target()
