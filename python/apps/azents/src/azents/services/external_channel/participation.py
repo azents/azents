@@ -21,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -60,7 +61,6 @@ from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
     setup_source_from_projection,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 class ExternalChannelParticipationError(ValueError):

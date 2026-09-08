@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
 )
 from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
     ExternalChannelConversationLockError,
@@ -38,7 +39,6 @@ from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
     get_external_channel_participation_lock,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 class ExternalChannelIngestionOperation(enum.StrEnum):

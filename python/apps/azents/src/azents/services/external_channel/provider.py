@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol, assert_never
 
 from azents.core.enums import ExternalChannelProvider
-from azents.services.external_channel.data import (
+from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionCredentials,

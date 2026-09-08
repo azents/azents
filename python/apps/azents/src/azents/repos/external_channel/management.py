@@ -25,6 +25,11 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
 )
+from azents.core.external_channel_provider import (
+    DiscordThreadAutoArchiveDurationMinutes,
+    decode_discord_connection_configuration,
+)
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -65,11 +70,6 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
-from azents.services.external_channel.data import (
-    DiscordThreadAutoArchiveDurationMinutes,
-    decode_discord_connection_configuration,
-)
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 @dataclass(frozen=True)

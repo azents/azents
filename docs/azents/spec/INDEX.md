@@ -14,12 +14,12 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-04 | 72 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-08 | 162 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-07 | 73 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-08 | 74 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-27 | 21 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
-| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-07 | 10 |
+| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-08 | 11 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-07 | 109 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-03 | 13 |
@@ -36,7 +36,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-07 | 59 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-05 | 47 |

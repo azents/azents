@@ -39,6 +39,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_progress import checking_progress_title
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
@@ -68,7 +69,6 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 from .data import (
     DiscordGatewayTypingTarget,

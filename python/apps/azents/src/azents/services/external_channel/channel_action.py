@@ -17,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
+from azents.core.discord_external_channel_presentation import (
+    render_discord_session_navigation_components,
+    render_discord_session_presence,
+    render_discord_setup_required,
+)
 from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelAppMode,
@@ -30,6 +35,13 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.external_channel_provider_effect import (
+    ProviderEffectOutcome,
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.core.external_channel_session_presence import (
     ExternalChannelSessionPresenceState,
     build_external_channel_scheduled_task_url,
@@ -71,11 +83,6 @@ from azents.services.external_channel.discord_delivery import (
     _sdk_delivery_failure,
     _sdk_timeout_result,
 )
-from azents.services.external_channel.discord_presentation import (
-    render_discord_session_navigation_components,
-    render_discord_session_presence,
-    render_discord_setup_required,
-)
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
     DiscordSDKError,
@@ -98,13 +105,6 @@ from azents.services.external_channel.presentation import (
     prepend_agent_markdown,
     resolve_slack_agent_name_presentation,
     resolve_slack_agent_presentation,
-)
-from azents.services.external_channel.provider_effect import (
-    ProviderEffectOutcome,
-    ProviderEffectPlan,
-    ProviderMutationOutcome,
-    ProviderOperationKey,
-    ProviderTarget,
 )
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,

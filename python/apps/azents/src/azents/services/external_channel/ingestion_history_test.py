@@ -16,15 +16,15 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionCredentials,
+    SlackConnectionCredentials,
+)
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryRange,
     ExternalChannelHistoryTemporaryFailure,
     ExternalChannelOperationDeadline,
-)
-from azents.services.external_channel.data import (
-    DiscordConnectionCredentials,
-    SlackConnectionCredentials,
 )
 from azents.services.external_channel.discord_events import DiscordNormalizedMessage
 from azents.services.external_channel.ingestion import ExternalChannelTriggerLocator

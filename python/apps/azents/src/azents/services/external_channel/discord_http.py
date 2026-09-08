@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelInteractionStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -55,7 +56,6 @@ from azents.services.external_channel.discord_settings_scope import (
     DiscordSettingsScope,
     parse_discord_settings_custom_id,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )

@@ -20,6 +20,11 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+)
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelConnection,
@@ -46,17 +51,12 @@ from azents.services.external_channel.conversation import (
     ExternalChannelConversationLockLease,
     ExternalChannelParticipationLock,
 )
-from azents.services.external_channel.data import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-)
 from azents.services.external_channel.management import (
     ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
     ExternalChannelResponseModeSetting,
     slack_manifest_guidance,
 )
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.testing.external_channel import make_provider_effect_plan
 from azents.testing.types import require_instance
 

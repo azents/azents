@@ -21,6 +21,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.s3.deps import get_s3_service
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
@@ -45,7 +46,6 @@ from azents.repos.external_channel.data import (
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleCleanup
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.orchestrator import (
     TransitionOperation,
