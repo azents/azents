@@ -60,6 +60,34 @@ class TestSessionRepository:
         assert sess.created_at
         assert sess.updated_at
 
+    async def test_create_for_active_user_rejects_disabled_user(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Conditional Session creation rejects a disabled User."""
+        user_id = await _create_user(
+            rdb_session,
+            email="sess-create-disabled@example.com",
+        )
+        await UserRepository().disable_access(
+            rdb_session,
+            user_id,
+            disabled_at=tznow(),
+        )
+        repo = SessionRepository()
+
+        result = await repo.create_for_active_user(
+            rdb_session,
+            SessionCreate(
+                user_id=user_id,
+                refresh_token="disabled-create-token",
+                expires_at=tznow() + datetime.timedelta(hours=1),
+            ),
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, NotFound)
+
     async def test_get(self, rdb_session: AsyncSession) -> None:
         """Fetch Session by ID."""
         # Given: create Session

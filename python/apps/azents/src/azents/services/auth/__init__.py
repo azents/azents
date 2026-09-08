@@ -7,26 +7,29 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.jwt import create_access_token
 from azents.core.auth.password import verify_password
 from azents.core.config import AuthConfig, EmailConfig
 from azents.core.deps import get_auth_config, get_email_config
 from azents.core.email.service import EmailService
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
+from azents.repos.auth_operation import AuthOperationRepository
+from azents.repos.auth_operation.data import (
+    AuthenticationUnavailable,
+    PasswordCredentialLookup,
+    RefreshAuthenticationSession,
+    RefreshTokenRejected,
+    VerifiedEmailUserResolve,
+)
+from azents.repos.auth_operation.data import (
+    RegistrationRequired as RepositoryRegistrationRequired,
+)
 from azents.repos.email_verification.data import EmailVerificationCreate
 from azents.repos.email_verification_operation import (
     EmailVerificationOperationRepository,
 )
 from azents.repos.email_verification_operation.data import EmailVerificationVerify
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.session import SessionRepository
-from azents.repos.session.data import SessionCreate, TokenMatch
-from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
-from azents.repos.user_email import UserEmailRepository
+from azents.repos.session.data import SessionCreate
 from azents.services._utils import (
     DEFAULT_EXPIRE_MINUTES,
     generate_code,
@@ -70,14 +73,11 @@ class AuthService:
         EmailVerificationOperationRepository,
         Depends(EmailVerificationOperationRepository),
     ]
-    user_repo: Annotated[UserRepository, Depends()]
-    user_email_repo: Annotated[UserEmailRepository, Depends()]
-    password_login_repo: Annotated[PasswordLoginRepository, Depends()]
-    session_repo: Annotated[SessionRepository, Depends()]
-    credential_service: Annotated[CredentialService, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    auth_operation_repository: Annotated[
+        AuthOperationRepository,
+        Depends(AuthOperationRepository),
     ]
+    credential_service: Annotated[CredentialService, Depends()]
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     email_config: Annotated[EmailConfig | None, Depends(get_email_config)]
@@ -146,23 +146,22 @@ class AuthService:
             email=input.email
         )
 
-        # Fetch or automatically create User
-        async with self.session_manager() as session:
-            user_email = await self.user_email_repo.get_by_email(session, input.email)
-
-            if user_email is None:
-                if self.auth_config.registration_mode != "open":
-                    return Failure(RegistrationRequired())
-                user = await self.user_repo.create(
-                    session,
-                    UserCreate(email=input.email),
+        resolve_result = (
+            await self.auth_operation_repository.resolve_verified_email_user(
+                resolve=VerifiedEmailUserResolve(
+                    email=input.email,
+                    registration_open=self.auth_config.registration_mode == "open",
                 )
-                user_id = user.id
-            else:
-                user_id = user_email.user_id
-                user = await self.user_repo.get(session, user_id)
-                if user is not None and user.access_disabled_at is not None:
-                    return Failure(InvalidVerificationCode())
+            )
+        )
+        if isinstance(resolve_result, Failure):
+            error = resolve_result.error
+            if isinstance(error, RepositoryRegistrationRequired):
+                return Failure(RegistrationRequired())
+            if isinstance(error, AuthenticationUnavailable):
+                return Failure(InvalidVerificationCode())
+            assert_never(error)
+        user_id = resolve_result.value.user_id
 
         # Create session
         refresh_token = generate_refresh_token()
@@ -173,18 +172,23 @@ class AuthService:
             else None
         )
 
-        async with self.session_manager() as session:
-            db_session = await self.session_repo.create(
-                session,
-                SessionCreate(
-                    user_id=user_id,
-                    refresh_token=refresh_token,
-                    expires_at=expires_at,
-                    max_expires_at=max_expires_at,
-                    user_agent=input.user_agent,
-                    ip_address=input.ip_address,
-                ),
+        session_result = await self.auth_operation_repository.issue_session(
+            create=SessionCreate(
+                user_id=user_id,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                max_expires_at=max_expires_at,
+                user_agent=input.user_agent,
+                ip_address=input.ip_address,
             )
+        )
+        match session_result:
+            case Success(db_session):
+                pass
+            case Failure():
+                return Failure(InvalidVerificationCode())
+            case _:
+                assert_never(session_result)
 
         # Create JWT access token
         access_token = create_access_token(
@@ -209,77 +213,16 @@ class AuthService:
         :param input: Refresh input data
         :return: New tokens on success, error on failure
         """
-        async with self.session_manager() as session:
-            result = await self.session_repo.get_by_refresh_token(
-                session, input.refresh_token
+        refresh_result = await self.auth_operation_repository.refresh_session(
+            refresh=RefreshAuthenticationSession(
+                refresh_token=input.refresh_token,
+                candidate_refresh_token=generate_refresh_token(),
+                rotation_period=self.auth_config.refresh_token.rotation_period,
+                grace_period=self.auth_config.refresh_token.grace_period,
+                expire_timedelta=self.auth_config.refresh_token.expire_timedelta,
             )
-            if result is None:
-                return Failure(InvalidRefreshToken())
-
-            db_session, token_match = result
-
-            # Revoked session
-            if db_session.is_revoked:
-                return Failure(InvalidRefreshToken())
-
-            # Expired session
-            if db_session.is_expired:
-                return Failure(InvalidRefreshToken())
-
-            user = await self.user_repo.get(session, db_session.user_id)
-            if user is None or user.access_disabled_at is not None:
-                return Failure(InvalidRefreshToken())
-
-            # Check grace period for previous token
-            if token_match == TokenMatch.PREVIOUS:
-                grace_period = self.auth_config.refresh_token.grace_period
-                if (tznow() - db_session.refresh_token_created_at) > grace_period:
-                    return Failure(InvalidRefreshToken())
-
-                # Previous token within grace period -> return current session as-is
-                access_token = create_access_token(
-                    config=self.auth_config.jwt,
-                    user_id=db_session.user_id,
-                    session_id=db_session.id,
-                )
-                return Success(
-                    RefreshTokenOutput(
-                        access_token=access_token,
-                        refresh_token=db_session.refresh_token,
-                        expires_in=self.auth_config.jwt.access_token_expire_seconds,
-                    )
-                )
-
-            # Current token -> check rotation interval
-            rotation_period = self.auth_config.refresh_token.rotation_period
-            if (tznow() - db_session.refresh_token_created_at) < rotation_period:
-                # Below rotation interval -> return existing token as-is
-                access_token = create_access_token(
-                    config=self.auth_config.jwt,
-                    user_id=db_session.user_id,
-                    session_id=db_session.id,
-                )
-                return Success(
-                    RefreshTokenOutput(
-                        access_token=access_token,
-                        refresh_token=db_session.refresh_token,
-                        expires_in=self.auth_config.jwt.access_token_expire_seconds,
-                    )
-                )
-
-            # Refresh token rotation
-            new_refresh_token = generate_refresh_token()
-            new_expires_at = tznow() + self.auth_config.refresh_token.expire_timedelta
-
-            rotate_result = await self.session_repo.rotate_refresh_token(
-                session,
-                db_session.id,
-                db_session.refresh_token,
-                new_refresh_token,
-                new_expires_at,
-            )
-
-        match rotate_result:
+        )
+        match refresh_result:
             case Success(updated_session):
                 access_token = create_access_token(
                     config=self.auth_config.jwt,
@@ -293,10 +236,12 @@ class AuthService:
                         expires_in=self.auth_config.jwt.access_token_expire_seconds,
                     )
                 )
-            case Failure():
+            case Failure(error) if isinstance(error, RefreshTokenRejected):
                 return Failure(InvalidRefreshToken())
+            case Failure(error):
+                assert_never(error)
             case _:
-                assert_never(rotate_result)
+                assert_never(refresh_result)
 
     async def logout(self, input: LogoutInput) -> Result[None, SessionNotFound]:
         """Revoke session.
@@ -304,8 +249,9 @@ class AuthService:
         :param input: Logout input data
         :return: None on success, error on failure
         """
-        async with self.session_manager() as session:
-            result = await self.session_repo.revoke(session, input.session_id)
+        result = await self.auth_operation_repository.revoke_session(
+            session_id=input.session_id
+        )
 
         match result:
             case Success():
@@ -328,25 +274,22 @@ class AuthService:
         :param input: Password login input data
         :return: Tokens on success, error on failure
         """
-        # Fetch user by email
-        async with self.session_manager() as session:
-            user = await self.user_repo.get_by_email(session, input.email)
-            if user is None:
-                return Failure(InvalidCredentials())
-            if user.access_disabled_at is not None:
-                return Failure(InvalidCredentials())
-
-            # Check password
-            password_login = await self.password_login_repo.get_by_user_id(
-                session, user.id
+        credential_result = (
+            await self.auth_operation_repository.get_password_credential(
+                lookup=PasswordCredentialLookup(email=input.email)
             )
-            if password_login is None:
+        )
+        match credential_result:
+            case Success(credential):
+                pass
+            case Failure():
                 return Failure(InvalidCredentials())
+            case _:
+                assert_never(credential_result)
 
-        if not verify_password(input.password, password_login.password_hash):
+        if not verify_password(input.password, credential.password_hash):
             return Failure(InvalidCredentials())
 
-        # Create session
         refresh_token = generate_refresh_token()
         expires_at = tznow() + self.auth_config.refresh_token.expire_timedelta
         max_expires_at = (
@@ -355,23 +298,28 @@ class AuthService:
             else None
         )
 
-        async with self.session_manager() as session:
-            db_session = await self.session_repo.create(
-                session,
-                SessionCreate(
-                    user_id=user.id,
-                    refresh_token=refresh_token,
-                    expires_at=expires_at,
-                    max_expires_at=max_expires_at,
-                    user_agent=input.user_agent,
-                    ip_address=input.ip_address,
-                ),
+        session_result = await self.auth_operation_repository.issue_session(
+            create=SessionCreate(
+                user_id=credential.user_id,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                max_expires_at=max_expires_at,
+                user_agent=input.user_agent,
+                ip_address=input.ip_address,
             )
+        )
+        match session_result:
+            case Success(db_session):
+                pass
+            case Failure():
+                return Failure(InvalidCredentials())
+            case _:
+                assert_never(session_result)
 
         # Create JWT access token
         access_token = create_access_token(
             config=self.auth_config.jwt,
-            user_id=user.id,
+            user_id=credential.user_id,
             session_id=db_session.id,
         )
 

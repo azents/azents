@@ -10,6 +10,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.session import RDBSession
+from azents.rdb.models.user import RDBUser
 
 from .data import NotFound, Session, SessionCreate, TokenMatch
 
@@ -35,6 +36,29 @@ class SessionRepository:
         session.add(rdb_session)
         await session.flush()
         return Session.from_rdb(rdb_session)
+
+    async def create_for_active_user(
+        self,
+        session: AsyncSession,
+        create: SessionCreate,
+    ) -> Result[Session, NotFound]:
+        """Create Session only when the User currently has access.
+
+        :param session: Database session
+        :param create: Create data
+        :return: Created Session or unavailable User error
+        """
+        result = await session.execute(
+            sa.select(RDBUser.id)
+            .where(
+                RDBUser.id == create.user_id,
+                RDBUser.access_disabled_at.is_(None),
+            )
+            .with_for_update(read=True)
+        )
+        if result.scalar_one_or_none() is None:
+            return Failure(NotFound(id=create.user_id))
+        return Success(await self.create(session, create))
 
     async def get(self, session: AsyncSession, session_id: str) -> Session | None:
         """Fetch Session by ID.
