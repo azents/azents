@@ -18,6 +18,7 @@ from azents.repos.toolkit.data import (
     NotFound,
     ScopeNotFound,
 )
+from azents.services.agent.data import NotAdmin
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -37,7 +38,11 @@ from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
     AgentToolkitAttachRequest,
+    AgentToolkitConfigCreateRequest,
+    AgentToolkitConfigUpdateRequest,
     AgentToolkitListResponse,
+    AgentToolkitManagementItemResponse,
+    AgentToolkitManagementResponse,
     AgentToolkitResponse,
     ToolkitConfigCreateRequest,
     ToolkitConfigListResponse,
@@ -305,6 +310,270 @@ async def delete_toolkit_config(
                 )
             case _:
                 assert_never(error)
+
+
+# ------------------------------------------------------------------ #
+# Agent-owned Toolkit Config management (Owner or explicit AgentAdmin)
+# ------------------------------------------------------------------ #
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/toolkit-configs")
+async def list_agent_toolkit_management(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentToolkitManagementResponse:
+    """Return the authorized Agent Toolkit management projection."""
+    result = await service.list_agent_management(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    if result.success:
+        value = result.value
+        return AgentToolkitManagementResponse(
+            items=[
+                AgentToolkitManagementItemResponse(
+                    ownership_scope=item.ownership_scope,
+                    toolkit=ToolkitConfigResponse.model_validate(
+                        item.toolkit,
+                        from_attributes=True,
+                    ),
+                    agent_toolkit_id=item.agent_toolkit_id,
+                    readiness=item.readiness,
+                )
+                for item in value.items
+            ],
+            available_shared=[
+                ToolkitConfigResponse.model_validate(
+                    toolkit,
+                    from_attributes=True,
+                )
+                for toolkit in value.available_shared
+            ],
+        )
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found.",
+            )
+        case NotAdmin():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Agent administrator or workspace owner access required.",
+            )
+        case _:
+            assert_never(error)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agent_toolkit_config(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AgentToolkitConfigCreateRequest,
+) -> ToolkitConfigResponse:
+    """Create one ToolkitConfig owned by the path Agent."""
+    if request_body.toolkit_type == "shell":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Shell is managed via Agent Runtime settings, not toolkit configs.",
+        )
+    result = await service.create_agent_owned(
+        agent_id,
+        ToolkitCreateInput(
+            workspace_id=member.workspace_id,
+            toolkit_type=request_body.toolkit_type,
+            slug=request_body.slug,
+            name=request_body.name,
+            description=request_body.description,
+            config=request_body.config,
+            prompt=request_body.prompt,
+            credentials=request_body.credentials,
+            enabled=request_body.enabled,
+            always_expose_tools=request_body.always_expose_tools,
+        ),
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    if result.success:
+        return ToolkitConfigResponse.model_validate(
+            result.value,
+            from_attributes=True,
+        )
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found.",
+            )
+        case NotAdmin():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Agent administrator or workspace owner access required.",
+            )
+        case InvalidToolkitType():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown toolkit type.",
+            )
+        case InvalidConfig():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid tool config.",
+            )
+        case DuplicateSlug():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate toolkit slug for this agent.",
+            )
+        case EffectiveSlugConflict():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Toolkit slug conflicts with another toolkit for this agent.",
+            )
+        case InvalidCredentials(detail=detail):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=detail,
+            )
+        case _:
+            assert_never(error)
+
+
+@router.get(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}"
+)
+async def get_agent_toolkit_config(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> ToolkitConfigResponse:
+    """Read one ToolkitConfig owned by the path Agent."""
+    result = await service.get_agent_owned(
+        agent_id,
+        toolkit_config_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    if result.success:
+        return ToolkitConfigResponse.model_validate(
+            result.value,
+            from_attributes=True,
+        )
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace() | NotAdmin() | NotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Toolkit config not found.",
+            )
+        case _:
+            assert_never(error)
+
+
+@router.patch(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}"
+)
+async def update_agent_toolkit_config(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+    request_body: AgentToolkitConfigUpdateRequest,
+) -> ToolkitConfigResponse:
+    """Update one ToolkitConfig owned by the path Agent."""
+    result = await service.update_agent_owned(
+        agent_id,
+        toolkit_config_id,
+        request_body,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    if result.success:
+        return ToolkitConfigResponse.model_validate(
+            result.value,
+            from_attributes=True,
+        )
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace() | NotAdmin() | NotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Toolkit config not found.",
+            )
+        case InvalidConfig():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid tool config.",
+            )
+        case DuplicateSlug():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate toolkit slug for this agent.",
+            )
+        case EffectiveSlugConflict():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Toolkit slug conflicts with another toolkit for this agent.",
+            )
+        case InvalidCredentials(detail=detail):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=detail,
+            )
+        case _:
+            assert_never(error)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_agent_toolkit_config(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ToolkitService, Depends()],
+    *,
+    agent_id: str,
+    toolkit_config_id: str,
+) -> None:
+    """Delete one ToolkitConfig owned by the path Agent."""
+    result = await service.delete_agent_owned(
+        agent_id,
+        toolkit_config_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    if result.success:
+        return
+    error = result.error
+    match error:
+        case AgentNotBelongToWorkspace() | NotAdmin() | NotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Toolkit config not found.",
+            )
+        case _:
+            assert_never(error)
 
 
 # ------------------------------------------------------------------ #

@@ -164,6 +164,32 @@ def test_agent_scoped_toolkit_migration_preserves_shared_rows_and_guards_downgra
                 agent_id="agent-toolkit-owner-1",
                 slug="github",
             )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO mcp_oauth_connections (
+                        id,
+                        toolkit_id,
+                        server_url,
+                        authorization_endpoint,
+                        token_endpoint,
+                        encrypted_client_id,
+                        token_endpoint_auth_method,
+                        status
+                    )
+                    VALUES (
+                        'oauth-owned-agent-1',
+                        'toolkit-owned-agent-1',
+                        'https://mcp.test',
+                        'https://mcp.test/authorize',
+                        'https://mcp.test/token',
+                        'encrypted-client-id',
+                        'client_secret_post',
+                        'reconnect_required'
+                    )
+                    """
+                )
+            )
             _insert_owned_toolkit(
                 connection,
                 toolkit_id="toolkit-owned-agent-2",
@@ -211,6 +237,16 @@ def test_agent_scoped_toolkit_migration_preserves_shared_rows_and_guards_downgra
                 )
             )
             assert owner_one_count == 0
+            oauth_count = connection.scalar(
+                sa.text(
+                    """
+                    SELECT count(*)
+                    FROM mcp_oauth_connections
+                    WHERE toolkit_id = 'toolkit-owned-agent-1'
+                    """
+                )
+            )
+            assert oauth_count == 0
 
         with pytest.raises(
             RuntimeError,
