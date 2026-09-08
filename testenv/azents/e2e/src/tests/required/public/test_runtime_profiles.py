@@ -10,13 +10,16 @@ from typing import Any, Literal, cast
 import azentsadminclient
 import azentspublicclient
 import pytest
+import requests
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
 )
 from azents_runtime_control.runner import (
+    RunnerOperationEnvelope,
     RunnerOperationEvent,
     RunnerRegistration,
+    RunnerRegistrationAccepted,
     RunnerStateReport,
     RuntimeRunnerEventType,
     RuntimeRunnerState,
@@ -105,6 +108,17 @@ class _RunnerProbeSettings:
     endpoint: str
     auth_token: str = dataclasses.field(repr=False)
     registration: RunnerRegistration
+
+
+@dataclasses.dataclass(frozen=True)
+class _InflightProbeOperation:
+    """One real Public API operation retained by a controlled Runner probe."""
+
+    client: GrpcRunnerControlClient
+    accepted: RunnerRegistrationAccepted
+    operation: RunnerOperationEnvelope
+    response_task: asyncio.Task[requests.Response]
+    path: str
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -275,28 +289,263 @@ async def _wait_for_runner_generation_above(
     raise AssertionError("Real Runner did not replace the stale E2E probe")
 
 
-async def _assert_stale_runner_action_is_fenced(
-    action: _StaleRunnerAction,
+async def _start_inflight_probe_operation(
     *,
     settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
     runtime_api: AgentRuntimeV1Api,
     agent_id: str,
     handle: str,
     headers: dict[str, str],
-    runtime_control_container: DockerContainer,
-) -> None:
-    """Replace one probe, submit one stale action, and preserve current state."""
+    path: str,
+) -> _InflightProbeOperation:
+    """Start one real Workspace operation and hold its final Runner result."""
+    operation_received = asyncio.Event()
+    operations: list[RunnerOperationEnvelope] = []
+
+    async def capture_operation(operation: RunnerOperationEnvelope) -> None:
+        operations.append(operation)
+        operation_received.set()
+
     client = GrpcRunnerControlClient.from_endpoint(
         settings.endpoint,
         runner_auth_token=settings.auth_token,
         tls=None,
         allow_insecure=True,
     )
+    client.set_operation_handler(capture_operation)
     accepted = await client.register_runner(
         settings.registration,
-        connection_id=f"stale-probe-{action}-{unique()}",
+        connection_id=f"inflight-probe-{unique()}",
         registered_at=datetime.now(UTC),
     )
+    await client.report_runner_state(
+        RunnerStateReport(
+            runtime_id=accepted.runtime_id,
+            runner_id=accepted.runner_id,
+            runner_generation=accepted.generation,
+            runner_state=RuntimeRunnerState.READY,
+            capabilities=settings.registration.capabilities,
+            active_operation_ids=(),
+            health="ready",
+            diagnostic={"source": "inflight-probe"},
+            workspace_path=settings.registration.workspace_path,
+            reported_at=datetime.now(UTC),
+            runtime_configuration=settings.registration.runtime_configuration,
+        )
+    )
+    projection_deadline = asyncio.get_running_loop().time() + 10
+    while asyncio.get_running_loop().time() < projection_deadline:
+        projected = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            projected.runtime is not None
+            and projected.runtime.runner_generation == str(accepted.generation)
+            and projected.runtime.runner_state.value == "ready"
+        ):
+            break
+        await asyncio.sleep(0.2)
+    else:
+        await client.close()
+        raise AssertionError("Runner probe generation was not durably projected")
+    response_task = asyncio.create_task(
+        asyncio.to_thread(
+            requests.post,
+            f"{public_server_url}/chat/v1/agents/{agent_id}/workspace/directories",
+            headers=_headers(token),
+            json={"path": path, "parents": False},
+            timeout=25,
+        )
+    )
+    try:
+        await asyncio.wait_for(operation_received.wait(), timeout=10)
+        operation = operations[0]
+        assert operation.operation_type == "file.mkdir"
+        assert operation.payload["path"] == path
+        assert await client.start_runner_operation(operation)
+    except asyncio.CancelledError:
+        await client.close()
+        if not response_task.done():
+            response_task.cancel()
+        raise
+    except Exception:
+        await client.close()
+        if not response_task.done():
+            response_task.cancel()
+        raise
+    return _InflightProbeOperation(
+        client=client,
+        accepted=accepted,
+        operation=operation,
+        response_task=response_task,
+        path=path,
+    )
+
+
+async def _assert_inflight_request_did_not_succeed(
+    inflight: _InflightProbeOperation,
+) -> None:
+    """Require one lost or stale operation to avoid an HTTP success response."""
+    try:
+        response = await inflight.response_task
+    except requests.RequestException:
+        return
+    assert response.status_code != 200
+
+
+def _assert_workspace_path_missing(
+    workspace_api: ChatV1Api,
+    *,
+    agent_id: str,
+    path: str,
+    headers: dict[str, str],
+) -> None:
+    """Require that a rejected synthetic result created no Runtime path."""
+    with pytest.raises(ApiException) as error:
+        workspace_api.chat_v1_read_agent_workspace_path(
+            agent_id=agent_id,
+            path=path,
+            _headers=headers,
+        )
+    assert cast(Any, error.value).status == 404
+
+
+async def _wait_for_empty_store_recovery(
+    runtime_api: AgentRuntimeV1Api,
+    *,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    minimum_generation: int,
+    provider_container: DockerContainer,
+    prior_provider_registrations: int,
+) -> AgentRuntimeResponse:
+    """Wait for both Provider and Runner to recover after empty-store reset."""
+    deadline = asyncio.get_running_loop().time() + 120
+    while asyncio.get_running_loop().time() < deadline:
+        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            current.runtime is not None
+            and current.runtime.runner_generation is not None
+            and current.lifecycle is not None
+            and _runtime_provider_registration_count(provider_container)
+            > prior_provider_registrations
+            and int(current.runtime.runner_generation) > minimum_generation
+            and current.lifecycle.availability == "ready"
+            and current.actions.use_runner
+        ):
+            return current
+        await asyncio.sleep(0.5)
+    raise AssertionError("Runtime did not recover with higher authority after reset")
+
+
+async def _reset_with_inflight_operation(
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    path: str,
+    previous_generation: int,
+    provider_container: DockerContainer,
+    previous_provider_registrations: int,
+    valkey_container: DockerContainer,
+) -> AgentRuntimeResponse:
+    """Clear Valkey with an active operation and require fail-closed recovery."""
+    inflight = await _start_inflight_probe_operation(
+        settings=settings,
+        public_server_url=public_server_url,
+        token=token,
+        runtime_api=runtime_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        path=path,
+    )
+    redis = Redis(
+        host=valkey_container.get_container_host_ip(),
+        port=int(valkey_container.get_exposed_port(6379)),
+        decode_responses=True,
+    )
+    try:
+        await asyncio.to_thread(redis.flushall)
+        recovered = await _wait_for_empty_store_recovery(
+            runtime_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            minimum_generation=max(
+                previous_generation,
+                inflight.accepted.generation,
+            ),
+            provider_container=provider_container,
+            prior_provider_registrations=previous_provider_registrations,
+        )
+        await _assert_inflight_request_did_not_succeed(inflight)
+        _assert_workspace_path_missing(
+            workspace_api,
+            agent_id=agent_id,
+            path=inflight.path,
+            headers=headers,
+        )
+        return recovered
+    finally:
+        redis.close()
+        await inflight.client.close()
+
+
+async def _assert_stale_runner_action_is_fenced(
+    action: _StaleRunnerAction,
+    *,
+    settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
+    runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    runtime_control_container: DockerContainer,
+) -> None:
+    """Replace one probe, submit one stale action, and preserve current state."""
+    inflight: _InflightProbeOperation | None = None
+    if action == "result":
+        inflight = await _start_inflight_probe_operation(
+            settings=settings,
+            public_server_url=public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            path=f"{settings.registration.workspace_path}/stale-result-{unique()}",
+        )
+        client = inflight.client
+        accepted = inflight.accepted
+    else:
+        client = GrpcRunnerControlClient.from_endpoint(
+            settings.endpoint,
+            runner_auth_token=settings.auth_token,
+            tls=None,
+            allow_insecure=True,
+        )
+        accepted = await client.register_runner(
+            settings.registration,
+            connection_id=f"stale-probe-{action}-{unique()}",
+            registered_at=datetime.now(UTC),
+        )
     current = await _wait_for_runner_generation_above(
         runtime_api,
         agent_id=agent_id,
@@ -343,13 +592,14 @@ async def _assert_stale_runner_action_is_fenced(
                     heartbeat_at=datetime.now(UTC),
                 )
         elif action == "result":
+            assert inflight is not None
             await client.append_runner_event(
                 RunnerOperationEvent(
-                    request_id=f"stale-result-{unique()}",
+                    request_id=inflight.operation.request_id,
                     runtime_id=accepted.runtime_id,
                     generation=accepted.generation,
                     event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
-                    payload={"success": True},
+                    payload={"created_path": inflight.path},
                     created_at=datetime.now(UTC),
                     final=True,
                 )
@@ -360,6 +610,13 @@ async def _assert_stale_runner_action_is_fenced(
                     generation=accepted.generation,
                     heartbeat_at=datetime.now(UTC),
                 )
+            await _assert_inflight_request_did_not_succeed(inflight)
+            _assert_workspace_path_missing(
+                workspace_api,
+                agent_id=agent_id,
+                path=inflight.path,
+                headers=headers,
+            )
         else:
             await client.close()
             wait_until(
@@ -390,7 +647,10 @@ async def _assert_stale_runner_action_is_fenced(
 async def _assert_stale_runner_actions_are_fenced(
     *,
     settings: _RunnerProbeSettings,
+    public_server_url: str,
+    token: str,
     runtime_api: AgentRuntimeV1Api,
+    workspace_api: ChatV1Api,
     agent_id: str,
     handle: str,
     headers: dict[str, str],
@@ -401,7 +661,10 @@ async def _assert_stale_runner_actions_are_fenced(
         await _assert_stale_runner_action_is_fenced(
             action,
             settings=settings,
+            public_server_url=public_server_url,
+            token=token,
             runtime_api=runtime_api,
+            workspace_api=workspace_api,
             agent_id=agent_id,
             handle=handle,
             headers=headers,
@@ -504,65 +767,44 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
     )
     assert before.runtime is not None
     assert before.runtime.runner_generation is not None
+    assert before.runtime.workspace_path
     previous_generation = int(before.runtime.runner_generation)
     assert previous_generation > 0
     previous_provider_registrations = _runtime_provider_registration_count(
         azents_runtime_provider_docker_container
     )
-
-    redis = Redis(
-        host=valkey_container.get_container_host_ip(),
-        port=int(valkey_container.get_exposed_port(6379)),
-        decode_responses=True,
+    workspace_api = ChatV1Api(public_api_client)
+    settings = _runner_probe_settings(
+        runtime_id=before.runtime.id,
+        provider_container=azents_runtime_provider_docker_container,
+        runtime_control_container=azents_runtime_control_container,
     )
-    try:
-        redis.flushall()
-    finally:
-        redis.close()
-
-    recovered: AgentRuntimeResponse | None = None
-
-    def runtime_recovered_with_higher_generation() -> bool:
-        nonlocal recovered
-        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+    recovered = asyncio.run(
+        _reset_with_inflight_operation(
+            settings=settings,
+            public_server_url=azents_public_server_url,
+            token=token,
+            runtime_api=runtime_api,
+            workspace_api=workspace_api,
             agent_id=agent.id,
             handle=handle,
-            _headers=headers,
+            headers=headers,
+            path=(f"{before.runtime.workspace_path}/lost-inflight-reset-{suffix}"),
+            previous_generation=previous_generation,
+            provider_container=azents_runtime_provider_docker_container,
+            previous_provider_registrations=previous_provider_registrations,
+            valkey_container=valkey_container,
         )
-        if (
-            current.runtime is None
-            or current.runtime.runner_generation is None
-            or current.lifecycle is None
-        ):
-            return False
-        recovered = current
-        return (
-            _runtime_provider_registration_count(
-                azents_runtime_provider_docker_container
-            )
-            > previous_provider_registrations
-            and int(current.runtime.runner_generation) > previous_generation
-            and current.lifecycle.availability == "ready"
-            and current.actions.use_runner
-        )
-
-    wait_until(
-        runtime_recovered_with_higher_generation,
-        timeout=120,
-        interval=1,
-        message="Runtime did not recover with higher authority after Valkey reset",
     )
-    assert recovered is not None
     assert recovered.runtime is not None
     assert recovered.runtime.workspace_path
     asyncio.run(
         _assert_stale_runner_actions_are_fenced(
-            settings=_runner_probe_settings(
-                runtime_id=recovered.runtime.id,
-                provider_container=azents_runtime_provider_docker_container,
-                runtime_control_container=azents_runtime_control_container,
-            ),
+            settings=settings,
+            public_server_url=azents_public_server_url,
+            token=token,
             runtime_api=runtime_api,
+            workspace_api=workspace_api,
             agent_id=agent.id,
             handle=handle,
             headers=headers,
@@ -571,7 +813,6 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
     )
 
     directory = f"{recovered.runtime.workspace_path}/empty-valkey-{suffix}"
-    workspace_api = ChatV1Api(public_api_client)
     workspace_api.chat_v1_create_agent_workspace_directory(
         agent_id=agent.id,
         agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(

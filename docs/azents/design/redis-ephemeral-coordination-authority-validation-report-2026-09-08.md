@@ -28,7 +28,7 @@ merged front to back, and a matching snapshot is available.
 | --- | --- | --- |
 | Full backend regression | `python/apps/azents`: `uv run pytest -q` | `5125 passed, 2 skipped` |
 | Backend typing | `python/apps/azents`: `uv run ty check --error-on-warning` | passed |
-| Empty-Valkey Runtime recovery | required Docker Runtime Provider E2E clears Valkey, requires Provider re-registration and a higher Runner generation, rejects stale heartbeat/report/result/revoke traffic, then creates and reads a Workspace directory | `1 passed` |
+| Empty-Valkey Runtime recovery | required Docker Runtime Provider E2E starts a real in-flight Workspace operation, clears Valkey without synthesizing success, requires Provider re-registration and a higher Runner generation, rejects stale heartbeat/report/real-operation-result/revoke traffic, then creates and reads a new Workspace directory | `1 passed` |
 | Durable activation | migration seed, future-subject triggers, cutover marker, downgrade fence, signed-`BIGINT` bounds | passed |
 | Candidate publication | Redis/in-memory parity, invisibility, exact token, reset loss, stale generation, ambiguous failure behavior | passed |
 | Registration authority | DB-only transaction checks, current Provider expiry, locked Runner revalidation, Provider history atomicity, non-blocking replacement observer | passed |
@@ -44,10 +44,12 @@ and running Runtime state. It performs no direct database write. It clears the
 test-owned Valkey instance, then requires a numerically higher public Runner generation,
 an additional Docker Provider registration, ready lifecycle authority, and Runner
 operation availability. It then opens short-lived valid Runner probe streams, waits for
-the real Runner to replace them, submits stale heartbeat, failed state report, final
-operation result, and stream-close revoke attempts, and verifies the current durable
-Runtime projection remains unchanged before a successful new Agent Workspace directory
-operation.
+the real Runner to replace them, submits stale heartbeat, failed state report, a final
+result for an actual active Workspace operation, and stream-close revoke attempts, and
+verifies the current durable Runtime projection remains unchanged. A separate probe
+starts an actual Workspace operation before `FLUSHALL`; the lost operation never returns
+success and never creates its requested path. The recovered Runner then completes a new
+Agent Workspace directory operation.
 
 ## Findings Corrected During Validation
 
@@ -70,6 +72,8 @@ operation.
   promoted route before cancellation propagates.
 - Empty-Valkey E2E now proves Provider recovery and stale Runner
   heartbeat/report/result/revoke fencing, not only Runner generation advancement.
+- A real operation started before `FLUSHALL` remains fail-closed: its waiter receives no
+  synthesized success and its requested Workspace path remains absent.
 - Enrollment reset validation now proves a fresh abuse window cannot make consumed,
   revoked, or expired PostgreSQL grants usable through the public exchange.
 - Full-suite stale revision, Runtime Control composition, and Transfer namespace
@@ -88,7 +92,7 @@ operation.
 | `M7` | PostgreSQL/Python/protobuf integers, Redis 19-digit strings, and public/browser nullable canonical strings preserve signed `BIGINT`. |
 | `M8` | Runtime Control refuses startup without the cutover marker; Helm renders the non-overlap scale-zero procedure. |
 | `M9` | Runtime, Transfer, and Terminal use fresh v2 schemas without legacy readers. |
-| `M10` | Empty-Valkey E2E proves Provider and Runner reconnect, stale Runner traffic rejection, and new work; existing durable broker, file, External Channel, and Scheduled Task recovery remains authoritative. |
+| `M10` | Empty-Valkey E2E proves lost in-flight work fails closed, Provider and Runner reconnect, stale Runner traffic cannot complete an actual operation, and new work succeeds; existing durable broker, file, External Channel, and Scheduled Task recovery remains authoritative. |
 | `M11` | Reference Compose Valkey has no volume and disables snapshot/AOF persistence. |
 | `M12` | Migration, cancellation races, reset, stale heartbeat/report/result/revoke authority, durable invalid-grant rejection, maximum string values, deployment, clients, and real E2E have deterministic coverage. |
 
