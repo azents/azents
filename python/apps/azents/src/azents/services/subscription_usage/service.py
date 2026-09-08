@@ -39,6 +39,7 @@ from azents.core.xai_oauth import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.llm_provider_integration.deps import (
@@ -147,6 +148,9 @@ class SubscriptionUsageService:
     repository: Annotated[
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
+    ]
+    chatgpt_oauth_runtime_repository: Annotated[
+        ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -269,8 +273,7 @@ class SubscriptionUsageService:
 
         fresh_result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.chatgpt_oauth_runtime_repository,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -336,8 +339,7 @@ class SubscriptionUsageService:
         """Force one token refresh and retry one unauthorized usage request once."""
         refresh_result = await refresh_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.chatgpt_oauth_runtime_repository,
         )
         match refresh_result:
             case Failure(error):

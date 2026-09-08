@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-04 | 72 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-04 | 161 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-08 | 162 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-07 | 73 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
@@ -33,7 +33,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-07 | 75 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 45 |
-| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
+| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |

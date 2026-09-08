@@ -77,6 +77,7 @@ from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
@@ -310,8 +311,10 @@ async def _ensure_provider_runtime_tokens(
     else:
         result = await ensure_chatgpt_oauth_runtime_tokens(
             integration=integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
+            persistence_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
         )
     match result:
         case Success(value):

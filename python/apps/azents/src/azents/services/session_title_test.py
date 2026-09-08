@@ -8,6 +8,7 @@ from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.session_title as session_title_module
@@ -48,12 +49,16 @@ from azents.engine.run.provider_failure import (
     model_provider_failure,
 )
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
+from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.session_title import SessionTitleRepository
+from azents.repos.session_title.data import SessionTitleGenerationSnapshot
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
@@ -340,10 +345,10 @@ class TestSessionTitleHelpers:
         result = await _title_service(
             capability
         )._generate_title(  # Exercise the operation-local mode selection.
-            agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
+            snapshot=_generation_snapshot(capability),
         )
 
         assert result == "Generated title"
@@ -384,10 +389,10 @@ class TestSessionTitleHelpers:
         result = await _title_service(
             capability
         )._generate_title(  # Exercise the bounded compatibility transition.
-            agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
+            snapshot=_generation_snapshot(capability),
         )
 
         if capability is None:
@@ -439,10 +444,10 @@ class TestSessionTitleHelpers:
         result = await _title_service(
             None, max_retries=1
         )._generate_title(  # Exercise retry interaction with the active mode.
-            agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
+            snapshot=_generation_snapshot(None),
         )
 
         assert result == "Retried structured title"
@@ -494,10 +499,10 @@ class TestSessionTitleHelpers:
         result = await _title_service(
             None, max_retries=1
         )._generate_title(  # Exercise retry after the one-way transition.
-            agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
+            snapshot=_generation_snapshot(None),
         )
 
         assert result == "Plain title after retry"
@@ -534,10 +539,10 @@ class TestSessionTitleHelpers:
         result = await _title_service(
             capability
         )._generate_title(  # Exercise schema-decode transition policy.
-            agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
+            snapshot=_generation_snapshot(capability),
         )
 
         if capability is None:
@@ -597,10 +602,13 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
-            agent_repository=_AgentRepository(),
-            agent_session_repository=_AgentSessionRepository(),
-            integration_repository=_IntegrationRepository(),
-            session_manager=_session_manager,
+            session_title_repository=_session_title_repository(
+                strict_json_schema=None,
+                session_manager=_session_manager,
+            ),
+            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+                _session_manager
+            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -684,10 +692,13 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
-            agent_repository=_AgentRepository(),
-            agent_session_repository=_AgentSessionRepository(),
-            integration_repository=_IntegrationRepository(),
-            session_manager=_session_manager,
+            session_title_repository=_session_title_repository(
+                strict_json_schema=None,
+                session_manager=_session_manager,
+            ),
+            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+                _session_manager
+            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -725,10 +736,10 @@ class TestSessionTitleHelpers:
         with pytest.raises(UnclassifiedModelProviderError):
             # Exercise the standalone retry boundary directly.
             await service._generate_title(
-                agent_id="agent-001",
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
+                snapshot=_generation_snapshot(None),
             )
 
         assert attempts == [1]
@@ -757,10 +768,15 @@ class TestSessionTitleHelpers:
 
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
-            agent_repository=_AgentRepository(),
-            agent_session_repository=title_repository,
-            integration_repository=_IntegrationRepository(),
-            session_manager=_session_manager,
+            session_title_repository=SessionTitleRepository(
+                agent_repository=_AgentRepository(),
+                agent_session_repository=title_repository,
+                integration_repository=_IntegrationRepository(),
+                session_manager=_session_manager,
+            ),
+            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+                _session_manager
+            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -798,10 +814,10 @@ class TestSessionTitleHelpers:
 
         result = (
             await service._generate_title(  # Exercise retry ownership revalidation.
-                agent_id="agent-001",
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
+                snapshot=_generation_snapshot(None),
             )
         )
 
@@ -840,7 +856,13 @@ class TestSessionTitleHelpers:
 
         @asynccontextmanager
         async def session_manager() -> AsyncIterator[RecordingSession]:
-            yield RecordingSession()
+            session = RecordingSession()
+            try:
+                yield session
+            except Exception:
+                raise
+            else:
+                await session.commit()
 
         class RecordingThreadTitleService(_ThreadTitleService):
             async def project_generated_title(
@@ -857,10 +879,15 @@ class TestSessionTitleHelpers:
 
         repository = WinningRepository()
         service = SessionTitleService(
-            agent_repository=_AgentRepository(),
-            agent_session_repository=repository,
-            integration_repository=_IntegrationRepository(),
-            session_manager=session_manager,
+            session_title_repository=SessionTitleRepository(
+                agent_repository=_AgentRepository(),
+                agent_session_repository=repository,
+                integration_repository=_IntegrationRepository(),
+                session_manager=session_manager,
+            ),
+            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+                session_manager
+            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -890,7 +917,107 @@ class TestSessionTitleHelpers:
         )
 
         assert result is not None
-        assert calls == ["generate", "replace", "commit", "project"]
+        assert calls == ["commit", "generate", "replace", "commit", "project"]
+
+    async def test_title_external_work_runs_without_an_active_database_context(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OAuth, model generation, and projection run after repository transactions."""
+        active_contexts = 0
+        calls: list[str] = []
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncIterator[AsyncSession]:
+            nonlocal active_contexts
+            active_contexts += 1
+            try:
+                yield AsyncMock(spec=AsyncSession)
+            finally:
+                active_contexts -= 1
+
+        class WinningRepository(_AgentSessionRepository):
+            async def replace_initial_auto_title(
+                self,
+                session: AsyncSession,
+                *,
+                session_id: str,
+                title: str,
+                event_id: str,
+            ) -> AgentSession:
+                del session, session_id, event_id
+                return (
+                    await self.get_by_id(AsyncMock(spec=AsyncSession), "session-001")
+                ).model_copy(
+                    update={
+                        "title": title,
+                        "title_source": AgentSessionTitleSource.AUTO_GENERATED,
+                    }
+                )
+
+        class RecordingThreadTitleService(_ThreadTitleService):
+            async def project_generated_title(
+                self,
+                *,
+                session_id: str,
+                event: Event,
+                title: str,
+            ) -> None:
+                del session_id, event, title
+                assert active_contexts == 0
+                calls.append("project")
+
+        async def ensure_tokens(**kwargs: object) -> object:
+            del kwargs
+            assert active_contexts == 0
+            calls.append("oauth")
+            return Success(_integration())
+
+        async def generate_title(**kwargs: object) -> str:
+            del kwargs
+            assert active_contexts == 0
+            calls.append("generate")
+            return "Incident response"
+
+        monkeypatch.setattr(
+            session_title_module, "ensure_runtime_tokens", ensure_tokens
+        )
+        monkeypatch.setattr(
+            session_title_module, "generate_session_title_with_model", generate_title
+        )
+        service = SessionTitleService(
+            session_title_repository=SessionTitleRepository(
+                agent_repository=_AgentRepository(),
+                agent_session_repository=WinningRepository(),
+                integration_repository=_IntegrationRepository(),
+                session_manager=session_manager,
+            ),
+            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+                session_manager
+            ),
+            model_stream_watchdog=make_test_model_stream_watchdog(),
+            retry_policy=FailedRunRetryPolicy(
+                max_retries=0,
+                base_backoff_seconds=0,
+                backoff_multiplier=1,
+                max_backoff_seconds=0,
+            ),
+            external_channel_thread_title_service=RecordingThreadTitleService(),
+        )
+
+        result = await service.generate_from_initial_prompt(
+            session_id="session-001",
+            event=_external_channel_event(
+                prompt_role="invocation",
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                body="Investigate the incident.",
+                attachment_metadata={},
+            ).model_copy(update={"id": "0" * 32}),
+        )
+
+        assert result is not None
+        assert active_contexts == 0
+        assert calls == ["oauth", "generate", "project"]
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""
@@ -1060,17 +1187,22 @@ class _IntegrationRepository(LLMProviderIntegrationRepository):
         integration_id: str,
     ) -> LLMProviderIntegrationWithSecrets:
         del session, integration_id
-        now = datetime.datetime.now(datetime.UTC)
-        return LLMProviderIntegrationWithSecrets(
-            id="integration-001",
-            workspace_id="workspace-001",
-            provider=LLMProvider.OPENAI,
-            name="OpenAI test",
-            secrets=ApiKeySecrets(api_key="test-key"),
-            enabled=True,
-            created_at=now,
-            updated_at=now,
-        )
+        return _integration()
+
+
+def _integration() -> LLMProviderIntegrationWithSecrets:
+    """Create an enabled test Provider Integration."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="integration-001",
+        workspace_id="workspace-001",
+        provider=LLMProvider.OPENAI,
+        name="OpenAI test",
+        secrets=ApiKeySecrets(api_key="test-key"),
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class _ThreadTitleService(ExternalChannelThreadTitleService):
@@ -1093,10 +1225,13 @@ def _title_service(
     max_retries: int = 0,
 ) -> SessionTitleService:
     return SessionTitleService(
-        agent_repository=_AgentRepository(strict_json_schema),
-        agent_session_repository=_AgentSessionRepository(),
-        integration_repository=_IntegrationRepository(),
-        session_manager=_session_manager,
+        session_title_repository=_session_title_repository(
+            strict_json_schema=strict_json_schema,
+            session_manager=_session_manager,
+        ),
+        chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
+            _session_manager
+        ),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         retry_policy=FailedRunRetryPolicy(
             max_retries=max_retries,
@@ -1105,6 +1240,41 @@ def _title_service(
             max_backoff_seconds=0,
         ),
         external_channel_thread_title_service=_ThreadTitleService(),
+    )
+
+
+def _session_title_repository(
+    *,
+    strict_json_schema: bool | None,
+    session_manager: SessionManager[AsyncSession],
+) -> SessionTitleRepository:
+    """Create the title database operation repository for tests."""
+    return SessionTitleRepository(
+        agent_repository=_AgentRepository(strict_json_schema),
+        agent_session_repository=_AgentSessionRepository(),
+        integration_repository=_IntegrationRepository(),
+        session_manager=session_manager,
+    )
+
+
+def _chatgpt_oauth_runtime_repository(
+    session_manager: SessionManager[AsyncSession],
+) -> ChatGPTOAuthRuntimeRepository:
+    """Create the OAuth runtime persistence repository for tests."""
+    return ChatGPTOAuthRuntimeRepository(
+        integration_repository=_IntegrationRepository(),
+        session_manager=session_manager,
+    )
+
+
+def _generation_snapshot(
+    strict_json_schema: bool | None,
+) -> SessionTitleGenerationSnapshot:
+    """Create a completed title generation database snapshot."""
+    return SessionTitleGenerationSnapshot(
+        agent_id="agent-001",
+        selection=_model_selection(strict_json_schema),
+        integration=_integration(),
     )
 
 

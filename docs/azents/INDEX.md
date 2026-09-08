@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-04 | 72 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-04 | 161 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-08 | 162 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-07 | 73 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -36,7 +36,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-07 | 75 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 45 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-05 | 21 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-07 | 59 |
@@ -448,6 +448,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
 | [Discord Task-Only Tracker Edit Requirements](requirements/tracker-260907-task-only-edit.md) | tracker-260907 | 2026-09-07 | 2026-09-07 |
+| [Repository-owned Database Transactions Requirements](requirements/transaction-260908-repository-ownership.md) | transaction-260908 | 2026-09-08 | - |
 | [Runtime File Transfer Requirements](requirements/transfer-260725-runtime-file-transfer.md) | transfer-260725 | 2026-07-25 | 2026-07-28 |
 | [Runtime Transfer Lifespan Recovery Requirements](requirements/transfer-260728-runtime-transfer-lifespan-recovery.md) | transfer-260728 | 2026-07-28 | 2026-07-28 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
@@ -864,6 +865,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
 - [Discord Todo Work Activity Tracker Visibility Decisions](adr/tracker-260829-todo-work-visibility.md)
 - [Discord Task-Only Tracker Edit Decisions](adr/tracker-260907-task-only-edit.md)
+- [Repository-owned Database Transactions](adr/transaction-260908-repository-ownership.md)
 - [Runtime File Transfer](adr/transfer-260725-runtime-file-transfer.md)
 - [Runtime Transfer Lifespan Recovery](adr/transfer-260728-runtime-transfer-lifespan-recovery.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)

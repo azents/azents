@@ -52,6 +52,7 @@ from azents.core.llm_catalog_sync import (
 from azents.core.llm_mapping import to_runtime_model
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
     LiteLLMSourceSnapshotRepository,
     LLMCatalogRepository,
@@ -936,6 +937,9 @@ class IntegrationCatalogProjectionService:
     integration_repository: Annotated[
         LLMProviderIntegrationRepository, Depends(_get_integration_repository)
     ]
+    chatgpt_oauth_runtime_repository: Annotated[
+        ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
+    ]
     source_sync_service: Annotated[
         LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
     ]
@@ -1014,8 +1018,7 @@ class IntegrationCatalogProjectionService:
             if integration.provider == LLMProvider.CHATGPT_OAUTH:
                 token_result = await ensure_runtime_tokens(
                     integration=integration,
-                    integration_repository=self.integration_repository,
-                    session_manager=self.session_manager,
+                    persistence_repository=self.chatgpt_oauth_runtime_repository,
                 )
                 if token_result.success:
                     refreshed_integration = token_result.value

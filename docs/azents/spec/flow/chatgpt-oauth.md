@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/chatgpt_oauth/**
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_session/**
   - python/apps/azents/src/azents/rdb/models/chatgpt_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
@@ -25,8 +26,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-05
-spec_version: 21
+last_verified_at: 2026-09-08
+spec_version: 22
 ---
 
 # ChatGPT OAuth Flow
@@ -249,6 +250,15 @@ User-Agent. The usage base URL is independent from the Responses runtime `/codex
 endpoint likewise retains the production default and can be replaced process-locally with
 `AZ_CHATGPT_OAUTH_TOKEN_URL` for deterministic refresh testing.
 
+Runtime freshness receives a completed integration snapshot. When refresh is
+required, the HTTP token exchange runs without an open database transaction.
+Refresh success persists credentials and reloads the integration in one completed
+repository operation. Refresh failure first reads the latest completed
+integration state, preserves an observed concurrent success, and otherwise writes
+the existing failure status through a separate completed repository operation.
+These boundaries do not change the existing ChatGPT refresh concurrency or error
+policy.
+
 A usage 401 triggers exactly one forced refresh through the existing persistence and concurrent-refresh
 recovery path, followed by exactly one usage retry. Only that shared OAuth refresh lifecycle may update
 integration connection status. Usage-specific 403, 429, provider 5xx, transport failure, or malformed
@@ -307,6 +317,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-08 | 22 | Moved runtime token-refresh reads and persistence behind completed repository operations | Keep OAuth HTTP calls outside database transactions without changing existing refresh outcomes |
 | 2026-09-05 | 21 | Lowered result-less failed image calls to semantic history before stateless provider-item ID omission | Preserve durable failure history without sending an invalid `image_generation_call` lacking both `id` and `result` |
 | 2026-09-05 | 20 | Adopted the provider's `99.99.99` full-catalog discovery sentinel | Avoid per-release client-version maintenance while exposing API-supported, picker-visible models such as `gpt-6-astra` without changing the runtime request dialect |
 | 2026-09-04 | 19 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

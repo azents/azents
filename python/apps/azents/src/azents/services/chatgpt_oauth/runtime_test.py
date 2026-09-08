@@ -16,6 +16,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
@@ -91,6 +92,17 @@ async def _create_integration(
     return repo, integration.id
 
 
+def _persistence_repository(
+    integration_repository: LLMProviderIntegrationRepository,
+    session: AsyncSession,
+) -> ChatGPTOAuthRuntimeRepository:
+    """Create the runtime persistence boundary for tests."""
+    return ChatGPTOAuthRuntimeRepository(
+        integration_repository=integration_repository,
+        session_manager=_SessionManager(session),
+    )
+
+
 class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
 
@@ -149,17 +161,14 @@ class TestEnsureRuntimeTokens:
     ) -> None:
         """Preserve validation behavior in normal and forced refresh entry points."""
         repository = AsyncMock()
-        session_manager = AsyncMock()
 
         ensured = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repository,
-            session_manager=session_manager,
+            persistence_repository=repository,
         )
         refreshed = await refresh_runtime_tokens(
             integration=integration,
-            integration_repository=repository,
-            session_manager=session_manager,
+            persistence_repository=repository,
         )
 
         if ensure_succeeds:
@@ -185,8 +194,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -225,8 +233,7 @@ class TestEnsureRuntimeTokens:
 
         result = await refresh_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -266,8 +273,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -299,8 +305,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -334,8 +339,7 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(ChatGPTOAuthClient, "refresh_tokens", fail_refresh)
         first = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -365,8 +369,7 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(ChatGPTOAuthClient, "refresh_tokens", success_refresh)
         second = await ensure_runtime_tokens(
             integration=after_failure,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(second, Success)
@@ -421,8 +424,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=stale_integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
