@@ -780,7 +780,7 @@
     "enabled": "켜짐",
     "disabled": "꺼짐",
     "executionOptionAriaLabel": "{label}, {state}. {costHint}",
-    "executionOptionSaveFailed": "실행 옵션을 저장하지 못했습니다. 이전 설정으로 복원했습니다."
+    "executionOptions": "실행 옵션"
   },
   "inferenceProvenance": {
     "title": "추론 프로필",

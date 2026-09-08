@@ -536,10 +536,6 @@ function useChatInputContainerImplementation({
   const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
     useState<DesktopProfileFocusTarget | null>(null);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
-  const [executionOptionSavePending, setExecutionOptionSavePending] =
-    useState(false);
-  const [executionOptionSaveErrorVisible, setExecutionOptionSaveErrorVisible] =
-    useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -791,12 +787,7 @@ function useChatInputContainerImplementation({
       const trimmed = inputValue.trim();
       const normalizedAction =
         selectedAction === null ? null : normalizeAction(selectedAction.action);
-      if (
-        inputDisabled ||
-        isUploading ||
-        editSendDisabled ||
-        executionOptionSavePending
-      ) {
+      if (inputDisabled || isUploading || editSendDisabled) {
         return;
       }
 
@@ -891,7 +882,6 @@ function useChatInputContainerImplementation({
     inferenceProfile,
     isUploading,
     editSendDisabled,
-    executionOptionSavePending,
     inputDisabled,
     pendingFiles,
     agentId,
@@ -1049,7 +1039,6 @@ function useChatInputContainerImplementation({
   const handleExecutionOptionToggle = useCallback(
     (optionId: ModelExecutionOptionId): void => {
       if (
-        executionOptionSavePending ||
         inputDisabled ||
         editSendDisabled ||
         editingMessageId !== null ||
@@ -1057,7 +1046,6 @@ function useChatInputContainerImplementation({
       ) {
         return;
       }
-      const previousProfile = inferenceProfile;
       const enabled = new Set(inferenceProfile.enabled_execution_options);
       if (enabled.has(optionId)) {
         enabled.delete(optionId);
@@ -1070,31 +1058,13 @@ function useChatInputContainerImplementation({
           enabled.has(id),
         ),
       };
-      setExecutionOptionSaveErrorVisible(false);
       updateInferenceProfile(nextProfile);
-      if (!onApplyInferenceProfile) {
-        return;
-      }
-      setExecutionOptionSavePending(true);
-      void onApplyInferenceProfile(nextProfile)
-        .then((applied) => {
-          if (!applied) {
-            setInferenceProfile(previousProfile);
-            profileDirtyRef.current = true;
-            setExecutionOptionSaveErrorVisible(true);
-          }
-        })
-        .finally(() => {
-          setExecutionOptionSavePending(false);
-        });
     },
     [
       editSendDisabled,
       editingMessageId,
-      executionOptionSavePending,
       inferenceProfile,
       inputDisabled,
-      onApplyInferenceProfile,
       supportedExecutionOptions,
       updateInferenceProfile,
     ],
@@ -1353,8 +1323,6 @@ function useChatInputContainerImplementation({
     contextUsageActiveRun,
     onApplyInferenceProfile,
     selectableExecutionOptions,
-    executionOptionSavePending,
-    executionOptionSaveErrorVisible,
     isUploading,
     pendingFiles,
     goal,

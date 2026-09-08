@@ -780,7 +780,7 @@
     "enabled": "activé",
     "disabled": "désactivé",
     "executionOptionAriaLabel": "{label}, {state}. {costHint}",
-    "executionOptionSaveFailed": "Impossible d’enregistrer l’option d’exécution. Le réglage précédent a été restauré."
+    "executionOptions": "Options d’exécution"
   },
   "inferenceProvenance": {
     "title": "Profil d’inférence",

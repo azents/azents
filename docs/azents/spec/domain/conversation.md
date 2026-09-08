@@ -1114,10 +1114,11 @@ turn boundaries resolve the newly applied intent against the current Agent optio
 
 Composer execution-option controls are separate from static model capabilities and built-in tools.
 The first boolean option, Fast, is off by default and appears only for supported selected model
-snapshots with qualitative API-cost or ChatGPT-usage guidance. In existing Sessions, toggling an
-option immediately replaces the complete displayed profile, including any draft model and effort,
-without another Apply click or a conversation message. Controls show save progress, prevent duplicate
-writes, and report failure without presenting an uncommitted preference as saved. New-session
+snapshots with qualitative API-cost or ChatGPT-usage guidance. Options appear inside the existing
+model picker rather than as extra composer toolbar buttons. Desktop uses switches; mobile uses
+independently selectable rows styled like model-selection rows, with a checkmark when selected.
+Toggling edits the shared draft profile without a network write or save loading state. The existing
+pending-profile highlight and Send/Confirm flow apply the complete displayed profile. New-session
 composers retain the choice locally until first input admission. Switching the draft model retains
 only enabled options supported by the new model. Read-only composers do not expose writable options.
 
