@@ -1,7 +1,11 @@
 """Runtime lifecycle reconciler tests."""
 
+import asyncio
+import dataclasses
 import datetime
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import pytest
 import sqlalchemy as sa
@@ -53,6 +57,15 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.runtime_lifecycle_dispatch.data import (
+    RuntimeLifecycleDispatchPreflight,
+    RuntimeLifecycleDispatchRejection,
+    RuntimeLifecycleDispatchRejectionReason,
+    RuntimeLifecycleDispatchRequest,
+)
+from azents.repos.runtime_lifecycle_dispatch.repository import (
+    RuntimeLifecycleDispatchRepository,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationDesiredStateWrite,
     RuntimeConfigurationState,
@@ -65,7 +78,11 @@ from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.data import (
+    RuntimeDispatchResult,
     RuntimeProtocolCapabilities,
+    RuntimeProtocolRouteUnavailable,
+    RuntimeProtocolStaleGeneration,
+    RuntimeProviderCommand,
     RuntimeProviderRegistration,
 )
 from azents.runtime.control_protocol.reconciler import (
@@ -74,6 +91,10 @@ from azents.runtime.control_protocol.reconciler import (
 )
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
+)
+from azents.runtime.coordination.data import (
+    RuntimeConnectionKind,
+    RuntimeConnectionRecord,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
@@ -105,6 +126,667 @@ class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
         """Record one locked Runtime authority recheck."""
         self.read_runtime_ids.append(runtime_id)
         return await super().get_by_id_for_update(session, runtime_id)
+
+
+class SessionBoundaryProbe:
+    """Track repository session contexts across external dispatch assertions."""
+
+    def __init__(
+        self,
+        session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Initialize the probe around the real test session manager."""
+        self.base_session_manager = session_manager
+        self.active_contexts = 0
+        self.completed_sessions: list[AsyncSession] = []
+
+    @asynccontextmanager
+    async def session_manager(self) -> AsyncGenerator[AsyncSession]:
+        """Track one complete repository-owned transaction context."""
+        self.active_contexts += 1
+        try:
+            async with self.base_session_manager() as session:
+                yield session
+                self.completed_sessions.append(session)
+        finally:
+            self.active_contexts -= 1
+
+    def assert_no_active_transaction(self) -> None:
+        """Assert every repository context completed before external work."""
+        assert self.active_contexts == 0
+        assert self.completed_sessions
+        assert all(not session.in_transaction() for session in self.completed_sessions)
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedRuntimeDispatch:
+    """Committed Runtime state selected for one direct dispatch test."""
+
+    runtime: AgentRuntime
+    desired_generation: int
+    configuration_sequence: int
+
+
+def _dispatch_repository(
+    *,
+    runtime_repository: AgentRuntimeRepository,
+    profile_repository: RuntimeProfileRepository,
+    session_manager: SessionManager[AsyncSession],
+) -> RuntimeLifecycleDispatchRepository:
+    """Build the repository-owned Runtime dispatch boundary for tests."""
+    return RuntimeLifecycleDispatchRepository(
+        agent_repository=AgentRepository(),
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=session_manager,
+    )
+
+
+async def _prepare_start_dispatch(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    slug: str,
+) -> PreparedRuntimeDispatch:
+    """Create and commit one configured pending Runtime START."""
+    runtime_repository = AgentRuntimeRepository()
+    async with session_manager() as session:
+        workspace_id = await _create_workspace(
+            session,
+            f"{slug}-workspace",
+        )
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            f"{slug}-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        command = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        state = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
+        current = await runtime_repository.get_by_id(session, runtime.id)
+        assert current is not None
+        return PreparedRuntimeDispatch(
+            runtime=current,
+            desired_generation=command.desired_generation,
+            configuration_sequence=state.desired.sequence,
+        )
+
+
+async def _prepare_stop_dispatch(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    slug: str,
+) -> PreparedRuntimeDispatch:
+    """Create and commit one configured pending Runtime STOP."""
+    runtime_repository = AgentRuntimeRepository()
+    async with session_manager() as session:
+        workspace_id = await _create_workspace(
+            session,
+            f"{slug}-workspace",
+        )
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            f"{slug}-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        command = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert command is not None
+        state = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
+        current = await runtime_repository.get_by_id(session, runtime.id)
+        assert current is not None
+        return PreparedRuntimeDispatch(
+            runtime=current,
+            desired_generation=command.desired_generation,
+            configuration_sequence=state.desired.sequence,
+        )
+
+
+def _direct_dispatch_reconciler(
+    *,
+    runtime_repository: AgentRuntimeRepository,
+    profile_repository: RuntimeProfileRepository,
+    session_manager: SessionManager[AsyncSession],
+    dispatch_session_manager: SessionManager[AsyncSession],
+    store: InMemoryRuntimeCoordinationStore,
+    control_protocol: RuntimeControlProtocolService,
+) -> RuntimeLifecycleReconciler:
+    """Build a reconciler for direct dispatch-boundary tests."""
+    return RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=dispatch_session_manager,
+        ),
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+        ),
+    )
+
+
+async def test_dispatch_repository_rejects_stale_selected_snapshot_before_claim(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Claim cannot consume a Runtime generation changed after preflight."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-stale-admission",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    dispatch_repository = _dispatch_repository(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+    )
+    preflight_result = await dispatch_repository.preflight(
+        RuntimeLifecycleDispatchRequest(
+            runtime=prepared.runtime,
+            command_type=RuntimeProviderCommandType.START,
+            claim_lifecycle=True,
+            required_provider_generation=None,
+            required_observed_generation=None,
+            required_configuration_sequence=None,
+            lifecycle_retry_delay=datetime.timedelta(minutes=1),
+        )
+    )
+    assert isinstance(preflight_result, RuntimeLifecycleDispatchPreflight)
+    async with rdb_session_manager() as session:
+        replacement = await runtime_repository.set_desired_state(
+            session,
+            prepared.runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert replacement is not None
+
+    result = await dispatch_repository.claim(
+        preflight_result,
+        connection_generation=1,
+    )
+
+    assert isinstance(result, RuntimeLifecycleDispatchRejection)
+    assert (
+        result.reason
+        is RuntimeLifecycleDispatchRejectionReason.RUNTIME_SNAPSHOT_CHANGED
+    )
+
+
+async def test_stop_without_provider_keeps_claim_for_reconnect_dispatch(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """An unavailable Provider cannot consume the only pending STOP dispatch."""
+    prepared = await _prepare_stop_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-stop-reconnect",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "stop-after-reconnect-request",
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=rdb_session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    unavailable = await reconciler.reconcile_once(limit=10)
+    async with rdb_session_manager() as session:
+        waiting = await runtime_repository.get_by_id(
+            session,
+            prepared.runtime.id,
+        )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    dispatched = await reconciler.reconcile_once(limit=10)
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+    duplicate = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert unavailable == 0
+    assert waiting is not None
+    assert waiting.last_lifecycle_dispatch_generation < waiting.desired_generation
+    assert dispatched == 1
+    assert claimed is not None
+    assert claimed.operation_type == "provider.stop"
+    assert claimed.payload["desired_generation"] == prepared.desired_generation
+    assert duplicate is None
+
+
+async def test_dispatch_releases_database_transaction_before_coordination_and_provider(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis and Provider I/O run after preflight and claim locks are released."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-transaction-boundary",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    probe = SessionBoundaryProbe(rdb_session_manager)
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "transaction-boundary-request",
+    )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    original_get_connection = store.get_connection
+    original_dispatch = control_protocol.dispatch_provider_command
+    checked_boundaries: list[str] = []
+
+    async def get_connection(
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+    ) -> RuntimeConnectionRecord | None:
+        probe.assert_no_active_transaction()
+        checked_boundaries.append("coordination")
+        return await original_get_connection(kind=kind, subject_id=subject_id)
+
+    async def dispatch_provider_command(
+        command: RuntimeProviderCommand,
+        *,
+        created_at: datetime.datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
+        probe.assert_no_active_transaction()
+        checked_boundaries.append("provider")
+        return await original_dispatch(command, created_at=created_at)
+
+    monkeypatch.setattr(store, "get_connection", get_connection)
+    monkeypatch.setattr(
+        control_protocol,
+        "dispatch_provider_command",
+        dispatch_provider_command,
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=probe.session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    dispatched = await reconciler._dispatch_runtime_command(
+        prepared.runtime,
+        command_type=RuntimeProviderCommandType.START,
+        claim_lifecycle=True,
+        required_provider_generation=None,
+    )
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert dispatched
+    assert claimed is not None
+    assert checked_boundaries.count("coordination") >= 1
+    assert checked_boundaries.count("provider") == 1
+    probe.assert_no_active_transaction()
+
+
+async def test_dispatch_success_does_not_apply_stale_connection_outcome(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful old-generation append cannot overwrite newer Runtime state."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-stale-outcome",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "stale-outcome-request",
+    )
+    await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    original_dispatch = control_protocol.dispatch_provider_command
+
+    async def dispatch_then_advance_generation(
+        command: RuntimeProviderCommand,
+        *,
+        created_at: datetime.datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
+        result = await original_dispatch(command, created_at=created_at)
+        async with rdb_session_manager() as session:
+            replacement = await runtime_repository.set_desired_state(
+                session,
+                prepared.runtime.id,
+                RuntimeLifecycleCommandType.RESTART,
+                RuntimeDesiredState.RUNNING,
+            )
+            assert replacement is not None
+        return result
+
+    monkeypatch.setattr(
+        control_protocol,
+        "dispatch_provider_command",
+        dispatch_then_advance_generation,
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=rdb_session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    dispatched = await reconciler._dispatch_runtime_command(
+        prepared.runtime,
+        command_type=RuntimeProviderCommandType.START,
+        claim_lifecycle=True,
+        required_provider_generation=None,
+    )
+    async with rdb_session_manager() as session:
+        current = await runtime_repository.get_by_id(
+            session,
+            prepared.runtime.id,
+        )
+
+    assert dispatched
+    assert current is not None
+    assert current.desired_generation > prepared.desired_generation
+    assert (
+        current.provider_connection_state is RuntimeProviderConnectionState.DISCONNECTED
+    )
+
+
+async def test_dispatch_route_unavailable_records_disconnected_after_revalidation(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connection lost after lookup records only the current Runtime outcome."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-route-unavailable",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    async with rdb_session_manager() as session:
+        connected = await runtime_repository.record_provider_connection_state(
+            session,
+            prepared.runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert connected is not None
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(store)
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    original_dispatch = control_protocol.dispatch_provider_command
+
+    async def disconnect_before_dispatch(
+        command: RuntimeProviderCommand,
+        *,
+        created_at: datetime.datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
+        revoked = await store.revoke_connection(
+            kind=RuntimeConnectionKind.PROVIDER,
+            subject_id=command.provider_id,
+            generation=command.provider_generation,
+        )
+        assert revoked
+        return await original_dispatch(command, created_at=created_at)
+
+    monkeypatch.setattr(
+        control_protocol,
+        "dispatch_provider_command",
+        disconnect_before_dispatch,
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=rdb_session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    dispatched = await reconciler._dispatch_runtime_command(
+        prepared.runtime,
+        command_type=RuntimeProviderCommandType.START,
+        claim_lifecycle=True,
+        required_provider_generation=accepted.generation,
+    )
+    async with rdb_session_manager() as session:
+        current = await runtime_repository.get_by_id(
+            session,
+            prepared.runtime.id,
+        )
+
+    assert not dispatched
+    assert current is not None
+    assert (
+        current.provider_connection_state is RuntimeProviderConnectionState.DISCONNECTED
+    )
+
+
+async def test_dispatch_unknown_outcome_propagates_without_connection_write(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ambiguous Provider dispatch failure remains visible and unreplayed."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-unknown-outcome",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(store)
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    original_dispatch = control_protocol.dispatch_provider_command
+
+    async def fail_dispatch(
+        command: RuntimeProviderCommand,
+        *,
+        created_at: datetime.datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
+        result = await original_dispatch(command, created_at=created_at)
+        assert isinstance(result, RuntimeDispatchResult)
+        raise RuntimeError("provider dispatch outcome is unknown")
+
+    monkeypatch.setattr(
+        control_protocol,
+        "dispatch_provider_command",
+        fail_dispatch,
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=rdb_session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    with pytest.raises(RuntimeError, match="outcome is unknown"):
+        await reconciler._dispatch_runtime_command(
+            prepared.runtime,
+            command_type=RuntimeProviderCommandType.START,
+            claim_lifecycle=True,
+            required_provider_generation=None,
+        )
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+    async with rdb_session_manager() as session:
+        current = await runtime_repository.get_by_id(
+            session,
+            prepared.runtime.id,
+        )
+
+    assert current is not None
+    assert claimed is not None
+    assert current.last_lifecycle_dispatch_generation == prepared.desired_generation
+    assert (
+        current.provider_connection_state is RuntimeProviderConnectionState.DISCONNECTED
+    )
+
+
+async def test_dispatch_cancellation_propagates_without_connection_write(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation after admission remains cancellation and writes no outcome."""
+    prepared = await _prepare_start_dispatch(
+        session_manager=rdb_session_manager,
+        slug="dispatch-cancellation",
+    )
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(store)
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    original_dispatch = control_protocol.dispatch_provider_command
+    dispatch_started = asyncio.Event()
+
+    async def block_dispatch(
+        command: RuntimeProviderCommand,
+        *,
+        created_at: datetime.datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
+        result = await original_dispatch(command, created_at=created_at)
+        assert isinstance(result, RuntimeDispatchResult)
+        dispatch_started.set()
+        await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(
+        control_protocol,
+        "dispatch_provider_command",
+        block_dispatch,
+    )
+    reconciler = _direct_dispatch_reconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_session_manager=rdb_session_manager,
+        store=store,
+        control_protocol=control_protocol,
+    )
+
+    dispatch_task = asyncio.create_task(
+        reconciler._dispatch_runtime_command(
+            prepared.runtime,
+            command_type=RuntimeProviderCommandType.START,
+            claim_lifecycle=True,
+            required_provider_generation=None,
+        )
+    )
+    await asyncio.wait_for(dispatch_started.wait(), timeout=5)
+    dispatch_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch_task
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+    async with rdb_session_manager() as session:
+        current = await runtime_repository.get_by_id(
+            session,
+            prepared.runtime.id,
+        )
+
+    assert current is not None
+    assert claimed is not None
+    assert current.last_lifecycle_dispatch_generation == prepared.desired_generation
+    assert (
+        current.provider_connection_state is RuntimeProviderConnectionState.DISCONNECTED
+    )
 
 
 async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
@@ -163,6 +845,11 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=RuntimeControlProtocolService(store),
         config=RuntimeLifecycleDispatchConfig(
@@ -267,6 +954,11 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -401,6 +1093,11 @@ async def test_reconciler_repairs_current_network_drift_once(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -437,7 +1134,12 @@ async def test_reconciler_repairs_current_network_drift_once(
     assert claimed is not None
     assert claimed.payload["command_type"] == "update_configuration"
     assert no_retry == 0
-    assert runtime_repository.read_runtime_ids == [runtime.id, runtime.id]
+    assert runtime_repository.read_runtime_ids == [
+        runtime.id,
+        runtime.id,
+        runtime.id,
+        runtime.id,
+    ]
     handoff_log = next(
         record
         for record in caplog.records
@@ -516,6 +1218,11 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -604,6 +1311,11 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -719,6 +1431,11 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -835,6 +1552,11 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -881,7 +1603,7 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
     )
 
 
-async def test_reconciler_rejects_mismatched_resolved_provider_reference(
+async def test_dispatch_repository_records_mismatched_provider_reference(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """Dispatch validates resolved references against the current state document."""
@@ -929,26 +1651,34 @@ async def test_reconciler_rejects_mismatched_resolved_provider_reference(
         current = await runtime_repository.get_by_id(session, runtime.id)
         assert current is not None
 
-    store = InMemoryRuntimeCoordinationStore()
-    reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
+    dispatch_repository = _dispatch_repository(
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
-        coordination_store=store,
-        control_protocol=RuntimeControlProtocolService(store),
-        config=RuntimeLifecycleDispatchConfig(
-            runner_image="runner:test",
-            runner_control_endpoint="runtime-control:9090",
-            runner_transfer_endpoint="runtime-transfer:9091",
-            runner_credential_identifier=_runner_credential_verifier(),
-            runner_control_tls_ca_pem=None,
-            allow_insecure_runner_control=True,
+    )
+    preflight_result = await dispatch_repository.preflight(
+        RuntimeLifecycleDispatchRequest(
+            runtime=current,
+            command_type=RuntimeProviderCommandType.START,
+            claim_lifecycle=False,
+            required_provider_generation=None,
+            required_observed_generation=None,
+            required_configuration_sequence=None,
+            lifecycle_retry_delay=datetime.timedelta(minutes=1),
         ),
     )
+    assert isinstance(preflight_result, RuntimeLifecycleDispatchPreflight)
+    result = await dispatch_repository.claim(
+        preflight_result,
+        connection_generation=1,
+    )
 
-    with pytest.raises(ValueError, match="Provider reference"):
-        await reconciler._runtime_configuration(current, locked_session=None)
+    assert isinstance(result, RuntimeLifecycleDispatchRejection)
+    assert (
+        result.reason is RuntimeLifecycleDispatchRejectionReason.CONFIGURATION_INVALID
+    )
+    assert result.failure_message is not None
+    assert "Provider reference" in result.failure_message
 
 
 async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
@@ -1016,6 +1746,11 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(
@@ -1126,6 +1861,11 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+            session_manager=rdb_session_manager,
+        ),
         coordination_store=store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(

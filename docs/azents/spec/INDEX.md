@@ -30,7 +30,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-06 | 171 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-07 | 75 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-08 | 76 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-05 | 45 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
@@ -44,7 +44,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-04 | 5 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-06 | 18 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-02 | 32 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-06 | 20 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-07 | 44 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |

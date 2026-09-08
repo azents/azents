@@ -34,6 +34,9 @@ from azents.core.runtime_transfer_coordinator_credential import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_lifecycle_dispatch.repository import (
+    RuntimeLifecycleDispatchRepository,
+)
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
@@ -389,6 +392,12 @@ async def runtime_control_server_lifespan(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=session_manager,
+        dispatch_repository=RuntimeLifecycleDispatchRepository(
+            agent_repository=agent_repository,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=session_manager,
+        ),
         coordination_store=coordination_store,
         control_protocol=control_protocol,
         config=RuntimeLifecycleDispatchConfig(

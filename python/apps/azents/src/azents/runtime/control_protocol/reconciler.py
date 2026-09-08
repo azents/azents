@@ -16,16 +16,9 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.provider import (
     RuntimeProviderReconciliationStatus as SharedProviderReconciliationStatus,
 )
-from azents_runtime_control.runtime_configuration import (
-    RuntimeConfigurationEnvelope,
-    RuntimeConfigurationEvidence,
-    canonical_runtime_configuration_json,
-    parse_runtime_configuration_envelope,
-)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeCapability,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -40,8 +33,16 @@ from azents.core.runtime_profile import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
-from azents.repos.runtime_profile.data import RuntimeConfigurationState
+from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.runtime_lifecycle_dispatch.data import (
+    RuntimeLifecycleDispatchAdmission,
+    RuntimeLifecycleDispatchRejection,
+    RuntimeLifecycleDispatchRejectionReason,
+    RuntimeLifecycleDispatchRequest,
+)
+from azents.repos.runtime_lifecycle_dispatch.repository import (
+    RuntimeLifecycleDispatchRepository,
+)
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -102,6 +103,7 @@ class RuntimeLifecycleReconciler:
         runtime_repository: AgentRuntimeRepository,
         profile_repository: RuntimeProfileRepository,
         session_manager: SessionManager[AsyncSession],
+        dispatch_repository: RuntimeLifecycleDispatchRepository,
         coordination_store: RuntimeCoordinationStore,
         control_protocol: RuntimeControlProtocolService,
         config: RuntimeLifecycleDispatchConfig,
@@ -111,6 +113,7 @@ class RuntimeLifecycleReconciler:
         self._runtime_repository = runtime_repository
         self._profile_repository = profile_repository
         self._session_manager = session_manager
+        self._dispatch_repository = dispatch_repository
         self._coordination_store = coordination_store
         self._control_protocol = control_protocol
         self._config = config
@@ -379,54 +382,34 @@ class RuntimeLifecycleReconciler:
         required_configuration_sequence: int | None = None,
         reconciliation_kind: str | None = None,
         reconciliation_reason: str | None = None,
-        locked_session: AsyncSession | None = None,
     ) -> bool:
-        if locked_session is None:
-            async with self._session_manager() as session:
-                agent = await self._agent_repository.lock_by_id(
-                    session,
-                    runtime.agent_id,
-                )
-                if agent is None or not _runtime_dispatch_allowed(
-                    agent.runtime_capability,
-                    command_type,
-                ):
-                    return False
-                current = await self._runtime_repository.get_by_id_for_update(
-                    session,
-                    runtime.id,
-                )
-                if not _runtime_dispatch_snapshot_matches(current, runtime):
-                    return False
-                assert current is not None
-                return await self._dispatch_runtime_command(
-                    current,
-                    command_type=command_type,
-                    claim_lifecycle=claim_lifecycle,
-                    required_provider_generation=required_provider_generation,
-                    required_observed_generation=required_observed_generation,
-                    required_configuration_sequence=(required_configuration_sequence),
-                    reconciliation_kind=reconciliation_kind,
-                    reconciliation_reason=reconciliation_reason,
-                    locked_session=session,
-                )
-        provider_id = runtime.runtime_provider_id
-        if provider_id is None:
-            _LOGGER.warning(
-                "Runtime lifecycle dispatch skipped without provider",
-                extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
-                    "desired_generation": runtime.desired_generation,
-                },
+        preflight_result = await self._dispatch_repository.preflight(
+            RuntimeLifecycleDispatchRequest(
+                runtime=runtime,
+                command_type=command_type,
+                claim_lifecycle=claim_lifecycle,
+                required_provider_generation=required_provider_generation,
+                required_observed_generation=required_observed_generation,
+                required_configuration_sequence=required_configuration_sequence,
+                lifecycle_retry_delay=self._config.lifecycle_retry_delay,
             )
-            await self._record_failure(
-                runtime,
-                code="PROVIDER_NOT_CONFIGURED",
-                message="Agent Runtime has no configured Runtime Provider.",
-                locked_session=locked_session,
-            )
+        )
+        if isinstance(preflight_result, RuntimeLifecycleDispatchRejection):
+            if (
+                preflight_result.reason
+                is RuntimeLifecycleDispatchRejectionReason.PROVIDER_NOT_CONFIGURED
+            ):
+                _LOGGER.warning(
+                    "Runtime lifecycle dispatch skipped without provider",
+                    extra={
+                        "runtime_id": runtime.id,
+                        "agent_id": runtime.agent_id,
+                        "desired_generation": runtime.desired_generation,
+                    },
+                )
             return False
+        preflight = preflight_result
+        provider_id = preflight.provider_id
         connection = await self._coordination_store.get_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=provider_id,
@@ -435,26 +418,17 @@ class RuntimeLifecycleReconciler:
             _LOGGER.warning(
                 "Runtime lifecycle dispatch waiting for provider connection",
                 extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
+                    "runtime_id": preflight.runtime_id,
+                    "agent_id": preflight.agent_id,
                     "provider_id": provider_id,
-                    "desired_generation": runtime.desired_generation,
+                    "desired_generation": preflight.desired_generation,
                     "command_type": command_type.value,
                 },
             )
-            if locked_session is None:
-                async with self._session_manager() as session:
-                    await self._runtime_repository.record_provider_connection_state(
-                        session,
-                        runtime.id,
-                        RuntimeProviderConnectionState.DISCONNECTED,
-                    )
-            else:
-                await self._runtime_repository.record_provider_connection_state(
-                    locked_session,
-                    runtime.id,
-                    RuntimeProviderConnectionState.DISCONNECTED,
-                )
+            await self._dispatch_repository.record_connection_outcome(
+                preflight,
+                RuntimeProviderConnectionState.DISCONNECTED,
+            )
             return False
         if (
             required_provider_generation is not None
@@ -463,105 +437,56 @@ class RuntimeLifecycleReconciler:
             _LOGGER.info(
                 "Runtime lifecycle dispatch skipped after Provider generation changed",
                 extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
+                    "runtime_id": preflight.runtime_id,
+                    "agent_id": preflight.agent_id,
                     "provider_id": provider_id,
                     "required_provider_generation": required_provider_generation,
                     "connection_provider_generation": connection.generation,
-                    "desired_generation": runtime.desired_generation,
+                    "desired_generation": preflight.desired_generation,
                     "command_type": command_type.value,
                 },
             )
             return False
-        if (
-            required_observed_generation is not None
-            or required_configuration_sequence is not None
-        ):
-            if locked_session is None:
-                async with self._session_manager() as session:
-                    current = await self._runtime_repository.get_by_id(
-                        session, runtime.id
-                    )
-                    state = await self._profile_repository.get_configuration_state(
-                        session,
-                        runtime_id=runtime.id,
-                    )
-            else:
-                current = runtime
-                state = await self._profile_repository.get_configuration_state(
-                    locked_session,
-                    runtime_id=runtime.id,
-                )
-            if not _current_network_policy_repair_target(
-                current,
-                state=state,
-                provider_id=provider_id,
-                provider_generation=required_provider_generation,
-                observed_generation=required_observed_generation,
-                configuration_sequence=required_configuration_sequence,
+        admission_result = await self._dispatch_repository.claim(
+            preflight,
+            connection_generation=connection.generation,
+        )
+        if isinstance(admission_result, RuntimeLifecycleDispatchRejection):
+            if (
+                admission_result.reason
+                is RuntimeLifecycleDispatchRejectionReason.LIFECYCLE_CLAIM_UNAVAILABLE
             ):
-                return False
-            assert current is not None
-            runtime = current
-
-        if claim_lifecycle:
-            claimed = await self._runtime_repository.claim_lifecycle_dispatch(
-                locked_session,
-                runtime.id,
-                runtime.desired_generation,
-                retry_delay=self._config.lifecycle_retry_delay,
-            )
-            if claimed is None:
                 _LOGGER.debug(
                     "Runtime lifecycle dispatch skipped after concurrent claim",
                     extra={
-                        "runtime_id": runtime.id,
-                        "agent_id": runtime.agent_id,
+                        "runtime_id": preflight.runtime_id,
+                        "agent_id": preflight.agent_id,
                         "provider_id": provider_id,
-                        "desired_generation": runtime.desired_generation,
+                        "desired_generation": preflight.desired_generation,
                         "command_type": command_type.value,
                     },
                 )
-                return False
-            runtime = claimed
-
+            return False
+        admission = admission_result
+        runtime_configuration = admission.runtime_configuration
         created_at = datetime.now(UTC)
         runner_credential_id = self._config.runner_credential_identifier.credential_id(
-            runtime_id=runtime.id,
-            desired_generation=runtime.desired_generation,
+            runtime_id=admission.runtime_id,
+            desired_generation=admission.desired_generation,
         )
-        try:
-            runtime_configuration = await self._runtime_configuration(
-                runtime,
-                locked_session=locked_session,
-                require_ready=command_type
-                not in {
-                    RuntimeProviderCommandType.STOP,
-                    RuntimeProviderCommandType.TERMINAL_DELETE,
-                    RuntimeProviderCommandType.OBSERVE,
-                },
-            )
-        except ValueError as error:
-            await self._record_failure(
-                runtime,
-                code="RUNTIME_CONFIGURATION_INVALID",
-                message=str(error),
-                locked_session=locked_session,
-            )
-            return False
         result = await self._control_protocol.dispatch_provider_command(
             RuntimeProviderCommand(
                 provider_id=provider_id,
-                provider_generation=connection.generation,
-                runtime_id=runtime.id,
-                desired_generation=runtime.desired_generation,
+                provider_generation=admission.connection_generation,
+                runtime_id=admission.runtime_id,
+                desired_generation=admission.desired_generation,
                 command_type=command_type,
-                reset_final_desired_state=_reset_final_desired_state(runtime),
+                reset_final_desired_state=_reset_final_desired_state(admission),
                 payload={
                     "identity": {
-                        "runtime_id": runtime.id,
-                        "agent_id": runtime.agent_id,
-                        "workspace_id": runtime.workspace_id,
+                        "runtime_id": admission.runtime_id,
+                        "agent_id": admission.agent_id,
+                        "workspace_id": admission.workspace_id,
                     },
                     "runner_image": self._config.runner_image,
                     "auth": {
@@ -580,27 +505,18 @@ class RuntimeLifecycleReconciler:
             created_at=created_at,
         )
         if isinstance(result, RuntimeDispatchResult):
-            if locked_session is None:
-                async with self._session_manager() as session:
-                    await self._runtime_repository.record_provider_connection_state(
-                        session,
-                        runtime.id,
-                        RuntimeProviderConnectionState.CONNECTED,
-                    )
-            else:
-                await self._runtime_repository.record_provider_connection_state(
-                    locked_session,
-                    runtime.id,
-                    RuntimeProviderConnectionState.CONNECTED,
-                )
+            await self._dispatch_repository.record_connection_outcome(
+                admission,
+                RuntimeProviderConnectionState.CONNECTED,
+            )
             _LOGGER.info(
                 "Runtime lifecycle command dispatched",
                 extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
+                    "runtime_id": admission.runtime_id,
+                    "agent_id": admission.agent_id,
                     "provider_id": provider_id,
-                    "provider_generation": connection.generation,
-                    "desired_generation": runtime.desired_generation,
+                    "provider_generation": admission.connection_generation,
+                    "desired_generation": admission.desired_generation,
                     "command_type": command_type.value,
                     "request_id": result.request_id,
                     "configuration_sequence": (
@@ -615,203 +531,42 @@ class RuntimeLifecycleReconciler:
             _LOGGER.warning(
                 "Runtime lifecycle dispatch route unavailable",
                 extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
+                    "runtime_id": admission.runtime_id,
+                    "agent_id": admission.agent_id,
                     "provider_id": provider_id,
-                    "desired_generation": runtime.desired_generation,
+                    "desired_generation": admission.desired_generation,
                     "command_type": command_type.value,
                 },
             )
-            if locked_session is None:
-                async with self._session_manager() as session:
-                    await self._runtime_repository.record_provider_connection_state(
-                        session,
-                        runtime.id,
-                        RuntimeProviderConnectionState.DISCONNECTED,
-                    )
-            else:
-                await self._runtime_repository.record_provider_connection_state(
-                    locked_session,
-                    runtime.id,
-                    RuntimeProviderConnectionState.DISCONNECTED,
-                )
+            await self._dispatch_repository.record_connection_outcome(
+                admission,
+                RuntimeProviderConnectionState.DISCONNECTED,
+            )
             return False
         if isinstance(result, RuntimeProtocolStaleGeneration):
             _LOGGER.info(
                 "Runtime lifecycle dispatch skipped for stale provider generation",
                 extra={
-                    "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
+                    "runtime_id": admission.runtime_id,
+                    "agent_id": admission.agent_id,
                     "provider_id": provider_id,
-                    "provider_generation": connection.generation,
-                    "desired_generation": runtime.desired_generation,
+                    "provider_generation": admission.connection_generation,
+                    "desired_generation": admission.desired_generation,
                     "command_type": command_type.value,
                 },
             )
             return False
         raise AssertionError(f"unexpected dispatch result: {result!r}")
 
-    async def _runtime_configuration(
-        self,
-        runtime: AgentRuntime,
-        *,
-        locked_session: AsyncSession | None,
-        require_ready: bool = True,
-    ) -> RuntimeConfigurationEnvelope:
-        if locked_session is None:
-            async with self._session_manager() as session:
-                state = await self._profile_repository.get_configuration_state(
-                    session,
-                    runtime_id=runtime.id,
-                )
-        else:
-            state = await self._profile_repository.get_configuration_state(
-                locked_session,
-                runtime_id=runtime.id,
-            )
-        if state is None:
-            raise ValueError("Runtime configuration state is missing.")
-        desired = state.desired
-        slot = (
-            desired
-            if desired.status is RuntimeConfigurationStateStatus.READY
-            else state.applied
-        )
-        if require_ready:
-            slot = desired
-        if (
-            slot is None
-            or slot.document is None
-            or slot.digest is None
-            or slot.document.resolved_configuration is None
-        ):
-            raise ValueError("Runtime configuration target document is missing.")
-        document = slot.document
-        resolved_configuration = document.resolved_configuration
-        assert resolved_configuration is not None
-        if (
-            runtime.runtime_provider_resource_id is None
-            or document.provider_id != runtime.runtime_provider_resource_id
-        ):
-            raise ValueError("Runtime configuration Provider binding is invalid.")
-        if require_ready and slot.target_generation != runtime.desired_generation:
-            raise ValueError("Runtime configuration target generation is stale.")
-        envelope = RuntimeConfigurationEnvelope(
-            evidence=RuntimeConfigurationEvidence(
-                configuration_sequence=slot.sequence,
-                digest=slot.digest,
-                desired_generation=runtime.desired_generation,
-            ),
-            resolved_configuration_json=canonical_runtime_configuration_json(
-                resolved_configuration
-            ),
-        )
-        configuration = parse_runtime_configuration_envelope(
-            envelope,
-            desired_generation=runtime.desired_generation,
-            expected_provider_kind=None,
-        )
-        if (
-            configuration.provider.id != document.provider_id
-            or configuration.provider.logical_id != runtime.runtime_provider_id
-            or configuration.provider.capability_revision_id
-            != document.provider_capability_revision_id
-        ):
-            raise ValueError("Runtime configuration Provider reference is invalid.")
-        if not require_ready:
-            return envelope
-        if (
-            configuration.infrastructure_profile.id
-            != document.infrastructure_profile_id
-            or configuration.infrastructure_profile.version
-            != document.infrastructure_profile_version
-        ):
-            raise ValueError(
-                "Runtime configuration Infrastructure Profile reference is invalid."
-            )
-        if (
-            configuration.workspace_runtime_profile.id
-            != document.workspace_runtime_profile_id
-            or configuration.workspace_runtime_profile.version
-            != document.workspace_runtime_profile_version
-        ):
-            raise ValueError(
-                "Runtime configuration Workspace Runtime Profile reference is invalid."
-            )
-        return envelope
 
-    async def _record_failure(
-        self,
-        runtime: AgentRuntime,
-        *,
-        code: str,
-        message: str,
-        locked_session: AsyncSession | None = None,
-    ) -> None:
-        if locked_session is None:
-            async with self._session_manager() as session:
-                await self._runtime_repository.record_runtime_failure(
-                    session,
-                    runtime.id,
-                    AgentRuntimeFailurePatch(
-                        generation=runtime.desired_generation,
-                        code=code,
-                        message=message,
-                    ),
-                )
-            return
-        await self._runtime_repository.record_runtime_failure(
-            locked_session,
-            runtime.id,
-            AgentRuntimeFailurePatch(
-                generation=runtime.desired_generation,
-                code=code,
-                message=message,
-            ),
-        )
-
-
-def _reset_final_desired_state(runtime: AgentRuntime) -> str | None:
-    if runtime.last_lifecycle_command != RuntimeLifecycleCommandType.RESET:
+def _reset_final_desired_state(
+    admission: RuntimeLifecycleDispatchAdmission,
+) -> str | None:
+    if admission.last_lifecycle_command != RuntimeLifecycleCommandType.RESET:
         return None
-    if runtime.reset_final_desired_state is None:
+    if admission.reset_final_desired_state is None:
         return None
-    return runtime.reset_final_desired_state.value
-
-
-def _runtime_dispatch_allowed(
-    capability: AgentRuntimeCapability,
-    command_type: RuntimeProviderCommandType,
-) -> bool:
-    """Allow ordinary dispatch only while managed; removal owns terminal delete."""
-    return capability is AgentRuntimeCapability.MANAGED or (
-        capability is AgentRuntimeCapability.REMOVING
-        and command_type is RuntimeProviderCommandType.TERMINAL_DELETE
-    )
-
-
-def _runtime_dispatch_snapshot_matches(
-    current: AgentRuntime | None,
-    expected: AgentRuntime,
-) -> bool:
-    """Require the locked Runtime to match the selected dispatch authority."""
-    return (
-        current is not None
-        and current.agent_id == expected.agent_id
-        and current.runtime_provider_id == expected.runtime_provider_id
-        and current.runtime_provider_resource_id
-        == expected.runtime_provider_resource_id
-        and current.desired_state is expected.desired_state
-        and current.desired_generation == expected.desired_generation
-        and current.last_lifecycle_command is expected.last_lifecycle_command
-        and current.terminal_delete_requested_generation
-        == expected.terminal_delete_requested_generation
-        and current.configuration_sequence == expected.configuration_sequence
-        and current.provider_generation == expected.provider_generation
-        and current.provider_observed_generation
-        == expected.provider_observed_generation
-        and current.provider_observed_state is expected.provider_observed_state
-    )
+    return admission.reset_final_desired_state.value
 
 
 def _provider_command_type(
@@ -826,31 +581,3 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
-
-
-def _current_network_policy_repair_target(
-    runtime: AgentRuntime | None,
-    *,
-    state: RuntimeConfigurationState | None,
-    provider_id: str,
-    provider_generation: int | None,
-    observed_generation: int | None,
-    configuration_sequence: int | None,
-) -> bool:
-    """Return whether one drift-repair snapshot remains current at dispatch."""
-    return (
-        runtime is not None
-        and runtime.runtime_provider_id == provider_id
-        and runtime.desired_state is RuntimeDesiredState.RUNNING
-        and runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING
-        and runtime.provider_generation == provider_generation
-        and runtime.provider_observed_generation == observed_generation
-        and runtime.desired_generation == observed_generation
-        and runtime.last_lifecycle_dispatch_generation >= runtime.desired_generation
-        and runtime.terminal_delete_requested_generation is None
-        and state is not None
-        and state.applied is not None
-        and state.desired.status is RuntimeConfigurationStateStatus.READY
-        and state.desired.sequence == configuration_sequence
-        and state.applied.sequence == configuration_sequence
-    )
