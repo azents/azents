@@ -43,6 +43,12 @@ from azents.repos.external_channel.management_data import (
     ManagedConnection,
     ManagedMultiRoute,
 )
+from azents.repos.external_channel.management_operation_data import (
+    ExternalChannelManagementNotFound,
+)
+from azents.repos.external_channel.management_operations import (
+    ExternalChannelManagementOperationRepository,
+)
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
 )
@@ -52,7 +58,6 @@ from azents.services.external_channel.conversation import (
     ExternalChannelParticipationLock,
 )
 from azents.services.external_channel.management import (
-    ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
     ExternalChannelResponseModeSetting,
     slack_manifest_guidance,
@@ -177,14 +182,13 @@ def _management_service(
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
+    _operation_repository = repository
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = agent_repository
+    _operation_agent_admin_repository = agent_admin_repository
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     return ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=AsyncMock(),
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
         discord_activation_service=AsyncMock(),
         action_service=AsyncMock() if action_service is None else action_service,
@@ -193,6 +197,15 @@ def _management_service(
         participation_lock=_Lock()
         if participation_lock is None
         else participation_lock,
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
 
@@ -566,19 +579,28 @@ async def test_parent_binding_response_mode_update_uses_participation_locks() ->
     ]
 
 
-async def test_setup_discord_commits_route_before_callback_activation() -> None:
+@pytest.mark.parametrize("commit_fails", [False, True])
+async def test_setup_discord_commits_route_before_callback_activation(
+    commit_fails: bool,
+) -> None:
     """Dedicated setup cannot make provider ingress active before its route exists."""
     events: list[str] = []
     session = AsyncMock(spec=AsyncSession)
 
     async def commit() -> None:
         events.append("commit")
+        if commit_fails:
+            raise RuntimeError("Route commit failed")
 
     session.commit.side_effect = commit
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield session
+        events.append("open")
+        try:
+            yield session
+        finally:
+            events.append("close")
 
     domain_repository = AsyncMock()
 
@@ -605,21 +627,30 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
     )
     agent_admin_repository = AsyncMock()
     agent_admin_repository.is_admin.return_value = True
+    _operation_repository = AsyncMock()
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = agent_repository
+    _operation_agent_admin_repository = agent_admin_repository
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=AsyncMock(),
-        domain_repository=domain_repository,
-        lifecycle_repository=AsyncMock(),
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        workspace_user_repository=AsyncMock(),
         connection_service=connection_service,
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
+    service.operation_repository.domain_repository = domain_repository
     managed = _connection().model_copy(
         update={
             "provider": ExternalChannelProvider.DISCORD,
@@ -628,7 +659,7 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
     )
     service.list_connections = AsyncMock(return_value=[managed])
 
-    result = await service.setup_discord(
+    setup = service.setup_discord(
         workspace_id="workspace-1",
         agent_id="agent-1",
         workspace_user_id="workspace-user-1",
@@ -641,8 +672,24 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
     )
 
+    if commit_fails:
+        with pytest.raises(RuntimeError, match="Route commit failed"):
+            await setup
+        activation_service.activate.assert_not_awaited()
+        assert events == ["open", "close", "open", "route", "commit", "close"]
+        return
+
+    result = await setup
     assert result.connection == managed
-    assert events == ["route", "commit", "activate"]
+    assert events == [
+        "open",
+        "close",
+        "open",
+        "route",
+        "commit",
+        "close",
+        "activate",
+    ]
     activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
 
 
@@ -690,20 +737,28 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         ),
         ExternalChannelConnectionService,
     )
+    _operation_repository = repository
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = agent_repository
+    _operation_agent_admin_repository = agent_admin_repository
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=AsyncMock(),
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        workspace_user_repository=AsyncMock(),
         connection_service=connection_service,
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
     await service.update_discord(
@@ -774,20 +829,28 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         ),
         ExternalChannelConnectionService,
     )
+    _operation_repository = repository
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = AsyncMock()
+    _operation_agent_admin_repository = AsyncMock()
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=AsyncMock(),
-        agent_repository=AsyncMock(),
-        agent_admin_repository=AsyncMock(),
-        workspace_user_repository=AsyncMock(),
         connection_service=connection_service,
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
     await service.update_multi_discord(
@@ -837,20 +900,28 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
         ),
         ExternalChannelConnectionService,
     )
+    _operation_repository = repository
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = AsyncMock()
+    _operation_agent_admin_repository = AsyncMock()
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=AsyncMock(),
-        agent_repository=AsyncMock(),
-        agent_admin_repository=AsyncMock(),
-        workspace_user_repository=AsyncMock(),
         connection_service=connection_service,
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
     with pytest.raises(ValueError, match="Discord callback failed"):
@@ -1128,22 +1199,31 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
     )
+    _operation_repository = repository
+    _operation_lifecycle_repository = AsyncMock()
+    _operation_agent_repository = agent_repository
+    _operation_agent_admin_repository = AsyncMock()
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=domain_repository,
-        lifecycle_repository=AsyncMock(),
-        agent_repository=agent_repository,
-        agent_admin_repository=AsyncMock(),
-        workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
         discord_activation_service=AsyncMock(),
         action_service=AsyncMock(),
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
+    service.operation_repository.domain_repository = domain_repository
     result = await service.add_multi_route(
         workspace_id="workspace-1",
         connection_id="connection-1",
@@ -1198,19 +1278,31 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
     session.flush.assert_awaited_once()
 
 
-async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> None:
+@pytest.mark.parametrize("failed_commit", [None, 1, 2])
+async def test_disconnect_prepares_cleanup_before_terminal_secret_purge(
+    failed_commit: int | None,
+) -> None:
     """Provider cleanup retains its target while terminal state commits first."""
     events: list[str] = []
     session = AsyncMock(spec=AsyncSession)
+    commits = 0
 
     async def commit() -> None:
+        nonlocal commits
+        commits += 1
         events.append("commit")
+        if commits == failed_commit:
+            raise RuntimeError("Disconnect commit failed")
 
     session.commit.side_effect = commit
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield session
+        events.append("open")
+        try:
+            yield session
+        finally:
+            events.append("close")
 
     repository = AsyncMock()
     repository.get_connection.return_value = object()
@@ -1251,36 +1343,63 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
     agent_admin_repository = AsyncMock()
     agent_admin_repository.is_admin.return_value = True
 
+    _operation_repository = repository
+    _operation_lifecycle_repository = lifecycle_repository
+    _operation_agent_repository = agent_repository
+    _operation_agent_admin_repository = agent_admin_repository
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=lifecycle_repository,
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
-    result = await service.disconnect_connection(
+    disconnect = service.disconnect_connection(
         workspace_id="workspace-1",
         agent_id="agent-1",
         workspace_user_id="workspace-user-1",
         connection_id="connection-1",
     )
 
+    if failed_commit is not None:
+        with pytest.raises(RuntimeError, match="Disconnect commit failed"):
+            await disconnect
+        action_service.execute_terminal_control.assert_not_awaited()
+        assert events[:6] == ["open", "close", "open", "begin", "commit", "close"]
+        if failed_commit == 1:
+            lifecycle_repository.disconnect_single_connection.assert_not_awaited()
+            assert len(events) == 6
+        else:
+            assert events[6:] == ["open", "lifecycle", "complete", "commit", "close"]
+        return
+
+    result = await disconnect
     assert result.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert events == [
+        "open",
+        "close",
+        "open",
         "begin",
         "commit",
+        "close",
+        "open",
         "lifecycle",
         "complete",
         "commit",
+        "close",
         "delivery",
     ]
 
@@ -1337,20 +1456,28 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         events.append("delivery")
 
     action_service.execute_terminal_control.side_effect = deliver
+    _operation_repository = repository
+    _operation_lifecycle_repository = lifecycle_repository
+    _operation_agent_repository = AsyncMock()
+    _operation_agent_admin_repository = AsyncMock()
+    _operation_workspace_user_repository = AsyncMock()
+    _operation_session_manager = session_manager
     service = ExternalChannelManagementService(
-        session_manager=session_manager,
-        repository=repository,
-        domain_repository=AsyncMock(),
-        lifecycle_repository=lifecycle_repository,
-        agent_repository=AsyncMock(),
-        agent_admin_repository=AsyncMock(),
-        workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
         conversation_lock=_Lock(),
         participation_lock=_Lock(),
+        operation_repository=ExternalChannelManagementOperationRepository(
+            domain_repository=AsyncMock(),
+            repository=_operation_repository,
+            lifecycle_repository=_operation_lifecycle_repository,
+            agent_repository=_operation_agent_repository,
+            agent_admin_repository=_operation_agent_admin_repository,
+            workspace_user_repository=_operation_workspace_user_repository,
+            session_manager=_operation_session_manager,
+        ),
     )
 
     result = await service.disconnect_multi_connection(
@@ -1362,3 +1489,67 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
 
     assert result.disconnected_binding_count == 1
     assert events == ["disconnect", "purge", "commit", "delivery"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", list(ExternalChannelProvider))
+async def test_validate_connection_finishes_db_reads_before_provider_io(
+    provider: ExternalChannelProvider,
+) -> None:
+    """Provider validation starts only after all authorization reads finish."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        events.append("open")
+        try:
+            yield session
+        finally:
+            events.append("close")
+
+    repository = AsyncMock()
+    repository.get_connection.return_value = SimpleNamespace(
+        connection=SimpleNamespace(provider=provider)
+    )
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+    )
+    service.operation_repository.session_manager = session_manager
+
+    async def activate(**kwargs: object) -> object:
+        assert kwargs["connection_id"] == "connection-1"
+        assert events == ["open", "close", "open", "close"]
+        events.append("provider")
+        return SimpleNamespace()
+
+    activation_service = AsyncMock()
+    activation_service.activate.side_effect = activate
+    connection_service = AsyncMock()
+    connection_service.validate_connection.side_effect = activate
+    service.discord_activation_service = activation_service
+    service.connection_service = connection_service
+
+    await service.validate_connection(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        connection_id="connection-1",
+    )
+
+    assert events == ["open", "close", "open", "close", "provider"]
+    if provider is ExternalChannelProvider.DISCORD:
+        activation_service.activate.assert_awaited_once()
+        connection_service.validate_connection.assert_not_awaited()
+    else:
+        connection_service.validate_connection.assert_awaited_once()
+        activation_service.activate.assert_not_awaited()

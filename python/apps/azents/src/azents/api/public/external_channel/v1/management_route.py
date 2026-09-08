@@ -44,6 +44,10 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
+from azents.repos.external_channel.management_operation_data import (
+    ExternalChannelManagementGenerationChanged,
+    ExternalChannelManagementNotFound,
+)
 from azents.services.external_channel.access import (
     ExternalChannelAccessDecisionError,
     ExternalChannelAccessRequestNotFound,
@@ -62,8 +66,6 @@ from azents.services.external_channel.management import (
     DiscordUrlPreviewSuppressionSetting,
     ExternalChannelAccessPolicyInput,
     ExternalChannelDecisionInput,
-    ExternalChannelManagementGenerationChanged,
-    ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
     ExternalChannelResponseModeSetting,
     ManagedConnectionSetup,
