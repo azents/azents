@@ -8,10 +8,11 @@ from typing import Annotated, Literal, Protocol, assert_never
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState, EventKind
+from azents.core.goal import GoalState, GoalStateSnapshot
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -26,23 +27,22 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import SkillLoadedPayload
 from azents.engine.tools.deps import (
-    get_goal_state_store,
     get_skill_state_store,
     get_vfs_projection_service,
 )
-from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import (
     SkillActionProjectionReader,
-    SkillProjectionItem,
     SkillStateStore,
     load_skill_projection_for_actions,
-    resolve_active_skill,
     skill_action_id,
     skill_actions_from_snapshot,
     skill_item_from_vfs_entry,
 )
 from azents.rdb.models.event import JSONValue
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.mailbox.promotion import (
+    MailboxGoalCreate,
+    MailboxSkillRevalidation,
+)
 from azents.services.vfs import (
     VfsFileResolutionError,
     VfsResolvedFile,
@@ -143,10 +143,11 @@ class TurnActionPreparedEvent:
 
 @dataclasses.dataclass(frozen=True)
 class TurnActionPreparationContext:
-    """Caller-owned transaction and immutable action input snapshot."""
+    """Immutable Session and action input snapshot used outside a transaction."""
 
-    session: AsyncSession
+    agent_id: str
     session_id: str
+    workspace_id: str
     active_run_id: str | None
     mailbox_item_id: str
     content: str
@@ -161,6 +162,9 @@ class TurnActionPreparationResult:
     effect: TurnActionPreparationEffect
     handled_failure: str | None
     operation_action: OperationAction | None
+    goal_create: MailboxGoalCreate | None
+    skill_revalidation: MailboxSkillRevalidation | None
+    finalization_failure: str | None
 
 
 class TurnActionAdmissionError(ValueError):
@@ -171,10 +175,6 @@ class TurnActionAdmissionError(ValueError):
 class TurnActionCapabilityRegistry:
     """Explicit closed registry for TurnAction lifecycle capabilities."""
 
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    goal_store: Annotated[GoalStateStore, Depends(get_goal_state_store)]
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)]
     vfs_projection_service: Annotated[
         TurnActionVfsProjectionService | None,
@@ -308,7 +308,7 @@ class TurnActionCapabilityRegistry:
         action: TurnAction,
         context: TurnActionPreparationContext,
     ) -> TurnActionPreparationResult:
-        """Prepare one typed action inside the caller transaction."""
+        """Prepare one typed action without an active database transaction."""
         match action:
             case GoalAction():
                 return await self._prepare_goal(context)
@@ -327,6 +327,9 @@ class TurnActionCapabilityRegistry:
                     effect=TurnActionPreparationEffect.NEUTRAL,
                     handled_failure=None,
                     operation_action=action,
+                    goal_create=None,
+                    skill_revalidation=None,
+                    finalization_failure=None,
                 )
             case _:
                 assert_never(action)
@@ -338,33 +341,13 @@ class TurnActionCapabilityRegistry:
         objective = context.content.strip()
         if not objective:
             return _handled_failure("Goal objective is required.")
-        agent_session = await self.agent_session_repository.get_by_id(
-            context.session,
-            context.session_id,
-        )
-        if agent_session is None:
-            return _handled_failure("Session not found.")
         updated_at = datetime.datetime.now(datetime.UTC).isoformat()
-
-        def mutate(current: GoalState) -> GoalState:
-            if current.status in {"active", "paused", "blocked"} and current.objective:
-                raise _GoalActionError("An unfinished goal already exists.")
-            return GoalState(
-                objective=objective,
-                status="active",
-                created_at=updated_at,
-                updated_at=updated_at,
-            )
-
-        try:
-            updated = await self.goal_store.update_in_session(
-                context.session,
-                agent_session.agent_id,
-                context.session_id,
-                mutate,
-            )
-        except _GoalActionError as exc:
-            return _handled_failure(exc.message)
+        updated = GoalState(
+            objective=objective,
+            status="active",
+            created_at=updated_at,
+            updated_at=updated_at,
+        )
         snapshot = GoalStateSnapshot.from_state(updated)
         return TurnActionPreparationResult(
             events=[
@@ -378,6 +361,12 @@ class TurnActionCapabilityRegistry:
             effect=TurnActionPreparationEffect.ELIGIBLE,
             handled_failure=None,
             operation_action=None,
+            goal_create=MailboxGoalCreate(
+                objective=objective,
+                updated_at=updated_at,
+            ),
+            skill_revalidation=None,
+            finalization_failure="An unfinished goal already exists.",
         )
 
     async def _prepare_skill(
@@ -385,13 +374,8 @@ class TurnActionCapabilityRegistry:
         context: TurnActionPreparationContext,
         action: SkillAction,
     ) -> TurnActionPreparationResult:
-        agent_session = await self.agent_session_repository.get_by_id(
-            context.session,
-            context.session_id,
-        )
-        if agent_session is None:
-            return _handled_failure("Session not found.")
         item: SkillProjectionItem | None
+        skill_revalidation = None
         if action.skill_path.startswith("azents://"):
             item = None
             if (
@@ -401,9 +385,9 @@ class TurnActionCapabilityRegistry:
                 try:
                     resolved = await self.vfs_projection_service.resolve_file(
                         run_id=context.active_run_id,
-                        agent_id=agent_session.agent_id,
+                        agent_id=context.agent_id,
                         session_id=context.session_id,
-                        workspace_id=agent_session.workspace_id,
+                        workspace_id=context.workspace_id,
                         uri=action.skill_path,
                     )
                     item = skill_item_from_vfs_entry(resolved.entry)
@@ -411,7 +395,7 @@ class TurnActionCapabilityRegistry:
                     logger.warning(
                         "Managed Skill action resolution failed",
                         extra={
-                            "agent_id": agent_session.agent_id,
+                            "agent_id": context.agent_id,
                             "session_id": context.session_id,
                             "run_id": context.active_run_id,
                             "skill_path": action.skill_path,
@@ -419,12 +403,13 @@ class TurnActionCapabilityRegistry:
                         },
                     )
         else:
-            state = await self.skill_store.load_in_session(
-                context.session,
-                agent_session.agent_id,
+            state = await self.skill_store.load(
+                context.agent_id,
                 context.session_id,
             )
             item = resolve_active_skill(state, skill_path=action.skill_path)
+            if item is not None:
+                skill_revalidation = MailboxSkillRevalidation(item=item)
         if item is None:
             return _handled_failure(
                 "Selected Skill is not available in the active projection."
@@ -452,16 +437,12 @@ class TurnActionCapabilityRegistry:
             effect=TurnActionPreparationEffect.ELIGIBLE,
             handled_failure=None,
             operation_action=None,
+            goal_create=None,
+            skill_revalidation=skill_revalidation,
+            finalization_failure=(
+                "Selected Skill is not available in the active projection."
+            ),
         )
-
-
-class _GoalActionError(Exception):
-    """User-visible Goal action failure."""
-
-    def __init__(self, message: str) -> None:
-        """Create one handled Goal error."""
-        super().__init__(message)
-        self.message = message
 
 
 def _handled_failure(message: str) -> TurnActionPreparationResult:
@@ -472,6 +453,9 @@ def _handled_failure(message: str) -> TurnActionPreparationResult:
         effect=TurnActionPreparationEffect.FAILED,
         handled_failure=message,
         operation_action=None,
+        goal_create=None,
+        skill_revalidation=None,
+        finalization_failure=None,
     )
 
 

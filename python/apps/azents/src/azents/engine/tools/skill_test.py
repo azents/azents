@@ -15,6 +15,12 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
 )
+from azents.core.skill_projection import (
+    SkillProjectionItem,
+    SkillProjectionSnapshot,
+    SkillProjectionState,
+    resolve_active_skill,
+)
 from azents.core.tools import TurnContext
 from azents.core.vfs import (
     VfsProjection,
@@ -28,17 +34,13 @@ from azents.engine.tools.runtime_io import (
     RuntimeFileTextReadResult,
 )
 from azents.engine.tools.skill import (
-    SkillProjectionItem,
     SkillProjectionService,
-    SkillProjectionSnapshot,
-    SkillProjectionState,
     SkillRuntimeFileReader,
     SkillToolkit,
     load_skill_projection_for_actions,
     make_load_skill_tool,
     render_skill_items,
     render_skill_prompt,
-    resolve_active_skill,
     skill_actions_from_snapshot,
     skill_items_from_vfs_projection,
 )
@@ -233,6 +235,23 @@ class _TestableSkillProjectionService(SkillProjectionService):
             projects=projects,
             workspace_root="/runtime/home",
         )
+
+
+class _ProjectReader:
+    """Completed Project snapshot reader for Skill projection tests."""
+
+    def __init__(self, projects: list[SessionWorkspaceProject]) -> None:
+        """Store the detached Project snapshot."""
+        self.projects = projects
+
+    async def list_projects(
+        self,
+        *,
+        session_id: str,
+    ) -> list[SessionWorkspaceProject]:
+        """Return the configured detached Project snapshot."""
+        del session_id
+        return self.projects
 
 
 def _managed_projection() -> VfsProjection:
@@ -723,7 +742,7 @@ class TestSkillProjectionService:
         )
         service = _TestableSkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
-            session_manager=_session_manager,
+            project_reader=_ProjectReader([]),
             runtime_target_resolver=_RuntimeTargetResolver(),
             session_working_folder_binding_service=AsyncMock(),
         )
@@ -760,7 +779,7 @@ class TestSkillProjectionService:
         )
         service = _TestableSkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
-            session_manager=_session_manager,
+            project_reader=_ProjectReader([]),
             runtime_target_resolver=_RuntimeTargetResolver(),
             session_working_folder_binding_service=AsyncMock(),
         )
@@ -789,7 +808,7 @@ class TestSkillProjectionService:
         broadcast = _Broadcast()
         service = SkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
-            session_manager=_session_manager,
+            project_reader=_ProjectReader([]),
             runtime_target_resolver=_RuntimeTargetResolver(),
             session_working_folder_binding_service=AsyncMock(),
             broadcast=broadcast,

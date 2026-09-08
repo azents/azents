@@ -10,6 +10,9 @@ code_paths:
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_capabilities.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/core/goal.py
+  - python/apps/azents/src/azents/core/skill_projection.py
+  - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
@@ -35,7 +38,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
-  - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/engine/tooling/execution_context.py
@@ -44,6 +46,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
+  - python/apps/azents/src/azents/repos/goal/**
+  - python/apps/azents/src/azents/repos/skill_state/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
   - python/apps/azents/src/azents/worker/deps.py
@@ -60,8 +64,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-07
-spec_version: 109
+last_verified_at: 2026-09-08
+spec_version: 110
 ---
 
 # Toolkit
@@ -158,6 +162,14 @@ github__azents__get_file_contents
 
 The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
 
+Toolkit State identity and payload models are pure core types. Database handles
+and optimistic compare-and-set storage live in the repository layer. Goal and
+Skill owners expose completed typed repository operations; application callers do
+not pass arbitrary mutation callbacks into a live repository transaction. Goal
+clear, objective changes, create, and status transitions retain their existing
+validation and event behavior. Skill Project invalidation composes through its
+passed-session database primitive when a Project mutation must remain atomic.
+
 Final provider-facing client tools are canonicalized by model-visible tool name before lowering to the model request. Toolkit-local generation may use whatever construction order is convenient, but `ToolCatalog.native_tools` is name-sorted so identical toolkit configuration and identical successful toolkit state produce stable function-tool ordering. Provider-hosted tools are also sorted by stable semantic name/config before request lowering when more than one hosted tool is present.
 
 One logical catalog entry may declare multiple provider wire variants while preserving its final
@@ -215,6 +227,13 @@ Every AgentRun stores one self-contained immutable VFS projection in `agent_runs
 
 The Skill Toolkit combines managed entrypoints with the existing filesystem Skill snapshot. Filesystem Skills keep absolute `SKILL.md` paths and the session-scoped `latest`/`active` adoption lifecycle. Managed Skills use their exact `azents://` URI as `skill_path`; equal slugs remain separate when their locators differ. `load_skill` dispatches absolute paths only to the active filesystem projection and canonical managed URIs only to the current run VFS projection, with no cross-source fallback.
 
+Filesystem Skill synchronization obtains the Session Project source set through a
+completed Project operation repository read. Runtime directory listing and Skill
+file reads occur after that database transaction closes. The resulting projection
+is persisted through a later completed Skill State repository operation; the
+projection service receives neither a session manager nor a session-taking
+Project repository.
+
 The currently approved global release bundle contains `azents://skills/azents/skill-creator/SKILL.md`. It guides Agents to create or repair filesystem Skills through the Shell Runtime tools. It requires the standard `name` and non-empty `description` frontmatter fields, treats `summary` as non-discoverable metadata, validates the saved file before reporting success, and explains that runtime Skill projection refresh completes after the current run.
 
 The Skill owner contributes zero or more definitions to the shared closed
@@ -222,7 +241,10 @@ TurnAction composer catalog. Discovery uses a fresh non-persisted VFS preview
 while the Session is idle and the active AgentRun projection while it is running.
 A selected managed SkillAction stores only its exact URI. Run input preparation
 validates that URI through the same Skill-owned capability against the projection
-ensured for the active run before emitting the durable `skill_loaded` event.
+ensured for the active run before the final Mailbox database transaction. The
+final transaction re-locks the Session and FIFO head; a filesystem Skill also
+revalidates the exact active projection item before emitting the durable
+`skill_loaded` event and deleting the source Mailbox row.
 Eligibility drift between an idle preview and run creation therefore produces the
 normal unavailable-Skill error rather than reading stale preview content.
 
@@ -923,6 +945,11 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 110) — Split pure Toolkit State, Goal, and Skill
+  models from repository-owned persistence, replaced application mutation
+  callbacks with typed operations, moved managed Skill TurnAction VFS resolution
+  outside the final Mailbox transaction, and separated Project snapshot reads
+  from Runtime Skill scanning.
 - **2026-09-07** (spec_version 109) — Restricted Discord task-change relocation to
   Actions that also contain a conversational message; message-free task changes now
   update the current host in place or create only when the host is missing.

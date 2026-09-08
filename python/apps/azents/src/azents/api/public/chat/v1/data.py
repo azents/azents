@@ -20,6 +20,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
+from azents.core.goal import GoalStateSnapshot
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -33,7 +34,6 @@ from azents.engine.events.action_messages import (
     PersistedChatAction,
 )
 from azents.engine.events.types import Event, UserMessagePayload, public_event_payload
-from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
 from azents.rdb.models.event import JSONValue
 from azents.repos.action_execution.data import (

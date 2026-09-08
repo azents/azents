@@ -11,7 +11,10 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
-  - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
+  - python/apps/azents/src/azents/core/goal.py
+  - python/apps/azents/src/azents/core/toolkit_state.py
+  - python/apps/azents/src/azents/repos/goal/**
+  - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/services/scheduled_task/rendering.py
@@ -21,8 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-09-01
-spec_version: 38
+last_verified_at: 2026-09-08
+spec_version: 39
 ---
 
 # Context Compaction
@@ -293,6 +296,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 39) — Updated Goal and Toolkit State ownership
+  paths after pure models moved to core and database handles and completed
+  operations moved to repositories; compaction behavior is unchanged.
 - **2026-09-01** (spec_version 38) — Removed the deleted event model-order field
   from the continuity projection metadata exclusions.
 - **2026-09-01** (spec_version 37) — Included External Channel invocation-role

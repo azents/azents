@@ -8,8 +8,8 @@ import pytest
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
-from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
 from azents.testing.types import is_object_factory

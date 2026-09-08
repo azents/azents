@@ -15,8 +15,8 @@ from botocore.credentials import Credentials
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
-from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.aws import AwsCredentialProvider, AwsSigV4Auth, AwsToolkit
 from azents.testing.types import is_object_factory
 

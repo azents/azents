@@ -10,9 +10,9 @@ from mcp.types import TextContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_credentials import GitHubInstallationTarget
+from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import GitHubToolkitConfig, McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionTool
-from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
 from azents.testing.types import is_object_factory

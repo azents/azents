@@ -26,6 +26,7 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
+from azents.core.goal import GoalStateSnapshot
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
@@ -36,7 +37,6 @@ from azents.engine.events.action_messages import (
     CreateSessionWorkingFolderAction,
 )
 from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
-from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
@@ -63,6 +63,10 @@ from azents.repos.agent_session.data import (
     SessionWorkingFolderContext,
 )
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.goal.store import (
+    GoalInvalidStatusTransitionError,
+    GoalStateStore,
+)
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -320,10 +324,6 @@ def _require_session_inference_profile(
     if session.inference_state is None:
         raise ValueError("Active AgentRun has no Session inference state")
     return session.inference_state.applied_profile
-
-
-class _InvalidGoalStatusTransitionError(Exception):
-    """Service-internal Goal status transition error."""
 
 
 _SESSION_TITLE_MAX_LENGTH = 200
@@ -2159,10 +2159,9 @@ class ChatSessionService:
 
         goal_store = GoalStateStore(session_manager=self.session_manager)
         if objective is None:
-            updated = await goal_store.update(
-                agent_session.agent_id,
-                session_id,
-                lambda _current: GoalState(),
+            updated = await goal_store.clear(
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
             )
             return Success(
                 UpdateGoalResult(
@@ -2173,21 +2172,19 @@ class ChatSessionService:
                 )
             )
 
-        changed = False
         updated_at = datetime.datetime.now(datetime.UTC).isoformat()
-
-        def mutate(current: GoalState) -> GoalState:
-            nonlocal changed
-            if not current.objective or current.status is None:
-                return current
-            changed = current.objective != objective
-            return current.model_copy(
-                update={"objective": objective, "updated_at": updated_at}
-            )
-
-        updated = await goal_store.update(agent_session.agent_id, session_id, mutate)
-        snapshot = GoalStateSnapshot.from_state(updated)
-        wake_up = changed and bool(snapshot.objective) and snapshot.status == "active"
+        objective_update = await goal_store.update_objective(
+            agent_id=agent_session.agent_id,
+            session_id=session_id,
+            objective=objective,
+            updated_at=updated_at,
+        )
+        snapshot = GoalStateSnapshot.from_state(objective_update.updated)
+        wake_up = (
+            objective_update.changed
+            and bool(snapshot.objective)
+            and snapshot.status == "active"
+        )
         event = (
             await self._append_goal_updated_event(session_id, snapshot)
             if wake_up
@@ -2225,39 +2222,25 @@ class ChatSessionService:
                     assert_never(error)
 
         goal_store = GoalStateStore(session_manager=self.session_manager)
-        changed = False
-        previous_status: str | None = None
         updated_at = datetime.datetime.now(datetime.UTC).isoformat()
-
-        def mutate(current: GoalState) -> GoalState:
-            nonlocal changed, previous_status
-            if not current.objective or current.status is None:
-                raise _InvalidGoalStatusTransitionError
-            if input.status == "paused":
-                if current.status != "active":
-                    raise _InvalidGoalStatusTransitionError
-            elif input.status == "active":
-                if current.status not in {"paused", "blocked"}:
-                    raise _InvalidGoalStatusTransitionError
-            else:
-                raise _InvalidGoalStatusTransitionError
-            previous_status = current.status
-            changed = current.status != input.status
-            return current.model_copy(
-                update={"status": input.status, "updated_at": updated_at}
-            )
-
         try:
-            updated = await goal_store.update(
-                agent_session.agent_id, session_id, mutate
+            status_update = await goal_store.set_control_status(
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+                status=input.status,
+                updated_at=updated_at,
             )
-        except _InvalidGoalStatusTransitionError:
+        except GoalInvalidStatusTransitionError:
             return Failure(InvalidGoalStatusTransition())
-        snapshot = GoalStateSnapshot.from_state(updated)
-        wake_up = changed and snapshot.status == "active" and bool(snapshot.objective)
+        snapshot = GoalStateSnapshot.from_state(status_update.updated)
+        wake_up = (
+            status_update.changed
+            and snapshot.status == "active"
+            and bool(snapshot.objective)
+        )
         event_metadata = {
             "goal_control_action": "resume",
-            "previous_goal_status": previous_status or "",
+            "previous_goal_status": status_update.previous_status,
         }
         if input.resume_hint:
             event_metadata["resume_hint"] = input.resume_hint

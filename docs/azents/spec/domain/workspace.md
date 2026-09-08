@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
+  - python/apps/azents/src/azents/repos/session_workspace_project_operations/**
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
   - python/apps/azents/src/azents/repos/agent_project_preset/**
   - python/apps/azents/src/azents/repos/agent_project_default/**
   - python/apps/azents/src/azents/repos/agent_project_catalog/**
@@ -116,8 +118,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-07
-spec_version: 80
+last_verified_at: 2026-09-08
+spec_version: 81
 ---
 
 # Workspace & Membership
@@ -435,6 +437,13 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `agent_project_catalog` stores Agent-scoped reusable Project path candidates and filesystem status projection (`unchecked`, `available`, `missing`, `unavailable`, or `error`) with optional detail and `last_checked_at`. Catalog status is a UI projection; it does not decide prompt Project eligibility. Worktree action execution upserts the created worktree path into the catalog and may refresh status, but it does not update last-created-session defaults after execution.
 - `GET /chat/v1/agents/{agent_id}/git-refs?source_project_path=...` previews branches, tags, default branch, and HEAD commit for a Git source Project through typed Runtime Runner Git operations. Runtime unavailable or Git semantic failures are surfaced as user-safe preview errors.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession's shared `SessionAgentContext`. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the context-owned registry row. This API does not modify filesystem.
+- Existing-session registration first completes its database authorization and
+  binding snapshot, performs Runtime path resolution and directory validation
+  without an active database transaction, and then uses one database-only
+  operation repository to revalidate access, binding identity, target path, and
+  conflicts while atomically creating the Project, preset, and catalog effects.
+  Final Project operations acquire locks in the retained order `Agent ->
+  AgentSession -> membership -> binding/context -> Project/path`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_agent_context_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_agent_context_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
@@ -827,6 +836,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-08 (spec_version=81)** — Moved existing-session Project and
+  working-folder database atomic groups into composing repositories, with Runtime
+  and filesystem work between completed database operations, final authority
+  revalidation, and the canonical Agent-before-Session lock order.
 - **2026-09-07 (spec_version=80)** — Documented the existing-session Agent
   Workspace directory picker's bounded internal scrolling behavior across desktop
   and narrow mobile/Safari layouts.

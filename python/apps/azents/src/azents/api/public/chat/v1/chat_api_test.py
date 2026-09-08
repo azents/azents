@@ -86,6 +86,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.goal import GoalStateSnapshot
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -98,11 +99,9 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.run.input import InputMessage
-from azents.engine.tools.goal import GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import SkillProjectionState, SkillStateStore
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import (
     AgentSession,
     AgentSessionUnreadTerminalRunProjection,
@@ -1050,11 +1049,6 @@ def _turn_action_capabilities(
 ) -> TurnActionCapabilityRegistry:
     """Create a TurnAction registry for route tests."""
     return TurnActionCapabilityRegistry(
-        agent_session_repository=require_instance(
-            MagicMock(spec=AgentSessionRepository),
-            AgentSessionRepository,
-        ),
-        goal_store=require_instance(MagicMock(spec=GoalStateStore), GoalStateStore),
         skill_store=skill_store or _EmptySkillStore(),
         vfs_projection_service=None,
     )
