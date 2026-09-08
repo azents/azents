@@ -71,6 +71,7 @@ from support.utils import (
 )
 
 _RUNTIME_PROVIDER_ID = "system-docker"
+_RUNTIME_PROVIDER_REGISTERED_MARKER = "Runtime Provider registered"
 _SIGNUP_PASSWORD = "TestPass123!"
 
 
@@ -118,13 +119,17 @@ def _stop_runtime_provider(container: DockerContainer) -> None:
     assert wrapped_container.status == "exited"
 
 
+def _runtime_provider_registration_count(container: DockerContainer) -> int:
+    """Count completed Provider registrations in deterministic container logs."""
+    stdout, stderr = container.get_logs()
+    return (stdout.decode(errors="replace") + stderr.decode(errors="replace")).count(
+        _RUNTIME_PROVIDER_REGISTERED_MARKER
+    )
+
+
 def _restart_runtime_provider(container: DockerContainer) -> None:
     """Restart the deterministic Provider and wait for a new registration."""
-    marker = "Runtime Provider registered"
-    stdout, stderr = container.get_logs()
-    prior_registrations = (
-        stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    ).count(marker)
+    prior_registrations = _runtime_provider_registration_count(container)
     wrapped_container = container.get_wrapped_container()
     wrapped_container.start()
 
@@ -132,12 +137,7 @@ def _restart_runtime_provider(container: DockerContainer) -> None:
         wrapped_container.reload()
         if wrapped_container.status == "exited":
             raise AssertionError("Runtime Provider exited while restarting")
-        current_stdout, current_stderr = container.get_logs()
-        registrations = (
-            current_stdout.decode(errors="replace")
-            + current_stderr.decode(errors="replace")
-        ).count(marker)
-        return registrations > prior_registrations
+        return _runtime_provider_registration_count(container) > prior_registrations
 
     wait_until(
         registered_again,
@@ -156,7 +156,7 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
     valkey_container: DockerContainer,
 ) -> None:
     """An empty Valkey instance loses live work but not Runtime authority."""
-    del azents_runtime_provider_docker_container, azents_engine_worker_container
+    del azents_engine_worker_container
     suffix = unique()
     token, _, _ = authenticate_user(
         public_api_client,
@@ -223,6 +223,9 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
     assert before.runtime.runner_generation is not None
     previous_generation = int(before.runtime.runner_generation)
     assert previous_generation > 0
+    previous_provider_registrations = _runtime_provider_registration_count(
+        azents_runtime_provider_docker_container
+    )
 
     redis = Redis(
         host=valkey_container.get_container_host_ip(),
@@ -251,7 +254,11 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
             return False
         recovered = current
         return (
-            int(current.runtime.runner_generation) > previous_generation
+            _runtime_provider_registration_count(
+                azents_runtime_provider_docker_container
+            )
+            > previous_provider_registrations
+            and int(current.runtime.runner_generation) > previous_generation
             and current.lifecycle.availability == "ready"
             and current.actions.use_runner
         )
