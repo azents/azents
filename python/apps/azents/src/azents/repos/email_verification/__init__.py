@@ -93,11 +93,17 @@ class EmailVerificationRepository:
         now = tznow()
         result = await session.execute(
             sa.update(RDBEmailVerification)
-            .where(RDBEmailVerification.id == verification_id)
+            .where(
+                RDBEmailVerification.id == verification_id,
+                RDBEmailVerification.verified_at.is_(None),
+                RDBEmailVerification.expires_at >= now,
+            )
             .values(verified_at=now)
             .returning(RDBEmailVerification)
         )
-        updated = result.scalar_one()
+        updated = result.scalar_one_or_none()
+        if updated is None:
+            return Failure(AlreadyVerified(verification_id=verification_id))
         return Success(self._build(updated))
 
     async def delete_stale_by_email(self, session: AsyncSession, email: str) -> int:
