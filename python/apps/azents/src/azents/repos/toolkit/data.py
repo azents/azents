@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import enum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -15,8 +16,9 @@ class ToolkitConfig(BaseModel):
 
     id: str = Field(description="Toolkit ID")
     workspace_id: str = Field(description="Workspace ID")
+    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
     toolkit_type: str = Field(description="Tool type")
-    slug: str = Field(description="Unique slug within workspace")
+    slug: str = Field(description="Unique slug within the ownership scope")
     name: str = Field(description="Display name")
     description: str | None = Field(default=None, description="Description")
     config: dict[str, Any] = Field(description="Tool settings")
@@ -57,8 +59,9 @@ class ToolkitCreate(BaseModel):
     """Toolkit create schema."""
 
     workspace_id: str = Field(description="Workspace ID")
+    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
     toolkit_type: str = Field(description="Tool type")
-    slug: str = Field(description="Unique slug within workspace")
+    slug: str = Field(description="Unique slug within the ownership scope")
     name: str = Field(description="Display name")
     description: str | None = Field(default=None, description="Description")
     config: dict[str, Any] = Field(description="Tool settings")
@@ -106,6 +109,39 @@ class AgentToolkitCreate(BaseModel):
     toolkit_type: str = Field(description="Tool type (denormalized)")
 
 
+class EffectiveToolkitSource(enum.StrEnum):
+    """Persisted source that makes a Toolkit effective for an Agent."""
+
+    SHARED_ATTACHMENT = "shared_attachment"
+    AGENT_OWNED = "agent_owned"
+
+
+class EffectiveToolkitConfig(BaseModel):
+    """One enabled ToolkitConfig effective for an Agent."""
+
+    toolkit: ToolkitConfig
+    source: EffectiveToolkitSource
+    agent_toolkit_id: str | None
+
+
+class EffectiveToolkitSlugConflict(RuntimeError):
+    """Persisted effective Toolkit slugs are not unique for one Agent."""
+
+    def __init__(
+        self,
+        *,
+        agent_id: str,
+        slug: str,
+        toolkit_ids: tuple[str, ...],
+    ) -> None:
+        super().__init__(
+            f"Duplicate effective Toolkit slug for Agent {agent_id}: {slug}"
+        )
+        self.agent_id = agent_id
+        self.slug = slug
+        self.toolkit_ids = toolkit_ids
+
+
 @dataclasses.dataclass(frozen=True)
 class NotFound:
     """Toolkit not found."""
@@ -138,9 +174,10 @@ class DuplicateScope:
 
 @dataclasses.dataclass(frozen=True)
 class DuplicateSlug:
-    """Toolkit with same slug already exists in workspace."""
+    """Toolkit with the same slug already exists in its ownership scope."""
 
     workspace_id: str
+    owner_agent_id: str | None
     slug: str
 
 

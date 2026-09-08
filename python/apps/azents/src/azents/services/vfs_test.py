@@ -18,15 +18,15 @@ from azents.core.vfs import (
     make_vfs_projection,
     make_vfs_source_revision,
 )
+from azents.repos.toolkit.data import EffectiveToolkitSlugConflict
 from azents.services.vfs import (
     GLOBAL_RELEASE_SOURCE,
     ReleaseVfsCatalog,
+    VfsEffectiveToolkitConfig,
     VfsFileResolutionError,
     VfsProjectionService,
     VfsRun,
     VfsSessionRecord,
-    VfsToolkitAttachment,
-    VfsToolkitConfig,
 )
 
 
@@ -160,17 +160,6 @@ class _MappedSessionRepository:
         return self.sessions.get(agent_session_id)
 
 
-class _NoAttachmentsRepository:
-    """AgentToolkitRepository test double without attached Toolkits."""
-
-    async def list_by_agent(
-        self, session: _Session, agent_id: str
-    ) -> list[VfsToolkitAttachment]:
-        """Return no attached Toolkits."""
-        del session, agent_id
-        return []
-
-
 class _UnusedRunRepository:
     """Fail if preview-only tests unexpectedly load a run."""
 
@@ -200,14 +189,77 @@ class _UnusedSessionRepository:
         raise AssertionError("Session repository is not used by preview")
 
 
-class _UnusedToolkitRepository:
-    """Fail if empty-attachment tests unexpectedly load a toolkit."""
+class _EmptyToolkitRepository:
+    """Effective Toolkit repository test double without persisted Toolkits."""
 
-    async def get_by_id(
-        self, session: _Session, toolkit_id: str
-    ) -> VfsToolkitConfig | None:
-        del session, toolkit_id
-        raise AssertionError("Toolkit repository is not used for no attachments")
+    async def list_effective_for_agent(
+        self,
+        session: _Session,
+        agent_id: str,
+        *,
+        workspace_id: str,
+    ) -> list[VfsEffectiveToolkitConfig]:
+        """Return no effective ToolkitConfigs."""
+        del session, agent_id, workspace_id
+        return []
+
+
+@dataclass(frozen=True)
+class _ToolkitConfig:
+    """Minimal effective ToolkitConfig view."""
+
+    enabled: bool
+    workspace_id: str
+    toolkit_type: str
+
+
+@dataclass(frozen=True)
+class _EffectiveToolkit:
+    """Minimal effective Toolkit projection."""
+
+    toolkit: _ToolkitConfig
+
+
+class _OneToolkitRepository:
+    """Effective Toolkit repository with one Provider config."""
+
+    async def list_effective_for_agent(
+        self,
+        session: _Session,
+        agent_id: str,
+        *,
+        workspace_id: str,
+    ) -> list[_EffectiveToolkit]:
+        """Return one enabled effective ToolkitConfig."""
+        del session, agent_id
+        return [
+            _EffectiveToolkit(
+                toolkit=_ToolkitConfig(
+                    enabled=True,
+                    workspace_id=workspace_id,
+                    toolkit_type="scheduled",
+                )
+            )
+        ]
+
+
+class _ConflictingToolkitRepository:
+    """Effective Toolkit repository with a corrupted duplicate namespace."""
+
+    async def list_effective_for_agent(
+        self,
+        session: _Session,
+        agent_id: str,
+        *,
+        workspace_id: str,
+    ) -> list[VfsEffectiveToolkitConfig]:
+        """Fail before VFS publishes a partial provider projection."""
+        del session, workspace_id
+        raise EffectiveToolkitSlugConflict(
+            agent_id=agent_id,
+            slug="duplicate",
+            toolkit_ids=("toolkit-1", "toolkit-2"),
+        )
 
 
 class _ScheduledReleaseProvider(ToolkitProvider[Any]):
@@ -240,8 +292,7 @@ def _projection_service(
         catalog=ReleaseVfsCatalog(),
         agent_run_repository=_RunRepository(projection),
         agent_session_repository=_SessionRepository(),
-        agent_toolkit_repository=_NoAttachmentsRepository(),
-        toolkit_repository=_UnusedToolkitRepository(),
+        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 
@@ -265,8 +316,7 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
         catalog=ReleaseVfsCatalog(),
         agent_run_repository=_UnusedRunRepository(),
         agent_session_repository=_UnusedSessionRepository(),
-        agent_toolkit_repository=_NoAttachmentsRepository(),
-        toolkit_repository=_UnusedToolkitRepository(),
+        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 
@@ -287,8 +337,7 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
         catalog=ReleaseVfsCatalog(),
         agent_run_repository=_UnusedRunRepository(),
         agent_session_repository=_UnusedSessionRepository(),
-        agent_toolkit_repository=_NoAttachmentsRepository(),
-        toolkit_repository=_UnusedToolkitRepository(),
+        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={"scheduled": provider},
     )
 
@@ -302,6 +351,46 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
     body = entry.decode_body().decode()
     assert "name: scheduled-task" in body
     assert "Do not normalize it to `Z`" in body
+
+
+async def test_preview_includes_effective_agent_owned_provider_source() -> None:
+    """An effective direct-owner Toolkit enables its Provider release source."""
+    provider = _ScheduledReleaseProvider()
+    service = VfsProjectionService(
+        session_manager=_session_manager,
+        toolkit_registry={"scheduled": provider},
+        catalog=ReleaseVfsCatalog(),
+        agent_run_repository=_UnusedRunRepository(),
+        agent_session_repository=_UnusedSessionRepository(),
+        toolkit_repository=_OneToolkitRepository(),
+        required_provider_sources={},
+    )
+
+    projection = await service.build_preview(
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+    )
+
+    assert projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
+
+
+async def test_preview_fails_closed_on_duplicate_effective_slug() -> None:
+    """Do not publish VFS sources from a corrupted effective Toolkit set."""
+    service = VfsProjectionService(
+        session_manager=_session_manager,
+        toolkit_registry={},
+        catalog=ReleaseVfsCatalog(),
+        agent_run_repository=_UnusedRunRepository(),
+        agent_session_repository=_UnusedSessionRepository(),
+        toolkit_repository=_ConflictingToolkitRepository(),
+        required_provider_sources={},
+    )
+
+    with pytest.raises(EffectiveToolkitSlugConflict):
+        await service.build_preview(
+            agent_id="agent-1",
+            workspace_id="workspace-1",
+        )
 
 
 @pytest.mark.parametrize(
@@ -337,8 +426,7 @@ async def test_run_projection_scopes_required_source_to_root_execution(
                 )
             }
         ),
-        agent_toolkit_repository=_NoAttachmentsRepository(),
-        toolkit_repository=_UnusedToolkitRepository(),
+        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={"scheduled": provider},
     )
 
@@ -465,8 +553,7 @@ async def test_subagent_run_loads_its_own_projection() -> None:
                 ),
             }
         ),
-        agent_toolkit_repository=_NoAttachmentsRepository(),
-        toolkit_repository=_UnusedToolkitRepository(),
+        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 

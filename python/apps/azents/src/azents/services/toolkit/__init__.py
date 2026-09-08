@@ -49,6 +49,7 @@ from .data import (
     AgentToolkitNotBelongToAgent,
     AgentToolkitOutput,
     DuplicateSlug,
+    EffectiveSlugConflict,
     InvalidConfig,
     InvalidCredentials,
     InvalidToolkitType,
@@ -207,6 +208,7 @@ class ToolkitService:
 
         repo_create = ToolkitCreate(
             workspace_id=create.workspace_id,
+            owner_agent_id=None,
             toolkit_type=create.toolkit_type,
             slug=slug,
             name=create.name,
@@ -262,7 +264,7 @@ class ToolkitService:
         :return: Toolkit or error
         """
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
+            toolkit = await self.toolkit_repo.get_shared_by_id(session, toolkit_id)
         if toolkit is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if toolkit.workspace_id != workspace_id:
@@ -283,6 +285,7 @@ class ToolkitService:
         | NotBelongToWorkspace
         | InvalidConfig
         | DuplicateSlug
+        | EffectiveSlugConflict
         | InvalidCredentials,
     ]:
         """Update Toolkit by ID.
@@ -294,7 +297,7 @@ class ToolkitService:
         :return: Updated Toolkit or error
         """
         async with self.session_manager() as session:
-            existing = await self.toolkit_repo.get_by_id(session, toolkit_id)
+            existing = await self.toolkit_repo.get_shared_by_id(session, toolkit_id)
         if existing is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if existing.workspace_id != workspace_id:
@@ -387,8 +390,42 @@ class ToolkitService:
                 repo_update["credentials"] = None
 
         async with self.session_manager() as session:
+            locked = await self.toolkit_repo.get_shared_by_id_for_update(
+                session,
+                toolkit_id,
+            )
+            if locked is None:
+                return Failure(NotFound(toolkit_id=toolkit_id))
+            if locked.workspace_id != workspace_id:
+                return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
+
+            candidate_slug = repo_update.get("slug", locked.slug)
+            candidate_enabled = repo_update.get("enabled", locked.enabled)
+            namespace_change = (
+                candidate_slug != locked.slug or candidate_enabled != locked.enabled
+            )
+            if namespace_change:
+                agent_ids = await self.agent_toolkit_repo.list_agent_ids_by_toolkit(
+                    session,
+                    toolkit_id,
+                )
+                for attached_agent_id in agent_ids:
+                    await self.agent_repo.lock_by_id(session, attached_agent_id)
+                for attached_agent_id in agent_ids:
+                    if await self.toolkit_repo.has_effective_slug_conflict(
+                        session,
+                        agent_id=attached_agent_id,
+                        workspace_id=workspace_id,
+                        toolkit_id=toolkit_id,
+                        slug=candidate_slug,
+                        enabled=candidate_enabled,
+                    ):
+                        return Failure(EffectiveSlugConflict(slug=candidate_slug))
+
             result = await self.toolkit_repo.update_by_id(
-                session, toolkit_id, repo_update
+                session,
+                toolkit_id,
+                repo_update,
             )
         match result:
             case Success(value):
@@ -409,7 +446,7 @@ class ToolkitService:
         :return: Success or error
         """
         async with self.session_manager() as session:
-            existing = await self.toolkit_repo.get_by_id(session, toolkit_id)
+            existing = await self.toolkit_repo.get_shared_by_id(session, toolkit_id)
         if existing is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if existing.workspace_id != workspace_id:
@@ -433,7 +470,9 @@ class ToolkitService:
         :return: Created ToolkitScope or error
         """
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, create.toolkit_id)
+            toolkit = await self.toolkit_repo.get_shared_by_id(
+                session, create.toolkit_id
+            )
         if toolkit is None:
             return Failure(NotFound(toolkit_id=create.toolkit_id))
         if toolkit.workspace_id != workspace_id:
@@ -466,7 +505,7 @@ class ToolkitService:
         :return: ToolkitScope list or error
         """
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
+            toolkit = await self.toolkit_repo.get_shared_by_id(session, toolkit_id)
         if toolkit is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if toolkit.workspace_id != workspace_id:
@@ -500,7 +539,7 @@ class ToolkitService:
         :return: Success or error
         """
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
+            toolkit = await self.toolkit_repo.get_shared_by_id(session, toolkit_id)
         if toolkit is None:
             return Failure(NotFound(toolkit_id=toolkit_id))
         if toolkit.workspace_id != workspace_id:
@@ -578,6 +617,7 @@ class ToolkitService:
         | NotBelongToWorkspace
         | ToolkitNotAvailable
         | DuplicateAgentToolkit
+        | EffectiveSlugConflict
         | AgentNotBelongToWorkspace,
     ]:
         """Mount Toolkit on agent.
@@ -588,32 +628,44 @@ class ToolkitService:
         :param user_id: Requesting user ID
         :return: Created AgentToolkit or error
         """
-        agent_error = await self._check_agent_workspace(agent_id, workspace_id)
-        if agent_error is not None:
-            return Failure(agent_error)
-
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-
-        # Check availability
-        async with self.session_manager() as session:
-            available = await self.toolkit_repo.list_available_for_workspace_user(
-                session, workspace_id, user_id
+            toolkit = await self.toolkit_repo.get_shared_by_id_for_update(
+                session,
+                toolkit_id,
             )
-        available_ids = {t.id for t in available}
-        if toolkit_id not in available_ids:
-            return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
+            if toolkit is None:
+                return Failure(NotFound(toolkit_id=toolkit_id))
+            if toolkit.workspace_id != workspace_id:
+                return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
 
-        repo_create = AgentToolkitCreate(
-            agent_id=agent_id,
-            toolkit_id=toolkit_id,
-            toolkit_type=toolkit.toolkit_type,
-        )
-        async with self.session_manager() as session:
+            agent = await self.agent_repo.lock_by_id(session, agent_id)
+            if agent is None or agent.workspace_id != workspace_id:
+                return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
+
+            available = await self.toolkit_repo.list_available_for_workspace_user(
+                session,
+                workspace_id,
+                user_id,
+            )
+            available_ids = {item.id for item in available}
+            if toolkit_id not in available_ids:
+                return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
+
+            if await self.toolkit_repo.has_effective_slug_conflict(
+                session,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
+                slug=toolkit.slug,
+                enabled=toolkit.enabled,
+            ):
+                return Failure(EffectiveSlugConflict(slug=toolkit.slug))
+
+            repo_create = AgentToolkitCreate(
+                agent_id=agent_id,
+                toolkit_id=toolkit_id,
+                toolkit_type=toolkit.toolkit_type,
+            )
             result = await self.agent_toolkit_repo.create(session, repo_create)
         match result:
             case Success(value):
