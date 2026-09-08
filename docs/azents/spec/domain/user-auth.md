@@ -30,6 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/auth_operation/**
+  - python/apps/azents/src/azents/repos/security_operation/**
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
   - python/apps/azents/src/azents/repos/email_verification/**
@@ -87,7 +88,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-08
-spec_version: 15
+spec_version: 16
 ---
 
 # User & Authentication
@@ -402,6 +403,15 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 
 ## 6. Business Rules
 
+Security User/password reads and password mutations complete inside
+`SecurityOperationRepository` before returning to the service. Password hashing,
+verification, email delivery, and elevated JWT creation occur outside these DB
+transactions. Password setup uses an atomic unique-user upsert. Password removal
+rechecks verified email presence in its final DELETE statement, using the email
+delivery availability supplied before the operation; an earlier eligible
+credential projection alone cannot authorize deletion. Credential projection and
+UserEmail administration retain their separate existing boundaries.
+
 - `[registration-default-signup-token]` — default new signup is signup token redeem.
 - `[legacy-open-registration-explicit]` — email OTP new user auto-creation is allowed only when `registration_mode=open`.
 - `[signup-token-email-bound]` — signup token always has normalized email.
@@ -498,6 +508,10 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-09-08** (v16) — Moved Security User/password operations into completed
+  DB-only repository transactions; made password setup an atomic upsert and
+  revalidated verified-email eligibility in the final password deletion.
 
 - **2026-09-08** (v15) — Moved Auth user resolution, password credential reads,
   active-user Session issuance, refresh eligibility/rotation, and logout revocation

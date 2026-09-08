@@ -7,7 +7,6 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.jwt import create_access_token
 from azents.core.auth.password import (
@@ -19,22 +18,20 @@ from azents.core.auth.password import (
 from azents.core.config import AuthConfig, EmailConfig
 from azents.core.deps import get_auth_config, get_email_config
 from azents.core.email.service import EmailService
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.email_verification.data import EmailVerificationCreate
 from azents.repos.email_verification_operation import (
     EmailVerificationOperationRepository,
 )
 from azents.repos.email_verification_operation.data import EmailVerificationVerify
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.password_login.data import PasswordLoginCreate
-from azents.repos.user import UserRepository
+from azents.repos.security_operation import (
+    PasswordRemovalOutcome,
+    SecurityOperationRepository,
+)
 from azents.services._utils import (
     DEFAULT_EXPIRE_MINUTES,
     generate_code,
     generate_csrf_token,
 )
-from azents.services.credential.data import CredentialType, CredentialUnavailableReason
 from azents.services.credential.service import CredentialService
 
 from .data import (
@@ -69,12 +66,8 @@ class SecurityService:
         EmailVerificationOperationRepository,
         Depends(EmailVerificationOperationRepository),
     ]
-    password_login_repo: Annotated[PasswordLoginRepository, Depends()]
-    user_repo: Annotated[UserRepository, Depends()]
+    operation_repository: Annotated[SecurityOperationRepository, Depends()]
     credential_service: Annotated[CredentialService, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     email_config: Annotated[EmailConfig | None, Depends(get_email_config)]
 
@@ -148,10 +141,9 @@ class SecurityService:
         :param input: Send input data
         :return: Output including CSRF token or error
         """
-        async with self.session_manager() as session:
-            user = await self.user_repo.get(session, input.user_id)
-            if user is None:
-                return Failure(UserNotFound(user_id=input.user_id))
+        user = await self.operation_repository.get_user(input.user_id)
+        if user is None:
+            return Failure(UserNotFound(user_id=input.user_id))
 
         email = user.primary_email
         code = generate_code()
@@ -189,10 +181,9 @@ class SecurityService:
         :return: elevated access token or error
         """
         # Fetch primary email of user
-        async with self.session_manager() as session:
-            user = await self.user_repo.get(session, input.user_id)
-            if user is None:
-                return Failure(InvalidElevationCode())
+        user = await self.operation_repository.get_user(input.user_id)
+        if user is None:
+            return Failure(InvalidElevationCode())
 
         email = user.primary_email
 
@@ -241,10 +232,7 @@ class SecurityService:
         :param input: elevation input data
         :return: elevated access token or error
         """
-        async with self.session_manager() as session:
-            password_login = await self.password_login_repo.get_by_user_id(
-                session, input.user_id
-            )
+        password_login = await self.operation_repository.get_password(input.user_id)
 
         if password_login is None:
             return Failure(PasswordNotSet())
@@ -283,54 +271,10 @@ class SecurityService:
 
         password_hash = hash_password(input.password)
 
-        async with self.session_manager() as session:
-            user = await self.user_repo.get(session, input.user_id)
-            if user is None:
-                return Failure(UserNotFound(user_id=input.user_id))
-
-            # upsert: update existing password if present, create if absent
-            existing = await self.password_login_repo.get_by_user_id(
-                session, input.user_id
-            )
-            if existing is not None:
-                result = await self.password_login_repo.update_password_hash(
-                    session, input.user_id, password_hash
-                )
-                match result:
-                    case Success():
-                        pass
-                    case Failure():
-                        return Failure(UserNotFound(user_id=input.user_id))
-                    case _:
-                        assert_never(result)
-            else:
-                create_result = await self.password_login_repo.create(
-                    session,
-                    PasswordLoginCreate(
-                        user_id=input.user_id,
-                        password_hash=password_hash,
-                    ),
-                )
-                match create_result:
-                    case Success():
-                        pass
-                    case Failure():
-                        # AlreadyExists (race condition) → fallback to update
-                        update_result = (
-                            await self.password_login_repo.update_password_hash(
-                                session, input.user_id, password_hash
-                            )
-                        )
-                        match update_result:
-                            case Success():
-                                pass
-                            case Failure():
-                                return Failure(UserNotFound(user_id=input.user_id))
-                            case _:
-                                assert_never(update_result)
-                    case _:
-                        assert_never(create_result)
-
+        if not await self.operation_repository.set_password(
+            input.user_id, password_hash
+        ):
+            return Failure(UserNotFound(user_id=input.user_id))
         return Success(None)
 
     async def remove_password(
@@ -341,26 +285,16 @@ class SecurityService:
         :param input: Password deletion input data
         :return: Success or error
         """
-        remove_check = await self.credential_service.check_remove_allowed(
-            user_id=input.user_id,
-            credential_type=CredentialType.PASSWORD,
+        outcome = await self.operation_repository.remove_password(
+            input.user_id,
+            email_available=self.email_service.configured,
         )
-        if remove_check is None:
-            return Failure(PasswordNotSet())
-        if not remove_check.allowed:
-            if remove_check.reason == CredentialUnavailableReason.NOT_CONFIGURED:
-                return Failure(PasswordNotSet())
-            return Failure(LastCredentialRemovalDenied())
-
-        async with self.session_manager() as session:
-            result = await self.password_login_repo.delete_by_user_id(
-                session, input.user_id
-            )
-
-        match result:
-            case Success():
+        match outcome:
+            case PasswordRemovalOutcome.REMOVED:
                 return Success(None)
-            case Failure():
+            case PasswordRemovalOutcome.NOT_SET:
                 return Failure(PasswordNotSet())
+            case PasswordRemovalOutcome.LAST_CREDENTIAL:
+                return Failure(LastCredentialRemovalDenied())
             case _:
-                assert_never(result)
+                assert_never(outcome)
