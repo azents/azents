@@ -11,6 +11,7 @@ from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.rdb.models.owner_lifecycle import RDBOwnerLifecycleJob
 from azents.rdb.models.session import RDBSession
 from azents.rdb.session import SessionManager
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
@@ -617,6 +618,11 @@ async def test_session_issue_share_lock_serializes_account_deletion(
                 return_exceptions=True,
             )
         async with session_manager() as session:
+            await session.execute(
+                sa.delete(RDBOwnerLifecycleJob).where(
+                    RDBOwnerLifecycleJob.user_id == user_id
+                )
+            )
             await UserRepository().delete(session, user_id)
 
 
