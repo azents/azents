@@ -3299,13 +3299,23 @@ async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwr
 
 
 @pytest.mark.asyncio
-async def test_execute_enqueues_follow_up_after_context_invalidating_action(
+@pytest.mark.parametrize(
+    ("pending_mailbox", "expected_wake_count"),
+    [(True, 1), (False, 0)],
+)
+async def test_execute_enqueues_follow_up_for_pending_context_invalidating_action(
     monkeypatch: pytest.MonkeyPatch,
+    pending_mailbox: bool,
+    expected_wake_count: int,
 ) -> None:
-    """Project-mutating actions stop before dispatch without stale wake fallback."""
+    """Project-mutating actions wake only when fresh-context input remains."""
     lifecycle = _SessionLifecycle()
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
+
+    async def has_pending_session_mailbox_items(session_id: str) -> bool:
+        assert session_id == message.session_id
+        return pending_mailbox
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
@@ -3324,6 +3334,11 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         raise AssertionError("resolve_invoke_input should not be called")
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor.mailbox_item_service,
+        "has_pending_session_mailbox_items",
+        has_pending_session_mailbox_items,
+    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3346,7 +3361,10 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     )
 
     assert result.no_actionable_work is True
-    assert lifecycle.wake_ups == []
+    assert (
+        lifecycle.wake_ups
+        == [SessionWakeUp(session_id=message.session_id)] * expected_wake_count
+    )
 
 
 def test_dynamic_worktree_binding_receives_current_run_boundary() -> None:
