@@ -18,7 +18,6 @@ from google.analytics.data_v1beta import (
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
     GoogleAnalyticsToolkitConfig,
@@ -412,8 +411,6 @@ class GoogleAnalyticsToolkitProvider(
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate Service Account Key JSON structure."""

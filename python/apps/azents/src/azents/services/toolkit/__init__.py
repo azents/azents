@@ -7,40 +7,36 @@ from typing import Annotated, Any, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
-from azents.core.enums import ToolkitScopeType
 from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.engine.tools.envvar import EnvVarToolkitSecrets
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
-from azents.repos.toolkit import (
-    AgentToolkitRepository,
-    ToolkitRepository,
-    ToolkitScopeRepository,
-)
 from azents.repos.toolkit.data import (
-    AgentToolkitCreate,
     DuplicateAgentToolkit,
     DuplicateScope,
     NotFound,
     ScopeNotFound,
+    ToolkitConfig,
     ToolkitCreate,
-    ToolkitScopeCreate,
     ToolkitUpdate,
 )
-from azents.repos.toolkit.data import (
-    DuplicateSlug as RepoDuplicateSlug,
+from azents.repos.toolkit.data import DuplicateSlug as RepoDuplicateSlug
+from azents.repos.toolkit_operations import ToolkitOperationsRepository
+from azents.repos.toolkit_operations.data import (
+    AgentToolkitMismatch,
+    AgentWorkspaceMismatch,
+    PlatformAuthorityRejected,
+    PlatformToolkitAuthority,
+    ScopeToolkitMismatch,
+    ToolkitUnavailable,
+    ToolkitWithOAuth,
+    ToolkitWorkspaceMismatch,
 )
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+    ResolvedPlatformGitHubApp,
 )
 
 from .data import (
@@ -69,6 +65,14 @@ _github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(GitHubSecrets)
 _envvar_secrets_adapter: TypeAdapter[EnvVarToolkitSecrets] = TypeAdapter(
     EnvVarToolkitSecrets
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class _PreparedCredentials:
+    """Credentials normalized against one external Platform settings snapshot."""
+
+    credentials: dict[str, object] | None
+    platform: ResolvedPlatformGitHubApp | None
 
 
 def _resolve_mcp_config(
@@ -124,42 +128,18 @@ def merge_envvar_credentials(
     }
 
 
-def _get_toolkit_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> ToolkitRepository:
-    """ToolkitRepository dependency."""
-    return ToolkitRepository(cipher=cipher)
-
-
-def _get_mcp_oauth_connection_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> MCPOAuthConnectionRepository:
-    """MCPOAuthConnectionRepository dependency."""
-    return MCPOAuthConnectionRepository(cipher=cipher)
-
-
 @dataclasses.dataclass
 class ToolkitService:
-    """Toolkit CRUD + Scope management + AgentToolkit management service."""
+    """Toolkit CRUD, Scope, and Agent attachment orchestration."""
 
-    toolkit_repo: Annotated[ToolkitRepository, Depends(_get_toolkit_repo)]
-    mcp_oauth_connection_repo: Annotated[
-        MCPOAuthConnectionRepository, Depends(_get_mcp_oauth_connection_repo)
-    ]
-    scope_repo: Annotated[ToolkitScopeRepository, Depends()]
-    agent_toolkit_repo: Annotated[AgentToolkitRepository, Depends()]
-    agent_repo: Annotated[AgentRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations_repository: Annotated[
+        ToolkitOperationsRepository,
+        Depends(ToolkitOperationsRepository),
     ]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
-
-    # ------------------------------------------------------------------ #
-    # Toolkit CRUD (for Manager)
-    # ------------------------------------------------------------------ #
 
     async def create(
         self, create: ToolkitCreateInput, *, user_id: str
@@ -167,108 +147,85 @@ class ToolkitService:
         ToolkitOutput,
         InvalidToolkitType | InvalidConfig | DuplicateSlug | InvalidCredentials,
     ]:
-        """Create Toolkit and automatically add workspace scope.
-
-        :param create: Create data
-        :param user_id: User ID
-        :return: Created Toolkit or error
-        """
-        slug_error = self._validate_toolkit_type(create.toolkit_type)
-        if slug_error is not None:
-            return Failure(slug_error)
-
+        """Create a Toolkit and its Workspace scope atomically."""
+        type_error = self._validate_toolkit_type(create.toolkit_type)
+        if type_error is not None:
+            return Failure(type_error)
         config_error = self._validate_config(create.toolkit_type, create.config)
         if config_error is not None:
             return Failure(config_error)
 
-        credentials = await self._bind_platform_app_identity(create.credentials)
-        if isinstance(credentials, InvalidCredentials):
-            return Failure(credentials)
-        cred_error = self._validate_credentials(create.toolkit_type, credentials)
-        if cred_error is not None:
-            return Failure(cred_error)
-
-        # Validate credentials by provider (e.g. GitHub installation ownership)
-        provider = self.toolkit_registry.get(create.toolkit_type)
-        if provider is not None:
-            async with self.session_manager() as session:
-                cred_err_msg = await provider.validate_credentials(
-                    session, user_id, credentials
-                )
-            if cred_err_msg is not None:
-                return Failure(InvalidCredentials(cred_err_msg))
-
-        # Use toolkit_type as default when slug is unspecified
-        slug = create.slug if create.slug is not None else create.toolkit_type
-
-        credentials_json: str | None = None
-        if credentials is not None:
-            credentials_json = json.dumps(credentials)
-
-        repo_create = ToolkitCreate(
-            workspace_id=create.workspace_id,
-            toolkit_type=create.toolkit_type,
-            slug=slug,
-            name=create.name,
-            description=create.description,
-            config=create.config,
-            prompt=create.prompt,
-            credentials=credentials_json,
-            enabled=create.enabled,
-            always_expose_tools=create.always_expose_tools,
+        prepared = await self._prepare_credentials(create.credentials)
+        if isinstance(prepared, InvalidCredentials):
+            return Failure(prepared)
+        credential_error = self._validate_credentials(
+            create.toolkit_type,
+            prepared.credentials,
         )
-        async with self.session_manager() as session:
-            result = await self.toolkit_repo.create(session, repo_create)
-            match result:
-                case Success(toolkit):
-                    # Automatically create workspace scope
-                    await self.scope_repo.create(
-                        session,
-                        ToolkitScopeCreate(
-                            toolkit_id=toolkit.id,
-                            scope_type=ToolkitScopeType.WORKSPACE,
-                            scope_id=create.workspace_id,
-                        ),
-                    )
-                    output = ToolkitOutput.model_validate(toolkit, from_attributes=True)
-                    return Success(await self._attach_oauth_connection(output))
-                case Failure(error):
+        if credential_error is not None:
+            return Failure(credential_error)
+        provider_error = await self._validate_provider_credentials(
+            create.toolkit_type,
+            prepared.credentials,
+        )
+        if provider_error is not None:
+            return Failure(provider_error)
+
+        slug = create.slug if create.slug is not None else create.toolkit_type
+        credentials_json = (
+            json.dumps(prepared.credentials)
+            if prepared.credentials is not None
+            else None
+        )
+        result = await self.operations_repository.create(
+            ToolkitCreate(
+                workspace_id=create.workspace_id,
+                toolkit_type=create.toolkit_type,
+                slug=slug,
+                name=create.name,
+                description=create.description,
+                config=create.config,
+                prompt=create.prompt,
+                credentials=credentials_json,
+                enabled=create.enabled,
+                always_expose_tools=create.always_expose_tools,
+            ),
+            platform_authority=self._platform_authority(
+                prepared,
+                user_id=user_id,
+            ),
+        )
+        match result:
+            case Success(value):
+                output = self._output_with_oauth(value)
+                return Success(
+                    self._attach_platform_authorization(output, prepared.platform)
+                )
+            case Failure(error):
+                if isinstance(error, RepoDuplicateSlug):
                     return Failure(DuplicateSlug(slug=error.slug))
-                case _:
-                    assert_never(result)
+                return Failure(InvalidCredentials(error.detail))
+            case _:
+                assert_never(result)
 
     async def list_by_workspace(self, workspace_id: str) -> ToolkitListOutput:
-        """Fetch all Toolkits in workspace.
-
-        :param workspace_id: Workspace ID
-        :return: Toolkit list
-        """
-        async with self.session_manager() as session:
-            toolkits = await self.toolkit_repo.list_by_workspace(session, workspace_id)
-        outputs = [
-            ToolkitOutput.model_validate(t, from_attributes=True) for t in toolkits
-        ]
+        """Fetch all Toolkits in a Workspace."""
+        values = await self.operations_repository.list_by_workspace(workspace_id)
+        outputs = [self._output_with_oauth(value) for value in values]
         return ToolkitListOutput(items=await self._attach_oauth_connections(outputs))
 
     async def get_by_id(
         self, toolkit_id: str, *, workspace_id: str
     ) -> Result[ToolkitOutput, NotFound | NotBelongToWorkspace]:
-        """Fetch Toolkit by ID.
-
-        Includes workspace isolation validation.
-
-        :param toolkit_id: Toolkit ID
-        :param workspace_id: Workspace ID
-        :return: Toolkit or error
-        """
-        async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-        output = ToolkitOutput.model_validate(toolkit, from_attributes=True)
-        return Success(await self._attach_oauth_connection(output))
+        """Fetch one Toolkit after Workspace isolation validation."""
+        result = await self.operations_repository.get_by_id(
+            toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_toolkit_read_error(result.error))
+        output = self._output_with_oauth(result.value)
+        return Success(await self._attach_oauth_connection(output, attach_mcp=False))
 
     async def update_by_id(
         self,
@@ -285,38 +242,33 @@ class ToolkitService:
         | DuplicateSlug
         | InvalidCredentials,
     ]:
-        """Update Toolkit by ID.
-
-        :param toolkit_id: Toolkit ID
-        :param update: Update data
-        :param workspace_id: Workspace ID
-        :param user_id: User ID
-        :return: Updated Toolkit or error
-        """
-        async with self.session_manager() as session:
-            existing = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if existing is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if existing.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
+        """Update one Toolkit after external preparation and final revalidation."""
+        existing_result = await self.operations_repository.load_update_context(
+            toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(existing_result, Failure):
+            return Failure(self._map_toolkit_read_error(existing_result.error))
+        existing = existing_result.value
 
         if "config" in update:
             config_error = self._validate_config(
-                existing.toolkit_type, update["config"]
+                existing.toolkit_type,
+                update["config"],
             )
             if config_error is not None:
                 return Failure(config_error)
 
         normalized_credentials: dict[str, object] | None = None
+        platform: ResolvedPlatformGitHubApp | None = None
         if "credentials" in update:
             update_credentials = update["credentials"]
             if update_credentials is not None:
-                bound_credentials = await self._bind_platform_app_identity(
-                    update_credentials
-                )
-                if isinstance(bound_credentials, InvalidCredentials):
-                    return Failure(bound_credentials)
-                normalized_credentials = bound_credentials
+                prepared = await self._prepare_credentials(update_credentials)
+                if isinstance(prepared, InvalidCredentials):
+                    return Failure(prepared)
+                normalized_credentials = prepared.credentials
+                platform = prepared.platform
                 if existing.toolkit_type == ToolkitType.ENVVAR:
                     if normalized_credentials is None:
                         return Failure(
@@ -330,22 +282,18 @@ class ToolkitService:
                         normalized_credentials,
                         config,
                     )
-                cred_error = self._validate_credentials(
+                credential_error = self._validate_credentials(
                     existing.toolkit_type,
                     normalized_credentials,
                 )
-                if cred_error is not None:
-                    return Failure(cred_error)
-                provider = self.toolkit_registry.get(existing.toolkit_type)
-                if provider is not None:
-                    async with self.session_manager() as session:
-                        cred_err_msg = await provider.validate_credentials(
-                            session,
-                            user_id,
-                            normalized_credentials,
-                        )
-                    if cred_err_msg is not None:
-                        return Failure(InvalidCredentials(cred_err_msg))
+                if credential_error is not None:
+                    return Failure(credential_error)
+                provider_error = await self._validate_provider_credentials(
+                    existing.toolkit_type,
+                    normalized_credentials,
+                )
+                if provider_error is not None:
+                    return Failure(provider_error)
         elif (
             existing.toolkit_type == ToolkitType.ENVVAR
             and "config" in update
@@ -357,6 +305,341 @@ class ToolkitService:
                 update["config"],
             )
 
+        repo_update = self._build_repo_update(
+            update,
+            existing=existing,
+            normalized_credentials=normalized_credentials,
+        )
+        prepared_for_authority = _PreparedCredentials(
+            credentials=normalized_credentials,
+            platform=platform,
+        )
+        result = await self.operations_repository.update(
+            toolkit_id,
+            repo_update,
+            workspace_id=workspace_id,
+            expected_toolkit_type=existing.toolkit_type,
+            platform_authority=self._platform_authority(
+                prepared_for_authority,
+                user_id=user_id,
+            ),
+        )
+        match result:
+            case Success(value):
+                output = ToolkitOutput.model_validate(value, from_attributes=True)
+                return Success(await self._attach_oauth_connection(output))
+            case Failure(error):
+                if isinstance(error, RepoDuplicateSlug):
+                    return Failure(DuplicateSlug(slug=error.slug))
+                if isinstance(error, PlatformAuthorityRejected):
+                    return Failure(InvalidCredentials(error.detail))
+                return Failure(self._map_toolkit_read_error(error))
+            case _:
+                assert_never(result)
+
+    async def delete_by_id(
+        self, toolkit_id: str, *, workspace_id: str
+    ) -> Result[None, NotFound | NotBelongToWorkspace]:
+        """Delete one Toolkit after final Workspace validation."""
+        result = await self.operations_repository.delete(
+            toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_toolkit_read_error(result.error))
+        return Success(None)
+
+    async def create_scope(
+        self, create: ToolkitScopeCreateInput, *, workspace_id: str
+    ) -> Result[ToolkitScopeOutput, NotFound | NotBelongToWorkspace | DuplicateScope]:
+        """Create one Workspace Scope with current Toolkit authority."""
+        result = await self.operations_repository.create_scope(
+            toolkit_id=create.toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Success):
+            return Success(
+                ToolkitScopeOutput.model_validate(result.value, from_attributes=True)
+            )
+        if isinstance(result.error, (NotFound, ToolkitWorkspaceMismatch)):
+            return Failure(self._map_toolkit_read_error(result.error))
+        return Failure(result.error)
+
+    async def list_scopes(
+        self, toolkit_id: str, *, workspace_id: str
+    ) -> Result[ToolkitScopeListOutput, NotFound | NotBelongToWorkspace]:
+        """Fetch Scopes for one Workspace Toolkit."""
+        result = await self.operations_repository.list_scopes(
+            toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Failure):
+            return Failure(self._map_toolkit_read_error(result.error))
+        return Success(
+            ToolkitScopeListOutput(
+                items=[
+                    ToolkitScopeOutput.model_validate(scope, from_attributes=True)
+                    for scope in result.value
+                ]
+            )
+        )
+
+    async def delete_scope(
+        self,
+        scope_id: str,
+        *,
+        toolkit_id: str,
+        workspace_id: str,
+    ) -> Result[
+        None, NotFound | NotBelongToWorkspace | ScopeNotFound | ScopeNotBelongToToolkit
+    ]:
+        """Delete one Scope after final Toolkit and Scope identity validation."""
+        result = await self.operations_repository.delete_scope(
+            scope_id,
+            toolkit_id=toolkit_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Success):
+            return Success(None)
+        error = result.error
+        if isinstance(error, (NotFound, ToolkitWorkspaceMismatch)):
+            return Failure(self._map_toolkit_read_error(error))
+        if isinstance(error, ScopeToolkitMismatch):
+            return Failure(ScopeNotBelongToToolkit(scope_id=error.scope_id))
+        return Failure(error)
+
+    async def list_available(
+        self, workspace_id: str, user_id: str
+    ) -> ToolkitListOutput:
+        """Fetch Toolkits available to one Workspace user."""
+        values = await self.operations_repository.list_available(workspace_id, user_id)
+        outputs = [self._output_with_oauth(value) for value in values]
+        return ToolkitListOutput(items=await self._attach_oauth_connections(outputs))
+
+    async def list_agent_toolkits(
+        self, agent_id: str, *, workspace_id: str
+    ) -> Result[AgentToolkitListOutput, AgentNotBelongToWorkspace]:
+        """Fetch Toolkit attachments for one Workspace Agent."""
+        result = await self.operations_repository.list_agent_toolkits(
+            agent_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Failure):
+            return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
+        return Success(
+            AgentToolkitListOutput(
+                items=[
+                    AgentToolkitOutput.model_validate(item, from_attributes=True)
+                    for item in result.value
+                ]
+            )
+        )
+
+    async def attach_to_agent(
+        self,
+        agent_id: str,
+        toolkit_id: str,
+        *,
+        workspace_id: str,
+        user_id: str,
+    ) -> Result[
+        AgentToolkitOutput,
+        NotFound
+        | NotBelongToWorkspace
+        | ToolkitNotAvailable
+        | DuplicateAgentToolkit
+        | AgentNotBelongToWorkspace,
+    ]:
+        """Attach one currently available Toolkit to an Agent atomically."""
+        result = await self.operations_repository.attach_to_agent(
+            agent_id,
+            toolkit_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        if isinstance(result, Success):
+            return Success(
+                AgentToolkitOutput.model_validate(result.value, from_attributes=True)
+            )
+        error = result.error
+        if isinstance(error, AgentWorkspaceMismatch):
+            return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
+        if isinstance(error, ToolkitWorkspaceMismatch):
+            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
+        if isinstance(error, ToolkitUnavailable):
+            return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
+        return Failure(error)
+
+    async def detach_from_agent(
+        self,
+        agent_toolkit_id: str,
+        *,
+        agent_id: str,
+        workspace_id: str,
+    ) -> Result[
+        None,
+        AgentToolkitNotBelongToAgent | AgentNotBelongToWorkspace | ScopeNotFound,
+    ]:
+        """Detach one Toolkit after final Agent and attachment validation."""
+        result = await self.operations_repository.detach_from_agent(
+            agent_toolkit_id,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+        )
+        if isinstance(result, Success):
+            return Success(None)
+        error = result.error
+        if isinstance(error, AgentWorkspaceMismatch):
+            return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
+        if isinstance(error, AgentToolkitMismatch):
+            return Failure(
+                AgentToolkitNotBelongToAgent(agent_toolkit_id=agent_toolkit_id)
+            )
+        return Failure(error)
+
+    async def _attach_oauth_connection(
+        self,
+        toolkit: ToolkitOutput,
+        *,
+        attach_mcp: bool = True,
+    ) -> ToolkitOutput:
+        """Attach current MCP and Platform authorization projections."""
+        result = (
+            await self._attach_mcp_oauth_connection(toolkit) if attach_mcp else toolkit
+        )
+        platform_credentials = self._platform_credentials(result)
+        if platform_credentials is None:
+            return result
+        platform = await self.github_runtime.resolve()
+        return self._attach_platform_authorization(result, platform)
+
+    async def _attach_oauth_connections(
+        self, toolkits: list[ToolkitOutput]
+    ) -> list[ToolkitOutput]:
+        """Attach public Platform authorization states using one snapshot."""
+        platform_items = [
+            (toolkit, self._platform_credentials(toolkit)) for toolkit in toolkits
+        ]
+        if not any(credentials is not None for _, credentials in platform_items):
+            return toolkits
+        platform = await self.github_runtime.resolve()
+        return [
+            self._attach_platform_authorization(toolkit, platform)
+            if credentials is not None
+            else toolkit
+            for toolkit, credentials in platform_items
+        ]
+
+    async def _attach_mcp_oauth_connection(
+        self,
+        toolkit: ToolkitOutput,
+    ) -> ToolkitOutput:
+        """Attach an MCP OAuth summary through a completed repository operation."""
+        mcp_config = _resolve_mcp_config(
+            toolkit.toolkit_type,
+            toolkit.config,
+            self.toolkit_registry,
+        )
+        if mcp_config is None or mcp_config.auth_type != "oauth2":
+            return toolkit
+        summary = await self.operations_repository.get_oauth_summary(toolkit.id)
+        return toolkit.model_copy(update={"oauth_connection": summary})
+
+    async def _prepare_credentials(
+        self,
+        credentials: dict[str, object] | None,
+    ) -> _PreparedCredentials | InvalidCredentials:
+        """Bind Platform credentials to one external settings snapshot."""
+        if credentials is None or credentials.get("type") != "github_app_platform":
+            return _PreparedCredentials(credentials=credentials, platform=None)
+        platform = await self.github_runtime.resolve()
+        if platform.app_id is None:
+            return InvalidCredentials("Platform GitHub App is not configured.")
+        return _PreparedCredentials(
+            credentials={**credentials, "app_id": platform.app_id},
+            platform=platform,
+        )
+
+    def _platform_authority(
+        self,
+        prepared: _PreparedCredentials,
+        *,
+        user_id: str,
+    ) -> PlatformToolkitAuthority | None:
+        """Build final DB revalidation input for Platform credentials."""
+        if prepared.credentials is None or prepared.platform is None:
+            return None
+        credentials = _github_secrets_adapter.validate_python(prepared.credentials)
+        if not isinstance(credentials, GitHubSecretsAppPlatform):
+            return None
+        return PlatformToolkitAuthority(
+            app_id=credentials.app_id,
+            app_id_source=prepared.platform.app_id_source,
+            user_id=user_id,
+            installation_ids=frozenset(
+                int(installation.installation_id)
+                for installation in credentials.installations
+            ),
+        )
+
+    @staticmethod
+    def _attach_platform_authorization(
+        toolkit: ToolkitOutput,
+        platform: ResolvedPlatformGitHubApp | None,
+    ) -> ToolkitOutput:
+        """Attach redacted Platform reconnect state from a resolved snapshot."""
+        if platform is None:
+            return toolkit
+        credentials = ToolkitService._platform_credentials(toolkit)
+        if credentials is None:
+            return toolkit
+        authorization_state = PlatformGitHubAppRuntimeService.authorization_state(
+            credentials,
+            effective_app_id=platform.app_id,
+        )
+        return toolkit.model_copy(update={"authorization_state": authorization_state})
+
+    @staticmethod
+    def _platform_credentials(
+        toolkit: ToolkitOutput,
+    ) -> GitHubSecretsAppPlatform | None:
+        """Parse persisted Platform credentials for redacted projection."""
+        if toolkit.toolkit_type != "github" or toolkit.credentials is None:
+            return None
+        credentials = _github_secrets_adapter.validate_json(toolkit.credentials)
+        if isinstance(credentials, GitHubSecretsAppPlatform):
+            return credentials
+        return None
+
+    @staticmethod
+    def _map_toolkit_read_error(
+        error: NotFound | ToolkitWorkspaceMismatch,
+    ) -> NotFound | NotBelongToWorkspace:
+        """Map repository ownership errors to the established service contract."""
+        if isinstance(error, NotFound):
+            return error
+        return NotBelongToWorkspace(toolkit_id=error.toolkit_id)
+
+    def _output_with_oauth(self, value: ToolkitWithOAuth) -> ToolkitOutput:
+        """Project a detached Toolkit and applicable MCP OAuth summary."""
+        output = ToolkitOutput.model_validate(value.toolkit, from_attributes=True)
+        mcp_config = _resolve_mcp_config(
+            output.toolkit_type,
+            output.config,
+            self.toolkit_registry,
+        )
+        if mcp_config is None or mcp_config.auth_type != "oauth2":
+            return output
+        return output.model_copy(update={"oauth_connection": value.oauth_connection})
+
+    @staticmethod
+    def _build_repo_update(
+        update: ToolkitUpdateInput,
+        *,
+        existing: ToolkitConfig,
+        normalized_credentials: dict[str, object] | None,
+    ) -> ToolkitUpdate:
+        """Convert the service patch to the encrypted repository patch shape."""
         repo_update = ToolkitUpdate()
         if "slug" in update:
             repo_update["slug"] = update["slug"]
@@ -379,382 +662,15 @@ class ToolkitService:
         if "always_expose_tools" in update:
             repo_update["always_expose_tools"] = update["always_expose_tools"]
 
-        # Delete existing credentials when auth_type changes
         if "config" in update and "credentials" not in update:
             old_auth = existing.config.get("auth_type") if existing.config else None
             new_auth = update["config"].get("auth_type") if update["config"] else None
             if old_auth != new_auth and new_auth is not None:
                 repo_update["credentials"] = None
-
-        async with self.session_manager() as session:
-            result = await self.toolkit_repo.update_by_id(
-                session, toolkit_id, repo_update
-            )
-        match result:
-            case Success(value):
-                output = ToolkitOutput.model_validate(value, from_attributes=True)
-                return Success(await self._attach_oauth_connection(output))
-            case Failure(error):
-                if isinstance(error, RepoDuplicateSlug):
-                    return Failure(DuplicateSlug(slug=error.slug))
-                return Failure(error)
-
-    async def delete_by_id(
-        self, toolkit_id: str, *, workspace_id: str
-    ) -> Result[None, NotFound | NotBelongToWorkspace]:
-        """Delete Toolkit by ID.
-
-        :param toolkit_id: Toolkit ID
-        :param workspace_id: Workspace ID
-        :return: Success or error
-        """
-        async with self.session_manager() as session:
-            existing = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if existing is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if existing.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-
-        async with self.session_manager() as session:
-            await self.toolkit_repo.delete_by_id(session, toolkit_id)
-        return Success(None)
-
-    # ------------------------------------------------------------------ #
-    # Scope management (for Manager)
-    # ------------------------------------------------------------------ #
-
-    async def create_scope(
-        self, create: ToolkitScopeCreateInput, *, workspace_id: str
-    ) -> Result[ToolkitScopeOutput, NotFound | NotBelongToWorkspace | DuplicateScope]:
-        """Create Toolkit Scope.
-
-        :param create: Create data
-        :param workspace_id: Workspace ID
-        :return: Created ToolkitScope or error
-        """
-        async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, create.toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=create.toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=create.toolkit_id))
-
-        repo_create = ToolkitScopeCreate(
-            toolkit_id=create.toolkit_id,
-            scope_type=ToolkitScopeType.WORKSPACE,
-            scope_id=workspace_id,
-        )
-        async with self.session_manager() as session:
-            result = await self.scope_repo.create(session, repo_create)
-        match result:
-            case Success(value):
-                return Success(
-                    ToolkitScopeOutput.model_validate(value, from_attributes=True)
-                )
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(result)
-
-    async def list_scopes(
-        self, toolkit_id: str, *, workspace_id: str
-    ) -> Result[ToolkitScopeListOutput, NotFound | NotBelongToWorkspace]:
-        """Fetch Scope list of Toolkit.
-
-        :param toolkit_id: Toolkit ID
-        :param workspace_id: Workspace ID
-        :return: ToolkitScope list or error
-        """
-        async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-
-        async with self.session_manager() as session:
-            scopes = await self.scope_repo.list_by_toolkit(session, toolkit_id)
-        return Success(
-            ToolkitScopeListOutput(
-                items=[
-                    ToolkitScopeOutput.model_validate(s, from_attributes=True)
-                    for s in scopes
-                ]
-            )
-        )
-
-    async def delete_scope(
-        self,
-        scope_id: str,
-        *,
-        toolkit_id: str,
-        workspace_id: str,
-    ) -> Result[
-        None, NotFound | NotBelongToWorkspace | ScopeNotFound | ScopeNotBelongToToolkit
-    ]:
-        """Delete Toolkit Scope.
-
-        :param scope_id: Scope ID
-        :param toolkit_id: Toolkit ID
-        :param workspace_id: Workspace ID
-        :return: Success or error
-        """
-        async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-
-        async with self.session_manager() as session:
-            scope = await self.scope_repo.get_by_id(session, scope_id)
-        if scope is None:
-            return Failure(ScopeNotFound(scope_id=scope_id))
-        if scope.toolkit_id != toolkit_id:
-            return Failure(ScopeNotBelongToToolkit(scope_id=scope_id))
-
-        async with self.session_manager() as session:
-            await self.scope_repo.delete_by_id(session, scope_id)
-        return Success(None)
-
-    # ------------------------------------------------------------------ #
-    # Agent Toolkit (for Member)
-    # ------------------------------------------------------------------ #
-
-    async def list_available(
-        self, workspace_id: str, user_id: str
-    ) -> ToolkitListOutput:
-        """Fetch Toolkits available to workspace user.
-
-        :param workspace_id: Workspace ID
-        :param user_id: User ID
-        :return: Available Toolkit list
-        """
-        async with self.session_manager() as session:
-            toolkits = await self.toolkit_repo.list_available_for_workspace_user(
-                session, workspace_id, user_id
-            )
-        outputs = [
-            ToolkitOutput.model_validate(t, from_attributes=True) for t in toolkits
-        ]
-        return ToolkitListOutput(items=await self._attach_oauth_connections(outputs))
-
-    async def list_agent_toolkits(
-        self, agent_id: str, *, workspace_id: str
-    ) -> Result[AgentToolkitListOutput, AgentNotBelongToWorkspace]:
-        """Fetch Toolkit list mounted on agent.
-
-        :param agent_id: Agent ID
-        :param workspace_id: Workspace ID
-        :return: AgentToolkit list or error
-        """
-        agent_error = await self._check_agent_workspace(agent_id, workspace_id)
-        if agent_error is not None:
-            return Failure(agent_error)
-
-        async with self.session_manager() as session:
-            agent_toolkits = await self.agent_toolkit_repo.list_by_agent(
-                session, agent_id
-            )
-        return Success(
-            AgentToolkitListOutput(
-                items=[
-                    AgentToolkitOutput.model_validate(at, from_attributes=True)
-                    for at in agent_toolkits
-                ]
-            )
-        )
-
-    async def attach_to_agent(
-        self,
-        agent_id: str,
-        toolkit_id: str,
-        *,
-        workspace_id: str,
-        user_id: str,
-    ) -> Result[
-        AgentToolkitOutput,
-        NotFound
-        | NotBelongToWorkspace
-        | ToolkitNotAvailable
-        | DuplicateAgentToolkit
-        | AgentNotBelongToWorkspace,
-    ]:
-        """Mount Toolkit on agent.
-
-        :param agent_id: Agent ID
-        :param toolkit_id: Toolkit ID
-        :param workspace_id: Workspace ID
-        :param user_id: Requesting user ID
-        :return: Created AgentToolkit or error
-        """
-        agent_error = await self._check_agent_workspace(agent_id, workspace_id)
-        if agent_error is not None:
-            return Failure(agent_error)
-
-        async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
-        if toolkit is None:
-            return Failure(NotFound(toolkit_id=toolkit_id))
-        if toolkit.workspace_id != workspace_id:
-            return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-
-        # Check availability
-        async with self.session_manager() as session:
-            available = await self.toolkit_repo.list_available_for_workspace_user(
-                session, workspace_id, user_id
-            )
-        available_ids = {t.id for t in available}
-        if toolkit_id not in available_ids:
-            return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
-
-        repo_create = AgentToolkitCreate(
-            agent_id=agent_id,
-            toolkit_id=toolkit_id,
-            toolkit_type=toolkit.toolkit_type,
-        )
-        async with self.session_manager() as session:
-            result = await self.agent_toolkit_repo.create(session, repo_create)
-        match result:
-            case Success(value):
-                return Success(
-                    AgentToolkitOutput.model_validate(value, from_attributes=True)
-                )
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(result)
-
-    async def detach_from_agent(
-        self,
-        agent_toolkit_id: str,
-        *,
-        agent_id: str,
-        workspace_id: str,
-    ) -> Result[
-        None,
-        AgentToolkitNotBelongToAgent | AgentNotBelongToWorkspace | ScopeNotFound,
-    ]:
-        """Unmount Toolkit from agent.
-
-        :param agent_toolkit_id: AgentToolkit ID
-        :param agent_id: Agent ID
-        :param workspace_id: Workspace ID
-        :return: Success or error
-        """
-        agent_error = await self._check_agent_workspace(agent_id, workspace_id)
-        if agent_error is not None:
-            return Failure(agent_error)
-
-        async with self.session_manager() as session:
-            agent_toolkit = await self.agent_toolkit_repo.get_by_id(
-                session, agent_toolkit_id
-            )
-        if agent_toolkit is None:
-            return Failure(ScopeNotFound(scope_id=agent_toolkit_id))
-        if agent_toolkit.agent_id != agent_id:
-            return Failure(
-                AgentToolkitNotBelongToAgent(agent_toolkit_id=agent_toolkit_id)
-            )
-
-        async with self.session_manager() as session:
-            await self.agent_toolkit_repo.delete_by_id(session, agent_toolkit_id)
-        return Success(None)
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-
-    async def _attach_oauth_connection(self, toolkit: ToolkitOutput) -> ToolkitOutput:
-        """Attach redacted authorization state to one Toolkit output.
-
-        :param toolkit: Toolkit output
-        :return: Toolkit output with public authorization state
-        """
-        result = await self._attach_mcp_oauth_connection(toolkit)
-        platform_credentials = self._platform_credentials(result)
-        if platform_credentials is None:
-            return result
-        platform = await self.github_runtime.resolve()
-        authorization_state = self.github_runtime.authorization_state(
-            platform_credentials,
-            effective_app_id=platform.app_id,
-        )
-        return result.model_copy(update={"authorization_state": authorization_state})
-
-    async def _attach_oauth_connections(
-        self, toolkits: list[ToolkitOutput]
-    ) -> list[ToolkitOutput]:
-        """Attach public authorization states using one Platform snapshot."""
-        results = [
-            await self._attach_mcp_oauth_connection(toolkit) for toolkit in toolkits
-        ]
-        platform_items = [
-            (toolkit, self._platform_credentials(toolkit)) for toolkit in results
-        ]
-        if not any(credentials is not None for _, credentials in platform_items):
-            return results
-        platform = await self.github_runtime.resolve()
-        return [
-            toolkit.model_copy(
-                update={
-                    "authorization_state": self.github_runtime.authorization_state(
-                        credentials,
-                        effective_app_id=platform.app_id,
-                    )
-                }
-            )
-            if credentials is not None
-            else toolkit
-            for toolkit, credentials in platform_items
-        ]
-
-    async def _attach_mcp_oauth_connection(
-        self,
-        toolkit: ToolkitOutput,
-    ) -> ToolkitOutput:
-        """Attach an MCP OAuth connection summary when applicable."""
-        mcp_config = _resolve_mcp_config(
-            toolkit.toolkit_type, toolkit.config, self.toolkit_registry
-        )
-        if mcp_config is None or mcp_config.auth_type != "oauth2":
-            return toolkit
-        async with self.session_manager() as session:
-            summary = await self.mcp_oauth_connection_repo.get_summary_by_toolkit_id(
-                session, toolkit.id
-            )
-        return toolkit.model_copy(update={"oauth_connection": summary})
-
-    async def _bind_platform_app_identity(
-        self,
-        credentials: dict[str, object] | None,
-    ) -> dict[str, object] | None | InvalidCredentials:
-        """Bind Platform GitHub credentials to the current server App identity."""
-        if credentials is None or credentials.get("type") != "github_app_platform":
-            return credentials
-        platform = await self.github_runtime.resolve()
-        if platform.app_id is None:
-            return InvalidCredentials("Platform GitHub App is not configured.")
-        return {**credentials, "app_id": platform.app_id}
-
-    @staticmethod
-    def _platform_credentials(
-        toolkit: ToolkitOutput,
-    ) -> GitHubSecretsAppPlatform | None:
-        """Parse persisted Platform credentials for redacted projection."""
-        if toolkit.toolkit_type != "github" or toolkit.credentials is None:
-            return None
-        credentials = _github_secrets_adapter.validate_json(toolkit.credentials)
-        if isinstance(credentials, GitHubSecretsAppPlatform):
-            return credentials
-        return None
+        return repo_update
 
     def _validate_toolkit_type(self, toolkit_type: str) -> InvalidToolkitType | None:
-        """Check whether toolkit type exists in toolkit_registry.
-
-        :param toolkit_type: Tool type
-        :return: Error or None
-        """
+        """Check whether the Toolkit type exists in the registry."""
         if toolkit_type not in self.toolkit_registry:
             return InvalidToolkitType(toolkit_type=toolkit_type)
         return None
@@ -762,20 +678,14 @@ class ToolkitService:
     def _validate_config(
         self, toolkit_type: str, config: dict[str, object]
     ) -> InvalidConfig | None:
-        """Validate config with Pydantic config model.
-
-        :param toolkit_type: Tool type
-        :param config: Config to validate
-        :return: Error or None
-        """
+        """Validate config with the registered provider model."""
         provider = self.toolkit_registry.get(toolkit_type)
         if provider is None:
-            return None  # Type error is handled by _validate_toolkit_type
-
+            return None
         try:
             type(provider).validate_config(config)
-        except ValidationError as e:
-            return InvalidConfig(toolkit_type=toolkit_type, detail=str(e))
+        except ValidationError as error:
+            return InvalidConfig(toolkit_type=toolkit_type, detail=str(error))
         return None
 
     def _validate_credentials(
@@ -783,41 +693,33 @@ class ToolkitService:
         toolkit_type: str,
         credentials: dict[str, object] | None,
     ) -> InvalidConfig | None:
-        """Validate credentials as McpSecrets when MCP toolkit.
-
-        :param toolkit_type: Tool type
-        :param credentials: Credentials to validate
-        :return: Error or None
-        """
+        """Validate common MCP and GitHub credential shapes."""
         if credentials is None:
             return None
         try:
-            tt = ToolkitType(toolkit_type)
+            typed_toolkit = ToolkitType(toolkit_type)
         except ValueError:
             return None
-        if tt == ToolkitType.MCP:
+        if typed_toolkit == ToolkitType.MCP:
             try:
                 _mcp_secrets_adapter.validate_python(credentials)
-            except ValidationError as e:
-                return InvalidConfig(toolkit_type=toolkit_type, detail=str(e))
-        if tt == ToolkitType.GITHUB:
+            except ValidationError as error:
+                return InvalidConfig(toolkit_type=toolkit_type, detail=str(error))
+        if typed_toolkit == ToolkitType.GITHUB:
             try:
                 _github_secrets_adapter.validate_python(credentials)
-            except ValidationError as e:
-                return InvalidConfig(toolkit_type=toolkit_type, detail=str(e))
+            except ValidationError as error:
+                return InvalidConfig(toolkit_type=toolkit_type, detail=str(error))
         return None
 
-    async def _check_agent_workspace(
-        self, agent_id: str, workspace_id: str
-    ) -> AgentNotBelongToWorkspace | None:
-        """Check whether agent belongs to workspace.
-
-        :param agent_id: Agent ID
-        :param workspace_id: Workspace ID
-        :return: Error or None
-        """
-        async with self.session_manager() as session:
-            agent = await self.agent_repo.get_by_id(session, agent_id)
-        if agent is None or agent.workspace_id != workspace_id:
-            return AgentNotBelongToWorkspace(agent_id=agent_id)
-        return None
+    async def _validate_provider_credentials(
+        self,
+        toolkit_type: str,
+        credentials: dict[str, object] | None,
+    ) -> InvalidCredentials | None:
+        """Run provider validation with no database transaction or session alias."""
+        provider = self.toolkit_registry.get(toolkit_type)
+        if provider is None:
+            return None
+        error = await provider.validate_credentials(credentials)
+        return InvalidCredentials(error) if error is not None else None

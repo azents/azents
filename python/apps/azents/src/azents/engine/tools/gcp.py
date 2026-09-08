@@ -690,8 +690,6 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
 
     async def validate_credentials(
         self,
-        session: AsyncSession,
-        user_id: str,
         credentials: dict[str, object] | None,
     ) -> str | None:
         """Validate Service Account Key JSON structure."""

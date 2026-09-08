@@ -11,7 +11,7 @@ from azents.core.github_system_setting import (
     PlatformGitHubAppConfig,
     PlatformGitHubAppSecrets,
 )
-from azents.core.system_setting import SystemSettingSection
+from azents.core.system_setting import SystemSettingFieldSource, SystemSettingSection
 from azents.services.system_setting.service import SystemSettingsService
 
 
@@ -23,6 +23,7 @@ class ResolvedPlatformGitHubApp:
     client_id: str | None
     private_key: str | None
     client_secret: str | None
+    app_id_source: SystemSettingFieldSource
     effective_generation: str
 
 
@@ -61,6 +62,7 @@ class PlatformGitHubAppRuntimeService:
             client_id=resolved.config.client_id,
             private_key=resolved.secrets.private_key,
             client_secret=resolved.secrets.client_secret,
+            app_id_source=resolved.field_sources["app_id"],
             effective_generation=resolved.effective_generation,
         )
 

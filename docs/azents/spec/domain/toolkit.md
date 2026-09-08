@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/core/skill_projection.py
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
+  - python/apps/azents/src/azents/repos/toolkit_operations/**
+  - python/apps/azents/src/azents/repos/github_user_installation/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
@@ -65,7 +67,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-08
-spec_version: 110
+spec_version: 111
 ---
 
 # Toolkit
@@ -115,6 +117,29 @@ erDiagram
 - **ToolkitScope** — workspace visibility scope for ToolkitConfig. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. WORKSPACE scope is automatically added on creation. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - **AgentToolkit** — Agent ↔ ToolkitConfig link. `(agent_id, toolkit_id)` is UNIQUE. Denormalized `toolkit_type` column supports enforcing **one toolkit type per Agent**.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
+
+### Management Transaction Ownership
+
+Toolkit management services do not own SQLAlchemy sessions or database
+transactions. They validate local provider payloads and resolve the effective
+Platform GitHub App snapshot before invoking completed
+`ToolkitOperationsRepository` operations.
+
+Toolkit creation stores the ToolkitConfig, its automatic Workspace scope, and
+the MCP OAuth response summary read in one database-only transaction. A failure
+while composing that response rolls back both writes. List and detail operations
+return detached Toolkit data with MCP OAuth summaries from completed repository
+reads; Platform authorization projection occurs afterward.
+
+Final mutations re-read current Toolkit, Workspace, Scope, Agent, membership,
+availability, and attachment authority inside their owning repository
+transaction. A GitHub Platform credential mutation additionally rechecks the
+effective App identity source and the selected user's App-scoped installation
+rows before persisting the Toolkit. Provider validation and System Settings
+resolution therefore run with no Toolkit database transaction open, while an App
+identity change, installation revocation, Toolkit deletion, or Workspace mismatch
+between preparation and mutation fails before the write. This ownership change
+adds no lock, retry, or fallback mechanism.
 
 ### Enum / Type
 
@@ -945,6 +970,12 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-08** (spec_version 111) — Moved Toolkit CRUD, Scope, Agent attachment,
+  and MCP OAuth response composition into typed repository-owned operations;
+  made Toolkit plus automatic Workspace Scope creation atomic; moved provider
+  validation and Platform settings resolution outside Toolkit transactions; and
+  added final Toolkit, Workspace, Agent, Scope, Platform App, and installation
+  authority revalidation.
 - **2026-09-08** (spec_version 110) — Split pure Toolkit State, Goal, and Skill
   models from repository-owned persistence, replaced application mutation
   callbacks with typed operations, moved managed Skill TurnAction VFS resolution

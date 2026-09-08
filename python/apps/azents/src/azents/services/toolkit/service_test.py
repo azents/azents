@@ -1,13 +1,105 @@
 """Toolkit service unit tests."""
 
 import datetime
+import json
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 
+from azents.core.system_setting import SystemSettingFieldSource
+from azents.core.tools import McpToolkitConfig
 from azents.repos.toolkit.data import ToolkitConfig
+from azents.repos.toolkit_operations.data import (
+    PlatformAuthorityRejected,
+    ToolkitWithOAuth,
+)
+from azents.services.github_platform_system_setting.runtime import (
+    ResolvedPlatformGitHubApp,
+)
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
-from azents.services.toolkit.data import ToolkitUpdateInput
+from azents.services.toolkit.data import (
+    InvalidCredentials,
+    ToolkitCreateInput,
+    ToolkitUpdateInput,
+)
+
+
+def _platform() -> ResolvedPlatformGitHubApp:
+    """Build one resolved Platform App snapshot."""
+    return ResolvedPlatformGitHubApp(
+        app_id="123",
+        client_id="client-id",
+        private_key="private-key",
+        client_secret="client-secret",
+        app_id_source=SystemSettingFieldSource.ADMIN,
+        effective_generation="generation-1",
+    )
+
+
+def _github_toolkit() -> ToolkitConfig:
+    """Build one persisted Platform GitHub Toolkit."""
+    now = datetime.datetime.now(datetime.UTC)
+    return ToolkitConfig(
+        id="toolkit-1",
+        workspace_id="workspace-1",
+        toolkit_type="github",
+        slug="github",
+        name="GitHub",
+        config={},
+        credentials=json.dumps(
+            {
+                "type": "github_app_platform",
+                "app_id": "123",
+                "installations": [
+                    {
+                        "installation_id": "456",
+                        "account_login": "azents",
+                        "account_type": "Organization",
+                        "account_avatar_url": None,
+                    }
+                ],
+            }
+        ),
+        enabled=True,
+        always_expose_tools=False,
+        revision=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+class _DatabaseFreeProvider:
+    """Provider double that observes the transaction boundary."""
+
+    def __init__(self, active: list[bool], events: list[str]) -> None:
+        self.active = active
+        self.events = events
+
+    @classmethod
+    def validate_config(cls, config: dict[str, object]) -> dict[str, object]:
+        """Accept the test configuration."""
+        return config
+
+    @staticmethod
+    def to_mcp_config(config: dict[str, object]) -> McpToolkitConfig:
+        """Return a non-OAuth projection for the boundary test."""
+        del config
+        return McpToolkitConfig(
+            server_url="https://example.test",
+            auth_type="none",
+        )
+
+    async def validate_credentials(
+        self,
+        credentials: dict[str, object] | None,
+    ) -> str | None:
+        """Assert provider validation runs before repository mutation."""
+        assert self.active == [False]
+        assert credentials is not None
+        assert credentials["app_id"] == "123"
+        self.events.append("provider")
+        return None
 
 
 class TestMergeEnvVarCredentials:
@@ -74,18 +166,14 @@ class TestMergeEnvVarCredentials:
             created_at=datetime.datetime.now(datetime.UTC),
             updated_at=datetime.datetime.now(datetime.UTC),
         )
-        toolkit_repo = MagicMock()
-        toolkit_repo.get_by_id = AsyncMock(return_value=existing)
-        toolkit_repo.update_by_id = AsyncMock(return_value=Success(existing))
-        session_manager = MagicMock()
-        session_manager.return_value = AsyncMock()
+        operations_repository = MagicMock()
+        operations_repository.load_update_context = AsyncMock(
+            return_value=Success(existing)
+        )
+        operations_repository.update = AsyncMock(return_value=Success(existing))
+        operations_repository.get_oauth_summary = AsyncMock(return_value=None)
         service = ToolkitService(
-            toolkit_repo=toolkit_repo,
-            mcp_oauth_connection_repo=MagicMock(),
-            scope_repo=MagicMock(),
-            agent_toolkit_repo=MagicMock(),
-            agent_repo=MagicMock(),
-            session_manager=session_manager,
+            operations_repository=operations_repository,
             toolkit_registry={},
             github_runtime=MagicMock(),
         )
@@ -98,9 +186,122 @@ class TestMergeEnvVarCredentials:
             user_id="user-1",
         )
 
-        await_args = toolkit_repo.update_by_id.await_args
+        await_args = operations_repository.update.await_args
         assert await_args is not None
-        repo_update = await_args.args[2]
+        repo_update = await_args.args[1]
         assert (
             repo_update["credentials"] == '{"values": {"AZENTS_POSTGRES_USER": "user"}}'
         )
+
+
+async def test_create_external_validation_sees_no_repository_transaction() -> None:
+    """Settings and provider validation finish before the DB mutation starts."""
+    active = [False]
+    events: list[str] = []
+    provider = _DatabaseFreeProvider(active, events)
+    runtime = MagicMock()
+
+    async def resolve_platform() -> ResolvedPlatformGitHubApp:
+        assert active == [False]
+        events.append("settings")
+        return _platform()
+
+    runtime.resolve = AsyncMock(side_effect=resolve_platform)
+    operations = MagicMock()
+
+    async def create_toolkit(
+        create: object,
+        *,
+        platform_authority: object,
+    ) -> Success[ToolkitWithOAuth]:
+        del create
+        assert active == [False]
+        active[0] = True
+        try:
+            events.append("repository")
+            assert platform_authority is not None
+            return Success(
+                ToolkitWithOAuth(
+                    toolkit=_github_toolkit(),
+                    oauth_connection=None,
+                )
+            )
+        finally:
+            active[0] = False
+
+    operations.create = AsyncMock(side_effect=create_toolkit)
+    service = ToolkitService(
+        operations_repository=operations,
+        toolkit_registry=cast(dict[str, Any], {"github": provider}),
+        github_runtime=runtime,
+    )
+
+    result = await service.create(
+        ToolkitCreateInput(
+            workspace_id="workspace-1",
+            toolkit_type="github",
+            name="GitHub",
+            config={},
+            credentials={
+                "type": "github_app_platform",
+                "installations": [
+                    {
+                        "installation_id": "456",
+                        "account_login": "azents",
+                        "account_type": "Organization",
+                        "account_avatar_url": None,
+                    }
+                ],
+            },
+            always_expose_tools=False,
+        ),
+        user_id="user-1",
+    )
+
+    assert isinstance(result, Success)
+    assert events == ["settings", "provider", "repository"]
+    assert active == [False]
+
+
+async def test_update_maps_final_platform_revalidation_failure() -> None:
+    """A reconnect race after external validation cannot mutate the Toolkit."""
+    provider = _DatabaseFreeProvider([False], [])
+    runtime = MagicMock()
+    runtime.resolve = AsyncMock(return_value=_platform())
+    operations = MagicMock()
+    operations.load_update_context = AsyncMock(return_value=Success(_github_toolkit()))
+    operations.update = AsyncMock(
+        return_value=Failure(
+            PlatformAuthorityRejected("GitHub Platform App reconnect is required.")
+        )
+    )
+    operations.get_oauth_summary = AsyncMock()
+    service = ToolkitService(
+        operations_repository=operations,
+        toolkit_registry=cast(dict[str, Any], {"github": provider}),
+        github_runtime=runtime,
+    )
+
+    result = await service.update_by_id(
+        "toolkit-1",
+        {
+            "credentials": {
+                "type": "github_app_platform",
+                "installations": [
+                    {
+                        "installation_id": "456",
+                        "account_login": "azents",
+                        "account_type": "Organization",
+                        "account_avatar_url": None,
+                    }
+                ],
+            }
+        },
+        workspace_id="workspace-1",
+        user_id="user-1",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, InvalidCredentials)
+    assert result.error.detail == "GitHub Platform App reconnect is required."
+    operations.get_oauth_summary.assert_not_awaited()

@@ -184,6 +184,35 @@ class MCPOAuthConnectionRepository:
         result = await session.execute(stmt)
         return self._build(result.scalar_one())
 
+    async def list_summaries_by_toolkit_ids(
+        self,
+        session: AsyncSession,
+        toolkit_ids: list[str],
+    ) -> dict[str, MCPOAuthConnectionSummary]:
+        """Fetch public OAuth summaries keyed by Toolkit ID."""
+        if not toolkit_ids:
+            return {}
+        result = await session.execute(
+            sa.select(
+                RDBMCPOAuthConnection.toolkit_id,
+                RDBMCPOAuthConnection.status,
+                RDBMCPOAuthConnection.issuer,
+                RDBMCPOAuthConnection.resource,
+                RDBMCPOAuthConnection.scope,
+                RDBMCPOAuthConnection.expires_at,
+            ).where(RDBMCPOAuthConnection.toolkit_id.in_(toolkit_ids))
+        )
+        return {
+            row.toolkit_id: MCPOAuthConnectionSummary(
+                status=row.status,
+                issuer=row.issuer,
+                resource=row.resource,
+                scope=row.scope,
+                expires_at=row.expires_at,
+            )
+            for row in result.all()
+        }
+
     async def update_tokens(
         self,
         session: AsyncSession,
