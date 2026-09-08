@@ -1,5 +1,6 @@
 """Runtime connection registration orchestration tests."""
 
+import asyncio
 import dataclasses
 import logging
 from collections.abc import AsyncGenerator, Callable
@@ -74,6 +75,7 @@ class _GenerationAuthority:
         self.accepted: dict[tuple[RuntimeConnectionAuthorityKind, str], int] = {}
         self.accept_session: AsyncSession | None = None
         self.reject_acceptance = False
+        self.cancel_acceptance = False
 
     async def allocate_generation(
         self,
@@ -109,6 +111,8 @@ class _GenerationAuthority:
     ) -> RuntimeConnectionGeneration | None:
         assert session.in_transaction()
         self.accept_session = session
+        if self.cancel_acceptance:
+            raise asyncio.CancelledError
         key = (connection_kind, subject_id)
         if self.reject_acceptance or self.high_water.get(key) != generation:
             return None
@@ -359,6 +363,70 @@ async def test_failed_final_acceptance_revokes_only_after_transaction_ends() -> 
     )
 
     with pytest.raises(RuntimeConnectionRegistrationUnavailable, match="superseded"):
+        await service.register_runner(
+            _runner_registration(),
+            authentication=_runner_credential(),
+            registered_at=datetime.now(UTC),
+        )
+
+    assert store.external_calls == 3
+    assert (
+        await store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id="runtime-1",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_cancellation_after_promotion_revokes_connection() -> None:
+    """A cancelled Provider stream cannot leave its promoted route current."""
+    sessions = _SessionManager()
+    generations = _GenerationAuthority()
+    generations.cancel_acceptance = True
+    store = _TransactionCheckingStore(sessions)
+    service = RuntimeProviderConnectionRegistrationService(
+        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        generation_repository=generations,
+        coordination_store=store,
+        provider_control=_ProviderAuthority(),
+        clock=lambda: datetime.now(UTC),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.register_provider(
+            _provider_registration(),
+            authentication=_provider_authentication(),
+            registered_at=datetime.now(UTC),
+        )
+
+    assert store.external_calls == 3
+    assert (
+        await store.get_connection(
+            kind=RuntimeConnectionKind.PROVIDER,
+            subject_id="provider-1",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_cancellation_after_promotion_revokes_connection() -> None:
+    """A cancelled Runner stream cannot leave its promoted route current."""
+    sessions = _SessionManager()
+    generations = _GenerationAuthority()
+    generations.cancel_acceptance = True
+    store = _TransactionCheckingStore(sessions)
+    service = RuntimeRunnerConnectionRegistrationService(
+        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        generation_repository=generations,
+        coordination_store=store,
+        runner_authentication=_RunnerAuthority(),
+        generation_observer=None,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
         await service.register_runner(
             _runner_registration(),
             authentication=_runner_credential(),

@@ -1,5 +1,6 @@
 """Durable-to-volatile Runtime connection registration orchestration."""
 
+import asyncio
 import dataclasses
 import logging
 import secrets
@@ -243,6 +244,15 @@ class RuntimeProviderConnectionRegistrationService:
                     authorized_at=self.clock(),
                     connected_at=registered_at,
                 )
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                self.coordination_store.revoke_connection(
+                    kind=record.kind,
+                    subject_id=record.subject_id,
+                    generation=generation,
+                )
+            )
+            raise
         except Exception:
             await self.coordination_store.revoke_connection(
                 kind=record.kind,
@@ -363,6 +373,15 @@ class RuntimeRunnerConnectionRegistrationService:
                 )
                 if accepted is None:
                     raise RuntimeConnectionRegistrationUnavailable("superseded")
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                self.coordination_store.revoke_connection(
+                    kind=record.kind,
+                    subject_id=record.subject_id,
+                    generation=generation,
+                )
+            )
+            raise
         except Exception:
             await self.coordination_store.revoke_connection(
                 kind=record.kind,
