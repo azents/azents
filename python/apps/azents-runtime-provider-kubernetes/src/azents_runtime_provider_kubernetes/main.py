@@ -24,6 +24,7 @@ from azents_runtime_control.provider import (
     ProviderRegistration,
     ProviderRunLoop,
 )
+from azents_runtime_control.structured_logging import StructuredLogFormatter
 
 from azents_runtime_provider_kubernetes.deployment_diagnostics import (
     DeploymentDiagnosticSettings,
@@ -894,9 +895,11 @@ def _json_string_map_env(name: str) -> Mapping[str, str]:
 
 
 def _configure_logging() -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(StructuredLogFormatter())
     logging.basicConfig(
         level=os.environ.get("AZ_RUNTIME_PROVIDER_LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[handler],
     )
 
 

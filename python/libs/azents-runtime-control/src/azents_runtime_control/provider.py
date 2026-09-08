@@ -606,34 +606,36 @@ class ProviderRunLoop:
             return None
         command = envelope.command
         _LOGGER.info(
-            "Runtime Provider command claimed provider_id=%s provider_generation=%s "
-            "request_id=%s command=%s resource=runtime/%s agent_id=%s "
-            "workspace_id=%s desired_generation=%s",
-            accepted.provider_id,
-            accepted.generation,
-            envelope.request_id,
-            command.command_type.value,
-            command.identity.runtime_id,
-            command.identity.agent_id,
-            command.identity.workspace_id,
-            command.desired_generation,
+            "Runtime Provider command claimed",
+            extra={
+                "provider_id": accepted.provider_id,
+                "provider_generation": accepted.generation,
+                "request_id": envelope.request_id,
+                "command": command.command_type.value,
+                "runtime_id": command.identity.runtime_id,
+                "agent_id": command.identity.agent_id,
+                "workspace_id": command.identity.workspace_id,
+                "desired_generation": command.desired_generation,
+            },
         )
         if _deadline_expired(envelope, self._clock()):
             completion = self._expired_completion(envelope, accepted.generation)
             await self._client.complete_provider_command(completion)
             _LOGGER.warning(
-                "Runtime Provider command expired before execution provider_id=%s "
-                "provider_generation=%s request_id=%s command=%s "
-                "resource=runtime/%s desired_generation=%s deadline_at=%s",
-                accepted.provider_id,
-                accepted.generation,
-                envelope.request_id,
-                command.command_type.value,
-                command.identity.runtime_id,
-                command.desired_generation,
-                envelope.deadline_at.isoformat()
-                if envelope.deadline_at is not None
-                else None,
+                "Runtime Provider command expired before execution",
+                extra={
+                    "provider_id": accepted.provider_id,
+                    "provider_generation": accepted.generation,
+                    "request_id": envelope.request_id,
+                    "command": command.command_type.value,
+                    "runtime_id": command.identity.runtime_id,
+                    "desired_generation": command.desired_generation,
+                    "deadline_at": (
+                        envelope.deadline_at.isoformat()
+                        if envelope.deadline_at is not None
+                        else None
+                    ),
+                },
             )
             return completion
         completion = await self._execute_command(envelope, accepted.generation)
@@ -647,17 +649,17 @@ class ProviderRunLoop:
             )
         await self._client.complete_provider_command(completion)
         _LOGGER.info(
-            "Runtime Provider command finished provider_id=%s provider_generation=%s "
-            "request_id=%s command=%s resource=runtime/%s desired_generation=%s "
-            "success=%s error_code=%s",
-            accepted.provider_id,
-            accepted.generation,
-            envelope.request_id,
-            command.command_type.value,
-            command.identity.runtime_id,
-            command.desired_generation,
-            completion.success,
-            completion.error_code,
+            "Runtime Provider command finished",
+            extra={
+                "provider_id": accepted.provider_id,
+                "provider_generation": accepted.generation,
+                "request_id": envelope.request_id,
+                "command": command.command_type.value,
+                "runtime_id": command.identity.runtime_id,
+                "desired_generation": command.desired_generation,
+                "success": completion.success,
+                "error_code": completion.error_code,
+            },
         )
         return completion
 
@@ -753,12 +755,13 @@ class ProviderRunLoop:
             raise
         except Exception as exc:
             _LOGGER.exception(
-                "Runtime Provider command execution failed request_id=%s command=%s "
-                "resource=runtime/%s desired_generation=%s",
-                envelope.request_id,
-                envelope.command.command_type.value,
-                envelope.command.identity.runtime_id,
-                envelope.command.desired_generation,
+                "Runtime Provider command execution failed",
+                extra={
+                    "request_id": envelope.request_id,
+                    "command": envelope.command.command_type.value,
+                    "runtime_id": envelope.command.identity.runtime_id,
+                    "desired_generation": envelope.command.desired_generation,
+                },
             )
             return ProviderCommandCompletion(
                 request_id=envelope.request_id,

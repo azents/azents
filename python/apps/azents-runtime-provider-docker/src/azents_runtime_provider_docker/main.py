@@ -20,6 +20,7 @@ from azents_runtime_control.provider import (
     ProviderRegistration,
     ProviderRunLoop,
 )
+from azents_runtime_control.structured_logging import StructuredLogFormatter
 
 from azents_runtime_provider_docker.aiodocker_api import AioDockerApi
 from azents_runtime_provider_docker.provider import (
@@ -38,9 +39,11 @@ _LOGGER = logging.getLogger(__name__)
 
 def main() -> None:
     """Start the Docker Runtime Provider process."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(StructuredLogFormatter())
     logging.basicConfig(
         level=os.environ.get("AZ_LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[handler],
     )
     asyncio.run(_main())
 
