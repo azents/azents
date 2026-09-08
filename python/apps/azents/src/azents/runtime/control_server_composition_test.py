@@ -149,6 +149,24 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         del args, kwargs
         await stop.wait()
 
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield object()
+
+    class _Cutover:
+        allocator_version = 1
+
+    class _GenerationRepository:
+        async def get_cutover(self, session: object) -> _Cutover:
+            del session
+            return _Cutover()
+
+    monkeypatch.setattr(control_server, "_session_manager", lambda _: session_manager)
+    monkeypatch.setattr(
+        control_server,
+        "RuntimeConnectionGenerationRepository",
+        _GenerationRepository,
+    )
     monkeypatch.setattr(control_server, "_runtime_transfer_s3_service", s3_service)
     monkeypatch.setattr(control_server, "_run_reconciler", idle)
     monkeypatch.setattr(control_server, "_run_transfer_repair", idle)

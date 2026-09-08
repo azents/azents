@@ -19,6 +19,7 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeConfigurationStateStatus,
 )
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
@@ -196,6 +197,25 @@ def test_raw_state_replaces_direct_configuration_pointers() -> None:
             "applied_runtime_configuration_revision_id",
         }
     )
+
+
+def test_raw_state_uses_null_before_any_runner_generation_is_observed() -> None:
+    """A never-connected Runtime has no positive Runner connection authority."""
+    now = datetime.datetime(2026, 9, 8, tzinfo=datetime.UTC)
+    runtime = AgentRuntime(
+        id="runtime-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        terminal_delete_acknowledgement_kind=None,
+        runner_generation=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+    response = AgentRuntimeRawStateResponse.convert_from(runtime)
+
+    assert response.runner_generation is None
+    assert response.model_dump(mode="json")["runner_generation"] is None
 
 
 def test_remove_request_requires_true_without_boolean_enum_schema() -> None:

@@ -16349,7 +16349,14 @@
             "$ref": "#/components/schemas/RuntimeRunnerState"
           },
           "runner_generation": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Runner Generation"
           },
           "workspace_path": {

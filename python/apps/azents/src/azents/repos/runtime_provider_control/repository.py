@@ -195,6 +195,35 @@ class RuntimeProviderControlRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def credential_active(
+        self,
+        session: AsyncSession,
+        *,
+        credential_id: str,
+        provider_id: str,
+        binding_id: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Return whether one exact Provider credential remains usable."""
+        result = await session.scalar(
+            sa.select(sa.literal(True)).where(
+                sa.exists(
+                    sa.select(RDBRuntimeProviderCredential.id).where(
+                        RDBRuntimeProviderCredential.id == credential_id,
+                        RDBRuntimeProviderCredential.provider_id == provider_id,
+                        RDBRuntimeProviderCredential.binding_id == binding_id,
+                        RDBRuntimeProviderCredential.state
+                        == RuntimeProviderCredentialState.ACTIVE,
+                        sa.or_(
+                            RDBRuntimeProviderCredential.expires_at.is_(None),
+                            RDBRuntimeProviderCredential.expires_at > now,
+                        ),
+                    )
+                )
+            )
+        )
+        return result is True
+
     async def revoke_older_bootstrap_credentials(
         self,
         session: AsyncSession,

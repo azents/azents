@@ -15,6 +15,8 @@ from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.transfer.coordinator import (
     RuntimeTransferCoordinator,
     object_handle_for,
+    runner_reply_stream_id,
+    runner_request_stream_id,
 )
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
@@ -29,11 +31,26 @@ from azents.runtime.transfer.data import (
     RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
+from azents.testing.runtime_coordination import (
+    publish_next_test_connection,
+)
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _UNTRUSTED_CLEANUP_MESSAGE = (
     "provider=sentinel endpoint=https://storage.example/private-key"
 )
+
+
+def test_runner_stream_ids_preserve_signed_bigint_generation() -> None:
+    """Transfer routing uses the canonical Redis generation representation."""
+    generation = 2**63 - 1
+
+    assert runner_request_stream_id("runtime-1", generation) == (
+        "runner:runtime-1:generation:9223372036854775807:requests"
+    )
+    assert runner_reply_stream_id("runtime-1", generation) == (
+        "runner:runtime-1:generation:9223372036854775807:replies"
+    )
 
 
 class _Clock:
@@ -70,7 +87,8 @@ class _FailingCleanup(_Cleanup):
 async def test_dispatch_persists_metadata_only_intent_and_operation() -> None:
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -128,7 +146,8 @@ async def test_dispatch_persists_metadata_only_intent_and_operation() -> None:
 async def test_upload_dispatch_preserves_admission_sha256() -> None:
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -182,7 +201,8 @@ async def test_upload_dispatch_preserves_admission_sha256() -> None:
 async def test_generation_repair_fences_replaced_dispatch() -> None:
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -213,7 +233,8 @@ async def test_generation_repair_fences_replaced_dispatch() -> None:
         expected_revision=ready.revision,
         dispatch_id="dispatch-1",
     )
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-2",
@@ -238,7 +259,8 @@ async def test_generation_fence_retains_multipart_cleanup_until_repair() -> None
     clock = _Clock(_NOW)
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=clock)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",
@@ -301,7 +323,8 @@ async def test_generation_fence_retains_multipart_cleanup_until_repair() -> None
         cleanup_failure=None,
     )
     assert pending is not None
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-2",
@@ -340,7 +363,8 @@ async def test_active_cancellation_persists_reason_and_appends_typed_envelope() 
     """Cancellation is durable and routed with the stable transfer identity."""
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()
-    await coordination.register_connection(
+    await publish_next_test_connection(
+        coordination,
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
         connection_id="connection-1",

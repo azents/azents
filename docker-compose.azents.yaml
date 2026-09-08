@@ -14,10 +14,9 @@ services:
   valkey:
     image: valkey/valkey:9-alpine@sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715
     restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${AZENTS_VALKEY_PORT:-6379}:6379"
-    volumes:
-      - valkeydata:/data
   rustfs:
     image: rustfs/rustfs:1.0.0-alpha.90@sha256:0725587f6fcca83c1898f321424327d6e6da5e01ea20382905dd258ed5af3be4
     restart: unless-stopped
@@ -53,7 +52,6 @@ services:
       "
 volumes:
   pgdata:
-  valkeydata:
   rustfs:
 
 networks:

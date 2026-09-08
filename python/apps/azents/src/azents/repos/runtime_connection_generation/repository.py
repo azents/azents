@@ -4,6 +4,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeConnectionAuthorityKind
+from azents.core.runtime_connection_generation import (
+    MAX_RUNTIME_CONNECTION_GENERATION,
+)
 from azents.rdb.models.runtime_connection_generation import (
     RDBRuntimeConnectionGeneration,
     RDBRuntimeConnectionGenerationCutover,
@@ -17,7 +20,7 @@ from .data import (
 )
 
 CURRENT_ALLOCATOR_VERSION = 1
-MAX_CONNECTION_GENERATION = 2**63 - 1
+MAX_CONNECTION_GENERATION = MAX_RUNTIME_CONNECTION_GENERATION
 
 
 class RuntimeConnectionGenerationRepository:
