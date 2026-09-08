@@ -197,6 +197,7 @@ class AgentMailboxService:
                 scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=None,
                 order_group=None,
                 order_sequence=0,

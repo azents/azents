@@ -37,13 +37,19 @@ class TestChatSessionModelProfileUpdateRequest(unittest.TestCase):
             return ChatSessionModelProfileUpdateRequest(
                 client_request_id = '0',
                 model_target_label = '0',
-                reasoning_effort = 'none'
+                reasoning_effort = 'none',
+                enabled_execution_options = [
+                    'fast'
+                    ]
             )
         else:
             return ChatSessionModelProfileUpdateRequest(
                 client_request_id = '0',
                 model_target_label = '0',
                 reasoning_effort = 'none',
+                enabled_execution_options = [
+                    'fast'
+                    ],
         )
         """
 

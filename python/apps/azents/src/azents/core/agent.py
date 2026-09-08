@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 
 
 class AgentModelSelectionInput(BaseModel):
@@ -33,6 +34,10 @@ class AgentModelSelection(BaseModel):
         description="Runtime capability snapshot"
     )
     model_snapshot: dict[str, Any] = Field(description="Normalized model snapshot")
+    supported_execution_options: list[ModelExecutionOptionId] = Field(
+        default_factory=list,
+        description="Directly selectable execution options supported by this model",
+    )
     source_metadata: dict[str, Any] | None = Field(
         default=None,
         description="Source diagnostic metadata",

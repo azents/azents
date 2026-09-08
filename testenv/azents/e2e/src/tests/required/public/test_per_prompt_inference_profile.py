@@ -31,6 +31,8 @@ from support.utils import authenticate_user, unique, wait_until
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _QUALITY_MESSAGE = "Per prompt quality profile"
+_QUALITY_STANDARD_MESSAGE = "Per prompt quality standard profile"
+_FAST_RETRY_MESSAGE = "Per prompt Fast retry preserves prepared option"
 _FAST_MESSAGE = "Per prompt fast profile"
 _SPAWN_OVERRIDE_MESSAGE = "Subagent spawn with Fast override"
 _SPAWN_OVERRIDE_TASK = "Subagent Fast override task"
@@ -91,15 +93,18 @@ def _setup_profile_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
+    *,
+    user_email: str | None = None,
+    workspace_handle: str | None = None,
 ) -> ProfileAgentSetup:
     """Create a workspace and Agent with deterministic Quality/Fast targets."""
     uniq = unique()
     token, _, _ = authenticate_user(
         public_api_client,
         admin_api_client,
-        email=f"per-prompt-profile-{uniq}@example.com",
+        email=user_email or f"per-prompt-profile-{uniq}@example.com",
     )
-    handle = f"per-prompt-profile-{uniq}"
+    handle = workspace_handle or f"per-prompt-profile-{uniq}"
     WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
         CreateWorkspaceRequest(
             workspace_name=f"Per Prompt Profile QA {uniq}",
@@ -152,6 +157,8 @@ def _setup_profile_agent(
         ): entry
         for entry in entries
     }
+    assert by_identifier["gpt-5.5"].get("supported_execution_options") == ["fast"]
+    assert by_identifier["gpt-5.5-mini"].get("supported_execution_options") == []
 
     def selection(identifier: str) -> dict[str, str]:
         return {
@@ -220,6 +227,35 @@ def _setup_profile_agent(
     agent_id = created.get("id")
     if not isinstance(agent_id, str):
         raise AssertionError(f"Agent response did not include id: {created!r}")
+    created_options = {
+        _string(option.get("label"), label="selectable model label"): option
+        for option in _objects(
+            created.get("selectable_model_options"),
+            label="created selectable model options",
+        )
+    }
+    quality_selection = _object(
+        created_options["Quality"].get("model_selection"),
+        label="Quality model selection",
+    )
+    assert quality_selection.get("supported_execution_options") == ["fast"]
+    quality_definitions = _objects(
+        created_options["Quality"].get("execution_option_definitions"),
+        label="Quality execution option definitions",
+    )
+    assert len(quality_definitions) == 1
+    quality_definition = quality_definitions[0]
+    assert quality_definition.get("id") == "fast"
+    assert quality_definition.get("control") == "boolean"
+    assert _string(quality_definition.get("label"), label="option label")
+    assert _string(quality_definition.get("description"), label="option description")
+    assert _string(quality_definition.get("cost_hint"), label="option cost hint")
+    fast_selection = _object(
+        created_options["Fast"].get("model_selection"),
+        label="Fast model selection",
+    )
+    assert fast_selection.get("supported_execution_options") == []
+    assert created_options["Fast"].get("execution_option_definitions") == []
     start_and_wait_for_agent_runtime(
         public_api_client,
         token=token,
@@ -268,6 +304,7 @@ def _write_profile(
     message: str,
     target: str,
     effort: str | None,
+    enabled_execution_options: list[str],
 ) -> None:
     """Submit one explicit per-prompt profile."""
     response = requests.post(
@@ -280,6 +317,7 @@ def _write_profile(
             "inference_profile": {
                 "model_target_label": target,
                 "reasoning_effort": effort,
+                "enabled_execution_options": enabled_execution_options,
             },
         },
         timeout=10,
@@ -296,6 +334,8 @@ def _write_invalid_profile(
     message: str,
     target: str,
     effort: str | None,
+    enabled_execution_options: list[str],
+    expected_detail: str,
 ) -> None:
     """Assert deterministic admission rejection for one invalid profile."""
     response = requests.post(
@@ -308,13 +348,14 @@ def _write_invalid_profile(
             "inference_profile": {
                 "model_target_label": target,
                 "reasoning_effort": effort,
+                "enabled_execution_options": enabled_execution_options,
             },
         },
         timeout=10,
     )
     assert response.status_code == 422, response.text
     assert _object(response.json(), label="invalid profile response") == {
-        "detail": "Reasoning effort is not supported by model target"
+        "detail": expected_detail
     }
 
 
@@ -351,11 +392,12 @@ def _wait_for_session_profile(
     session_id: str,
     target: str,
     effort: str | None,
+    enabled_execution_options: list[str],
     timeout: float = 120,
 ) -> dict[str, object]:
     """Wait for the authoritative session projection to persist a profile."""
     deadline = time.monotonic() + timeout
-    last_profile: tuple[object, object] = (None, None)
+    last_profile: tuple[object, object, object] = (None, None, None)
     while time.monotonic() < deadline:
         response = requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
@@ -366,8 +408,9 @@ def _wait_for_session_profile(
         last_profile = (
             payload.get("current_model_target_label"),
             payload.get("current_reasoning_effort"),
+            payload.get("current_enabled_execution_options"),
         )
-        if last_profile == (target, effort):
+        if last_profile == (target, effort, enabled_execution_options):
             return payload
         time.sleep(0.5)
     raise TimeoutError(f"Session did not persist profile: {last_profile!r}")
@@ -446,6 +489,7 @@ def _wait_for_turn_provenance(
     session_id: str,
     target: str,
     effort: str | None,
+    enabled_execution_options: list[str],
     display_name: str,
     effective_context_window_tokens: int,
     timeout: float = 120,
@@ -469,6 +513,7 @@ def _wait_for_turn_provenance(
             if (
                 profile.get("model_target_label") != target
                 or profile.get("reasoning_effort") != effort
+                or profile.get("enabled_execution_options") != enabled_execution_options
             ):
                 continue
             assert profile.get("model_display_name") == display_name
@@ -535,6 +580,72 @@ def _wait_for_mock_model_output_cap(
         "Selected model output cap was not observed: "
         f"{(model_id, max_output_tokens)!r}, {last_payload!r}"
     )
+
+
+def _wait_for_proxy_service_tier(
+    *,
+    openai_proxy_url: str,
+    message: str,
+    model_id: str,
+    expected_tier: str | None,
+    timeout: float = 120,
+) -> None:
+    """Wait for the matching raw provider request and assert its service tier."""
+    deadline = time.monotonic() + timeout
+    last_payload: object = None
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+        )
+        response.raise_for_status()
+        last_payload = response.json()
+        for body in _objects(last_payload, label="proxy request journal"):
+            if body.get("model") != model_id:
+                continue
+            if message not in json.dumps(body, ensure_ascii=False):
+                continue
+            if expected_tier is None:
+                assert "service_tier" not in body
+            else:
+                assert body.get("service_tier") == expected_tier
+            return
+        time.sleep(0.5)
+    raise TimeoutError(
+        "Provider request service tier was not observed: "
+        f"{(message, model_id, expected_tier)!r}, {last_payload!r}"
+    )
+
+
+def _wait_for_matching_proxy_requests(
+    *,
+    openai_proxy_url: str,
+    message: str,
+    model_id: str,
+    minimum_count: int,
+) -> list[dict[str, object]]:
+    """Wait for an authoritative number of matching raw provider requests."""
+
+    def matching_requests() -> list[dict[str, object]] | None:
+        response = requests.get(
+            f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+        )
+        response.raise_for_status()
+        matches = [
+            body
+            for body in _objects(response.json(), label="proxy request journal")
+            if body.get("model") == model_id
+            and message in json.dumps(body, ensure_ascii=False)
+        ]
+        return matches if len(matches) >= minimum_count else None
+
+    matches = wait_until(
+        matching_requests,
+        timeout=120,
+        interval=0.5,
+        message=f"Expected {minimum_count} matching provider requests",
+    )
+    assert matches is not None
+    return matches
 
 
 def _subagent_tree(
@@ -651,6 +762,7 @@ class TestPerPromptInferenceProfile:
         self,
         azents_public_server_url: str,
         mock_openai_url: str,
+        openai_proxy_url: str,
         profile_agent_setup: ProfileAgentSetup,
     ) -> None:
         """Resolve distinct targets and expose an unsupported effort safely."""
@@ -663,6 +775,9 @@ class TestPerPromptInferenceProfile:
         requests.delete(
             f"{mock_openai_url}/v1/_requests", timeout=10
         ).raise_for_status()
+        requests.delete(
+            f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+        ).raise_for_status()
 
         _write_profile(
             server_url=azents_public_server_url,
@@ -672,6 +787,7 @@ class TestPerPromptInferenceProfile:
             message=_QUALITY_MESSAGE,
             target="Quality",
             effort="xhigh",
+            enabled_execution_options=["fast"],
         )
         quality_event = _wait_for_input_event(
             server_url=azents_public_server_url,
@@ -686,6 +802,7 @@ class TestPerPromptInferenceProfile:
         assert quality_payload.get("requested_inference_profile") == {
             "model_target_label": "Quality",
             "reasoning_effort": "xhigh",
+            "enabled_execution_options": ["fast"],
         }
         _wait_for_turn_provenance(
             server_url=azents_public_server_url,
@@ -693,6 +810,43 @@ class TestPerPromptInferenceProfile:
             session_id=session_id,
             target="Quality",
             effort="xhigh",
+            enabled_execution_options=["fast"],
+            display_name="GPT 5.5 Deterministic",
+            effective_context_window_tokens=32_000,
+        )
+
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=_QUALITY_STANDARD_MESSAGE,
+            target="Quality",
+            effort="high",
+            enabled_execution_options=[],
+        )
+        standard_event = _wait_for_input_event(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            message=_QUALITY_STANDARD_MESSAGE,
+        )
+        standard_payload = _object(
+            standard_event.get("payload"),
+            label="standard input payload",
+        )
+        assert standard_payload.get("requested_inference_profile") == {
+            "model_target_label": "Quality",
+            "reasoning_effort": "high",
+            "enabled_execution_options": [],
+        }
+        _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target="Quality",
+            effort="high",
+            enabled_execution_options=[],
             display_name="GPT 5.5 Deterministic",
             effective_context_window_tokens=32_000,
         )
@@ -705,6 +859,7 @@ class TestPerPromptInferenceProfile:
             message=_FAST_MESSAGE,
             target="Fast",
             effort=None,
+            enabled_execution_options=[],
         )
         fast_event = _wait_for_input_event(
             server_url=azents_public_server_url,
@@ -719,6 +874,7 @@ class TestPerPromptInferenceProfile:
         assert fast_payload.get("requested_inference_profile") == {
             "model_target_label": "Fast",
             "reasoning_effort": None,
+            "enabled_execution_options": [],
         }
         _wait_for_turn_provenance(
             server_url=azents_public_server_url,
@@ -726,6 +882,7 @@ class TestPerPromptInferenceProfile:
             session_id=session_id,
             target="Fast",
             effort=None,
+            enabled_execution_options=[],
             display_name="GPT 5.5 Mini Deterministic",
             effective_context_window_tokens=32_000,
         )
@@ -741,6 +898,24 @@ class TestPerPromptInferenceProfile:
             model_id="gpt-5.5-mini",
             max_output_tokens=4_000,
         )
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=_QUALITY_MESSAGE,
+            model_id="gpt-5.5",
+            expected_tier="priority",
+        )
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=_QUALITY_STANDARD_MESSAGE,
+            model_id="gpt-5.5",
+            expected_tier="default",
+        )
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=_FAST_MESSAGE,
+            model_id="gpt-5.5-mini",
+            expected_tier=None,
+        )
 
         unsupported_message = "Unsupported effort must fail safely"
         _write_invalid_profile(
@@ -751,11 +926,32 @@ class TestPerPromptInferenceProfile:
             message=unsupported_message,
             target="Fast",
             effort="high",
+            enabled_execution_options=[],
+            expected_detail="Reasoning effort is not supported by model target",
         )
         assert (
             _input_event(
                 _history(azents_public_server_url, token, session_id),
                 unsupported_message,
+            )
+            is None
+        )
+        unsupported_option_message = "Unsupported execution option must fail safely"
+        _write_invalid_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=unsupported_option_message,
+            target="Fast",
+            effort=None,
+            enabled_execution_options=["fast"],
+            expected_detail="Enabled execution option is not supported by the model.",
+        )
+        assert (
+            _input_event(
+                _history(azents_public_server_url, token, session_id),
+                unsupported_option_message,
             )
             is None
         )
@@ -767,6 +963,54 @@ class TestPerPromptInferenceProfile:
         )
         assert session["current_model_target_label"] == "Fast"
         assert session["current_reasoning_effort"] is None
+
+    def test_retry_preserves_prepared_fast_option(
+        self,
+        azents_public_server_url: str,
+        mock_openai_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+    ) -> None:
+        """Keep Fast enabled across deterministic provider retry attempts."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+        )
+        requests.delete(
+            f"{mock_openai_url}/v1/_requests", timeout=10
+        ).raise_for_status()
+        requests.delete(
+            f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+        ).raise_for_status()
+
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=_FAST_RETRY_MESSAGE,
+            target="Quality",
+            effort="high",
+            enabled_execution_options=["fast"],
+        )
+        _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        requests_ = _wait_for_matching_proxy_requests(
+            openai_proxy_url=openai_proxy_url,
+            message=_FAST_RETRY_MESSAGE,
+            model_id="gpt-5.5",
+            minimum_count=2,
+        )
+        assert len(requests_) >= 2
+        for body in requests_:
+            assert body.get("model") == "gpt-5.5"
+            assert body.get("service_tier") == "priority"
 
     def test_subagent_spawn_override_continuation(
         self,
@@ -789,6 +1033,7 @@ class TestPerPromptInferenceProfile:
             message=_SPAWN_OVERRIDE_MESSAGE,
             target="Quality",
             effort="high",
+            enabled_execution_options=[],
         )
         child = _wait_for_tree_node(
             server_url=azents_public_server_url,
@@ -813,6 +1058,7 @@ class TestPerPromptInferenceProfile:
             session_id=child_session_id,
             target="Fast",
             effort=None,
+            enabled_execution_options=[],
         )
         _wait_for_input_event(
             server_url=azents_public_server_url,
@@ -835,6 +1081,7 @@ class TestPerPromptInferenceProfile:
             message=_FOLLOWUP_MESSAGE,
             target="Quality",
             effort="high",
+            enabled_execution_options=[],
         )
         _wait_for_input_event(
             server_url=azents_public_server_url,
@@ -849,6 +1096,7 @@ class TestPerPromptInferenceProfile:
             session_id=child_session_id,
             target="Fast",
             effort=None,
+            enabled_execution_options=[],
         )
 
     @pytest.mark.parametrize(
@@ -901,6 +1149,7 @@ class TestPerPromptInferenceProfile:
             message=message,
             target="Quality",
             effort="high",
+            enabled_execution_options=[],
         )
         tool_result = _wait_for_tool_result(
             server_url=azents_public_server_url,
@@ -932,6 +1181,7 @@ class TestPerPromptInferenceProfile:
             session_id=child_session_id,
             target="Quality",
             effort=expected_effort,
+            enabled_execution_options=[],
         )
 
     @pytest.mark.parametrize(
@@ -977,6 +1227,7 @@ class TestPerPromptInferenceProfile:
             message=message,
             target="Quality",
             effort="high",
+            enabled_execution_options=[],
         )
         _wait_for_tool_result(
             server_url=azents_public_server_url,

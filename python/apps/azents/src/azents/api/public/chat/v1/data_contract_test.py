@@ -44,19 +44,35 @@ def test_model_profile_contract_contains_only_session_intent() -> None:
         client_request_id="request-1",
         model_target_label="Quality",
         reasoning_effort=ModelReasoningEffort.HIGH,
+        enabled_execution_options=[],
     )
     response = ChatSessionModelProfileResponse(
         session_id="session-1",
         model_target_label=request.model_target_label,
         reasoning_effort=request.reasoning_effort,
+        enabled_execution_options=request.enabled_execution_options,
     )
 
     assert set(response.model_dump(mode="json")) == {
         "session_id",
         "model_target_label",
         "reasoning_effort",
+        "enabled_execution_options",
     }
     assert "model_selection" not in response.model_dump(mode="json")
+
+
+def test_model_profile_update_accepts_historical_payload_without_options() -> None:
+    """Existing clients may omit execution options and retain all-off intent."""
+    request = ChatSessionModelProfileUpdateRequest.model_validate(
+        {
+            "client_request_id": "request-1",
+            "model_target_label": "Quality",
+            "reasoning_effort": "high",
+        }
+    )
+
+    assert request.enabled_execution_options == []
 
 
 def test_session_projection_reads_applied_intent_not_prepared_state() -> None:
@@ -68,6 +84,7 @@ def test_session_projection_reads_applied_intent_not_prepared_state() -> None:
         applied_inference_profile=SessionAppliedInferenceProfile(
             model_target_label="new",
             reasoning_effort=None,
+            enabled_execution_options=[],
         ),
         inference_state=SessionInferenceState.model_construct(
             model_target_label="old",
@@ -106,6 +123,7 @@ def test_chat_message_write_request_ignores_client_owned_file_parts() -> None:
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "attachments": ["exchange://workspace/agent/file"],
             "file_parts": [
@@ -133,6 +151,7 @@ def test_chat_edit_message_write_request_ignores_client_owned_file_parts() -> No
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "attachments": ["exchange://workspace/agent/file"],
             "file_parts": [

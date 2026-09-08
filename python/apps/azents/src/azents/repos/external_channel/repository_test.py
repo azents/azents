@@ -843,6 +843,7 @@ class TestExternalChannelRepository:
             capabilities={"supports_reply": True},
             checked_at=_at(3),
             expected_encrypted_credentials=configuration.encrypted_credentials,
+            expected_configuration_generation=configuration.configuration_generation,
         )
 
         assert updated is not None

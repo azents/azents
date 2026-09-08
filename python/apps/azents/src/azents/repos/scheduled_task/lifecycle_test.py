@@ -214,6 +214,7 @@ async def _create_task_cycle(
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             sender_user_id=None,
             order_group=None,
             order_sequence=0,
@@ -236,6 +237,7 @@ async def _create_task_cycle(
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
         session.add(run)
@@ -374,6 +376,7 @@ class TestScheduledTaskLifecycleRepository:
             parent_agent_run_id=None,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             status=AgentRunStatus.PENDING,
         )
         rdb_session.add(ordinary)
@@ -494,6 +497,7 @@ class TestScheduledTaskLifecycleRepository:
                 scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
                 sender_user_id=None,
                 order_group=None,
                 order_sequence=0,

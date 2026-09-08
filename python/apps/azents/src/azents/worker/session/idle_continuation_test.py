@@ -65,6 +65,7 @@ class _MailboxService:
                     scheduling_mode=input.scheduling_mode,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
+                    requested_enabled_execution_options=[],
                     sender_user_id=input.sender_user_id,
                     order_group=f"{index + 1:032d}",
                     order_sequence=0,

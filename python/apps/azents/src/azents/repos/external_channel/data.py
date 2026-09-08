@@ -135,6 +135,14 @@ class ExternalChannelConnectionConfiguration(_Record):
 
 
 @dataclasses.dataclass(frozen=True)
+class ExternalChannelConnectionHealthUpdate:
+    """Completed fenced connection health persistence outcome."""
+
+    connection: ExternalChannelConnection | None
+    connection_exists: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class DiscordGatewayTypingTarget:
     """One active Discord Gateway typing target."""
 

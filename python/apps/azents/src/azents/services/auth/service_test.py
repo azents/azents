@@ -1,10 +1,12 @@
 """AuthService tests."""
 
+import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from azcommon.datetime import tznow
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +19,15 @@ from azents.core.config import (
 )
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
+from azents.repos.auth_operation import AuthOperationRepository
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification_operation import (
     EmailVerificationOperationRepository,
 )
 from azents.repos.password_login import PasswordLoginRepository
+from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.session import SessionRepository
+from azents.repos.session.data import SessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.user_email import UserEmailRepository
@@ -40,6 +45,7 @@ from .data import (
     InvalidRefreshToken,
     InvalidVerificationCode,
     LogoutInput,
+    PasswordLoginInput,
     RefreshTokenInput,
     RegistrationRequired,
     SendCodeInput,
@@ -82,10 +88,13 @@ def _make_auth_service(
             email_verification_repository=EmailVerificationRepository(),
             session_manager=session_manager,
         ),
-        password_login_repo=PasswordLoginRepository(),
-        user_repo=UserRepository(),
-        user_email_repo=UserEmailRepository(),
-        session_repo=SessionRepository(),
+        auth_operation_repository=AuthOperationRepository(
+            user_repository=UserRepository(),
+            user_email_repository=UserEmailRepository(),
+            password_login_repository=PasswordLoginRepository(),
+            session_repository=SessionRepository(),
+            session_manager=session_manager,
+        ),
         credential_service=CredentialService(
             session_manager=session_manager,
             providers=[
@@ -94,7 +103,6 @@ def _make_auth_service(
             ],
             user_repo=UserRepository(),
         ),
-        session_manager=session_manager,
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         auth_config=_TEST_AUTH_CONFIG,
         email_config=None,
@@ -138,6 +146,37 @@ class _TransactionAssertingEmailService(EmailService):
         del to_email, code, expire_minutes, language
         assert not self.observed_session_manager.active
         self.delivery_count += 1
+
+
+class _TransactionAssertingTerminalPublisher:
+    """Assert terminal invalidation occurs after Session revocation commits."""
+
+    def __init__(self, observed_session_manager: _ObservedSessionManager) -> None:
+        self.observed_session_manager = observed_session_manager
+        self.invalidated_session_ids: list[str] = []
+
+    async def publish_runtime_terminal_invalidation(self, runtime_id: str) -> None:
+        """Reject unrelated Runtime invalidation in this test."""
+        raise AssertionError(runtime_id)
+
+    async def publish_user_terminal_invalidation(self, user_id: str) -> None:
+        """Reject unrelated User invalidation in this test."""
+        raise AssertionError(user_id)
+
+    async def publish_authentication_session_terminal_invalidation(
+        self,
+        authentication_session_id: str,
+    ) -> None:
+        """Record post-commit invalidation."""
+        assert not self.observed_session_manager.active
+        self.invalidated_session_ids.append(authentication_session_id)
+
+    async def publish_agent_session_terminal_invalidation(
+        self,
+        agent_session_id: str,
+    ) -> None:
+        """Reject unrelated Agent Session invalidation in this test."""
+        raise AssertionError(agent_session_id)
 
 
 class TestAuthServiceSendCode:
@@ -231,6 +270,82 @@ class TestAuthServiceVerifyCode:
         assert isinstance(result2, Success)
         assert result2.value.access_token
         assert result2.value.refresh_token
+
+    async def test_verify_code_disabled_user_preserves_invalid_code_mapping(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Disabled existing User remains indistinguishable from invalid OTP."""
+        service = _make_auth_service(rdb_session_manager)
+        email = "verify-disabled@example.com"
+        async with rdb_session_manager() as session:
+            user = await UserRepository().create(session, UserCreate(email=email))
+            await UserRepository().disable_access(
+                session,
+                user.id,
+                disabled_at=tznow(),
+            )
+        sent = await service.send_code(SendCodeInput(email=email))
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=sent.csrf_token,
+            )
+        )
+        assert verification is not None
+
+        result = await service.verify_code(
+            VerifyCodeInput(
+                email=email,
+                code=verification.code,
+                csrf_token=sent.csrf_token,
+            )
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, InvalidVerificationCode)
+
+    async def test_verify_code_creates_jwt_after_repository_transaction(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """JWT publication sees no active Auth repository transaction."""
+        observed_session_manager = _ObservedSessionManager(rdb_session_manager)
+        service = _make_auth_service(observed_session_manager)
+        email = "verify-jwt-boundary@example.com"
+        async with rdb_session_manager() as session:
+            await UserRepository().create(session, UserCreate(email=email))
+        sent = await service.send_code(SendCodeInput(email=email))
+        verification = (
+            await service.email_verification_operation_repository.get_by_email_and_csrf(
+                email=email,
+                csrf_token=sent.csrf_token,
+            )
+        )
+        assert verification is not None
+        create_token = Mock(return_value="published-access-token")
+
+        def assert_transaction_closed(**kwargs: object) -> str:
+            assert not observed_session_manager.active
+            return create_token(**kwargs)
+
+        monkeypatch.setattr(
+            "azents.services.auth.create_access_token",
+            assert_transaction_closed,
+        )
+
+        result = await service.verify_code(
+            VerifyCodeInput(
+                email=email,
+                code=verification.code,
+                csrf_token=sent.csrf_token,
+            )
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.access_token == "published-access-token"
+        create_token.assert_called_once()
 
     async def test_verify_code_wrong_code(
         self, rdb_session_manager: SessionManager[AsyncSession]
@@ -335,12 +450,34 @@ class TestAuthServiceRefreshToken:
         return result.value.access_token, result.value.refresh_token
 
     async def test_refresh_token(
-        self, rdb_session_manager: SessionManager[AsyncSession]
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Refresh with valid refresh token."""
+        """Refresh crypto input and JWT publication run outside the transaction."""
         # Given: create session
-        service = _make_auth_service(rdb_session_manager)
+        observed_session_manager = _ObservedSessionManager(rdb_session_manager)
+        service = _make_auth_service(observed_session_manager)
         _, refresh_token = await self._create_session(service, rdb_session_manager)
+        generate_token = Mock(return_value="unused-candidate-token")
+        create_token = Mock(return_value="refreshed-access-token")
+
+        def assert_generate_outside_transaction() -> str:
+            assert not observed_session_manager.active
+            return generate_token()
+
+        def assert_jwt_outside_transaction(**kwargs: object) -> str:
+            assert not observed_session_manager.active
+            return create_token(**kwargs)
+
+        monkeypatch.setattr(
+            "azents.services.auth.generate_refresh_token",
+            assert_generate_outside_transaction,
+        )
+        monkeypatch.setattr(
+            "azents.services.auth.create_access_token",
+            assert_jwt_outside_transaction,
+        )
 
         # When: refresh token
         result = await service.refresh_token(
@@ -349,8 +486,10 @@ class TestAuthServiceRefreshToken:
 
         # Then: success (return existing token because below rotation interval)
         assert isinstance(result, Success)
-        assert result.value.access_token
+        assert result.value.access_token == "refreshed-access-token"
         assert result.value.refresh_token == refresh_token  # below rotation interval
+        generate_token.assert_called_once()
+        create_token.assert_called_once()
 
     async def test_refresh_token_invalid(
         self, rdb_session_manager: SessionManager[AsyncSession]
@@ -444,3 +583,99 @@ class TestAuthServiceLogout:
         # Then: SessionNotFound
         assert isinstance(result, Failure)
         assert isinstance(result.error, SessionNotFound)
+
+    async def test_logout_invalidates_terminal_after_repository_transaction(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Terminal invalidation runs after the revoke transaction completes."""
+        observed_session_manager = _ObservedSessionManager(rdb_session_manager)
+        service = _make_auth_service(observed_session_manager)
+        email = "logout-boundary@example.com"
+        async with rdb_session_manager() as session:
+            user = await UserRepository().create(session, UserCreate(email=email))
+            authentication_session = await SessionRepository().create(
+                session,
+                SessionCreate(
+                    user_id=user.id,
+                    refresh_token="logout-boundary-refresh",
+                    expires_at=tznow() + datetime.timedelta(hours=1),
+                ),
+            )
+        publisher = _TransactionAssertingTerminalPublisher(observed_session_manager)
+        service.terminal_invalidation_publisher = publisher
+
+        result = await service.logout(LogoutInput(session_id=authentication_session.id))
+
+        assert isinstance(result, Success)
+        assert publisher.invalidated_session_ids == [authentication_session.id]
+
+
+class TestAuthServicePasswordLogin:
+    """Password login transaction boundary tests."""
+
+    async def test_password_crypto_and_jwt_run_outside_database_transaction(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Password verification and JWT creation see completed DB operations."""
+        observed_session_manager = _ObservedSessionManager(rdb_session_manager)
+        service = _make_auth_service(observed_session_manager)
+        email = "password-boundary@example.com"
+        async with rdb_session_manager() as session:
+            user = await UserRepository().create(session, UserCreate(email=email))
+            await PasswordLoginRepository().create(
+                session,
+                PasswordLoginCreate(
+                    user_id=user.id,
+                    password_hash="stored-password-hash",
+                ),
+            )
+        verify = Mock(return_value=True)
+        generate_token = Mock(return_value="password-boundary-refresh-token")
+        create_token = Mock(return_value="password-access-token")
+
+        def assert_verify_outside_transaction(
+            password: str,
+            password_hash: str,
+        ) -> bool:
+            assert not observed_session_manager.active
+            return verify(password, password_hash)
+
+        def assert_jwt_outside_transaction(**kwargs: object) -> str:
+            assert not observed_session_manager.active
+            return create_token(**kwargs)
+
+        def assert_generate_outside_transaction() -> str:
+            assert not observed_session_manager.active
+            return generate_token()
+
+        monkeypatch.setattr(
+            "azents.services.auth.verify_password",
+            assert_verify_outside_transaction,
+        )
+        monkeypatch.setattr(
+            "azents.services.auth.create_access_token",
+            assert_jwt_outside_transaction,
+        )
+        monkeypatch.setattr(
+            "azents.services.auth.generate_refresh_token",
+            assert_generate_outside_transaction,
+        )
+
+        result = await service.login_with_password(
+            PasswordLoginInput(
+                email=email,
+                password="plaintext-password",
+            )
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.access_token == "password-access-token"
+        verify.assert_called_once_with(
+            "plaintext-password",
+            "stored-password-hash",
+        )
+        generate_token.assert_called_once()
+        create_token.assert_called_once()

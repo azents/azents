@@ -37,6 +37,8 @@ def _replace_profile(
     token: str,
     session_id: str,
     target: str,
+    effort: str | None,
+    enabled_execution_options: list[str],
     client_request_id: str,
 ) -> requests.Response:
     """Replace a Session model profile through the public API."""
@@ -46,19 +48,20 @@ def _replace_profile(
         json={
             "client_request_id": client_request_id,
             "model_target_label": target,
-            "reasoning_effort": None,
+            "reasoning_effort": effort,
+            "enabled_execution_options": enabled_execution_options,
         },
         timeout=10,
     )
 
 
-def test_model_only_profile_is_idempotent_side_effect_free(
+def test_complete_profile_is_idempotent_side_effect_free(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     mock_openai_url: str,
 ) -> None:
-    """Apply Fast without a message and verify replay and execution side effects."""
+    """Apply target, effort, and Fast without creating a message or provider call."""
     token, agent_id, session_id = _setup_profile_agent(
         public_api_client,
         admin_api_client,
@@ -73,32 +76,40 @@ def test_model_only_profile_is_idempotent_side_effect_free(
         server_url=azents_public_server_url,
         token=token,
         session_id=session_id,
-        target="Fast",
+        target="Quality",
+        effort="xhigh",
+        enabled_execution_options=["fast"],
         client_request_id=client_request_id,
     )
     accepted_payload = _response_object(accepted)
     assert accepted_payload == {
         "session_id": session_id,
-        "model_target_label": "Fast",
-        "reasoning_effort": None,
+        "model_target_label": "Quality",
+        "reasoning_effort": "xhigh",
+        "enabled_execution_options": ["fast"],
     }
     applied = _wait_for_session_profile(
         server_url=azents_public_server_url,
         token=token,
         agent_id=agent_id,
         session_id=session_id,
-        target="Fast",
-        effort=None,
+        target="Quality",
+        effort="xhigh",
+        enabled_execution_options=["fast"],
     )
     assert _history(azents_public_server_url, token, session_id) == before_history
     assert _journal(mock_openai_url) == before_journal
-    assert applied["current_model_target_label"] == "Fast"
+    assert applied["current_model_target_label"] == "Quality"
+    assert applied["current_reasoning_effort"] == "xhigh"
+    assert applied["current_enabled_execution_options"] == ["fast"]
 
     replay = _replace_profile(
         server_url=azents_public_server_url,
         token=token,
         session_id=session_id,
-        target="Fast",
+        target="Quality",
+        effort="xhigh",
+        enabled_execution_options=["fast"],
         client_request_id=client_request_id,
     )
     assert _response_object(replay) == accepted_payload
@@ -107,6 +118,8 @@ def test_model_only_profile_is_idempotent_side_effect_free(
         token=token,
         session_id=session_id,
         target="Quality",
+        effort="xhigh",
+        enabled_execution_options=[],
         client_request_id=client_request_id,
     )
     assert conflict.status_code == 409
@@ -114,7 +127,7 @@ def test_model_only_profile_is_idempotent_side_effect_free(
     assert _journal(mock_openai_url) == before_journal
 
 
-def test_model_only_profile_rejects_invalid_target_without_side_effects(
+def test_model_profile_rejects_invalid_target_without_side_effects(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
@@ -141,6 +154,8 @@ def test_model_only_profile_rejects_invalid_target_without_side_effects(
         token=token,
         session_id=session_id,
         target="Missing",
+        effort=None,
+        enabled_execution_options=[],
         client_request_id=f"invalid-profile-{unique()}",
     )
     assert response.status_code == 422
@@ -155,9 +170,66 @@ def test_model_only_profile_rejects_invalid_target_without_side_effects(
     assert (
         after["current_model_target_label"],
         after["current_reasoning_effort"],
+        after["current_enabled_execution_options"],
     ) == (
         before["current_model_target_label"],
         before["current_reasoning_effort"],
+        before["current_enabled_execution_options"],
+    )
+    assert _history(azents_public_server_url, token, session_id) == before_history
+    assert _journal(mock_openai_url) == []
+
+
+def test_profile_rejects_unsupported_execution_option_without_side_effects(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    mock_openai_url: str,
+) -> None:
+    """Reject Fast on a target whose saved selection does not support it."""
+    token, agent_id, session_id = _setup_profile_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
+    before = _response_object(
+        requests.get(
+            f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+    )
+    before_history = _history(azents_public_server_url, token, session_id)
+
+    response = _replace_profile(
+        server_url=azents_public_server_url,
+        token=token,
+        session_id=session_id,
+        target="Fast",
+        effort=None,
+        enabled_execution_options=["fast"],
+        client_request_id=f"unsupported-option-{unique()}",
+    )
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Enabled execution option is not supported by the model."
+    }
+    after = _response_object(
+        requests.get(
+            f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+    )
+    assert (
+        after["current_model_target_label"],
+        after["current_reasoning_effort"],
+        after["current_enabled_execution_options"],
+    ) == (
+        before["current_model_target_label"],
+        before["current_reasoning_effort"],
+        before["current_enabled_execution_options"],
     )
     assert _history(azents_public_server_url, token, session_id) == before_history
     assert _journal(mock_openai_url) == []

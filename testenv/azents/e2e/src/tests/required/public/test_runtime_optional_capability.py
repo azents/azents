@@ -204,6 +204,7 @@ def _write_session_message(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,
@@ -462,6 +463,7 @@ def _create_user_session(
             "inference_profile": {
                 "model_target_label": "default",
                 "reasoning_effort": None,
+                "enabled_execution_options": [],
             },
             "existing_project_paths": [],
             "setup_actions": [],

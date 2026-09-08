@@ -17,6 +17,7 @@ const meta = {
       requestedInferenceProfile: {
         model_target_label: "quality",
         reasoning_effort: "high",
+        enabled_execution_options: [],
       },
     },
     currentWorkspaceProfile: {
@@ -51,6 +52,7 @@ export const Optimistic: StoryObj<typeof OptimisticInputBubble> = {
       requestedInferenceProfile: {
         model_target_label: "fast",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
     },
   },
@@ -69,6 +71,7 @@ export const WithAttachment: Story = {
       requestedInferenceProfile: {
         model_target_label: "quality",
         reasoning_effort: "high",
+        enabled_execution_options: [],
       },
     },
   },
@@ -91,6 +94,7 @@ export const WithSkillAction: Story = {
       requestedInferenceProfile: {
         model_target_label: "quality",
         reasoning_effort: "high",
+        enabled_execution_options: [],
       },
     },
   },
@@ -109,6 +113,7 @@ export const Deleting: Story = {
       requestedInferenceProfile: {
         model_target_label: "quality",
         reasoning_effort: null,
+        enabled_execution_options: [],
       },
     },
   },

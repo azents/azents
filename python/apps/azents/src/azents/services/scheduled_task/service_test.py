@@ -732,6 +732,7 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
             scheduling_mode=trigger.scheduling_mode,
             requested_model_target_label=trigger.requested_model_target_label,
             requested_reasoning_effort=trigger.requested_reasoning_effort,
+            requested_enabled_execution_options=trigger.requested_enabled_execution_options,
             sender_user_id=trigger.sender_user_id,
             order_group="m" * 32,
             order_sequence=trigger.order_sequence,

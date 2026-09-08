@@ -433,6 +433,7 @@ def _running_run(session_id: str) -> AgentRunState:
         parent_agent_run_id=None,
         requested_model_target_label=None,
         requested_reasoning_effort=None,
+        requested_enabled_execution_options=[],
         active_tool_calls=[
             ActiveToolCall(
                 call_id="call-1",

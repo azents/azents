@@ -29,6 +29,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.action_messages import (
     OperationAction,
     TurnAction,
@@ -110,6 +111,7 @@ class MailboxEnqueue:
     scheduling_mode: MailboxSchedulingMode
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
+    requested_enabled_execution_options: list[ModelExecutionOptionId]
     sender_user_id: str | None
     order_group: str | None
     order_sequence: int
@@ -331,6 +333,9 @@ class MailboxService:
                 scheduling_mode=input.scheduling_mode,
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
+                requested_enabled_execution_options=(
+                    input.requested_enabled_execution_options
+                ),
                 sender_user_id=input.sender_user_id,
                 order_group=input.order_group,
                 order_sequence=input.order_sequence,
@@ -365,6 +370,8 @@ class MailboxService:
             != input.requested_model_target_label
             or mailbox_item.requested_reasoning_effort
             != input.requested_reasoning_effort
+            or mailbox_item.requested_enabled_execution_options
+            != input.requested_enabled_execution_options
         ):
             raise ValueError(
                 "Input idempotency key already used for another inference profile"
@@ -1282,6 +1289,7 @@ class MailboxService:
                 model_target_label=requested_profile.model_target_label,
                 model_display_name=None,
                 reasoning_effort=requested_profile.reasoning_effort,
+                enabled_execution_options=(requested_profile.enabled_execution_options),
             )
         else:
             applied_profile = None
@@ -1912,12 +1920,16 @@ def _requested_inference_profile(
 ) -> RequestedInferenceProfile | None:
     """Build typed requested profile from one durable buffer."""
     if buffer.requested_model_target_label is None:
-        if buffer.requested_reasoning_effort is not None:
-            raise ValueError("Reasoning effort requires a model target")
+        if (
+            buffer.requested_reasoning_effort is not None
+            or buffer.requested_enabled_execution_options
+        ):
+            raise ValueError("Inference settings require a model target")
         return None
     return RequestedInferenceProfile(
         model_target_label=buffer.requested_model_target_label,
         reasoning_effort=buffer.requested_reasoning_effort,
+        enabled_execution_options=buffer.requested_enabled_execution_options,
     )
 
 

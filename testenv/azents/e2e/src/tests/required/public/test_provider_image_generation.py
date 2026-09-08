@@ -57,6 +57,7 @@ def _submit(
             "inference_profile": {
                 "model_target_label": "Quality",
                 "reasoning_effort": reasoning_effort,
+                "enabled_execution_options": [],
             },
         },
         timeout=10,

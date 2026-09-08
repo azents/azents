@@ -41,6 +41,7 @@ const meta = {
       requested_inference_profile: {
         model_target_label: "quality",
         reasoning_effort: "high",
+        enabled_execution_options: [],
       },
     }),
     currentWorkspaceProfile: {

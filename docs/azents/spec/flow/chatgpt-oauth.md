@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/core/llm_mapping.py
+  - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/services/session_title.py
@@ -221,6 +222,32 @@ Rules:
 - Completed SDK usage maps directly into the existing turn marker. `cost_usd` is a LiteLLM public
   price-map estimate based only on content-free usage metadata and represents API pricing rather than
   ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
+
+## Fast execution option
+
+Fast is a directly switchable model execution option, separate from model abilities,
+reasoning effort, and built-in tools. Account model catalog projection advertises
+`fast` only when the current `service_tiers` metadata declares `priority` or `fast`.
+Missing or empty declarations are unsupported. The saved model selection carries the
+supported-option snapshot; runtime does not discover or infer support from model names
+or historical raw metadata.
+
+Composer-enabled Fast survives requested, Session-applied, and prepared inference
+snapshots. Sampling sends `service_tier: priority` through the same official Responses
+SDK HTTP or WebSocket path. Fast-off omits that field following Codex backend standard
+routing, while the separate OpenAI API-key path explicitly requests `default` for
+supported models so a premium project default does not override an off selection.
+Neither path changes the chosen model, effort, tool set, or authentication identity.
+Auxiliary compaction and title calls retain their independent all-off behavior.
+
+Fast starts off and its composer explanation describes additional ChatGPT usage or
+credits rather than API billing or a fixed multiplier. Provider rejection uses the
+existing failure/retry contract with the same prepared settings; the application does
+not quietly remove Fast or substitute another model. Provider-side downgrades and
+entitlement limits remain provider behavior, not a latency guarantee. Cost estimation
+uses the returned actual tier and leaves unknown premium pricing unset instead of
+substituting standard prices; any displayed estimate is still an API-price estimate,
+not subscription credits or verified ChatGPT billing.
 
 ## Subscription Usage
 

@@ -19,6 +19,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.vfs import VfsProjection
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
@@ -534,6 +535,7 @@ class AgentRunRepository:
             parent_agent_run_id=create.parent_agent_run_id,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             phase=create.phase,
             status=create.status,
         )
@@ -574,6 +576,7 @@ class AgentRunRepository:
             parent_agent_run_id=parent_agent_run_id,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.PENDING,
         )
@@ -630,6 +633,7 @@ class AgentRunRepository:
         activated_at: datetime.datetime,
         requested_model_target_label: str,
         requested_reasoning_effort: ModelReasoningEffort | None,
+        requested_enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentRunState:
         """Persist its selected profile and activate one pending run."""
         rdb = await session.scalar(
@@ -648,6 +652,9 @@ class AgentRunRepository:
         )
         rdb.requested_model_target_label = requested_model_target_label
         rdb.requested_reasoning_effort = requested_reasoning_effort
+        rdb.requested_enabled_execution_options = [
+            option.value for option in requested_enabled_execution_options
+        ]
         rdb.status = AgentRunStatus.RUNNING
         rdb.started_at = activated_at
         await session.flush()
@@ -682,6 +689,9 @@ class AgentRunRepository:
             raise ValueError("AgentRun session mismatch")
         target.requested_model_target_label = source.requested_model_target_label
         target.requested_reasoning_effort = source.requested_reasoning_effort
+        target.requested_enabled_execution_options = (
+            source.requested_enabled_execution_options
+        )
         await session.flush()
         await session.refresh(target)
         return self._build(target)
@@ -1381,6 +1391,9 @@ class AgentRunRepository:
             parent_agent_run_id=rdb.parent_agent_run_id,
             requested_model_target_label=rdb.requested_model_target_label,
             requested_reasoning_effort=rdb.requested_reasoning_effort,
+            requested_enabled_execution_options=(
+                rdb.requested_enabled_execution_options
+            ),
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None

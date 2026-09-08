@@ -15,17 +15,17 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-07 | 73 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-08 | 74 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-08 | 163 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-08 | 74 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-08 | 75 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-08 | 22 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-08 | 11 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-07 | 110 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 14 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 15 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-07 | 80 |
 
 ## Living Specs — Flow
@@ -40,7 +40,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 38 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-05 | 42 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 43 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-08 | 60 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-08 | 48 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
@@ -181,6 +181,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Exec Process Tools Historical Requirements Reconstruction](requirements/exec-260627-exec-process.md) | exec-260627 | 2026-06-27 | - |
 | [User Stop Terminates Session-Owned Runtime Exec Processes Historical Requirements Reconstruction](requirements/exec-260628-exec-stop-termination.md) | exec-260628 | 2026-06-28 | - |
 | [Agent Execution Transcript Normalization Historical Requirements Reconstruction](requirements/execution-260527-execution-transcript-normalization.md) | execution-260527 | 2026-05-27 | 2026-05-28 |
+| [Composer Model Execution Options Requirements](requirements/execution-260908-model-execution-options.md) | execution-260908 | 2026-09-08 | 2026-09-08 |
 | [Session Workspace Project Existing Folder Registration Historical Requirements Reconstruction](requirements/existing-260611-existing-folder-registration.md) | existing-260611 | 2026-06-11 | 2026-06-11 |
 | [External Watch / Raw Session Event Subscription Historical Requirements Reconstruction](requirements/external-260503-external-watch-raw-subscription.md) | external-260503 | 2026-05-03 | 2026-05-03 |
 | [Discord Message Invocation Requirements](requirements/external-260726-discord-message-invocation.md) | external-260726 | 2026-07-26 | - |
@@ -601,6 +602,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Runtime Exec Process Tools](adr/exec-260627-exec-process.md)
 - [User Stop Terminates Session-Owned Runtime Exec Processes](adr/exec-260628-exec-stop-termination.md)
 - [Agent Execution Transcript Normalization](adr/execution-260527-execution-transcript-normalization.md)
+- [Composer Model Execution Options Decisions](adr/execution-260908-model-execution-options.md)
 - [Session Workspace Project Existing Folder Registration Historical Decision Reconstruction](adr/existing-260611-existing-folder-registration.md)
 - [External Watch / Raw Session Event Subscription Historical Decision Reconstruction](adr/external-260503-external-watch-raw-subscription.md)
 - [Discord Message Invocation](adr/external-260726-discord-message-invocation.md)

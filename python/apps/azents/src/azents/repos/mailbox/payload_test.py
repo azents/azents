@@ -51,6 +51,7 @@ def _item(
         file_parts=[],
         payload=payload,
         created_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+        requested_enabled_execution_options=[],
     )
 
 
