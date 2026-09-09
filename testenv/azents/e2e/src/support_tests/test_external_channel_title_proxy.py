@@ -1,6 +1,7 @@
 """Deterministic External Channel automatic-title proxy tests."""
 
 import json
+from pathlib import Path
 from typing import Self
 
 import pytest
@@ -42,6 +43,23 @@ def test_discord_title_request_match_is_specific() -> None:
 
 def test_discord_title_response_preserves_the_existing_structured_fixture() -> None:
     """Return the same structured title without an upstream proxy round trip."""
+    fixture_path = (
+        Path(proxy.__file__).parent / "aimock_fixtures" / "agents_md_loader.json"
+    )
+    fixture_document = json.loads(fixture_path.read_text())
+    matching_fixture_responses = [
+        fixture["response"]["content"]
+        for fixture in fixture_document["fixtures"]
+        if fixture["match"]
+        == {
+            "endpoint": "chat",
+            "systemMessage": "Create a brief title from the request",
+        }
+    ]
+
+    assert matching_fixture_responses == [
+        proxy._EXTERNAL_CHANNEL_DISCORD_TITLE_RESPONSE
+    ]
     assert json.loads(proxy._EXTERNAL_CHANNEL_DISCORD_TITLE_RESPONSE) == {
         "title": "Upload session initialized."
     }

@@ -4727,38 +4727,44 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 )
             )
         except TimeoutError as error:
-            final_detail = chat_api.chat_v1_get_agent_session(
-                agent_id=agent_id,
-                session_id=session.id,
-                _headers=headers,
-            )
-            final_counts = _int_dict(
-                _discord_provider_state(discord_provider_fake_url)["request_counts"]
-            )
-            worker_log_value = azents_engine_worker_container.logs(
-                stdout=True,
-                stderr=True,
-                tail=200,
-            )
-            worker_logs = (
-                worker_log_value.decode(errors="replace")
-                if isinstance(worker_log_value, bytes)
-                else worker_log_value
-            )
-            title_log_lines = [
-                line for line in worker_logs.splitlines() if "title" in line.lower()
-            ][-20:]
-            title_source = (
-                final_detail.title_source.value
-                if final_detail.title_source is not None
-                else None
-            )
-            pytest.fail(
-                f"{error}; session_title={final_detail.title!r}; "
-                f"session_title_source={title_source!r}; "
-                f"provider_request_counts={final_counts!r}; "
-                f"engine_title_logs={title_log_lines!r}"
-            )
+            try:
+                final_detail = chat_api.chat_v1_get_agent_session(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    _headers=headers,
+                )
+                final_counts = _int_dict(
+                    _discord_provider_state(discord_provider_fake_url)["request_counts"]
+                )
+                worker_log_value = azents_engine_worker_container.logs(
+                    stdout=True,
+                    stderr=True,
+                    tail=200,
+                )
+                worker_logs = (
+                    worker_log_value.decode(errors="replace")
+                    if isinstance(worker_log_value, bytes)
+                    else worker_log_value
+                )
+                title_log_lines = [
+                    line for line in worker_logs.splitlines() if "title" in line.lower()
+                ][-20:]
+                title_source = (
+                    final_detail.title_source.value
+                    if final_detail.title_source is not None
+                    else None
+                )
+                diagnostic_summary = (
+                    f"session_title={final_detail.title!r}; "
+                    f"session_title_source={title_source!r}; "
+                    f"provider_request_counts={final_counts!r}; "
+                    f"engine_title_logs={title_log_lines!r}"
+                )
+            except Exception as diagnostic_error:
+                diagnostic_summary = (
+                    f"title_failure_diagnostics_unavailable={diagnostic_error!r}"
+                )
+            pytest.fail(f"{error}; {diagnostic_summary}")
         requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
             timeout=5,
