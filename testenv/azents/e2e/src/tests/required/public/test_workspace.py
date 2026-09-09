@@ -19,14 +19,14 @@ from support.utils import authenticate_user, unique
 
 
 class TestWorkspaceGetByHandle:
-    """Workspace handle fetch t test."""
+    """Test public Workspace lookup by handle."""
 
     def test_get_workspace_by_handle(
         self,
         admin_api_client: azentsadminclient.ApiClient,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """handlet Workspacet fetcht t t."""
+        """A Workspace can be fetched by handle."""
         admin_api = AdminWorkspaceV1Api(admin_api_client)
         public_api = PublicWorkspaceV1Api(public_api_client)
         uniq = unique()
@@ -49,23 +49,23 @@ class TestWorkspaceGetByHandle:
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """existst t handlet fetch t 404t returnt."""
+        """Fetching a nonexistent Workspace handle returns 404."""
         public_api = PublicWorkspaceV1Api(public_api_client)
 
         with pytest.raises(ApiException) as exc_info:
             public_api.workspace_v1_get_workspace_by_handle("nonexistent-handle")
-        assert exc_info.value.status == 404  # t create API clientt t t t
+        assert exc_info.value.status == 404
 
 
 class TestWorkspaceAuthenticated:
-    """autht usert Workspace t test."""
+    """Test authenticated Workspace operations."""
 
     def test_list_workspaces_authenticated(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """autht usert t Workspace listt fetcht."""
+        """An authenticated user can list their Workspaces."""
         uniq = unique()
         access_token, _, _ = authenticate_user(
             public_api_client,
@@ -73,7 +73,7 @@ class TestWorkspaceAuthenticated:
             email=f"ws-list-{uniq}@example.com",
         )
 
-        # Public APIt workspace create
+        # Create a Workspace through the Public API.
         public_ws_api = PublicWorkspaceV1Api(public_api_client)
         create_response = public_ws_api.workspace_v1_create_workspace(
             PublicCreateWorkspaceRequest(
@@ -84,7 +84,7 @@ class TestWorkspaceAuthenticated:
             _headers={"Authorization": f"Bearer {access_token}"},
         )
 
-        # workspace list fetch
+        # Fetch the user's Workspace list.
         response = public_ws_api.workspace_v1_list_workspaces(
             _headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -96,7 +96,7 @@ class TestWorkspaceAuthenticated:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """autht usert Workspacet createt."""
+        """An authenticated user can create a Workspace."""
         uniq = unique()
         access_token, _, _ = authenticate_user(
             public_api_client,
@@ -118,18 +118,18 @@ class TestWorkspaceAuthenticated:
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """token t Workspace list fetch t 401t returnt."""
+        """Listing Workspaces without a token returns 401."""
         public_ws_api = PublicWorkspaceV1Api(public_api_client)
 
         with pytest.raises(ApiException) as exc_info:
             public_ws_api.workspace_v1_list_workspaces()
-        assert exc_info.value.status == 401  # t create API clientt t t t
+        assert exc_info.value.status == 401
 
     def test_create_workspace_without_token_returns_401(
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """token t Workspace create t 401t returnt."""
+        """Creating a Workspace without a token returns 401."""
         public_ws_api = PublicWorkspaceV1Api(public_api_client)
 
         with pytest.raises(ApiException) as exc_info:
@@ -140,4 +140,4 @@ class TestWorkspaceAuthenticated:
                     owner_name="Test Owner",
                 )
             )
-        assert exc_info.value.status == 401  # t create API clientt t t t
+        assert exc_info.value.status == 401

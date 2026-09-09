@@ -1,6 +1,6 @@
-"""Public API member profile update test.
+"""Public API member profile E2E tests.
 
-workspace membert t profile(t, t)t fetch/updatet t verifyt.
+Verify Workspace member profile retrieval and updates.
 """
 
 from typing import Any
@@ -22,7 +22,7 @@ def _setup_workspace(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
 ) -> tuple[str, str, str]:
-    """testt workspacet createt (access_token, handle, owner_name)t return."""
+    """Create a test Workspace and return its access context."""
     uniq = unique()
     access_token, _, _ = authenticate_user(public_api_client, admin_api_client)
 
@@ -47,8 +47,8 @@ def _get_my_profile(
     access_token: str,
     handle: str,
 ) -> dict[str, Any]:
-    """member profilet fetcht (raw HTTP use)."""
-    base_url = f"{public_api_client.configuration.host}"  # t create API clientt t t t
+    """Fetch the member profile through raw HTTP."""
+    base_url = f"{public_api_client.configuration.host}"
     response = requests.get(
         f"{base_url}/workspace-user/v1/workspaces/{handle}/me/profile",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -65,8 +65,8 @@ def _update_my_profile(
     *,
     name: str | None = None,
 ) -> dict[str, Any]:
-    """member profilet updatet (raw HTTP use)."""
-    base_url = f"{public_api_client.configuration.host}"  # t create API clientt t t t
+    """Update the member profile through raw HTTP."""
+    base_url = f"{public_api_client.configuration.host}"
     body: dict[str, str] = {}
     if name is not None:
         body["name"] = name
@@ -85,14 +85,14 @@ def _update_my_profile(
 
 
 class TestGetMyProfile:
-    """t workspace profile fetch test."""
+    """Test Workspace member profile retrieval."""
 
     def test_get_my_profile(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """workspace membert t profilet fetcht t t."""
+        """A Workspace member can fetch their profile."""
         access_token, handle, owner_name = _setup_workspace(
             public_api_client, admin_api_client
         )
@@ -111,10 +111,8 @@ class TestGetMyProfile:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """token t profile fetch t 401t returnt."""
-        base_url = (
-            f"{public_api_client.configuration.host}"  # t create API clientt t t t
-        )
+        """Fetching a profile without a token returns 401."""
+        base_url = f"{public_api_client.configuration.host}"
         response = requests.get(
             f"{base_url}/workspace-user/v1/workspaces/any-handle/me/profile",
             timeout=10,
@@ -123,14 +121,14 @@ class TestGetMyProfile:
 
 
 class TestUpdateMyProfile:
-    """t workspace profile update test."""
+    """Test Workspace member profile updates."""
 
     def test_update_name(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t t t t."""
+        """A member can update their display name."""
         access_token, handle, _ = _setup_workspace(public_api_client, admin_api_client)
 
         updated = _update_my_profile(
@@ -138,7 +136,7 @@ class TestUpdateMyProfile:
         )
         assert updated["name"] == "New Name"
 
-        # fetcht t check
+        # Fetch the profile again to verify persistence.
         profile = _get_my_profile(public_api_client, access_token, handle)
         assert profile["name"] == "New Name"
 
@@ -146,10 +144,8 @@ class TestUpdateMyProfile:
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """token t profile update t 401t returnt."""
-        base_url = (
-            f"{public_api_client.configuration.host}"  # t create API clientt t t t
-        )
+        """Updating a profile without a token returns 401."""
+        base_url = f"{public_api_client.configuration.host}"
         response = requests.patch(
             f"{base_url}/workspace-user/v1/workspaces/any-handle/me/profile",
             json={"name": "Test"},
@@ -163,7 +159,7 @@ class TestUpdateMyProfile:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t bodyt update t current profilet t returnt."""
+        """An empty update returns the current profile."""
         access_token, handle, owner_name = _setup_workspace(
             public_api_client, admin_api_client
         )
@@ -177,7 +173,7 @@ class TestUpdateMyProfile:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """profile update t rolet t t."""
+        """Updating a profile preserves the member role."""
         access_token, handle, _ = _setup_workspace(public_api_client, admin_api_client)
 
         updated = _update_my_profile(
