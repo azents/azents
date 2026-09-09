@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate documentation INDEX.md files from frontmatter."""
 
 import argparse
@@ -96,7 +95,7 @@ def has_list_field(body: str, field_name: str) -> bool:
             in_field = True
             continue
         if in_field:
-            if line.startswith("  - ") or line.startswith("- "):
+            if line.startswith(("  - ", "- ")):
                 return bool(line.lstrip(" -").strip())
             if line and not line.startswith(" "):
                 return False

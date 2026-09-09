@@ -1,6 +1,6 @@
-"""Public Security API E2E test.
+"""Public Security API E2E tests.
 
-password t, step-up auth(elevation), login t fetcht verifyt.
+Verify password management, step-up authentication, and login.
 """
 
 import azentsadminclient
@@ -29,22 +29,22 @@ def _elevate_user(
     access_token: str,
     email: str,
 ) -> str:
-    """email OTPt t t elevationt elevated access tokent return."""
+    """Elevate with an email OTP and return the elevated access token."""
     security_api = SecurityV1Api(public_api_client)
     adm_auth = AdminAuthV1Api(admin_api_client)
 
-    # 1. Elevation t t
+    # Request an elevation code.
     send_response = security_api.security_v1_send_elevation_code(
         _headers={"Authorization": f"Bearer {access_token}"},
     )
     csrf_token = send_response.csrf_token
 
-    # 2. Admin APIt t fetch
+    # Fetch the test verification code through the Admin API.
     verification = adm_auth.auth_v1_get_email_verification_by_email(
         email=email, csrf_token=csrf_token
     )
 
-    # 3. email OTPt elevation
+    # Elevate with the email verification code.
     elevate_response = security_api.security_v1_elevate_with_email(
         ElevateWithEmailRequest(code=verification.code, csrf_token=csrf_token),
         _headers={"Authorization": f"Bearer {access_token}"},
@@ -53,14 +53,14 @@ def _elevate_user(
 
 
 class TestSecurityElevation:
-    """Step-up auth(elevation) test."""
+    """Test step-up authentication."""
 
     def test_get_auth_methods_without_elevation_returns_403(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Elevated token t auth t fetch t 403t returnt."""
+        """Fetching auth methods without elevation returns 403."""
         access_token, _, _ = authenticate_user(public_api_client, admin_api_client)
         security_api = SecurityV1Api(public_api_client)
 
@@ -68,21 +68,21 @@ class TestSecurityElevation:
             security_api.security_v1_get_auth_methods(
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 403  # t create API clientt t t t
+        assert exc_info.value.status == 403
 
     def test_elevate_with_email_and_get_auth_methods(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """email OTPt elevation t auth t fetcht."""
+        """Email OTP elevation allows fetching auth methods."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
 
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # Elevated tokent auth t fetch
+        # Fetch auth methods with the elevated token.
         security_api = SecurityV1Api(public_api_client)
         response = security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
@@ -90,7 +90,7 @@ class TestSecurityElevation:
         assert response.methods is not None
         assert len(response.methods) > 0
 
-        # SMTP disabled fixture t email credential t invalid t.
+        # The SMTP-disabled fixture leaves the email method unavailable.
         email_methods = [m for m in response.methods if m.type == "email"]
         assert len(email_methods) == 1
         assert email_methods[0].configured is True
@@ -103,7 +103,7 @@ class TestSecurityElevation:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t t elevation t 400t returnt."""
+        """Elevation with an incorrect code returns 400."""
         access_token, _, _ = authenticate_user(public_api_client, admin_api_client)
         security_api = SecurityV1Api(public_api_client)
 
@@ -119,66 +119,66 @@ class TestSecurityElevation:
                 ),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 400  # t create API clientt t t t
+        assert exc_info.value.status == 400
 
     def test_elevation_stripped_on_refresh(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Refresh tokent t t elevationt t."""
+        """Refreshing an access token removes elevation."""
         access_token, refresh_token, email = authenticate_user(
             public_api_client, admin_api_client
         )
 
-        # Elevation t
+        # Elevate the original access token.
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # Elevated tokent security t t t check
+        # Verify that the elevated token reaches a protected endpoint.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # Refresh → t tokent elevation t
+        # Refresh the session to obtain a non-elevated access token.
         pub_auth = PublicAuthV1Api(public_api_client)
         refresh_response = pub_auth.auth_v1_refresh_token(
             RefreshTokenRequest(refresh_token=refresh_token)
         )
         new_access_token = refresh_response.access_token
 
-        # t tokent security t t t 403
+        # The refreshed token must not retain elevation.
         with pytest.raises(azentspublicclient.ApiException) as exc_info:
             security_api.security_v1_get_auth_methods(
                 _headers={"Authorization": f"Bearer {new_access_token}"},
             )
-        assert exc_info.value.status == 403  # t create API clientt t t t
+        assert exc_info.value.status == 403
 
 
 class TestPasswordManagement:
-    """password settings/delete test."""
+    """Test password management."""
 
     def test_set_password(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """passwordt settingst."""
+        """An elevated user can set a password."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
         security_api = SecurityV1Api(public_api_client)
-        # 204 No Content return
+        # The endpoint returns 204 No Content on success.
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # auth t passwordt t
+        # Verify that password authentication is enabled.
         response = security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
@@ -191,7 +191,7 @@ class TestPasswordManagement:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Elevation t password settings t 403t returnt."""
+        """Setting a password without elevation returns 403."""
         access_token, _, _ = authenticate_user(public_api_client, admin_api_client)
         security_api = SecurityV1Api(public_api_client)
 
@@ -200,14 +200,14 @@ class TestPasswordManagement:
                 SetPasswordRequest(password="StrongP@ss1!"),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 403  # t create API clientt t t t
+        assert exc_info.value.status == 403
 
     def test_remove_password(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """passwordt deletet."""
+        """Removing the only valid credential is rejected."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
@@ -215,20 +215,20 @@ class TestPasswordManagement:
 
         security_api = SecurityV1Api(public_api_client)
 
-        # password settings
+        # Set the password.
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # SMTP disabled fixture t t valid credential deletet t
+        # The SMTP-disabled fixture prevents deleting the only valid credential.
         with pytest.raises(azentspublicclient.ApiException) as exc_info:
             security_api.security_v1_remove_password(
                 _headers={"Authorization": f"Bearer {elevated_token}"},
             )
-        assert exc_info.value.status == 409  # t create API clientt t t t
+        assert exc_info.value.status == 409
 
-        # auth t passwordt t valid credential t t
+        # Verify that the password credential remains enabled.
         response = security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
@@ -241,7 +241,7 @@ class TestPasswordManagement:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Signup token redeem t settingst t passwordt deletet."""
+        """Removing the initial signup password is rejected."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
@@ -252,7 +252,7 @@ class TestPasswordManagement:
             security_api.security_v1_remove_password(
                 _headers={"Authorization": f"Bearer {elevated_token}"},
             )
-        assert exc_info.value.status == 409  # t create API clientt t t t
+        assert exc_info.value.status == 409
 
         response = security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
@@ -266,25 +266,25 @@ class TestPasswordManagement:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """password settings t passwordt elevationt t."""
+        """A configured password can elevate a new session."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # password settings
+        # Set the password.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # t sessiont login (password elevation testt t)
+        # Authenticate a new session for password elevation.
         access_token_2, _, _ = authenticate_user(
             public_api_client, admin_api_client, email=email
         )
 
-        # passwordt elevation
+        # Elevate with the configured password.
         elevate_response = security_api.security_v1_elevate_with_password(
             ElevateWithPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {access_token_2}"},
@@ -292,7 +292,7 @@ class TestPasswordManagement:
         assert elevate_response.access_token is not None
         assert elevate_response.expires_in > 0
 
-        # Elevated tokent security t t t
+        # Verify that the elevated token reaches a protected endpoint.
         security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevate_response.access_token}"},
         )
@@ -302,37 +302,37 @@ class TestPasswordManagement:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t passwordt elevation t 400t returnt."""
+        """Elevation with an incorrect password returns 400."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # password settings
+        # Set the password.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # t passwordt elevation t
+        # Attempt elevation with the wrong password.
         with pytest.raises(azentspublicclient.ApiException) as exc_info:
             security_api.security_v1_elevate_with_password(
                 ElevateWithPasswordRequest(password="WrongPassword!"),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 400  # t create API clientt t t t
+        assert exc_info.value.status == 400
 
 
 class TestPasswordLogin:
-    """password login test."""
+    """Test password login."""
 
     def test_login_methods_after_signup_token_redeem_has_password(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Signup token redeem t t passwordt t."""
+        """Signup token redemption leaves password login enabled."""
         _, _, email = authenticate_user(public_api_client, admin_api_client)
         pub_auth = PublicAuthV1Api(public_api_client)
 
@@ -346,20 +346,20 @@ class TestPasswordLogin:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """password settings t login t fetch t has_password=True."""
+        """Login methods report a configured password."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # password settings
+        # Set the password.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # login t fetch
+        # Fetch the available login methods.
         pub_auth = PublicAuthV1Api(public_api_client)
         response: LoginMethodsResponse = pub_auth.auth_v1_get_login_methods(
             email=email,
@@ -371,13 +371,13 @@ class TestPasswordLogin:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """passwordt logint."""
+        """A user can log in with a configured password."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # password settings
+        # Set the password.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
@@ -398,32 +398,32 @@ class TestPasswordLogin:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t passwordt login t 401t returnt."""
+        """Login with an incorrect password returns 401."""
         access_token, _, email = authenticate_user(public_api_client, admin_api_client)
         elevated_token = _elevate_user(
             public_api_client, admin_api_client, access_token, email
         )
 
-        # password settings
+        # Set the password.
         security_api = SecurityV1Api(public_api_client)
         security_api.security_v1_set_password(
             SetPasswordRequest(password="StrongP@ss1!"),
             _headers={"Authorization": f"Bearer {elevated_token}"},
         )
 
-        # t passwordt login
+        # Attempt login with the wrong password.
         pub_auth = PublicAuthV1Api(public_api_client)
         with pytest.raises(azentspublicclient.ApiException) as exc_info:
             pub_auth.auth_v1_login_with_password(
                 PasswordLoginRequest(email=email, password="WrongPassword!"),
             )
-        assert exc_info.value.status == 401  # t create API clientt t t t
+        assert exc_info.value.status == 401
 
     def test_login_with_password_unknown_email_returns_401(
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """existst t emailt password login t 401t returnt."""
+        """Password login with an unknown email returns 401."""
         pub_auth = PublicAuthV1Api(public_api_client)
         email = f"unknown-{unique()}@example.com"
 
@@ -431,13 +431,13 @@ class TestPasswordLogin:
             pub_auth.auth_v1_login_with_password(
                 PasswordLoginRequest(email=email, password="SomePassword1!"),
             )
-        assert exc_info.value.status == 401  # t create API clientt t t t
+        assert exc_info.value.status == 401
 
     def test_login_methods_unknown_email(
         self,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """existst t emailt login t fetch t has_password=False."""
+        """Login methods for an unknown email report no password."""
         pub_auth = PublicAuthV1Api(public_api_client)
         email = f"unknown-{unique()}@example.com"
 

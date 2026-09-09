@@ -1,6 +1,6 @@
-"""file upload/Exchange file API E2E test.
+"""File upload and Exchange file API E2E tests.
 
-file upload, Exchange file list, download/delete t verifyt.
+Verify uploads and Exchange file listing, download, and deletion.
 """
 
 import json
@@ -30,7 +30,7 @@ _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
 def _exchange_uri_is_file_location(uri: object) -> bool:
-    """Exchange URIt opaque file-locationt verifyt."""
+    """Return whether a value is an opaque Exchange file-location URI."""
     return (
         isinstance(uri, str)
         and uri.startswith("exchange://")
@@ -39,12 +39,12 @@ def _exchange_uri_is_file_location(uri: object) -> bool:
 
 
 def _headers(token: str) -> dict[str, str]:
-    """Bearer auth header t t."""
+    """Return a Bearer authorization header."""
     return {"Authorization": f"Bearer {token}"}
 
 
 def _ws_url(http_url: str) -> str:
-    """HTTP URL t WebSocket URL t t."""
+    """Convert an HTTP URL to its WebSocket equivalent."""
     if http_url.startswith("http://"):
         return "ws://" + http_url.removeprefix("http://")
     if http_url.startswith("https://"):
@@ -56,7 +56,7 @@ def _issue_ticket(
     public_api_client: azentspublicclient.ApiClient,
     access_token: str,
 ) -> str:
-    """WebSocket ticket t t."""
+    """Issue a WebSocket connection ticket."""
     return (
         ChatV1Api(public_api_client)
         .chat_v1_issue_ws_ticket(_headers=_headers(access_token))
@@ -71,20 +71,20 @@ def _connect_existing_chat(
     access_token: str,
     session_id: str,
 ) -> Connection:
-    """t chat session WebSocket t connectiont."""
+    """Connect to an existing chat session over WebSocket."""
     ticket = _issue_ticket(public_api_client, access_token)
     ws_uri = f"{_ws_url(public_url)}/chat/v1/sessions/{session_id}?ticket={ticket}"
     return ws_connect(ws_uri)
 
 
 def _recv_event(ws: Connection, *, timeout: float = 10) -> dict[str, object]:
-    """WebSocket event t JSON object t t."""
+    """Receive one WebSocket event as a JSON object."""
     raw = ws.recv(timeout=timeout)
     return _object_item(json.loads(raw), label="WebSocket payload")
 
 
 def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
-    """JSON object t verifyt returnt."""
+    """Validate and return a JSON object."""
     try:
         return _JSON_OBJECT.validate_python(raw_item)
     except ValidationError as exc:
@@ -92,7 +92,7 @@ def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
 
 
 def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """JSON list[object] t verifyt returnt."""
+    """Validate and return a list of JSON objects."""
     try:
         return _JSON_OBJECT_LIST.validate_python(raw_items)
     except ValidationError as exc:
@@ -105,7 +105,7 @@ def _wait_for_user_input(
     *,
     timeout: float = 90,
 ) -> dict[str, object]:
-    """t content t durable event user_message event t t."""
+    """Wait for a durable user-message event with the expected content."""
     deadline = time.monotonic() + timeout
     observed: list[object] = []
     while time.monotonic() < deadline:
@@ -131,7 +131,7 @@ def _wait_for_user_input(
 
 
 def _content_text(content: object) -> str:
-    """event content string t part arrayt text bodyt returnt."""
+    """Return text from either string or structured event content."""
     if isinstance(content, str):
         return content
     try:
@@ -148,7 +148,7 @@ def _content_text(content: object) -> str:
 
 
 def _assert_file_payload_is_blob_free(payload: object, *, label: str) -> None:
-    """file payload t raw provider blob t t t verifyt."""
+    """Assert that a file payload contains no raw provider blob data."""
     encoded = json.dumps(payload, ensure_ascii=False)
     forbidden = [
         "file_data",
@@ -163,12 +163,12 @@ def _assert_file_payload_is_blob_free(payload: object, *, label: str) -> None:
 
 
 def _mock_openai_journal_payload(mock_openai_url: str) -> object:
-    """AIMock journal JSON payload t returnt."""
+    """Return the AIMock request journal payload."""
     return requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
 
 
 def _reset_mock_openai(mock_openai_url: str) -> None:
-    """AIMock request journal t initializet."""
+    """Reset the AIMock request journal."""
     requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
 
 
@@ -176,7 +176,7 @@ def _wait_for_upload_journal(
     mock_openai_url: str,
     timeout: float = 90,
 ) -> str:
-    """AIMock journal t upload t model inputt t t t."""
+    """Wait until the AIMock journal contains the uploaded model input."""
     deadline = time.monotonic() + timeout
     last_journal = ""
     while time.monotonic() < deadline:
@@ -199,7 +199,7 @@ def _list_history(
     token: str,
     session_id: str,
 ) -> dict[str, object]:
-    """REST history event page t fetcht."""
+    """Fetch one REST history event page."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
         headers=_headers(token),
@@ -210,7 +210,7 @@ def _list_history(
 
 
 def _message_items(payload: dict[str, object]) -> list[dict[str, object]]:
-    """REST history item listt verifyt returnt."""
+    """Return user and assistant message items from REST history."""
     events = _object_items(payload.get("items"), label="REST history items")
     items: list[dict[str, object]] = []
     for event in events:
@@ -231,7 +231,7 @@ def _message_with_content(
     payload: dict[str, object],
     content: str,
 ) -> dict[str, object]:
-    """REST history t t content t t message t t."""
+    """Return the REST history message with the expected content."""
     for item in _message_items(payload):
         if item.get("content") == content:
             return item
@@ -246,7 +246,7 @@ def _wait_for_rest_message(
     *,
     timeout: float = 90,
 ) -> dict[str, object]:
-    """REST history t t content t t t t."""
+    """Wait for REST history to contain the expected message."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -265,7 +265,7 @@ def _wait_for_rest_message(
 
 
 class TestFileUpload:
-    """file upload API test."""
+    """Test the file upload API."""
 
     def test_upload_file(
         self,
@@ -273,7 +273,7 @@ class TestFileUpload:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """file upload success t URI, media_type, sizet returnt."""
+        """A successful file upload returns URI, media type, and size."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -363,7 +363,7 @@ class TestFileUpload:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """20MB t file upload t 413t returnt."""
+        """Uploading a file larger than 20 MB returns 413."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -390,7 +390,7 @@ class TestFileUpload:
 
 @pytest.mark.skip(reason="Session-scoped Exchange file listing API is not available.")
 class TestExchangeFiles:
-    """Exchange file API test."""
+    """Test the Exchange file API."""
 
     def test_list_exchange_files_empty(
         self,
@@ -398,7 +398,7 @@ class TestExchangeFiles:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """t sessiont t items listt returnt."""
+        """A session without files returns an empty list."""
         token, session_id, _ = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -418,7 +418,7 @@ class TestExchangeFiles:
         self,
         azents_public_server_url: str,
     ) -> None:
-        """auth t Exchange file list fetch t 401t returnt."""
+        """Listing Exchange files without authentication returns 401."""
         response = requests.get(
             f"{azents_public_server_url}/chat/v1/sessions/{unique()}/exchange-files",
             timeout=10,
@@ -431,7 +431,7 @@ class TestExchangeFiles:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """t usert Exchange file list fetch t 403t returnt."""
+        """Listing another user's Exchange files returns 403."""
         _, session_id = create_chat_session(
             public_api_client, admin_api_client, azents_public_server_url
         )
@@ -451,7 +451,7 @@ class TestExchangeFiles:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """file upload t Exchange file listt t checkt."""
+        """A file upload appears in the Exchange file list."""
         token, session_id, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -485,7 +485,7 @@ class TestExchangeFiles:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """file upload t Exchange filet downloadt t t checkt."""
+        """An uploaded Exchange file can be downloaded."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -514,7 +514,7 @@ class TestExchangeFiles:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """file upload t Exchange filet deletet t t checkt."""
+        """An uploaded Exchange file can be deleted."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -539,7 +539,7 @@ class TestExchangeFiles:
 
 
 class TestUploadMessagePath:
-    """upload filet chat t t patht verifyt."""
+    """Verify uploaded files through the chat message path."""
 
     def test_image_and_file_uploads_reach_model_input(
         self,
@@ -549,7 +549,7 @@ class TestUploadMessagePath:
         azents_engine_worker_container: object,
         mock_openai_url: str,
     ) -> None:
-        """t file t user path t uploadt model inputt t."""
+        """Image and file uploads reach model input through the user path."""
         del azents_engine_worker_container
         _reset_mock_openai(mock_openai_url)
         token, session_id, agent_id = create_chat_session_with_agent(

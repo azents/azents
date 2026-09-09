@@ -1,1 +1,1 @@
-"""E2E test t t."""
+"""Shared support for E2E tests."""
