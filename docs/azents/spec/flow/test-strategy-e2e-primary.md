@@ -11,6 +11,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - .github/workflows/snapshot.yaml
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -25,8 +26,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-07
-spec_version: 44
+last_verified_at: 2026-09-08
+spec_version: 48
 ---
 
 # E2E Primary Test Strategy
@@ -162,6 +163,24 @@ Always-on required CI does not depend on external credentials.
   improvement by removing tests, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
+- Required lanes resolve immutable snapshot images before enabling local Buildx.
+  Unchanged images may reuse the pull request base, the direct `main` predecessor, or
+  a compatible first-parent ancestor. On `main` push and explicit workflow dispatch,
+  a changed image may additionally reuse an already-published snapshot tagged for the
+  exact current commit SHA. Snapshot availability is never a workflow dependency or
+  wait condition: a missing, late, cancelled, or failed publication immediately
+  preserves the existing local Buildx/cache build path. Snapshot pulls run in
+  parallel, and lane observability records attempted sources, selected commit SHAs,
+  timing, and fallback state.
+- Snapshot workflow dispatch keeps downstream publication enabled by default for
+  compatibility. An explicit `dispatch_downstream: false` manual input builds and
+  publishes immutable images without invoking the downstream deployment, allowing
+  isolated same-SHA CI measurement without mutating live infrastructure.
+- CI workflow dispatch keeps automatic image-change detection by default. Its
+  opt-in `force_current_snapshots: true` diagnostic treats all required images as
+  changed so an already-published exact-current-SHA set and the unchanged local
+  fallback can be measured repeatedly without altering pull request or `main` push
+  behavior.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
@@ -181,10 +200,13 @@ Always-on required CI does not depend on external credentials.
   Deterministic External Channel collection uses
   `test_external_channel_management.py` for Slack HTTP, connection management, and
   provider-native progress; `test_external_channel_slack_socket.py` for Socket Mode;
-  `test_external_channel_discord_provisioning.py` for location wait and durable
-  conversation provisioning; and `test_external_channel_discord_journeys.py` for
-  activation, commands, components, and lifecycle. These files collect reusable
-  implementations from `external_channel_scenarios.py`.
+  `test_external_channel_discord_gateway_binding.py` for Gateway location wait and
+  binding; `test_external_channel_discord_configured_provisioning.py` for durable
+  conversation provisioning; `test_external_channel_discord_unmentioned_activity.py`
+  for unmentioned activity and typing recovery; and
+  `test_external_channel_discord_journeys.py` for activation, commands, components,
+  and lifecycle. These files collect reusable implementations from
+  `external_channel_scenarios.py`.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
@@ -363,6 +385,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-08** (spec_version 48) — Split the Discord provisioning collector into
+  independently planned Gateway binding, configured provisioning, and unmentioned
+  activity journeys while preserving historical timing projection and coverage.
 - **2026-09-02** (spec_version 43) — Added two focused real-Docker Runtime
   Terminal journeys for protocol behavior and Runtime lifecycle authority while
   retaining policy and Web presentation coverage in deterministic lower layers.

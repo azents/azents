@@ -172,6 +172,11 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
                 ),
                 (
                     "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers",
+                    13.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
                     "::test_discord_single_activation_and_interaction_journey[param]",
                     10.0,
                 ),
@@ -193,8 +198,150 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
     assert load_file_timings(timings_path) == {
         "src/tests/required/public/test_external_channel_management.py": 21.0,
         "src/tests/required/public/test_external_channel_slack_socket.py": 7.0,
-        "src/tests/required/public/test_external_channel_discord_provisioning.py": (
-            17.0
-        ),
+        (
+            "src/tests/required/public/test_external_channel_discord_gateway_binding.py"
+        ): 8.0,
+        (
+            "src/tests/required/public/"
+            "test_external_channel_discord_configured_provisioning.py"
+        ): 9.0,
+        (
+            "src/tests/required/public/"
+            "test_external_channel_discord_unmentioned_activity.py"
+        ): 13.0,
         "src/tests/required/public/test_external_channel_discord_journeys.py": 33.0,
     }
+
+
+def test_load_file_timings_projects_previous_discord_wrapper(tmp_path: Path) -> None:
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": (
+                        "src/tests/required/public/"
+                        "test_external_channel_discord_provisioning.py"
+                        f"::{test_name}"
+                    ),
+                    "duration_seconds": duration,
+                }
+            )
+            for test_name, duration in (
+                (
+                    "test_discord_configured_message_durably_provisions_conversation",
+                    10.0,
+                ),
+                (
+                    "test_discord_gateway_message_waits_for_location_then_binds",
+                    9.0,
+                ),
+                (
+                    "test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers",
+                    8.0,
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_file_timings(timings_path) == {
+        (
+            "src/tests/required/public/"
+            "test_external_channel_discord_configured_provisioning.py"
+        ): 10.0,
+        (
+            "src/tests/required/public/test_external_channel_discord_gateway_binding.py"
+        ): 9.0,
+        (
+            "src/tests/required/public/"
+            "test_external_channel_discord_unmentioned_activity.py"
+        ): 8.0,
+    }
+
+
+def test_plan_suites_assigns_split_discord_files_exactly_once(
+    tmp_path: Path,
+) -> None:
+    tests_root = tmp_path / "tests"
+    suite_root = _write_suite(tests_root, "required", lanes=4)
+    split_files = (
+        "test_external_channel_discord_configured_provisioning.py",
+        "test_external_channel_discord_gateway_binding.py",
+        "test_external_channel_discord_unmentioned_activity.py",
+    )
+    other_files = ("test_alpha.py", "test_beta.py", "test_gamma.py")
+    for name in (*split_files, *other_files):
+        (suite_root / name).write_text(
+            f"def {name.removesuffix('.py')}():\n    pass\n",
+            encoding="utf-8",
+        )
+    timings_path = tmp_path / "timings.jsonl"
+    timing_nodes = (
+        (
+            "test_external_channel_discord_provisioning.py"
+            "::test_discord_configured_message_durably_provisions_conversation",
+            10.0,
+        ),
+        (
+            "test_external_channel_discord_provisioning.py"
+            "::test_discord_gateway_message_waits_for_location_then_binds",
+            9.0,
+        ),
+        (
+            "test_external_channel_discord_provisioning.py"
+            "::test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers",
+            8.0,
+        ),
+        ("test_alpha.py::test_alpha", 7.0),
+        ("test_beta.py::test_beta", 6.0),
+        ("test_gamma.py::test_gamma", 5.0),
+    )
+    timings_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": f"src/tests/required/public/{node_id}",
+                    "duration_seconds": duration,
+                }
+            )
+            for node_id, duration in timing_nodes
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "plan"
+
+    matrix = plan_suites(
+        tests_root=tests_root,
+        enabled_suites={"required"},
+        timings_path=timings_path,
+        output_dir=output_dir,
+    )
+
+    lane_files = [
+        [
+            Path(line).name
+            for line in (output_dir / lane["plan_file"])
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        for lane in matrix["include"]
+    ]
+    assert lane_files == [
+        ["test_external_channel_discord_configured_provisioning.py"],
+        ["test_external_channel_discord_gateway_binding.py"],
+        [
+            "test_external_channel_discord_unmentioned_activity.py",
+            "test_gamma.py",
+        ],
+        ["test_alpha.py", "test_beta.py"],
+    ]
+    coverage = json.loads((output_dir / "coverage.json").read_text(encoding="utf-8"))
+    covered_files = [Path(path).name for path in coverage["required"]]
+    assigned_files = [name for lane in lane_files for name in lane]
+    assert sorted(assigned_files) == sorted(covered_files)
+    assert len(assigned_files) == len(set(assigned_files))

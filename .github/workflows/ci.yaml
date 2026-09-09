@@ -6,6 +6,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      force_current_snapshots:
+        description: Exercise exact-current-SHA required image selection
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -384,6 +390,7 @@ jobs:
           PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           base_sha=''
+          current_snapshot_sha=''
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               base_sha="$PR_BASE_SHA"
@@ -391,10 +398,12 @@ jobs:
             push)
               if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
                 base_sha="$PUSH_BASE_SHA"
+                current_snapshot_sha="$GITHUB_SHA"
               fi
               ;;
             workflow_dispatch)
               base_sha="$(git rev-parse HEAD^)"
+              current_snapshot_sha="$GITHUB_SHA"
               ;;
           esac
           if [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
@@ -403,14 +412,17 @@ jobs:
           else
             printf 'base_sha=\n' >> "$GITHUB_OUTPUT"
           fi
-      - name: Prepare direct predecessor E2E snapshot images
+          printf 'current_snapshot_sha=%s\n' "$current_snapshot_sha" \
+            >> "$GITHUB_OUTPUT"
+      - name: Prepare direct E2E snapshot images
         id: snapshot_images_direct
         if: steps.snapshot_base.outputs.base_sha != ''
         env:
           AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
-          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
-          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
-          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
+          AZENTS_E2E_CURRENT_SHA: ${{ steps.snapshot_base.outputs.current_snapshot_sha }}
+          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_server_image }}
+          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_runner_image }}
+          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_provider_docker_image }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"

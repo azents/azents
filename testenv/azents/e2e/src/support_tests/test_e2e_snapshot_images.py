@@ -1,12 +1,18 @@
-"""Tests for required E2E predecessor-snapshot image preparation."""
+"""Tests for required E2E immutable snapshot image preparation."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 from collections.abc import Sequence
+from pathlib import Path
 
-from support.e2e_snapshot_images import prepare_required_snapshot_images
+from support.e2e_snapshot_images import (
+    SnapshotPreparation,
+    _write_observability,
+    prepare_required_snapshot_images,
+)
 
 _BASE_SHA = "a" * 40
 _ANCESTOR_SHA = "b" * 40
@@ -53,6 +59,7 @@ def test_prepares_all_unchanged_images() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=_unchanged_environment(),
@@ -82,6 +89,7 @@ def test_builds_changed_image_and_prepares_unchanged_images() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=environment,
@@ -105,6 +113,7 @@ def test_pull_failure_falls_back_to_build() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=_unchanged_environment(),
@@ -133,6 +142,7 @@ def test_missing_base_snapshot_uses_compatible_ancestor() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=_unchanged_environment(),
@@ -167,6 +177,7 @@ def test_fallback_preserves_directly_prepared_images() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_ANCESTOR_SHA,),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=environment,
@@ -202,6 +213,7 @@ def test_incompatible_ancestor_falls_back_to_build() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=_unchanged_environment(),
@@ -226,6 +238,7 @@ def test_login_failure_falls_back_without_pull_attempts() -> None:
     result = prepare_required_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
+        current_sha=None,
         github_token="token",
         github_actor="github-actions",
         environment=_unchanged_environment(),
@@ -237,3 +250,99 @@ def test_login_failure_falls_back_without_pull_attempts() -> None:
     assert result.environment == {}
     assert result.pulls == ()
     assert len(runner.commands) == 1
+
+
+def test_prepares_changed_image_from_exact_current_snapshot() -> None:
+    runner = FakeCommandRunner(frozenset())
+    environment = _unchanged_environment()
+    environment["AZENTS_E2E_SERVER_IMAGE_CHANGED"] = "true"
+
+    result = prepare_required_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=_ANCESTOR_SHA,
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert result.all_images_prepared
+    assert not result.fallback_required
+    server_pull = next(pull for pull in result.pulls if pull.image == "azents-server")
+    assert server_pull.completed
+    assert server_pull.candidate_sha == _ANCESTOR_SHA
+    assert server_pull.attempted_sources == (
+        f"ghcr.io/azents/azents-server-snapshot:sha-{_ANCESTOR_SHA}",
+    )
+    assert not any(
+        command[0][:3] == ("git", "diff", "--quiet")
+        and "azents.Dockerfile" in command[0]
+        for command in runner.commands
+    )
+
+
+def test_missing_current_snapshot_builds_changed_image_locally() -> None:
+    runner = FakeCommandRunner(
+        frozenset({f"azents-server-snapshot:sha-{_ANCESTOR_SHA}"})
+    )
+    environment = _unchanged_environment()
+    environment["AZENTS_E2E_SERVER_IMAGE_CHANGED"] = "true"
+
+    result = prepare_required_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=_ANCESTOR_SHA,
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert not result.all_images_prepared
+    assert not result.fallback_required
+    assert "AZENTS_E2E_SERVER_IMAGE" not in result.environment
+    server_pull = next(pull for pull in result.pulls if pull.image == "azents-server")
+    assert not server_pull.completed
+    assert server_pull.attempted_sources == (
+        f"ghcr.io/azents/azents-server-snapshot:sha-{_ANCESTOR_SHA}",
+    )
+
+
+def test_fallback_observability_preserves_current_snapshot_sha(
+    tmp_path: Path,
+) -> None:
+    direct_preparation = SnapshotPreparation(
+        environment={},
+        pulls=(),
+        login_completed=True,
+        all_images_prepared=False,
+        fallback_required=True,
+    )
+    _write_observability(
+        tmp_path,
+        direct_preparation,
+        _BASE_SHA,
+        (_BASE_SHA,),
+        _ANCESTOR_SHA,
+        append=False,
+    )
+
+    fallback_preparation = SnapshotPreparation(
+        environment={},
+        pulls=(),
+        login_completed=True,
+        all_images_prepared=False,
+        fallback_required=False,
+    )
+    _write_observability(
+        tmp_path,
+        fallback_preparation,
+        _BASE_SHA,
+        (_ANCESTOR_SHA,),
+        None,
+        append=True,
+    )
+
+    status = json.loads((tmp_path / "snapshot-image-setup.json").read_text())
+    assert status["current_sha"] == _ANCESTOR_SHA
