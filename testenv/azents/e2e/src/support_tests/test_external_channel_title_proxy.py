@@ -40,6 +40,13 @@ def test_discord_title_request_match_is_specific() -> None:
     )
 
 
+def test_discord_title_response_preserves_the_existing_structured_fixture() -> None:
+    """Return the same structured title without an upstream proxy round trip."""
+    assert json.loads(proxy._EXTERNAL_CHANNEL_DISCORD_TITLE_RESPONSE) == {
+        "title": "Upload session initialized."
+    }
+
+
 def test_slack_response_mode_title_request_match_is_specific() -> None:
     """Only the response-mode title prompt uses the local deterministic response."""
     request: dict[str, object] = {

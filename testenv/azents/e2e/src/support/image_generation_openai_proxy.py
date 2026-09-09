@@ -180,6 +180,7 @@ _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING = re.compile(r"[A-Za-z0-9_-]{1,256}
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_DISCORD_TITLE_MARKER = "Private Discord Gateway invocation"
+_EXTERNAL_CHANNEL_DISCORD_TITLE_RESPONSE = '{"title":"Upload session initialized."}'
 _EXTERNAL_CHANNEL_SLACK_RESPONSE_MODE_TITLE_INPUT = (
     "Create a title from this request:\nInitial response-mode invocation"
 )
@@ -1253,15 +1254,24 @@ class _Handler(BaseHTTPRequestHandler):
                 response_id="resp_external_channel_slack_response_mode_title",
             )
             return
-        if (
-            is_external_channel_discord_title_request(request)
-            and not wait_for_external_channel_discord_title_barrier()
-        ):
-            self._write_json(
-                503,
-                {"error": {"message": "Discord title E2E barrier was not reached."}},
-            )
-            return
+        if is_external_channel_discord_title_request(request):
+            if not wait_for_external_channel_discord_title_barrier():
+                self._write_json(
+                    503,
+                    {
+                        "error": {
+                            "message": "Discord title E2E barrier was not reached."
+                        }
+                    },
+                )
+                return
+            if self.path == "/v1/responses":
+                self._write_text_response(
+                    request,
+                    _EXTERNAL_CHANNEL_DISCORD_TITLE_RESPONSE,
+                    response_id="resp_external_channel_discord_title",
+                )
+                return
         captured_prompts = _CAPTURED_MODEL_PROMPTS | {
             _SEMANTIC_PROMPT,
             *_SEMANTIC_FOLLOW_UP_RESPONSES,
