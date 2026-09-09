@@ -4405,7 +4405,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     ],
 ) -> None:
     """Gate one Gateway mention until a signed Discord location selection."""
-    del azents_engine_worker_container
     application_id = "100000000000000004"
     guild_id = "200000000000000004"
     bot_user_id = "300000000000000004"
@@ -4715,17 +4714,51 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 return generated_detail
             return None
 
-        generated_detail = _required(
-            wait_until(
-                generated_title_projection,
-                timeout=30,
-                interval=0.2,
-                message=(
-                    "Discord Session title generation and one-shot thread rename "
-                    "did not complete"
-                ),
+        try:
+            generated_detail = _required(
+                wait_until(
+                    generated_title_projection,
+                    timeout=30,
+                    interval=0.2,
+                    message=(
+                        "Discord Session title generation and one-shot thread rename "
+                        "did not complete"
+                    ),
+                )
             )
-        )
+        except TimeoutError as error:
+            final_detail = chat_api.chat_v1_get_agent_session(
+                agent_id=agent_id,
+                session_id=session.id,
+                _headers=headers,
+            )
+            final_counts = _int_dict(
+                _discord_provider_state(discord_provider_fake_url)["request_counts"]
+            )
+            worker_log_value = azents_engine_worker_container.logs(
+                stdout=True,
+                stderr=True,
+                tail=200,
+            )
+            worker_logs = (
+                worker_log_value.decode(errors="replace")
+                if isinstance(worker_log_value, bytes)
+                else worker_log_value
+            )
+            title_log_lines = [
+                line for line in worker_logs.splitlines() if "title" in line.lower()
+            ][-20:]
+            title_source = (
+                final_detail.title_source.value
+                if final_detail.title_source is not None
+                else None
+            )
+            pytest.fail(
+                f"{error}; session_title={final_detail.title!r}; "
+                f"session_title_source={title_source!r}; "
+                f"provider_request_counts={final_counts!r}; "
+                f"engine_title_logs={title_log_lines!r}"
+            )
         requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
             timeout=5,
