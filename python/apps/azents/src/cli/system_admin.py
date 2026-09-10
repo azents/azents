@@ -7,9 +7,9 @@ import typer
 from azcommon.logging import configure_logging_for_runtime
 from azcommon.result import Failure, Success
 
-from azents.app import run_with_container
 from azents.core.config import Config
 from azents.core.enums import SystemUserRole
+from azents.process_lifecycle import run_with_container
 from azents.repos.system_user_role.data import SystemUserNotFound
 from azents.services.system_user_role.service import SystemUserRoleService
 

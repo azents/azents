@@ -23,8 +23,8 @@ from dotenv import load_dotenv
 from ptpython.repl import embed
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.app import run_with_container
 from azents.core.config import Config, Settings
+from azents.process_lifecycle import run_with_container
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.base import RDBModel
 

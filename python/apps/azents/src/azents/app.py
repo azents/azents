@@ -15,22 +15,14 @@ from starlette.types import Lifespan
 from azents.api import admin, internal, public, testenv
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
-from azents.core.deps import get_appctx
-from azents.job_runtime.deps import get_job_runtime
-from azents.runtime import deps as runtime_deps
+from azents.process_lifecycle import create_container, preload_process_services
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
 from azents.services.runtime_provider_bootstrap.runner import (
     RuntimeProviderBootstrapRunner,
 )
-from azents.services.runtime_terminal.invalidation import (
-    get_runtime_terminal_invalidation_publisher,
-)
 from azents.services.system_bootstrap.service import SystemBootstrapService
-from azents.services.terminal_policy.invalidation import (
-    get_terminal_policy_invalidation_publisher,
-)
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
 
@@ -207,7 +199,7 @@ def _create_fastapi_instance(
     owns_resources = appctx is None
     if appctx is None:
         appctx = AppContext(config)
-        container = _create_container(appctx)
+        container = create_container(appctx)
     elif appctx.config is not config:
         raise ValueError("Externally owned AppContext must use the app Config.")
     assert container is not None
@@ -234,20 +226,6 @@ def _create_fastapi_instance(
     return app
 
 
-@asynccontextmanager
-async def run_with_container(config: Config) -> AsyncIterator[di.Container]:
-    """DI container context manager configured by Config.
-
-    Use this when running a non-FastAPI application, such as a CLI tool.
-    """
-    async with (
-        AppContext(config) as ctx,
-        _create_container(ctx) as container,
-    ):
-        await _preload_process_services(container)
-        yield container
-
-
 def _create_fastapi_lifespan(
     appctx: AppContext[Config],
     container: di.Container,
@@ -264,7 +242,7 @@ def _create_fastapi_lifespan(
             if owns_resources:
                 await stack.enter_async_context(appctx)
                 await stack.enter_async_context(container)
-            await _preload_process_services(container)
+            await preload_process_services(container)
             if owns_resources:
                 await stack.enter_async_context(_run_ingress_recovery(container))
             if initialize_system_bootstrap:
@@ -296,29 +274,3 @@ async def _run_ingress_recovery(
     finally:
         shutdown_event.set()
         await task
-
-
-async def _preload_process_services(container: di.Container) -> None:
-    """Resolve process singletons whose configuration must fail at startup."""
-    await container.solve(get_job_runtime)
-
-
-def _create_dependency_overrides(appctx: AppContext[Config]) -> di.DependencyOverrides:
-    """Create dependency overrides."""
-    return {
-        get_appctx: lambda: appctx,
-        get_runtime_terminal_invalidation_publisher: (
-            runtime_deps.get_runtime_terminal_invalidation_publisher
-        ),
-        get_terminal_policy_invalidation_publisher: (
-            runtime_deps.get_runtime_terminal_policy_invalidation_publisher
-        ),
-    }
-
-
-def _create_container(
-    appctx: AppContext[Config],
-) -> di.Container:
-    """Create the DI container."""
-    overrides = _create_dependency_overrides(appctx)
-    return di.Container(dependency_overrides=overrides)

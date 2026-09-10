@@ -884,16 +884,12 @@ def test_runtime_terminal_runtime_lifecycle_priority(
         message="Explicit Runtime Start did not restore Terminal authority",
     )
     assert restarted.lifecycle is not None
-    _prepare_terminal_session(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-    )
     resumed = _TerminalSocket.connect(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
         origin=_MAIN_WEB_ORIGIN,
     )
+    assert resumed.accepted.terminal_id != active.accepted.terminal_id
     resumed.command("printf '__REST''ARTED__yes__'", "RESTARTED_DONE")
     resumed.terminate()

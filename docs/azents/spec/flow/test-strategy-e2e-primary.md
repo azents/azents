@@ -12,6 +12,7 @@ code_paths:
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
   - .github/workflows/snapshot.yaml
+  - azents-e2e-server-overlay.Dockerfile
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -27,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 50
+spec_version: 51
 ---
 
 # E2E Primary Test Strategy
@@ -178,7 +179,18 @@ Always-on required CI does not depend on external credentials.
   wait condition: a missing, late, cancelled, or failed publication immediately
   preserves the existing local Buildx/cache build path. Snapshot pulls run in
   parallel, and lane observability records attempted sources, selected commit SHAs,
-  timing, and fallback state.
+  timing, and fallback state. For pull requests where only `python/apps/azents`
+  runtime content changes while the Server Dockerfile, Docker context rules,
+  dependency manifest and lock, and installed shared libraries remain identical, the
+  lane may pull a dependency-compatible predecessor or bounded ancestor Server
+  snapshot as a source-overlay base. It removes the complete predecessor application
+  directory before copying the current-worktree application directory, so changed and
+  deleted source both match the tested revision. The overlay build neither imports nor
+  exports the full-image remote cache. Dependency, lockfile, Dockerfile,
+  Docker-context, or installed shared-library changes still use the full
+  current-worktree Server build, as does any unavailable or incompatible overlay
+  base. Snapshot and image-build artifacts distinguish final-image pulls,
+  source-overlay-base pulls, full builds, and source-overlay builds.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
@@ -396,6 +408,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-10** (spec_version 51) — Added dependency-compatible Server snapshot
+  source overlays for application-source-only pull request changes, with complete
+  application replacement, exact-current-snapshot precedence, deterministic
+  full-build fallback, and explicit build-mode observability.
 - **2026-09-10** (spec_version 50) — Added protocol-observable Discord automatic-title
   synchronization and the complete testenv-only Gateway timing override while
   preserving production defaults and journey assertions.

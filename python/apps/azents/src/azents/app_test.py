@@ -6,17 +6,13 @@ from unittest.mock import MagicMock
 import pytest
 from azcommon.logging import RuntimeEnvironment
 
-from azents.app import (
-    _create_container,
-    create_public_api_app,
-    create_testenv_api_app,
-    run_with_container,
-)
+from azents.app import create_public_api_app, create_testenv_api_app
 from azents.core.enums import JobRuntimeBackend
 from azents.job_runtime.deps import (
     JobRuntimeBackendUnavailableError,
     get_job_runtime,
 )
+from azents.process_lifecycle import create_container, run_with_container
 from azents.utils.appctx import AppContext
 
 
@@ -58,7 +54,7 @@ async def test_external_fastapi_lifespan_keeps_shared_runtime_owned_by_root() ->
     """A co-located API lifespan does not close the devserver AppContext."""
     config = cast(Any, MagicMock(job_runtime_backend=JobRuntimeBackend.LOCAL))
     appctx = AppContext(config)
-    container = _create_container(appctx)
+    container = create_container(appctx)
 
     async with appctx, container:
         runtime = await container.solve(get_job_runtime)
