@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
+from azents.core.enums import LLMCatalogPurpose
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -182,5 +183,6 @@ async def test_connected_device_flow_creates_integration_catalog(
         rdb_session,
         integration_id=connected.value.integration.id,
         workspace_id=workspace_id,
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
     assert catalog is not None

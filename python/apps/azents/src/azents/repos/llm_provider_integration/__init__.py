@@ -77,6 +77,7 @@ class LLMProviderIntegrationRepository:
             encrypted_credentials=encrypted,
             config=config_dict,
             enabled=create.enabled,
+            catalog_configuration_version=1,
         )
         session.add(rdb_integration)
         await session.flush()
@@ -183,6 +184,18 @@ class LLMProviderIntegrationRepository:
             db_values["config"] = (
                 config.model_dump(mode="json") if config is not None else None
             )
+        if {"secrets", "config"} & update.keys():
+            db_values["catalog_configuration_version"] = (
+                RDBLLMProviderIntegration.catalog_configuration_version + 1
+            )
+        elif "enabled" in update:
+            db_values["catalog_configuration_version"] = sa.case(
+                (
+                    RDBLLMProviderIntegration.enabled != update["enabled"],
+                    RDBLLMProviderIntegration.catalog_configuration_version + 1,
+                ),
+                else_=RDBLLMProviderIntegration.catalog_configuration_version,
+            )
 
         result = await session.execute(
             sa.update(RDBLLMProviderIntegration)
@@ -221,6 +234,7 @@ class LLMProviderIntegrationRepository:
             name=rdb.name,
             config=config,
             enabled=rdb.enabled,
+            catalog_configuration_version=rdb.catalog_configuration_version,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
@@ -244,6 +258,7 @@ class LLMProviderIntegrationRepository:
             name=rdb.name,
             config=config,
             enabled=rdb.enabled,
+            catalog_configuration_version=rdb.catalog_configuration_version,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
             secrets=secrets,

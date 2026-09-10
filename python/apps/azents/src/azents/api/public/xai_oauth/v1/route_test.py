@@ -53,6 +53,7 @@ def _integration() -> LLMProviderIntegration:
         enabled=True,
         created_at=now,
         updated_at=now,
+        catalog_configuration_version=1,
     )
 
 

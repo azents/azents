@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMCatalogLowererTarget, LLMProvider
+from azents.core.enums import LLMCatalogLowererTarget, LLMCatalogPurpose, LLMProvider
 from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
     XaiOAuthConnectionStatus,
@@ -316,6 +316,7 @@ class XaiOAuthService:
                         integration_id=integration.id,
                         provider=integration.provider,
                         lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                        purpose=LLMCatalogPurpose.CONVERSATION,
                     )
                 return Success(XaiOAuthExchangeOutput(integration=integration))
             case Failure(error):

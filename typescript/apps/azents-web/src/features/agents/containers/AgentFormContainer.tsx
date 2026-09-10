@@ -13,6 +13,7 @@ import {
 } from "../model-selection";
 import { agentFormSchema } from "../schemas";
 import { useAgentFormTranslations } from "./useAgentFormTranslations";
+import { useImageGenerationCatalogs } from "./useImageGenerationCatalogs";
 import type { AgentFormProps } from "../components/AgentForm";
 import type { AgentFormValues } from "../schemas";
 
@@ -153,6 +154,11 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
     }
   }, [form, form.values.reasoning_effort, selectedModelEffortLevels]);
 
+  const imageCatalogs = useImageGenerationCatalogs(
+    props.handle,
+    form.values.selectable_model_options,
+  );
+
   return (
     <AgentForm
       {...props}
@@ -161,6 +167,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       hasSubmitAttempted={hasSubmitAttempted}
       onSubmitAttempted={() => setHasSubmitAttempted(true)}
       selectedModelEffortLevels={selectedModelEffortLevels}
+      imageGenerationCatalogStates={imageCatalogs.states}
+      canSyncImageCatalog={props.canManageIntegrations}
+      onSyncImageCatalog={imageCatalogs.onSync}
     />
   );
 }

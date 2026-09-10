@@ -13,6 +13,7 @@ from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
     SelectableModelOptionInput,
+    SelectableModelSettings,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -21,6 +22,7 @@ from azents.repos.workspace_model_settings.data import (
     WorkspaceModelSettings,
     WorkspaceModelSettingsUpdate,
 )
+from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_options import (
     NormalizedSelectableModelOptions,
@@ -46,6 +48,9 @@ class WorkspaceModelSettingsService:
         WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
+    image_generation_catalog_service: Annotated[
+        ImageGenerationCatalogService, Depends()
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -223,11 +228,22 @@ class WorkspaceModelSettingsService:
                 option_input.model_selection,
             )
 
+        async def validate_image_generation_config(
+            selection: AgentModelSelection,
+            settings: SelectableModelSettings,
+        ) -> list[str]:
+            return await self.image_generation_catalog_service.validate_option(
+                workspace_id=workspace_id,
+                selection=selection,
+                settings=settings,
+            )
+
         result = await normalize_selectable_model_options(
             option_inputs=option_inputs,
             main_model_label=main_model_label,
             lightweight_model_label=lightweight_model_label,
             resolve_model_selection=resolve_option,
+            validate_image_generation_config=validate_image_generation_config,
         )
         match result:
             case Success(value):

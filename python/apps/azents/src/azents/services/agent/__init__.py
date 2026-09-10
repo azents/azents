@@ -18,6 +18,7 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     ModelParameters,
     SelectableModelOptionInput,
+    SelectableModelSettings,
 )
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -46,6 +47,7 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_options import (
     NormalizedSelectableModelOptions,
@@ -162,6 +164,9 @@ class AgentService:
         WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
+    image_generation_catalog_service: Annotated[
+        ImageGenerationCatalogService, Depends()
+    ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
@@ -253,11 +258,22 @@ class AgentService:
                 option_input.model_selection,
             )
 
+        async def validate_image_generation_config(
+            selection: AgentModelSelection,
+            settings: SelectableModelSettings,
+        ) -> list[str]:
+            return await self.image_generation_catalog_service.validate_option(
+                workspace_id=workspace_id,
+                selection=selection,
+                settings=settings,
+            )
+
         result = await normalize_selectable_model_options(
             option_inputs=option_inputs,
             main_model_label=main_model_label,
             lightweight_model_label=lightweight_model_label,
             resolve_model_selection=resolve_option,
+            validate_image_generation_config=validate_image_generation_config,
         )
         match result:
             case Success(value):

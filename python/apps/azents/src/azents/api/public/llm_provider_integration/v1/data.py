@@ -20,6 +20,11 @@ from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.repos.llm_provider_integration.data import LLMProviderIntegration
+from azents.services.image_generation_catalog.data import (
+    ImageGenerationCatalogAttemptOutput,
+    ImageGenerationCatalogEntryOutput,
+    ImageGenerationModelCatalogOutput,
+)
 from azents.services.llm_catalog import (
     ModelCatalogEntryListOutput,
     ModelCatalogEntryOutput,
@@ -178,6 +183,113 @@ class ModelCatalogSyncResponse(BaseModel):
             failure_code=summary.failure_code,
             failure_message=summary.failure_message,
             action_hint=summary.action_hint,
+        )
+
+
+class ImageGenerationCatalogEntryResponse(BaseModel):
+    """Stored image-generation catalog entry response."""
+
+    id: str
+    provider: LLMProvider
+    provider_model_identifier: str
+    display_name: str
+    description: str
+    recommendation_rank: int | None
+    lifecycle_status: str
+    visibility_status: str
+    source_metadata: dict[str, Any] | None
+    projection_metadata: dict[str, Any] | None
+
+    @classmethod
+    def convert_from(
+        cls,
+        entry: ImageGenerationCatalogEntryOutput,
+    ) -> "ImageGenerationCatalogEntryResponse":
+        """Convert service output to response model."""
+        return cls(
+            id=entry.id,
+            provider=entry.provider,
+            provider_model_identifier=entry.provider_model_identifier,
+            display_name=entry.display_name,
+            description=entry.description,
+            recommendation_rank=entry.recommendation_rank,
+            lifecycle_status=entry.lifecycle_status.value,
+            visibility_status=entry.visibility_status.value,
+            source_metadata=entry.source_metadata,
+            projection_metadata=entry.projection_metadata,
+        )
+
+
+class ImageGenerationCatalogAttemptResponse(BaseModel):
+    """Latest image-generation catalog synchronization attempt response."""
+
+    id: str
+    status: str
+    started_at: datetime.datetime
+    finished_at: datetime.datetime | None
+    failure_code: str | None
+    failure_message: str | None
+    action_hint: str | None
+    fetched_count: int
+    matched_count: int
+    skipped_count: int
+    hidden_count: int
+
+    @classmethod
+    def convert_from(
+        cls,
+        attempt: ImageGenerationCatalogAttemptOutput,
+    ) -> "ImageGenerationCatalogAttemptResponse":
+        """Convert service output to response model."""
+        return cls.model_validate(attempt.model_dump())
+
+
+class ImageGenerationModelCatalogResponse(BaseModel):
+    """Stored image-generation model availability response."""
+
+    default_available: bool
+    explicit_selection_supported: bool
+    catalog_id: str | None
+    snapshot_id: str | None
+    snapshot_configuration_version: int | None
+    current_configuration_version: int | None
+    snapshot_created_at: datetime.datetime | None
+    latest_attempt: ImageGenerationCatalogAttemptResponse | None
+    stale: bool
+    generation_current: bool
+    sync_available_at: datetime.datetime | None
+    automatic_retry_blocked: bool
+    entries: list[ImageGenerationCatalogEntryResponse]
+    total: int
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: ImageGenerationModelCatalogOutput,
+    ) -> "ImageGenerationModelCatalogResponse":
+        """Convert service output to response model."""
+        return cls(
+            default_available=data.default_available,
+            explicit_selection_supported=data.explicit_selection_supported,
+            catalog_id=data.catalog_id,
+            snapshot_id=data.snapshot_id,
+            snapshot_configuration_version=data.snapshot_configuration_version,
+            current_configuration_version=data.current_configuration_version,
+            snapshot_created_at=data.snapshot_created_at,
+            latest_attempt=(
+                ImageGenerationCatalogAttemptResponse.convert_from(data.latest_attempt)
+                if data.latest_attempt is not None
+                else None
+            ),
+            stale=data.stale,
+            generation_current=data.generation_current,
+            sync_available_at=data.sync_available_at,
+            automatic_retry_blocked=data.automatic_retry_blocked,
+            entries=[
+                ImageGenerationCatalogEntryResponse.convert_from(entry)
+                for entry in data.entries
+            ],
+            total=data.total,
         )
 
 

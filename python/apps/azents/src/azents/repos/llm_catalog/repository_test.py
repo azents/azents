@@ -8,11 +8,16 @@ from azcommon.result import Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
+from azents.core.credentials import (
+    ApiKeySecrets,
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+)
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMModelLifecycleStatus,
     LLMProvider,
 )
@@ -24,13 +29,51 @@ from azents.core.llm_catalog_sync import (
 )
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry, RDBLLMCatalogSnapshot
 from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_catalog.data import LLMCatalogEntryCreate
+from azents.repos.llm_catalog.data import (
+    ImageGenerationCatalogEntryCreate,
+    LLMCatalogEntryCreate,
+)
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.llm_provider_integration.data import (
+    LLMProviderIntegrationCreate,
+    LLMProviderIntegrationUpdate,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _create_openai_integration(
+    rdb_session: AsyncSession,
+    *,
+    handle: str,
+) -> tuple[str, LLMProviderIntegrationRepository, str]:
+    """Create an OpenAI integration and return its workspace and repositories."""
+    workspace_repository = WorkspaceRepository()
+    workspace_result = await workspace_repository.create(
+        rdb_session,
+        WorkspaceCreate(
+            name=f"{handle} workspace",
+            handle=handle,
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await workspace_repository.resolve_id(rdb_session, handle)
+    assert workspace_id is not None
+    integration_repository = LLMProviderIntegrationRepository(
+        CredentialCipher(Fernet.generate_key().decode())
+    )
+    integration = await integration_repository.create(
+        rdb_session,
+        LLMProviderIntegrationCreate(
+            workspace_id=workspace_id,
+            provider=LLMProvider.OPENAI,
+            name="OpenAI",
+            secrets=ApiKeySecrets(api_key="sk-test"),
+        ),
+    )
+    return workspace_id, integration_repository, integration.id
 
 
 async def test_replace_current_snapshot_persists_snapshot_before_entries(
@@ -42,6 +85,7 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
         rdb_session,
         provider=LLMProvider.OPENAI,
         lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
 
     snapshot_id = await repository.replace_current_snapshot(
@@ -129,6 +173,7 @@ async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
                 integration_id=integration.id,
                 provider=LLMProvider.CHATGPT_OAUTH,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=LLMCatalogPurpose.CONVERSATION,
             )
         ).id
         for _ in range(8)
@@ -139,6 +184,7 @@ async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
                 rdb_session,
                 provider=LLMProvider.OPENAI,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=LLMCatalogPurpose.CONVERSATION,
             )
         ).id
         for _ in range(8)
@@ -194,6 +240,7 @@ async def test_chatgpt_integration_never_falls_back_to_system_catalog(
         rdb_session,
         provider=LLMProvider.CHATGPT_OAUTH,
         lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
     await repository.replace_current_snapshot(
         rdb_session,
@@ -225,6 +272,7 @@ async def test_chatgpt_integration_never_falls_back_to_system_catalog(
         rdb_session,
         integration_id=integration.id,
         workspace_id=workspace_id,
+        purpose=LLMCatalogPurpose.CONVERSATION,
         search=None,
         limit=50,
         offset=0,
@@ -275,6 +323,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         integration_id=integration.id,
         provider=integration.provider,
         lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
     now = datetime.datetime(2026, 7, 16, 12, 0, tzinfo=datetime.UTC)
 
@@ -337,3 +386,186 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
     )
     assert current_attempt_id == after_cooldown
     assert current_attempt_id != first
+
+
+async def test_catalog_identity_is_purpose_aware(
+    rdb_session: AsyncSession,
+) -> None:
+    """The same integration and lowerer target may own both catalog purposes."""
+    (
+        workspace_id,
+        _integration_repository,
+        integration_id,
+    ) = await _create_openai_integration(
+        rdb_session,
+        handle="purpose-aware-catalog",
+    )
+    repository = LLMCatalogRepository()
+
+    conversation = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=integration_id,
+        provider=LLMProvider.OPENAI,
+        lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    image = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=integration_id,
+        provider=LLMProvider.OPENAI,
+        lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.IMAGE_GENERATION,
+    )
+
+    assert conversation.id != image.id
+    assert (
+        await repository.get_by_integration(
+            rdb_session,
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.CONVERSATION,
+        )
+    ) == conversation
+    assert (
+        await repository.get_by_integration(
+            rdb_session,
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.IMAGE_GENERATION,
+        )
+    ) == image
+
+
+async def test_image_catalog_fences_generation_and_preserves_last_good(
+    rdb_session: AsyncSession,
+) -> None:
+    """Failed or superseded refreshes keep the prior snapshot diagnostic state."""
+    (
+        workspace_id,
+        integration_repository,
+        integration_id,
+    ) = await _create_openai_integration(
+        rdb_session,
+        handle="image-generation-fencing",
+    )
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=integration_id,
+        provider=LLMProvider.OPENAI,
+        lowerer_target=LLMCatalogLowererTarget.LITELLM,
+        purpose=LLMCatalogPurpose.IMAGE_GENERATION,
+    )
+    started_at = datetime.datetime.now(datetime.UTC)
+    first_attempt = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="openai_models_list:image_generation",
+        started_at=started_at,
+        trigger=IntegrationCatalogSyncTrigger.CREATE,
+    )
+    assert isinstance(first_attempt, str)
+    first_publication = await repository.replace_current_image_generation_snapshot(
+        rdb_session,
+        catalog=catalog,
+        attempt_id=first_attempt,
+        entries=[
+            ImageGenerationCatalogEntryCreate(
+                provider=LLMProvider.OPENAI,
+                provider_model_identifier="gpt-image-2.5-flare",
+                display_name="GPT Image 2.5 Flare",
+                description="Recommended image model.",
+                recommendation_rank=1,
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                source_metadata=None,
+                projection_metadata={"registry_revision": 1},
+                hidden_reason=None,
+            )
+        ],
+        diagnostics={"catalog_purpose": "image_generation"},
+    )
+    assert first_publication.snapshot_id is not None
+    await repository.mark_attempt_succeeded(
+        rdb_session,
+        attempt_id=first_attempt,
+        finished_at=started_at + datetime.timedelta(seconds=1),
+        produced_snapshot_id=first_publication.snapshot_id,
+        fetched_count=1,
+        matched_count=1,
+        skipped_count=0,
+        hidden_count=0,
+        diagnostics={"catalog_purpose": "image_generation"},
+    )
+
+    update_result = await integration_repository.update_by_id(
+        rdb_session,
+        integration_id,
+        LLMProviderIntegrationUpdate(
+            secrets=ApiKeySecrets(api_key="sk-updated"),
+        ),
+    )
+    assert isinstance(update_result, Success)
+    assert update_result.value.catalog_configuration_version == 2
+    page = await repository.list_image_generation_entries_by_integration(
+        rdb_session,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+    )
+    assert page is not None
+    assert page.catalog.current_snapshot_id == first_publication.snapshot_id
+    assert page.snapshot_catalog_configuration_version == 1
+    assert page.current_integration_catalog_configuration_version == 2
+    assert [entry.provider_model_identifier for entry in page.entries] == [
+        "gpt-image-2.5-flare"
+    ]
+    assert (
+        await repository.get_selectable_image_generation_entry(
+            rdb_session,
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            model_identifier="gpt-image-2.5-flare",
+        )
+        is None
+    )
+
+    second_attempt = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="openai_models_list:image_generation",
+        started_at=started_at + datetime.timedelta(seconds=31),
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(second_attempt, str)
+    second_update = await integration_repository.update_by_id(
+        rdb_session,
+        integration_id,
+        LLMProviderIntegrationUpdate(
+            secrets=ApiKeySecrets(api_key="sk-newer"),
+        ),
+    )
+    assert isinstance(second_update, Success)
+    assert second_update.value.catalog_configuration_version == 3
+    superseded = await repository.replace_current_image_generation_snapshot(
+        rdb_session,
+        catalog=catalog,
+        attempt_id=second_attempt,
+        entries=[],
+        diagnostics=None,
+    )
+    assert superseded.snapshot_id is None
+    assert superseded.current_catalog_configuration_version == 3
+
+    preserved = await repository.list_image_generation_entries_by_integration(
+        rdb_session,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+    )
+    assert preserved is not None
+    assert preserved.catalog.current_snapshot_id == first_publication.snapshot_id
+    assert [entry.provider_model_identifier for entry in preserved.entries] == [
+        "gpt-image-2.5-flare"
+    ]

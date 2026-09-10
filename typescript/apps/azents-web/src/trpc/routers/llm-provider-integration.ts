@@ -16,10 +16,12 @@ import {
   kimiOauthV1StartDevice,
   llmProviderIntegrationV1CreateIntegration,
   llmProviderIntegrationV1DeleteIntegration,
+  llmProviderIntegrationV1GetImageModelCatalog,
   llmProviderIntegrationV1GetSubscriptionUsage,
   llmProviderIntegrationV1ListIntegrationCatalogEntries,
   llmProviderIntegrationV1ListIntegrationProviders,
   llmProviderIntegrationV1ListIntegrations,
+  llmProviderIntegrationV1SyncImageModelCatalog,
   llmProviderIntegrationV1SyncIntegrationCatalog,
   llmProviderIntegrationV1UpdateIntegration,
   xaiOauthV1CancelDevice,
@@ -225,6 +227,42 @@ export const llmProviderIntegrationRouter = router({
       }
     }),
 
+  /** Fetch stored image-generation catalogs for used integrations. */
+  imageCatalogs: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        integrationIds: z.array(z.string().min(1)).max(10),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const items = await Promise.all(
+          input.integrationIds.map(async (integrationId) => {
+            const { data } = await llmProviderIntegrationV1GetImageModelCatalog(
+              {
+                client: ctx.apiClient,
+                path: {
+                  handle: input.handle,
+                  integration_id: integrationId,
+                },
+                throwOnError: true,
+              },
+            );
+            return { integrationId, catalog: data };
+          }),
+        );
+        return { items };
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
   /** Synchronize an integration-scoped model catalog. */
   syncCatalog: publicProcedure
     .input(
@@ -247,6 +285,37 @@ export const llmProviderIntegrationRouter = router({
       } catch (e) {
         throw mapExpectedError(e, {
           400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+          429: "TOO_MANY_REQUESTS",
+        });
+      }
+    }),
+
+  /** Synchronize an integration-scoped image model catalog. */
+  syncImageCatalog: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        integrationId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await llmProviderIntegrationV1SyncImageModelCatalog({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            integration_id: input.integrationId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",

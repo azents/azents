@@ -130,6 +130,7 @@ class TestEnsureRuntimeTokens:
                         expires_at=datetime.datetime.now(datetime.UTC)
                         + datetime.timedelta(hours=1),
                     ),
+                    catalog_configuration_version=1,
                 ),
                 True,
             ),
@@ -149,6 +150,7 @@ class TestEnsureRuntimeTokens:
                         expires_at=datetime.datetime.now(datetime.UTC)
                         + datetime.timedelta(hours=1),
                     ),
+                    catalog_configuration_version=1,
                 ),
                 False,
             ),

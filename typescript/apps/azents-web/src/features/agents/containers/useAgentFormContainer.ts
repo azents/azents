@@ -56,6 +56,7 @@ export interface AgentFormContainerOutput {
   workspaceModelSettings: WorkspaceModelSettingsResponse | null;
   runtimeProfiles: WorkspaceRuntimeProfileResponse[];
   runtimeProfilesLoading: boolean;
+  canManageIntegrations: boolean;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
@@ -102,6 +103,7 @@ export function useAgentFormContainer(
     includeDisabled: true,
   });
   const membersQuery = trpc.workspaceMember.list.useQuery({ handle });
+  const meQuery = trpc.workspaceMember.me.useQuery({ handle });
   const adminsQuery = trpc.agent.listAdmins.useQuery(
     { handle, agentId: agentId ?? "" },
     { enabled: isEditMode },
@@ -323,6 +325,7 @@ export function useAgentFormContainer(
     workspaceModelSettings: workspaceModelSettingsQuery.data ?? null,
     runtimeProfiles,
     runtimeProfilesLoading: runtimeProfilesQuery.isLoading,
+    canManageIntegrations: meQuery.data?.role === "owner",
     catalogStates,
     modelsLoading,
     members,

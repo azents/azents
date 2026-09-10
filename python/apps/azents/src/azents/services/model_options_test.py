@@ -7,6 +7,7 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     BuiltinToolConfig,
     SelectableModelOptionInput,
+    SelectableModelSettings,
     SelectableModelSettingsInput,
 )
 from azents.services.model_options import normalize_selectable_model_options
@@ -24,6 +25,15 @@ async def _resolve_option(
     if "search" in selection.model_identifier:
         selection.normalized_capabilities.built_in_tools.supported = ["web_search"]
     return Success(selection)
+
+
+async def _validate_image_generation_config(
+    selection: AgentModelSelection,
+    settings: SelectableModelSettings,
+) -> list[str]:
+    """Accept image-generation settings in general normalization tests."""
+    del selection, settings
+    return []
 
 
 def _option(label: str, model_identifier: str) -> SelectableModelOptionInput:
@@ -47,6 +57,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Failure)
@@ -62,6 +73,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Failure)
@@ -74,6 +86,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label="deleted",
             lightweight_model_label="fast",
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -91,6 +104,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -115,6 +129,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -139,6 +154,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -156,6 +172,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -177,6 +194,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Success)
@@ -201,6 +219,7 @@ class TestNormalizeSelectableModelOptions:
             main_model_label=None,
             lightweight_model_label=None,
             resolve_model_selection=_resolve_option,
+            validate_image_generation_config=_validate_image_generation_config,
         )
 
         assert isinstance(result, Failure)

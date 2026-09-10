@@ -97,6 +97,10 @@ from azents.services.chatgpt_oauth.runtime import (
     ensure_runtime_tokens as ensure_chatgpt_oauth_runtime_tokens,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.image_generation_catalog import (
+    ImageGenerationCatalogService,
+    ImageGenerationRuntimeConfigurationError,
+)
 from azents.services.kimi_oauth.data import (
     ProviderRejected as KimiOAuthProviderRejected,
 )
@@ -282,6 +286,7 @@ ResolveError = (
     | ModelTargetNotFound
     | ReasoningEffortUnsupported
     | ExecutionOptionUnsupported
+    | ImageGenerationRuntimeConfigurationError
 )
 RuntimeTokenRefreshError = (
     ChatGPTOAuthProviderRejected
@@ -421,6 +426,7 @@ async def resolve_invoke_input(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    image_generation_catalog_service: ImageGenerationCatalogService,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent/Integration and build RunRequest."""
     resolved = await resolve_invoke_input_with_model_source(
@@ -435,6 +441,7 @@ async def resolve_invoke_input(
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
+        image_generation_catalog_service=image_generation_catalog_service,
     )
     match resolved:
         case Success(value):
@@ -454,6 +461,7 @@ async def resolve_invoke_input_with_profile(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    image_generation_catalog_service: ImageGenerationCatalogService,
 ) -> Result[ResolvedInvokeInputProfile, ResolveError]:
     """Build a run request from one explicit Agent-owned inference profile."""
     resolved = await resolve_invoke_input_with_model_source(
@@ -468,6 +476,7 @@ async def resolve_invoke_input_with_profile(
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
+        image_generation_catalog_service=image_generation_catalog_service,
     )
     match resolved:
         case Success(value):
@@ -497,6 +506,7 @@ async def resolve_invoke_input_with_resolved_profile(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    image_generation_catalog_service: ImageGenerationCatalogService,
 ) -> Result[RunRequest, ResolveError]:
     """Rebuild a run request from an already activated model snapshot."""
     resolved = await resolve_invoke_input_with_model_source(
@@ -511,6 +521,7 @@ async def resolve_invoke_input_with_resolved_profile(
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
+        image_generation_catalog_service=image_generation_catalog_service,
     )
     match resolved:
         case Success(value):
@@ -539,6 +550,7 @@ async def resolve_invoke_input_with_model_source(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    image_generation_catalog_service: ImageGenerationCatalogService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
     """Resolve a run request and main selection from one Agent snapshot."""
     async with session_manager() as session:
@@ -621,13 +633,6 @@ async def resolve_invoke_input_with_model_source(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
-        if not integration.enabled:
-            return Failure(
-                IntegrationDisabled(
-                    integration_id=main_selection.llm_provider_integration_id,
-                )
-            )
-
         loaded_lightweight_integration = integration
         if lightweight_selection.llm_provider_integration_id != integration.id:
             loaded_lightweight_integration = (
@@ -648,6 +653,26 @@ async def resolve_invoke_input_with_model_source(
                         integration_id=lightweight_selection.llm_provider_integration_id,
                     )
                 )
+
+    image_configuration_error = await image_generation_catalog_service.validate_runtime(
+        integration_id=integration.id,
+        workspace_id=integration.workspace_id,
+        provider=integration.provider,
+        integration_enabled=integration.enabled,
+        image_generation_supported=(
+            "image_generation"
+            in main_selection.normalized_capabilities.built_in_tools.supported
+        ),
+        settings=main_settings,
+    )
+    if image_configuration_error is not None:
+        return Failure(image_configuration_error)
+    if not integration.enabled:
+        return Failure(
+            IntegrationDisabled(
+                integration_id=main_selection.llm_provider_integration_id,
+            )
+        )
 
     refreshed_integration = await _ensure_provider_runtime_tokens(
         integration=integration,

@@ -24,6 +24,7 @@ from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelDeveloper,
     LLMModelLifecycleStatus,
@@ -471,6 +472,7 @@ class ModelCatalogReadService:
                 integration_id=selection_input.llm_provider_integration_id,
                 workspace_id=workspace_id,
                 model_identifier=selection_input.model_identifier,
+                purpose=LLMCatalogPurpose.CONVERSATION,
             )
         if result is None:
             return Failure(
@@ -523,6 +525,7 @@ class ModelCatalogReadService:
                 session,
                 integration_id=integration_id,
                 workspace_id=workspace_id,
+                purpose=LLMCatalogPurpose.CONVERSATION,
                 search=search,
                 limit=limit,
                 offset=offset,
@@ -791,6 +794,7 @@ class SystemCatalogProjectionService:
                     session,
                     provider=provider,
                     lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                    purpose=LLMCatalogPurpose.CONVERSATION,
                 )
                 if catalog is None:
                     items.append(
@@ -867,6 +871,7 @@ class SystemCatalogProjectionService:
                 session,
                 provider=provider,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=LLMCatalogPurpose.CONVERSATION,
             )
             attempt = await self.catalog_repository.begin_attempt(
                 session,
@@ -999,6 +1004,7 @@ class IntegrationCatalogProjectionService:
                 integration_id=integration.id,
                 provider=integration.provider,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=LLMCatalogPurpose.CONVERSATION,
             )
         started_at = _utcnow()
         async with self.session_manager() as session:

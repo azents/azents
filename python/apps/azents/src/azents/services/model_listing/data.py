@@ -59,6 +59,17 @@ class ModelListingOutput(BaseModel):
     skips: list[ModelListingSkipSummary] = Field(description="skip summary")
 
 
+class ImageGenerationModelListingOutput(BaseModel):
+    """Complete credential-visible image model identifier listing."""
+
+    provider: LLMProvider = Field(description="Hosting provider")
+    source: str = Field(description="Provider listing source")
+    fetched_at: datetime.datetime = Field(description="Fetch time")
+    provider_model_identifiers: list[str] = Field(
+        description="Complete exact provider-visible model identifiers"
+    )
+
+
 class ListingNotFound(BaseModel):
     """listing target integration not found."""
 

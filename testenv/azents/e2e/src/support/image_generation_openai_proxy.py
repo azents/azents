@@ -94,6 +94,7 @@ _IMAGE_PATH = Path(
         "/fixtures/provider-image-generation.png",
     )
 )
+_OPENAI_MODEL_LIST_PATH = "/v1/models"
 _JOURNAL_PATH = "/v1/_image_generation_requests"
 _DYNAMIC_WORKTREE_JOURNAL_PATH = "/v1/_dynamic_worktree_requests"
 _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH = "/v1/_external_channel_progress_requests"
@@ -147,6 +148,36 @@ _CAPTURED_MODEL_PROMPTS = {
     "xAI OAuth image generation repeated 401",
     "xAI image generation disabled",
 }
+
+
+def image_generation_model_list_payload() -> dict[str, object]:
+    """Return credential-visible models for deterministic image catalog sync."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "gpt-image-2.5-flare",
+                "object": "model",
+                "created": 0,
+                "owned_by": "openai",
+            },
+            {
+                "id": "gpt-image-2.5-sunburst",
+                "object": "model",
+                "created": 0,
+                "owned_by": "openai",
+            },
+            {
+                "id": "provider-visible-unregistered-image-model",
+                "object": "model",
+                "created": 0,
+                "owned_by": "openai",
+            },
+        ],
+        "has_more": False,
+    }
+
+
 _EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
 _EXTERNAL_CHANNEL_QUIET_WORK_MARKER = "Discord quiet work presence E2E"
 _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER = "Discord quiet work setup E2E"
@@ -1125,6 +1156,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if urlsplit(self.path).path == _OPENAI_MODEL_LIST_PATH:
+            self._write_json(200, image_generation_model_list_payload())
+            return
         if self.path == _PROVIDER_TOOL_LIVE_BARRIER_PATH:
             self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
             return

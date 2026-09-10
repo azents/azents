@@ -190,6 +190,10 @@ async def normalize_selectable_model_options(
     resolve_model_selection: Callable[
         [SelectableModelOptionInput], Awaitable[Result[AgentModelSelection, TError]]
     ],
+    validate_image_generation_config: Callable[
+        [AgentModelSelection, SelectableModelSettings],
+        Awaitable[list[str]],
+    ],
 ) -> Result[NormalizedSelectableModelOptions, list[str] | TError]:
     """Validate option labels and resolve model snapshots and settings."""
     errors: list[str] = []
@@ -228,13 +232,23 @@ async def normalize_selectable_model_options(
                 )
                 match settings_result:
                     case Success(settings):
-                        options.append(
-                            SelectableModelOption(
-                                label=label,
-                                model_selection=selection,
-                                settings=settings,
-                            )
+                        image_errors = await validate_image_generation_config(
+                            selection,
+                            settings,
                         )
+                        if image_errors:
+                            errors.extend(
+                                f"Selectable model '{label}': {error}"
+                                for error in image_errors
+                            )
+                        else:
+                            options.append(
+                                SelectableModelOption(
+                                    label=label,
+                                    model_selection=selection,
+                                    settings=settings,
+                                )
+                            )
                     case Failure(settings_errors):
                         errors.extend(
                             f"Selectable model '{label}': {error}"

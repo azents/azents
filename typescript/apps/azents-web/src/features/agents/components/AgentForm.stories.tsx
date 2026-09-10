@@ -220,6 +220,7 @@ const meta = {
     workspaceModelSettings: null,
     runtimeProfiles: [],
     runtimeProfilesLoading: false,
+    canManageIntegrations: true,
     onSyncCatalog: () => Promise.resolve(),
     onSubmit: noopSubmit,
     onAddAdmin: () => {},

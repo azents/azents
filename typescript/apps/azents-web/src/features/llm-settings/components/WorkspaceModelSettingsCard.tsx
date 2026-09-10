@@ -7,7 +7,11 @@ import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { SelectableModelOptionsEditor } from "@/features/agents/components/SelectableModelOptionsEditor";
-import { selectableModelOptionFormValuesFromStoredOptions } from "@/features/agents/model-selection";
+import { useImageGenerationCatalogs } from "@/features/agents/containers/useImageGenerationCatalogs";
+import {
+  hasInvalidImageGenerationSelections,
+  selectableModelOptionFormValuesFromStoredOptions,
+} from "@/features/agents/model-selection";
 import type {
   ProviderIntegrationOption,
   SelectableModelOptionFormValue,
@@ -88,9 +92,22 @@ export function WorkspaceModelSettingsCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize form when server settings change.
   }, [settings]);
 
+  const imageCatalogs = useImageGenerationCatalogs(
+    handle,
+    form.values.defaultSelectableModelOptions,
+  );
+
   const submit = form.onSubmit(
     (values) => {
       setHasSubmitAttempted(true);
+      if (
+        hasInvalidImageGenerationSelections(
+          values.defaultSelectableModelOptions,
+          imageCatalogs.states,
+        )
+      ) {
+        return;
+      }
       onSubmit(values);
     },
     () => setHasSubmitAttempted(true),
@@ -117,6 +134,9 @@ export function WorkspaceModelSettingsCard({
             canEdit={canManage}
             showValidationErrors={hasSubmitAttempted}
             onSyncCatalog={onSyncCatalog}
+            imageGenerationCatalogStates={imageCatalogs.states}
+            canSyncImageCatalog={canManage}
+            onSyncImageCatalog={imageCatalogs.onSync}
             onChangeOptions={(options) =>
               form.setFieldValue("defaultSelectableModelOptions", options)
             }

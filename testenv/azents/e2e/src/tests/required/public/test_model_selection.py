@@ -136,6 +136,53 @@ def _wait_for_initial_catalog_sync(
     return response
 
 
+def _wait_for_image_catalog_sync(
+    server_url: str,
+    token: str,
+    handle: str,
+    integration_id: str,
+) -> dict[str, object]:
+    """Wait for the create-triggered image catalog projection."""
+
+    def populated_catalog() -> dict[str, object] | None:
+        response = requests.get(
+            f"{server_url}/llm-provider-integration/v1/workspaces/"
+            f"{handle}/llm-provider-integrations/{integration_id}/"
+            "image-generation-model-catalog",
+            headers=_headers(token),
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+        payload = _json_object(response.json())
+        if payload is None or payload.get("generation_current") is not True:
+            return None
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return None
+        identifiers = [
+            entry.get("provider_model_identifier")
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+        if identifiers != [
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+        ]:
+            return None
+        return payload
+
+    payload = wait_until(
+        populated_catalog,
+        timeout=15,
+        interval=0.2,
+        message="Create-triggered image catalog sync did not finish",
+    )
+    if payload is None:
+        raise AssertionError("Image catalog sync wait returned no response.")
+    return payload
+
+
 def _wait_for_turn_context(
     *,
     server_url: str,
@@ -651,6 +698,14 @@ class TestModelSelectionReadiness:
         _wait_for_initial_catalog_sync(
             azents_public_server_url, token, handle, integration_id
         )
+        image_catalog = _wait_for_image_catalog_sync(
+            azents_public_server_url,
+            token,
+            handle,
+            integration_id,
+        )
+        assert image_catalog["default_available"] is True
+        assert image_catalog["explicit_selection_supported"] is True
         listing = wait_until(
             lambda: requests.get(
                 f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
@@ -681,7 +736,16 @@ class TestModelSelectionReadiness:
                     "settings": {
                         "context_window_tokens": 100_000,
                         "max_output_tokens": 12_000,
-                        "builtin_tools": [{"name": "web_search"}],
+                        "builtin_tools": [
+                            {"name": "web_search"},
+                            {
+                                "name": "image_generation",
+                                "config": {
+                                    "model": "gpt-image-2.5-sunburst",
+                                    "quality": "high",
+                                },
+                            },
+                        ],
                         "subagent_enabled": False,
                         "subagent_guidance": "Reserve for complex synthesis.",
                     },
@@ -715,7 +779,16 @@ class TestModelSelectionReadiness:
         assert settings["default_selectable_model_options"][0]["settings"] == {
             "context_window_tokens": 100_000,
             "max_output_tokens": 12_000,
-            "builtin_tools": [{"name": "web_search", "config": {}}],
+            "builtin_tools": [
+                {"name": "web_search", "config": {}},
+                {
+                    "name": "image_generation",
+                    "config": {
+                        "model": "gpt-image-2.5-sunburst",
+                        "quality": "high",
+                    },
+                },
+            ],
             "subagent_enabled": False,
             "subagent_guidance": "Reserve for complex synthesis.",
         }
@@ -748,7 +821,16 @@ class TestModelSelectionReadiness:
             {
                 "context_window_tokens": 100_000,
                 "max_output_tokens": 12_000,
-                "builtin_tools": [{"name": "web_search", "config": {}}],
+                "builtin_tools": [
+                    {"name": "web_search", "config": {}},
+                    {
+                        "name": "image_generation",
+                        "config": {
+                            "model": "gpt-image-2.5-sunburst",
+                            "quality": "high",
+                        },
+                    },
+                ],
                 "subagent_enabled": False,
                 "subagent_guidance": "Reserve for complex synthesis.",
             },

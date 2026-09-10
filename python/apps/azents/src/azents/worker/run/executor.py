@@ -163,6 +163,10 @@ from azents.services.chat.data import (
     ChatLiveRunState,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.image_generation_catalog import (
+    ImageGenerationCatalogService,
+    ImageGenerationRuntimeConfigurationError,
+)
 from azents.services.mailbox import (
     MailboxOwnerGenerationStaleError,
     MailboxPreparationStaleError,
@@ -392,6 +396,9 @@ class RunExecutor:
         ExchangeFileService, Depends(get_exchange_file_service)
     ]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
+    image_generation_catalog_service: Annotated[
+        ImageGenerationCatalogService, Depends()
+    ]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService, Depends(SessionGitWorktreeService)
@@ -1122,6 +1129,9 @@ class RunExecutor:
                 session_manager=self.session_manager,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
+                image_generation_catalog_service=(
+                    self.image_generation_catalog_service
+                ),
             )
             if recovered.failure:
                 failure = _profile_resolution_failure(recovered.error)
@@ -2381,6 +2391,9 @@ class RunExecutor:
                 session_manager=self.session_manager,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
+                image_generation_catalog_service=(
+                    self.image_generation_catalog_service
+                ),
             )
             if resolved.failure:
                 return Failure(resolved.error)
@@ -3013,6 +3026,27 @@ def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
         return ProfileResolutionFailure(
             code=InferenceProfileFailureCode.EXECUTION_OPTION_UNSUPPORTED,
             message="The selected execution option is not supported by this model.",
+        )
+    if isinstance(error, ImageGenerationRuntimeConfigurationError):
+        match error.reason:
+            case "integration_disabled":
+                code = InferenceProfileFailureCode.IMAGE_INTEGRATION_DISABLED
+            case "explicit_selection_unsupported":
+                code = InferenceProfileFailureCode.IMAGE_EXPLICIT_SELECTION_UNSUPPORTED
+            case "catalog_unavailable":
+                code = InferenceProfileFailureCode.IMAGE_CATALOG_UNAVAILABLE
+            case "catalog_generation_mismatch":
+                code = InferenceProfileFailureCode.IMAGE_CATALOG_GENERATION_MISMATCH
+            case "model_unavailable":
+                code = InferenceProfileFailureCode.IMAGE_MODEL_UNAVAILABLE
+            case "provider_model_mismatch":
+                code = InferenceProfileFailureCode.IMAGE_PROVIDER_MODEL_MISMATCH
+        return ProfileResolutionFailure(
+            code=code,
+            message=(
+                "The selected image generation model is no longer available. "
+                "Choose another model, use the default, or disable image generation."
+            ),
         )
     return ProfileResolutionFailure(
         code=InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,

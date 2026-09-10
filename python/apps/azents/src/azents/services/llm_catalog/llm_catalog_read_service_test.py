@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMProvider,
 )
@@ -48,11 +49,12 @@ class _CatalogRepository(LLMCatalogRepository):
         *,
         integration_id: str,
         workspace_id: str,
+        purpose: LLMCatalogPurpose,
         search: str | None,
         limit: int,
         offset: int,
     ) -> LLMCatalogEntryList | None:
-        del session, integration_id, workspace_id, search, limit, offset
+        del session, integration_id, workspace_id, purpose, search, limit, offset
         return self.page
 
     async def get_latest_integration_attempt_for_workspace(
@@ -74,6 +76,7 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             id="catalog-id",
             scope=LLMCatalogScope.INTEGRATION,
             provider=LLMProvider.AWS_BEDROCK,
+            purpose=LLMCatalogPurpose.CONVERSATION,
             provider_integration_id="integration-id",
             lowerer_target=LLMCatalogLowererTarget.LITELLM,
             current_snapshot_id=None,
@@ -98,6 +101,7 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             skipped_count=0,
             hidden_count=0,
             diagnostics={"failure_category": "user_catalog_credentials_or_permissions"},
+            catalog_configuration_version=1,
         ),
     )
     service = ModelCatalogReadService(

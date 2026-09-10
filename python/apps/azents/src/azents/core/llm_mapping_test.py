@@ -51,6 +51,7 @@ def _make_integration(
         created_at=now,
         updated_at=now,
         secrets=secrets,
+        catalog_configuration_version=1,
     )
 
 
