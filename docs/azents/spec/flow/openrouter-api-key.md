@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/7e9b625b4c81_add_openrouter_provider.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/core/llm_mapping.py
@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-09-04
+last_verified_at: 2026-09-10
 spec_version: 4
 ---
 

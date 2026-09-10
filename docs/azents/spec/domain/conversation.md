@@ -27,8 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run_input_event.py
   - python/apps/azents/src/azents/rdb/models/inference_profile_types.py
   - python/apps/azents/src/azents/rdb/models/event.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/629612c66084_remove_event_model_order.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
@@ -126,7 +125,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 164
 ---
 

@@ -46,7 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/skill_state/**
@@ -70,7 +70,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 113
 ---
 

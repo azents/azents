@@ -16,13 +16,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/system_setting/**
   - python/apps/azents/src/azents/repos/github_platform_system_setting/**
   - python/apps/azents/src/azents/rdb/models/system_setting.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/ec609e0da8ab_add_system_settings_foundation.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/8842bd30d5c6_bind_github_resources_to_platform_app_.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/725b487eaaca_require_platform_github_app_identity.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
-  - python/apps/azents/db-schemas/rdb/migrations/versions/496235caed34_add_external_channel_file_system_.py
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/worker-deployment.yaml.tpl
@@ -33,7 +30,6 @@ code_paths:
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/azents/scheduler/registry.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/653ef7db49af_add_archived_session_retention_.py
   - typescript/apps/azents-admin-web/src/app/retention/**
   - typescript/apps/azents-admin-web/src/features/retention/**
   - typescript/apps/azents-admin-web/src/trpc/routers/retention.ts
@@ -49,7 +45,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-07-30
+last_verified_at: 2026-09-10
 spec_version: 5
 ---
 

@@ -4,10 +4,7 @@ spec_type: domain
 domain: workspace
 owner: "@Hardtack"
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/5ffa2fdb4e51_add_session_working_folder_context.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/155e9db4ee7e_contract_session_working_folder_context.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
@@ -118,7 +115,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 81
 ---
 

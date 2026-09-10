@@ -5,7 +5,7 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-06
+last_verified_at: 2026-09-10
 spec_version: 20
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
@@ -134,10 +134,9 @@ Ready state includes this UI:
 ## Verification
 
 As of 2026-07-21, verified through model-output admission, Context snapshot projection, and turn-marker
-serialization checks. A PostgreSQL Testcontainers migration-transition test runs when Docker is available
-in CI. Version 18 retains one replaceable prompt diagnostic snapshot per session instead of repeated prompt
-bodies in transcript turn markers, while preserving turn usage provenance and provider-tool semantic transcript
-breakdown.
+serialization checks. Version 18 retains one replaceable prompt diagnostic snapshot per session instead of
+repeated prompt bodies in transcript turn markers, while preserving turn usage provenance and provider-tool
+semantic transcript breakdown.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py

@@ -16,7 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -32,7 +32,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 22
 ---
 
