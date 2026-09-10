@@ -42,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_runner_auth/**
   - python/apps/azents/src/azents/services/runtime_connection_registration/**
   - python/apps/azents/src/azents/runtime/**
+  - python/apps/azents/src/azents/worker/health.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
