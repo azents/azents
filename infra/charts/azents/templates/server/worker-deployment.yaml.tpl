@@ -8,7 +8,7 @@ metadata:
     {{- include "azents.componentLabels" (dict "root" . "component" "worker") | nindent 4 }}
     app.kubernetes.io/part-of: "azents"
 spec:
-  replicas: 1
+  replicas: {{ .Values.server.worker.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "azents.name" . | quote }}

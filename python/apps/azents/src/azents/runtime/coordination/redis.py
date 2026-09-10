@@ -784,7 +784,6 @@ class RedisRuntimeCoordinationStore:
     ) -> list[RuntimeReplyRecord]:
         """Read reply events after the supplied cursor."""
         stream_key = self._stream_key("reply", stream_id)
-        await self._refresh_stream_ttl(stream_key)
         rows = await self._read_stream(
             stream_key,
             after_cursor=after_cursor,
@@ -797,6 +796,36 @@ class RedisRuntimeCoordinationStore:
             )
             for row in rows
         ]
+
+    async def wait_replies(
+        self,
+        stream_id: str,
+        *,
+        after_cursor: str | None,
+        limit: int,
+        block_ms: int,
+    ) -> list[RuntimeReplyRecord]:
+        """Wait boundedly for reply events after the supplied cursor."""
+        if block_ms < 0:
+            raise ValueError("block_ms must not be negative")
+        records = await self.read_replies(
+            stream_id,
+            after_cursor=after_cursor,
+            limit=limit,
+        )
+        if records or limit <= 0 or block_ms == 0:
+            return records
+        stream_key = self._stream_key("reply", stream_id)
+        await self._redis.xread(
+            {stream_key: after_cursor or "0-0"},
+            block=block_ms,
+            count=1,
+        )
+        return await self.read_replies(
+            stream_id,
+            after_cursor=after_cursor,
+            limit=limit,
+        )
 
     async def append_body_chunk(
         self,

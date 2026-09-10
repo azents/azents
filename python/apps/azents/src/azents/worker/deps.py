@@ -68,6 +68,10 @@ from azents.runtime.deps import (
     get_runtime_runner_operation_client,
     get_worker_runtime_transfer_coordinator_client,
 )
+from azents.runtime.observability import (
+    RuntimeReplyDeliveryMetrics,
+    get_runtime_reply_delivery_metrics,
+)
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
 from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationService,
@@ -550,6 +554,10 @@ async def get_worker_redis(
 
 def get_health_server(
     worker_redis: Annotated[Redis, Depends(get_worker_redis)],
+    metrics: Annotated[
+        RuntimeReplyDeliveryMetrics,
+        Depends(get_runtime_reply_delivery_metrics),
+    ],
 ) -> HealthServer:
     """HealthServer dependency.
 
@@ -557,7 +565,7 @@ def get_health_server(
     :return: HealthServer instance
     """
     port = int(os.environ.get("AZ_WORKER_HEALTH_PORT", str(_DEFAULT_HEALTH_PORT)))
-    return HealthServer(worker_redis, port=port)
+    return HealthServer(worker_redis, metrics=metrics, port=port)
 
 
 def get_toolkit_repository(

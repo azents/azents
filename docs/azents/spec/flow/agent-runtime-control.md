@@ -66,8 +66,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-08
-spec_version: 77
+last_verified_at: 2026-09-10
+spec_version: 78
 ---
 
 # Agent Runtime Control
@@ -376,6 +376,29 @@ generation, request/reply streams, and admitted request cursor. Retrying one exa
 dispatch is idempotent, while a replaced connection cannot create request-less
 metadata, append a cancellation, start work, or finalize an operation.
 
+Foreground reply observation uses an opaque cursor and a separate bounded wait
+contract. Redis first replays rows already present after the cursor, waits with an
+ordinary non-consuming `XREAD` for at most one second when no row exists, and then
+rereads the authoritative range. In-memory coordination provides the same
+check-before-wait behavior with a per-stream condition whose append and notification
+share the store lock. Every waiter advances across all generation-stream rows and
+filters its own request, so interleaved operation ordering and independent
+observation remain unchanged. Wait timeout only triggers deadline and cancellation
+reconciliation; it is not a reply or completion result.
+
+Reply reads and waits do not refresh Redis retention. Reply append remains the
+liveness write and refreshes the bounded stream TTL through every fenced and
+operation-aware append path. Request and body stream retention behavior remains
+unchanged.
+
+Each process records bounded aggregate reply-delivery observations: active and
+maximum waiters, fixed wait-duration and append-to-observation buckets, bounded wait
+outcomes, shared-stream examined/filtered rows, and Worker event-loop timer drift.
+The Worker periodically emits one structured aggregate snapshot. Metrics contain no
+request, operation, Runtime, Session, Agent, cursor, or payload dimensions, while
+request-scoped structured logs may retain correlation identifiers. Health and
+readiness response bodies remain unchanged.
+
 Control rejects or closes Provider/Runner streams whose inbound message generation
 differs from the accepted registration generation. Durable Provider reports are
 accepted only when both the Provider stream generation and observed desired
@@ -539,11 +562,26 @@ Runner authentication uses a signed credential bound to one logical Runtime ID a
 
 Before accepting a Runner stream, Control verifies the signature, resolves the Runtime ID and desired generation from the verified credential, loads the durable Runtime, and requires the generation to equal the current durable desired generation. A registration `runtime_id` may only match that resolved identity; another Runtime claim is rejected with `PERMISSION_DENIED`. Missing, malformed, tampered, absent-Runtime, or stale-generation Runner credentials are rejected with `UNAUTHENTICATED`. Desired-generation changes invalidate prior credentials without a wall-clock refresh or a shared-token compatibility path. Physical connection generation fencing remains separate from this logical Runtime-incarnation authority.
 
+The Runner retries transient Control stream failures with its process-start
+credential. Registration-time `UNAUTHENTICATED` and an accepted connection whose
+heartbeat authority is rejected are terminal for that process: it performs normal
+connection cleanup and exits instead of retrying the same unusable credential.
+Provider observation and periodic lifecycle reconciliation then issue a current
+generation lifecycle command, whose newly minted credential is injected into a
+replacement workload while preserving Workspace storage. Recovery is eventual
+through the existing Provider intervals and never accepts stale authority or adds an
+authentication fallback.
+
 Credential values, projected token contents, bearer headers, verifiers, and plaintext signed Runner credentials are excluded from logs, diagnostics, fixtures, rendered manifests, and Git. Authentication failures expose only bounded method-safe status and error codes.
 
 ## Helm Authentication and Storage Boundary
 
 The Helm chart keeps Runtime Control TLS mandatory and removes active shared Runtime Control authentication values, Provider credential values, credential bootstrap Jobs, staging/final credential Secrets, Provider credential volumes, and their Secret-based wiring. The trusted Kubernetes Provider instead receives an explicit projected ServiceAccount token volume with the `azents-runtime-control` audience and token path. Bootstrap metadata declares the opaque `system-kubernetes` Provider and its Kubernetes ServiceAccount binding for durable reconciliation.
+
+The Worker Deployment replica count is configured by `server.worker.replicas` and
+defaults to one. Redis broker consumer-group delivery, Session ownership
+lease/heartbeat, and generation fencing remain the multi-replica processing
+boundary. The chart does not define Worker autoscaling.
 
 Runtime Control receives a dedicated ClusterRole/ClusterRoleBinding that permits only TokenReview creation. Provider workload RBAC does not grant TokenReview, SubjectAccessReview, or impersonation authority. It grants workload-namespace operations for Runtime Pods, PersistentVolumeClaims, Services, ConfigMaps, NetworkPolicies, and `get/create/update/delete` for Secrets, plus leader-Lease access. The Provider implementation uses the Secret authority only for ownership-validated logical-Runtime CA material required by strict proxy enforcement; it is not an authentication credential path. Provider ClusterRole authority is limited to the configured workload Namespace and SelfSubjectAccessReview creation. Separate namespaced Roles grant `get` for explicitly named mandatory Services. Chart rendering must not include a legacy Provider credential or shared Runner-token path, credential plaintext, a host Docker socket, or a generic privileged workload toggle.
 
@@ -882,6 +920,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-10 (spec_version=78)** — Replaced foreground Runtime reply polling with
+  bounded Redis/in-memory event waits, made reply reads retention-neutral, added
+  bounded reply and Worker event-loop observations, exposed fixed Worker replicas,
+  and stopped stale-authority Runner reconnect loops for Provider reprovisioning.
 - **2026-09-08 (spec_version=77)** — Moved Runtime lifecycle preflight,
   post-connection claim/configuration admission, and outcome persistence into
   completed repository-owned transactions. Coordination and Provider dispatch

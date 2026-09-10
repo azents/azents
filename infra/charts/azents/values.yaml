@@ -62,6 +62,7 @@ server:
     resources: {}
   worker:
     enabled: true
+    replicas: 1
     resources: {}
   externalChannelGateway:
     resources: {}

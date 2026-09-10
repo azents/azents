@@ -319,11 +319,45 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             except asyncio.CancelledError:
                 shutting_down = True
                 raise
-            except (
-                RuntimeRunnerControlStreamClosed,
-                RunnerConnectionRejected,
-                grpc.aio.AioRpcError,
-            ):
+            except RunnerConnectionRejected as exc:
+                error_code = _runner_reprovisioning_error_code(exc)
+                assert error_code is not None
+                shutting_down = True
+                _LOGGER.warning(
+                    "Runtime Runner authority rejected; stopping for Provider "
+                    "reprovisioning",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "runner_id": runner_id,
+                        "error_code": error_code,
+                    },
+                )
+                return
+            except grpc.aio.AioRpcError as exc:
+                error_code = _runner_reprovisioning_error_code(exc.code())
+                if error_code is not None:
+                    shutting_down = True
+                    _LOGGER.warning(
+                        "Runtime Runner credential rejected; stopping for Provider "
+                        "reprovisioning",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_id": runner_id,
+                            "error_code": error_code,
+                            "grpc_status": exc.code().name,
+                        },
+                    )
+                    return
+                _LOGGER.warning(
+                    "Runtime Runner Control stream disconnected; reconnecting",
+                    exc_info=True,
+                    extra={
+                        "runtime_id": runtime_id,
+                        "runner_id": runner_id,
+                        "grpc_status": exc.code().name,
+                    },
+                )
+            except RuntimeRunnerControlStreamClosed:
                 _LOGGER.warning(
                     "Runtime Runner Control stream disconnected; reconnecting",
                     exc_info=True,
@@ -447,6 +481,17 @@ def _positive_int_env(name: str, default: int) -> int:
 
 def _control_connection_id(base_connection_id: str) -> str:
     return f"{base_connection_id}:control:{uuid.uuid4().hex}"
+
+
+def _runner_reprovisioning_error_code(
+    rejection: RunnerConnectionRejected | grpc.StatusCode,
+) -> str | None:
+    """Classify authority rejection that requires a fresh Runner process."""
+    if isinstance(rejection, RunnerConnectionRejected):
+        return "runner_authority_rejected"
+    if rejection is grpc.StatusCode.UNAUTHENTICATED:
+        return "runner_credential_rejected"
+    return None
 
 
 def _runtime_configuration_evidence_from_env() -> RuntimeConfigurationEvidence:

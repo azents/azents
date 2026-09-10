@@ -79,6 +79,7 @@ class InMemoryRuntimeCoordinationStore:
         ] = {}
         self._request_acked: set[tuple[str, str, str]] = set()
         self._reply_streams: dict[str, list[RuntimeReplyRecord]] = {}
+        self._reply_conditions: dict[str, asyncio.Condition] = {}
         self._body_streams: dict[str, list[RuntimeBodyChunkRecord]] = {}
         self._operation_metadata: dict[str, RuntimeOperationMetadata] = {}
         self._connections: dict[
@@ -278,9 +279,7 @@ class InMemoryRuntimeCoordinationStore:
                     status=RuntimeFencedMutationStatus.STALE_GENERATION,
                     value=None,
                 )
-            stream = self._reply_streams.setdefault(stream_id, [])
-            cursor = str(len(stream) + 1)
-            stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
+            cursor = self._append_reply_locked(stream_id, event)
             return RuntimeFencedMutationResult(
                 status=RuntimeFencedMutationStatus.APPLIED,
                 value=cursor,
@@ -328,9 +327,7 @@ class InMemoryRuntimeCoordinationStore:
                     status=RuntimeFencedMutationStatus.OPERATION_REJECTED,
                     value=None,
                 )
-            stream = self._reply_streams.setdefault(stream_id, [])
-            cursor = str(len(stream) + 1)
-            stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
+            cursor = self._append_reply_locked(stream_id, event)
             if event.final:
                 updated = dataclasses.replace(
                     metadata,
@@ -435,10 +432,7 @@ class InMemoryRuntimeCoordinationStore:
     ) -> str:
         """Append a reply event and return its cursor."""
         async with self._lock:
-            stream = self._reply_streams.setdefault(stream_id, [])
-            cursor = str(len(stream) + 1)
-            stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
-            return cursor
+            return self._append_reply_locked(stream_id, event)
 
     async def read_replies(
         self,
@@ -451,6 +445,41 @@ class InMemoryRuntimeCoordinationStore:
         async with self._lock:
             stream = self._reply_streams.get(stream_id, [])
             return _read_after_cursor(stream, after_cursor=after_cursor, limit=limit)
+
+    async def wait_replies(
+        self,
+        stream_id: str,
+        *,
+        after_cursor: str | None,
+        limit: int,
+        block_ms: int,
+    ) -> list[RuntimeReplyRecord]:
+        """Wait boundedly for reply events after the supplied cursor."""
+        if block_ms < 0:
+            raise ValueError("block_ms must not be negative")
+        if limit <= 0:
+            return []
+        condition = self._reply_condition(stream_id)
+        async with condition:
+            records = _read_after_cursor(
+                self._reply_streams.get(stream_id, []),
+                after_cursor=after_cursor,
+                limit=limit,
+            )
+            if records or block_ms == 0:
+                return records
+            try:
+                await asyncio.wait_for(
+                    condition.wait(),
+                    timeout=block_ms / 1000,
+                )
+            except TimeoutError:
+                pass
+            return _read_after_cursor(
+                self._reply_streams.get(stream_id, []),
+                after_cursor=after_cursor,
+                limit=limit,
+            )
 
     async def append_body_chunk(
         self,
@@ -576,9 +605,7 @@ class InMemoryRuntimeCoordinationStore:
             metadata = self._operation_metadata.get(operation_id)
             if metadata is None or metadata.status is RuntimeOperationStatus.FINAL:
                 return None
-            stream = self._reply_streams.setdefault(stream_id, [])
-            cursor = str(len(stream) + 1)
-            stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
+            cursor = self._append_reply_locked(stream_id, event)
             if event.final:
                 updated = dataclasses.replace(
                     metadata,
@@ -596,6 +623,25 @@ class InMemoryRuntimeCoordinationStore:
                 )
             self._operation_metadata[operation_id] = updated
             return RuntimeOperationReplyAppend(cursor=cursor, metadata=updated)
+
+    def _append_reply_locked(
+        self,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> str:
+        """Append and notify while the shared coordination lock is held."""
+        stream = self._reply_streams.setdefault(stream_id, [])
+        cursor = str(len(stream) + 1)
+        stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
+        self._reply_condition(stream_id).notify_all()
+        return cursor
+
+    def _reply_condition(self, stream_id: str) -> asyncio.Condition:
+        condition = self._reply_conditions.get(stream_id)
+        if condition is None:
+            condition = asyncio.Condition(self._lock)
+            self._reply_conditions[stream_id] = condition
+        return condition
 
     async def heartbeat_operation(
         self,

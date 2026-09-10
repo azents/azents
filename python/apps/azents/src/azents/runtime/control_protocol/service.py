@@ -615,6 +615,22 @@ class RuntimeControlProtocolService:
             limit=limit,
         )
 
+    async def wait_replies(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        limit: int,
+        block_ms: int,
+    ) -> list[RuntimeReplyRecord]:
+        """Wait boundedly for reply events for foreground operations."""
+        return await self._store.wait_replies(
+            reply_stream_id,
+            after_cursor=after_cursor,
+            limit=limit,
+            block_ms=block_ms,
+        )
+
     async def _append_request(
         self,
         *,

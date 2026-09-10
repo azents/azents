@@ -142,6 +142,17 @@ class RuntimeCoordinationStore(Protocol):
         """Read reply events after the supplied cursor."""
         ...
 
+    async def wait_replies(
+        self,
+        stream_id: str,
+        *,
+        after_cursor: str | None,
+        limit: int,
+        block_ms: int,
+    ) -> list[RuntimeReplyRecord]:
+        """Wait boundedly for reply events after the supplied cursor."""
+        ...
+
     async def append_body_chunk(
         self,
         stream_id: str,

@@ -53,6 +53,7 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 from azents.testing.runtime_coordination import (
     FakeRuntimeControlProtocolService,
 )
@@ -104,6 +105,9 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
         exit_code=0,
         final_cursor="3",
     )
+    snapshot = harness.metrics.snapshot()
+    assert snapshot.wait_event_count >= 1
+    assert sum(snapshot.observation_latency_bucket_counts) == 3
 
 
 @pytest.mark.asyncio
@@ -1325,6 +1329,7 @@ class _Harness:
     store: _ObservableStore
     control: RuntimeControlProtocolService
     client: RuntimeRunnerOperationClient
+    metrics: RuntimeReplyDeliveryMetrics
     runner_generation: int
 
     async def claim(self) -> RuntimeRequestEnvelope:
@@ -1371,15 +1376,18 @@ async def _make_harness(
         request_id_factory=_RequestIds(),
     )
     runner = await control.register_runner(_runner_registration(), registered_at=_now())
+    metrics = RuntimeReplyDeliveryMetrics()
     client = RuntimeRunnerOperationClient(
         control_protocol=control,
         coordination_store=store,
+        metrics=metrics,
         body_chunk_size_bytes=body_chunk_size_bytes,
     )
     return _Harness(
         store=store,
         control=control,
         client=client,
+        metrics=metrics,
         runner_generation=runner.generation,
     )
 
