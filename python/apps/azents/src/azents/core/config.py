@@ -137,6 +137,16 @@ class Settings(BaseSettings):
     testenv_github_platform_validation_base_url: str | None = None
     testenv_external_channel_gateway_lease_duration_seconds: float | None = None
     testenv_external_channel_gateway_renewal_interval_seconds: float | None = None
+    testenv_external_channel_gateway_poll_interval_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    testenv_workspace_runner_file_operation_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
 
     # Session data S3 storage; unified file storage
     workspace_s3_bucket: str = ""
@@ -161,10 +171,11 @@ class Settings(BaseSettings):
         """Require complete testenv Gateway lease timing overrides."""
         duration = self.testenv_external_channel_gateway_lease_duration_seconds
         renewal = self.testenv_external_channel_gateway_renewal_interval_seconds
-        if (duration is None) != (renewal is None):
+        poll = self.testenv_external_channel_gateway_poll_interval_seconds
+        if len({value is None for value in (duration, renewal, poll)}) != 1:
             raise ValueError(
-                "Testenv External Channel Gateway lease duration and renewal "
-                "interval must be configured together."
+                "Testenv External Channel Gateway lease duration, renewal interval, "
+                "and poll interval must be configured together."
             )
         return self
 
@@ -416,15 +427,21 @@ class ExternalChannelGatewayLeaseConfig(BaseModel):
 
     duration_seconds: float = Field(gt=0, allow_inf_nan=False)
     renewal_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
+    poll_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _validate_renewal_interval(self) -> "ExternalChannelGatewayLeaseConfig":
         """Require renewal to happen before the provider lease expires."""
         duration = datetime.timedelta(seconds=self.duration_seconds)
         renewal = datetime.timedelta(seconds=self.renewal_interval_seconds)
-        if duration <= datetime.timedelta() or renewal <= datetime.timedelta():
+        poll = datetime.timedelta(seconds=self.poll_interval_seconds)
+        if (
+            duration <= datetime.timedelta()
+            or renewal <= datetime.timedelta()
+            or poll <= datetime.timedelta()
+        ):
             raise ValueError(
-                "External Channel Gateway lease timing must resolve to at least "
+                "External Channel Gateway timing must resolve to at least "
                 "one microsecond."
             )
         if renewal >= duration:
@@ -443,6 +460,11 @@ class ExternalChannelGatewayLeaseConfig(BaseModel):
     def renewal_interval(self) -> datetime.timedelta:
         """Return the configured provider lease renewal interval."""
         return datetime.timedelta(seconds=self.renewal_interval_seconds)
+
+    @property
+    def poll_interval(self) -> datetime.timedelta:
+        """Return the configured provider connection discovery interval."""
+        return datetime.timedelta(seconds=self.poll_interval_seconds)
 
 
 class FileLifecycleConfig(BaseModel):
@@ -535,6 +557,11 @@ class Config(BaseModel):
     testenv_github_platform_validation_base_url: str | None = None
     testenv_external_channel_gateway_lease: ExternalChannelGatewayLeaseConfig | None = (
         None
+    )
+    testenv_workspace_runner_file_operation_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
     )
 
     @classmethod
@@ -689,12 +716,20 @@ class Config(BaseModel):
                     renewal_interval_seconds=(
                         settings.testenv_external_channel_gateway_renewal_interval_seconds
                     ),
+                    poll_interval_seconds=(
+                        settings.testenv_external_channel_gateway_poll_interval_seconds
+                    ),
                 )
                 if settings.testenv_external_channel_gateway_lease_duration_seconds
                 is not None
                 and settings.testenv_external_channel_gateway_renewal_interval_seconds
                 is not None
+                and settings.testenv_external_channel_gateway_poll_interval_seconds
+                is not None
                 else None
+            ),
+            testenv_workspace_runner_file_operation_timeout_seconds=(
+                settings.testenv_workspace_runner_file_operation_timeout_seconds
             ),
         )
 

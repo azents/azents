@@ -154,7 +154,7 @@ class DiscordGatewayManagerService:
                 try:
                     await asyncio.wait_for(
                         shutdown_event.wait(),
-                        timeout=self.poll_interval.total_seconds(),
+                        timeout=self._poll_interval().total_seconds(),
                     )
                 except TimeoutError:
                     continue
@@ -425,6 +425,11 @@ class DiscordGatewayManagerService:
         """Return the effective Gateway lease renewal interval."""
         override = self._lease_override()
         return self.renew_interval if override is None else override.renewal_interval
+
+    def _poll_interval(self) -> datetime.timedelta:
+        """Return the effective Gateway connection discovery interval."""
+        override = self._lease_override()
+        return self.poll_interval if override is None else override.poll_interval
 
     async def _load_typing_targets(
         self,

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
 from azents.runtime.control_server import (
     RuntimeControlSettings,
@@ -19,6 +20,30 @@ def _settings() -> RuntimeControlSettings:
         runtime_runner_transfer_endpoint="runtime-transfer:8031",
         credential_encryption_key=Fernet.generate_key().decode(),
     )
+
+
+def test_runtime_control_heartbeat_interval_defaults_to_production_value() -> None:
+    assert _settings().testenv_runtime_control_heartbeat_interval_seconds == 20
+
+
+def test_runtime_control_heartbeat_interval_accepts_positive_testenv_override() -> None:
+    settings = _settings().model_copy(
+        update={"testenv_runtime_control_heartbeat_interval_seconds": 2}
+    )
+
+    assert settings.testenv_runtime_control_heartbeat_interval_seconds == 2
+
+
+def test_runtime_control_heartbeat_interval_rejects_non_positive_value() -> None:
+    with pytest.raises(ValidationError):
+        RuntimeControlSettings(
+            runtime_control_allow_insecure=True,
+            runtime_runner_image="runner:test",
+            runtime_runner_control_endpoint="runtime-control:8030",
+            runtime_runner_transfer_endpoint="runtime-transfer:8031",
+            credential_encryption_key=Fernet.generate_key().decode(),
+            testenv_runtime_control_heartbeat_interval_seconds=0,
+        )
 
 
 def test_runtime_control_transport_allows_explicit_insecure_mode() -> None:

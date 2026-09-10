@@ -28,10 +28,10 @@ from azents.app import (
     create_admin_api_app,
     create_public_api_app,
     create_testenv_api_app,
-    run_with_container,
 )
 from azents.core.config import Config
 from azents.core.deps import get_appctx
+from azents.process_lifecycle import run_with_container
 from azents.runtime.control_server import (
     RuntimeControlSettings,
     runtime_control_server_lifespan,

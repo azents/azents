@@ -185,11 +185,6 @@ _EXTERNAL_CHANNEL_SLACK_RESPONSE_MODE_TITLE_INPUT = (
     "Create a title from this request:\nInitial response-mode invocation"
 )
 _SESSION_TITLE_SYSTEM_MARKER = "Create a brief title from the request"
-_DISCORD_PROVIDER_BARRIER_URL = os.environ.get(
-    "DISCORD_PROVIDER_BARRIER_URL",
-    "http://discord-fake:8085/__testenv/barrier",
-)
-_DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS = 5.0
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
 _EXTERNAL_CHANNEL_FILE_DECLARED_SIZE = re.compile(r"Declared size: (\d+) bytes")
@@ -795,36 +790,6 @@ def is_external_channel_slack_response_mode_title_request(
     )
 
 
-def wait_for_external_channel_discord_title_barrier() -> bool:
-    """Wait until direct thread creation evidence is committed before title output."""
-    deadline = time.monotonic() + _DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(  # noqa: S310 - fixed test-network endpoint
-                _DISCORD_PROVIDER_BARRIER_URL,
-                timeout=0.2,
-            ) as response:
-                evidence: object = json.loads(response.read())
-        except OSError:
-            time.sleep(0.01)
-            continue
-        except ValueError:
-            time.sleep(0.01)
-            continue
-        if not isinstance(evidence, dict):
-            time.sleep(0.01)
-            continue
-        barrier = _object(evidence)
-        if (
-            barrier.get("operation") == "create_message"
-            and barrier.get("occurrence") == 2
-            and barrier.get("reached") is True
-        ):
-            return True
-        time.sleep(0.01)
-    return False
-
-
 def external_channel_progress_evidence(
     request: dict[str, object],
 ) -> dict[str, object]:
@@ -1255,16 +1220,6 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         if is_external_channel_discord_title_request(request):
-            if not wait_for_external_channel_discord_title_barrier():
-                self._write_json(
-                    503,
-                    {
-                        "error": {
-                            "message": "Discord title E2E barrier was not reached."
-                        }
-                    },
-                )
-                return
             if self.path == "/v1/responses":
                 self._write_text_response(
                     request,

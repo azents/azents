@@ -99,6 +99,7 @@ _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
 _E2E_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
 _E2E_IMAGE_BUILD_PROFILE_ENV = "AZENTS_E2E_IMAGE_BUILD_PROFILE"
+_SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
 _SELENIUM_IMAGE = "selenium/standalone-chromium:4.45.0-20260606"
 _MAIN_WEB_UPSTREAM_URL = "http://azents-web:3000"
 _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
@@ -169,6 +170,9 @@ _SERVER_IMAGE_BUILD = _E2EImageBuild(
     dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
     cache_repository="azents-server",
     web=False,
+)
+_SERVER_SOURCE_OVERLAY_DOCKERFILE = (
+    REPOSITORY_ROOT / "azents-e2e-server-overlay.Dockerfile"
 )
 _RUNTIME_RUNNER_IMAGE_BUILD = _E2EImageBuild(
     environment_variable="AZENTS_E2E_RUNTIME_RUNNER_IMAGE",
@@ -762,8 +766,8 @@ def discord_provider_fake_container(
         .with_command(["python", "/app/discord_fake.py"])
         .with_exposed_ports(8085)
         .with_network(container_network)
-        .with_network_aliases("discord-fake") as container
-    ):
+        .with_network_aliases("discord-fake")
+    ) as container:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(8085)
         for _ in range(30):
@@ -856,6 +860,19 @@ def _build_configured_e2e_image(
     image_tag: str,
 ) -> None:
     """Build one configured image using its required context."""
+    overlay_base = os.environ.get(_SERVER_SOURCE_OVERLAY_BASE_ENV)
+    if image_build is _SERVER_IMAGE_BUILD and overlay_base:
+        _build_e2e_image(
+            image_tag=image_tag,
+            dockerfile=_SERVER_SOURCE_OVERLAY_DOCKERFILE,
+            cache_repository=None,
+            build_args={"BASE_IMAGE": overlay_base},
+            observability_image=image_build.cache_repository,
+            build_mode="source-overlay",
+            builder_override="default",
+        )
+        return
+
     if image_build.web:
         _build_e2e_web_image(
             image_tag=image_tag,
@@ -959,12 +976,20 @@ def _build_e2e_image(
     *,
     image_tag: str,
     dockerfile: Path,
-    cache_repository: str,
+    cache_repository: str | None,
     build_contexts: dict[str, str | Path] | None = None,
+    build_args: dict[str, str] | None = None,
+    observability_image: str | None = None,
+    build_mode: str = "full",
+    builder_override: str | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
-    cache_options = _get_e2e_image_cache_options(cache_repository)
-    builder = os.environ.get(_DOCKER_BUILDER_ENV)
+    cache_options = (
+        _E2EImageCacheOptions([], None, "none", None)
+        if cache_repository is None
+        else _get_e2e_image_cache_options(cache_repository)
+    )
+    builder = builder_override or os.environ.get(_DOCKER_BUILDER_ENV)
     started_at = time.monotonic()
     completed = False
 
@@ -976,18 +1001,20 @@ def _build_e2e_image(
             builder=builder,
             cache_from=cache_options.cache_from or None,
             cache_to=cache_options.cache_to,
+            build_args=build_args or {},
             build_contexts=build_contexts or {},
             load=True,
         )
         completed = True
     finally:
         _write_e2e_image_build_observability(
-            cache_repository=cache_repository,
+            cache_repository=observability_image or cache_repository or "unknown",
             cache_backend=cache_options.cache_backend,
             cache_scope=cache_options.cache_scope,
             cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,
             duration_seconds=time.monotonic() - started_at,
+            build_mode=build_mode,
         )
 
 
@@ -1064,6 +1091,7 @@ def _write_e2e_image_build_observability(
     cache_export_enabled: bool,
     completed: bool,
     duration_seconds: float,
+    build_mode: str = "full",
 ) -> None:
     """Append safe per-image build timing evidence to the CI artifact directory."""
     artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
@@ -1079,6 +1107,7 @@ def _write_e2e_image_build_observability(
         "cache_export_enabled": cache_export_enabled,
         "completed": completed,
         "duration_seconds": round(duration_seconds, 3),
+        "build_mode": build_mode,
     }
     with _IMAGE_BUILD_OBSERVABILITY_LOCK:
         with artifact_path.open("a", encoding="utf-8") as artifact_file:
@@ -1164,6 +1193,10 @@ def _configure_azents_server_container(
             _DISCORD_PROVIDER_INTERNAL_API_URL,
         )
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
+        .with_env(
+            "AZ_TESTENV_WORKSPACE_RUNNER_FILE_OPERATION_TIMEOUT_SECONDS",
+            "10",
+        )
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
         .with_env("AZ_AGENT_HOME_SESSION_HIBERNATE_IDLE_SECONDS", "60")
@@ -1698,11 +1731,15 @@ def azents_external_channel_gateway_factory(
             .with_env("AZ_WORKER_HEALTH_PORT", "8013")
             .with_env(
                 "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_LEASE_DURATION_SECONDS",
-                "5",
+                "2",
             )
             .with_env(
                 "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_RENEWAL_INTERVAL_SECONDS",
-                "1",
+                "0.5",
+            )
+            .with_env(
+                "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_POLL_INTERVAL_SECONDS",
+                "0.1",
             )
         )
 
@@ -1762,6 +1799,7 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")
+        .with_env("AZ_TESTENV_RUNTIME_CONTROL_HEARTBEAT_INTERVAL_SECONDS", "2")
         .with_env("AZ_RUNTIME_CONTROL_LIFECYCLE_RETRY_DELAY_SECONDS", "1")
         .with_env("AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS", "120")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)

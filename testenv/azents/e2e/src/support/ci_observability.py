@@ -63,6 +63,7 @@ class ImageBuildTiming(TypedDict):
     cache_backend: str
     cache_scope: str | None
     cache_export_enabled: bool
+    build_mode: Literal["full", "source-overlay"]
 
 
 _TEST_PHASE_RECORD_KEYS = frozenset(
@@ -87,6 +88,7 @@ _IMAGE_BUILD_TIMING_KEYS = frozenset(
         "cache_backend",
         "cache_scope",
         "cache_export_enabled",
+        "build_mode",
     }
 )
 
@@ -292,6 +294,9 @@ def _parse_image_build_timing(line: str) -> ImageBuildTiming:
         _IMAGE_BUILD_TIMING_KEYS,
         record_name="image build timing record",
     )
+    build_mode = _required_string(payload, "build_mode")
+    if build_mode not in {"full", "source-overlay"}:
+        raise ValueError("build_mode must be full or source-overlay")
     return ImageBuildTiming(
         image=_required_string(payload, "image"),
         duration_seconds=_required_float(payload, "duration_seconds"),
@@ -299,6 +304,7 @@ def _parse_image_build_timing(line: str) -> ImageBuildTiming:
         cache_backend=_required_string(payload, "cache_backend"),
         cache_scope=_optional_string(payload, "cache_scope"),
         cache_export_enabled=_required_bool(payload, "cache_export_enabled"),
+        build_mode=build_mode,
     )
 
 
@@ -418,8 +424,8 @@ def _render_image_build_summary(records: tuple[ImageBuildTiming, ...]) -> list[s
         "<details>",
         "<summary>Image build timing</summary>",
         "",
-        "| Image | Duration | Cache | Completed |",
-        "| --- | ---: | --- | --- |",
+        "| Image | Mode | Duration | Cache | Completed |",
+        "| --- | --- | ---: | --- | --- |",
     ]
     for record in sorted(
         records,
@@ -428,6 +434,7 @@ def _render_image_build_summary(records: tuple[ImageBuildTiming, ...]) -> list[s
     ):
         lines.append(
             f"| {_inline_code(record['image'])} | "
+            f"`{_escape_text(record['build_mode'])}` | "
             f"{record['duration_seconds']:.2f}s | "
             f"`{_escape_text(record['cache_backend'])}` | "
             f"`{str(record['completed']).lower()}` |"
@@ -435,7 +442,7 @@ def _render_image_build_summary(records: tuple[ImageBuildTiming, ...]) -> list[s
     total_duration = sum(record["duration_seconds"] for record in records)
     lines.extend(
         [
-            f"| **Total** | **{total_duration:.2f}s** |  |  |",
+            f"| **Total** |  | **{total_duration:.2f}s** |  |  |",
             "",
             "</details>",
             "",

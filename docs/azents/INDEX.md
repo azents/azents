@@ -41,7 +41,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 44 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-08 | 60 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-10 | 61 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-10 | 48 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
@@ -49,7 +49,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-10 | 18 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-10 | 20 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-08 | 48 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-10 | 51 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
 

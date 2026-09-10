@@ -10,6 +10,7 @@ import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config, Settings
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
@@ -49,15 +50,18 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.chat import workspace as workspace_module
 from azents.services.chat.workspace import (
     AgentWorkspaceFileReadError,
     AgentWorkspaceFileService,
+    get_runner_file_operation_timeout,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
 
 _NOW = datetime.datetime(2026, 5, 24, tzinfo=datetime.UTC)
+_RUNNER_FILE_OPERATION_TIMEOUT = datetime.timedelta(seconds=120)
 
 
 class _FakeAgentRepository(AgentRepository):
@@ -174,6 +178,7 @@ class _FakeRunnerOperations:
         }
         self.directories = {AGENT_WORKSPACE_ROOT.as_posix()}
         self.list_calls: list[tuple[str, int, str]] = []
+        self.list_deadlines: list[datetime.datetime] = []
         self.read_calls: list[tuple[str, int, str]] = []
         self.text_read_calls: list[tuple[str, int, int, str]] = []
         self.stat_calls: list[tuple[str, int, str]] = []
@@ -235,8 +240,9 @@ class _FakeRunnerOperations:
         exclude_patterns: list[str] | None = None,
         deadline_at: datetime.datetime,
     ) -> RuntimeFileListResult:
-        del recursive, exclude_patterns, deadline_at
+        del recursive, exclude_patterns
         self.list_calls.append((runtime_id, runner_generation, path))
+        self.list_deadlines.append(deadline_at)
         file_data = self.files.get(path)
         if file_data is not None:
             return RuntimeFileListResult(
@@ -465,6 +471,56 @@ async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
         await session.close()
 
 
+@pytest.mark.parametrize(
+    ("configured_timeout_seconds", "expected_timeout_seconds"),
+    [(None, 120.0), (10.0, 10.0)],
+)
+def test_runner_file_operation_timeout_uses_production_default_or_testenv_override(
+    configured_timeout_seconds: float | None,
+    expected_timeout_seconds: float,
+) -> None:
+    settings = Settings(
+        rdb_host="localhost",
+        rdb_user="azents",
+        rdb_db_name="azents",
+        auth_jwt_secret_key="test-secret",
+        credential_encryption_key="test-key",
+        testenv_workspace_runner_file_operation_timeout_seconds=(
+            configured_timeout_seconds
+        ),
+    )
+
+    timeout = get_runner_file_operation_timeout(Config.from_settings(settings))
+
+    assert timeout == datetime.timedelta(seconds=expected_timeout_seconds)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_seconds", [120.0, 10.0])
+async def test_get_workspace_applies_runner_file_operation_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: float,
+) -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    monkeypatch.setattr(workspace_module, "_utc_now", lambda: _NOW)
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+        runner_file_operation_timeout=datetime.timedelta(seconds=timeout_seconds),
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    assert runner_operations.list_deadlines == [
+        _NOW + datetime.timedelta(seconds=timeout_seconds)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     runtime = _make_agent_runtime()
@@ -476,6 +532,7 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -514,6 +571,7 @@ async def test_get_workspace_keeps_ready_runner_when_host_controls_disconnect() 
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -546,6 +604,7 @@ async def test_get_workspace_keeps_ready_runner_during_provider_transition() -> 
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -577,6 +636,7 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -602,6 +662,7 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -629,6 +690,7 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -654,6 +716,7 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -677,6 +740,7 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -701,6 +765,7 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_workspace("agent-1", "user-1")
@@ -723,6 +788,7 @@ async def test_read_path_returns_file_preview_without_preliminary_stat() -> None
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
 
@@ -752,6 +818,7 @@ async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.read_path("agent-1", "user-1", file_path)
@@ -775,6 +842,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
         runtime_workspace_download_service=transfer,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
@@ -811,6 +879,7 @@ async def test_read_path_returns_nonempty_directory_with_one_runner_operation() 
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.read_path(
@@ -845,6 +914,7 @@ async def test_read_path_stats_only_after_an_empty_directory_listing() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.read_path(
@@ -888,6 +958,7 @@ async def test_read_path_does_not_probe_child_repository_metadata() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.read_path(
@@ -924,6 +995,7 @@ async def test_repository_type_inspects_only_selected_directory() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_repository_type(
@@ -951,6 +1023,7 @@ async def test_repository_type_returns_none_when_git_marker_is_missing() -> None
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_repository_type(
@@ -978,6 +1051,7 @@ async def test_repository_type_propagates_runner_unavailability() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.get_repository_type(
@@ -1000,6 +1074,7 @@ async def test_stat_path_returns_inspector_metadata() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
 
@@ -1026,6 +1101,7 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.mkdir_path("agent-1", "user-1", "reports", parents=False)
@@ -1047,6 +1123,7 @@ async def test_delete_path_rejects_workspace_root() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.delete_path(
@@ -1070,6 +1147,7 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
     result = await service.move_path(
@@ -1094,6 +1172,7 @@ async def test_move_path_calls_runner_for_rename() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     source = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
     destination = (AGENT_WORKSPACE_ROOT / "README-renamed.md").as_posix()
@@ -1124,6 +1203,7 @@ async def test_bulk_delete_paths_calls_runner() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
     second = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
@@ -1149,6 +1229,7 @@ async def test_bulk_move_paths_calls_runner() -> None:
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
     second = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()

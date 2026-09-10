@@ -12,6 +12,7 @@ code_paths:
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
   - .github/workflows/snapshot.yaml
+  - azents-e2e-server-overlay.Dockerfile
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -26,8 +27,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-08
-spec_version: 48
+last_verified_at: 2026-09-10
+spec_version: 51
 ---
 
 # E2E Primary Test Strategy
@@ -71,6 +72,15 @@ Discord provider fakes publish sanitized delivery and operation evidence before 
 can observe controlled failure boundaries. Regression coverage synchronizes on
 authoritative evidence publication and the observable boundary instead of using
 sleeps.
+
+The Discord automatic-title journey pauses its already-ready Engine Worker before
+triggering the provider flow, waits for the exact targeted message-delivery barrier
+and committed direct-thread delivery evidence, then resumes the Worker. The title
+model request therefore begins only after the successful rename precondition exists,
+without holding a model response against its stream watchdog. The deterministic
+Gateway fixture may also shorten lease, renewal, and connection-discovery polling
+together through a complete testenv-only override; production defaults remain
+unchanged.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -171,7 +181,18 @@ Always-on required CI does not depend on external credentials.
   wait condition: a missing, late, cancelled, or failed publication immediately
   preserves the existing local Buildx/cache build path. Snapshot pulls run in
   parallel, and lane observability records attempted sources, selected commit SHAs,
-  timing, and fallback state.
+  timing, and fallback state. For pull requests where only `python/apps/azents`
+  runtime content changes while the Server Dockerfile, Docker context rules,
+  dependency manifest and lock, and installed shared libraries remain identical, the
+  lane may pull a dependency-compatible predecessor or bounded ancestor Server
+  snapshot as a source-overlay base. It removes the complete predecessor application
+  directory before copying the current-worktree application directory, so changed and
+  deleted source both match the tested revision. The overlay build neither imports nor
+  exports the full-image remote cache. Dependency, lockfile, Dockerfile,
+  Docker-context, or installed shared-library changes still use the full
+  current-worktree Server build, as does any unavailable or incompatible overlay
+  base. Snapshot and image-build artifacts distinguish final-image pulls,
+  source-overlay-base pulls, full builds, and source-overlay builds.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
@@ -190,9 +211,13 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files only within a suite using the latest successful `main` timing
-  baseline, with a deterministic source-based fallback. Required uses four lanes;
-  Web uses one lane. Lanes are parallel partitions, not additional profiles.
+  It balances files only within a suite using the latest successful timing baseline,
+  with a deterministic source-based fallback. The first pull request run starts from
+  the latest accessible `main` baseline. A successful internal pull request run saves
+  its observed timing under the head commit SHA, and later runs or attempts of that
+  same SHA restore the newest SHA-specific timing before falling back to `main`.
+  Fork pull requests do not publish timing caches. Required uses four lanes; Web uses
+  one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
   one reusable scenario module. When such a split replaces an existing collection
   file, the planner projects that file's historical per-test call timings onto the
@@ -385,6 +410,13 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-10** (spec_version 51) — Added dependency-compatible Server snapshot
+  source overlays for application-source-only pull request changes, with complete
+  application replacement, exact-current-snapshot precedence, deterministic
+  full-build fallback, and explicit build-mode observability.
+- **2026-09-10** (spec_version 50) — Added protocol-observable Discord automatic-title
+  synchronization and the complete testenv-only Gateway timing override while
+  preserving production defaults and journey assertions.
 - **2026-09-08** (spec_version 48) — Split the Discord provisioning collector into
   independently planned Gateway binding, configured provisioning, and unmentioned
   activity journeys while preserving historical timing projection and coverage.

@@ -11,8 +11,8 @@ import signal
 
 from azcommon.logging import configure_logging_for_runtime
 
-from azents.app import run_with_container
 from azents.core.config import Config
+from azents.process_lifecycle import run_with_container
 from azents.worker.deps import get_health_server
 from azents.worker.worker import AgentWorker
 

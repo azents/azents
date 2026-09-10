@@ -136,6 +136,93 @@ def _prepare_session_folder(
     response.raise_for_status()
 
 
+def _wait_session_folder_ready(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    deadline: float,
+) -> None:
+    """Wait until Runner-backed stat proves the bound Session folder exists."""
+    manifest_path = (
+        f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
+        "/workspace/project-browser-manifest"
+    )
+    stat_path = f"/chat/v1/agents/{agent_id}/workspace/stat"
+    last_observation: object = None
+    session_folder_path: str | None = None
+    while time.monotonic() < deadline:
+        if session_folder_path is None:
+            manifest_response = requests.get(
+                f"{server_url}{manifest_path}",
+                headers=_headers(token),
+                timeout=10,
+            )
+            if not manifest_response.ok:
+                manifest_error = _response_object(
+                    manifest_response,
+                    label="Session Project browser manifest error",
+                )
+                last_observation = {
+                    "status_code": manifest_response.status_code,
+                    "body": manifest_error,
+                }
+                if not (
+                    manifest_response.status_code == 400
+                    and manifest_error.get("detail")
+                    == "Session working-folder binding is unavailable."
+                ):
+                    manifest_response.raise_for_status()
+                time.sleep(0.5)
+                continue
+            manifest = _response_object(
+                manifest_response,
+                label="Session Project browser manifest",
+            )
+            entries = manifest.get("entries")
+            if not isinstance(entries, list):
+                raise AssertionError(f"Session manifest omitted entries: {manifest!r}")
+            session_paths = [
+                entry.get("path")
+                for entry in entries
+                if isinstance(entry, dict)
+                and isinstance(entry.get("source"), dict)
+                and entry["source"].get("type") == "session_folder"
+            ]
+            if len(session_paths) != 1 or not isinstance(session_paths[0], str):
+                raise AssertionError(
+                    f"Session manifest omitted one Session folder: {manifest!r}"
+                )
+            session_folder_path = session_paths[0]
+        response = requests.get(
+            f"{server_url}{stat_path}",
+            headers=_headers(token),
+            params={"path": session_folder_path},
+            timeout=10,
+        )
+        if response.status_code == 404:
+            last_observation = {
+                "status_code": response.status_code,
+                "body": response.text,
+            }
+            time.sleep(0.5)
+            continue
+        response.raise_for_status()
+        stat = _response_object(
+            response,
+            label="Session working-folder stat",
+        )
+        last_observation = stat
+        if stat.get("path") == session_folder_path and stat.get("kind") == "directory":
+            return
+        time.sleep(0.5)
+    raise AssertionError(
+        "Runner-backed Session working folder did not become ready: "
+        f"{last_observation!r}"
+    )
+
+
 def _prepare_terminal_session(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -149,12 +236,25 @@ def _prepare_terminal_session(
         agent_id=workspace.agent_id,
         session_id=workspace.session_id,
     )
+    deadline = time.monotonic() + 120
+    _wait_session_folder_ready(
+        server_url=server_url,
+        token=workspace.token,
+        agent_id=workspace.agent_id,
+        session_id=workspace.session_id,
+        deadline=deadline,
+    )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise AssertionError(
+            "Terminal readiness deadline expired after Session folder preparation"
+        )
     _wait_terminal_projection(
         public_api_client=public_api_client,
         workspace=workspace,
         predicate=lambda projection: projection.state in {"ready", "active"},
         message="Terminal did not become ready after Session folder preparation",
-        timeout=120,
+        timeout=remaining,
     )
 
 
@@ -784,16 +884,12 @@ def test_runtime_terminal_runtime_lifecycle_priority(
         message="Explicit Runtime Start did not restore Terminal authority",
     )
     assert restarted.lifecycle is not None
-    _prepare_terminal_session(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-    )
     resumed = _TerminalSocket.connect(
         public_api_client=public_api_client,
         workspace=workspace,
         server_url=azents_public_server_url,
         origin=_MAIN_WEB_ORIGIN,
     )
+    assert resumed.accepted.terminal_id != active.accepted.terminal_id
     resumed.command("printf '__REST''ARTED__yes__'", "RESTARTED_DONE")
     resumed.terminate()

@@ -9,10 +9,10 @@ from azcommon import di
 from fastapi import FastAPI
 
 import cli.devserver as devserver
-from azents.app import _create_container
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import JobRuntimeBackend
+from azents.process_lifecycle import create_container
 from azents.utils.appctx import AppContext
 from cli.devserver import _create_api_targets, _run_devserver_resources
 
@@ -24,7 +24,7 @@ def test_non_reload_api_apps_share_root_appcontext_and_container() -> None:
         MagicMock(job_runtime_backend=JobRuntimeBackend.LOCAL),
     )
     appctx = AppContext(config)
-    container = _create_container(appctx)
+    container = create_container(appctx)
 
     public, admin = _create_api_targets(
         config,
@@ -44,7 +44,7 @@ def test_reload_api_targets_create_one_root_inside_each_child_process() -> None:
     """Reload mode retains process-local app factories instead of parent objects."""
     config = cast(Config, MagicMock())
     appctx = AppContext(config)
-    container = _create_container(appctx)
+    container = create_container(appctx)
 
     public, admin = _create_api_targets(
         config,

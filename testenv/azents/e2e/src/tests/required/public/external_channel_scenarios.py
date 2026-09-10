@@ -102,6 +102,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
 from support.runtime_profiles import (
@@ -4399,9 +4400,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     discord_provider_fake_url: str,
-    azents_engine_worker_container: Container,
+    azents_engine_worker_container: DockerContainer,
     azents_external_channel_gateway_factory: Callable[
-        [], AbstractContextManager[Container]
+        [], AbstractContextManager[DockerContainer]
     ],
 ) -> None:
     """Gate one Gateway mention until a signed Discord location selection."""
@@ -4651,6 +4652,19 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         setup_gate_counts = _int_dict(setup_gate_state["request_counts"])
         assert setup_gate_counts.get("create_thread", 0) == 0
         assert setup_gate_counts.get("create_message", 0) == 1
+        engine_worker = azents_engine_worker_container.get_wrapped_container()
+
+        def ensure_engine_worker_running() -> None:
+            engine_worker.reload()
+            if engine_worker.status == "paused":
+                engine_worker.unpause()
+                engine_worker.reload()
+            assert engine_worker.status == "running"
+
+        request.addfinalizer(ensure_engine_worker_running)
+        engine_worker.pause()
+        engine_worker.reload()
+        assert engine_worker.status == "paused"
         _select_discord_setup_location(
             discord_provider_fake_url=discord_provider_fake_url,
             interaction_id="700000000000000004",
@@ -4694,6 +4708,44 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         assert barrier_state["operation"] == "create_message"
         assert barrier_state["occurrence"] == 2
         assert barrier_state["request_count"] == 2
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+
+        def direct_thread_delivery_committed() -> dict[str, object] | None:
+            state = _discord_provider_state(discord_provider_fake_url)
+            thread_channel_ids = {
+                operation.get("thread_channel_id")
+                for operation in _objects(state["operations"])
+                if operation.get("event") == "thread_create"
+                and operation.get("outcome") == "delivered"
+                and isinstance(operation.get("thread_channel_id"), str)
+            }
+            if len(thread_channel_ids) != 1:
+                return None
+            thread_channel_id = next(iter(thread_channel_ids))
+            if not any(
+                delivery.get("operation") == "create_message"
+                and delivery.get("outcome") == "created"
+                and delivery.get("channel_id") == thread_channel_id
+                for delivery in _objects(state["deliveries"])
+            ):
+                return None
+            return state
+
+        _required(
+            wait_until(
+                direct_thread_delivery_committed,
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord direct-created thread delivery did not commit before "
+                    "title generation"
+                ),
+            )
+        )
+        ensure_engine_worker_running()
 
         def generated_title_projection() -> AgentSessionResponse | None:
             generated_detail = chat_api.chat_v1_get_agent_session(
@@ -4736,18 +4788,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 final_counts = _int_dict(
                     _discord_provider_state(discord_provider_fake_url)["request_counts"]
                 )
-                worker_log_value = azents_engine_worker_container.logs(
-                    stdout=True,
-                    stderr=True,
-                    tail=200,
-                )
-                worker_logs = (
-                    worker_log_value.decode(errors="replace")
-                    if isinstance(worker_log_value, bytes)
-                    else worker_log_value
-                )
+                worker_stdout, worker_stderr = azents_engine_worker_container.get_logs()
                 title_log_lines = [
-                    line for line in worker_logs.splitlines() if "title" in line.lower()
+                    line
+                    for line in (
+                        worker_stdout.decode(errors="replace")
+                        + worker_stderr.decode(errors="replace")
+                    ).splitlines()
+                    if "title" in line.lower()
                 ][-20:]
                 title_source = (
                     final_detail.title_source.value
@@ -4765,10 +4813,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     f"title_failure_diagnostics_unavailable={diagnostic_error!r}"
                 )
             pytest.fail(f"{error}; {diagnostic_summary}")
-        requests.post(
-            f"{discord_provider_fake_url}/__testenv/barrier/release",
-            timeout=5,
-        ).raise_for_status()
         state = _object(
             wait_until(
                 lambda: _joined_session_navigation_state(

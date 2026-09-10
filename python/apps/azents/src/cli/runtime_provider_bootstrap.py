@@ -11,8 +11,8 @@ from azcommon.logging import configure_logging_for_runtime
 from kubernetes_asyncio.client import ApiClient, CoreV1Api
 from kubernetes_asyncio.config import load_incluster_config
 
-from azents.app import run_with_container
 from azents.core.config import Config
+from azents.process_lifecycle import run_with_container
 from azents.services.runtime_provider_bootstrap.enrollment import (
     RuntimeProviderBootstrapEnrollmentService,
 )
