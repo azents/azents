@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -30,6 +31,13 @@ from .data import ProviderRejected, ProviderUnavailable, TokenSet
 from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
 
 _TEST_KEY = Fernet.generate_key().decode()
+
+
+class _CreatedIntegration(NamedTuple):
+    """ChatGPT OAuth integration test fixture."""
+
+    repository: LLMProviderIntegrationRepository
+    integration_id: str
 
 
 class _SessionManager:
@@ -66,7 +74,7 @@ async def _create_integration(
     session: AsyncSession,
     *,
     expires_at: datetime.datetime,
-) -> tuple[LLMProviderIntegrationRepository, str]:
+) -> _CreatedIntegration:
     """Create ChatGPT OAuth integration for tests."""
     repo = LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
     workspace_id = await _create_workspace(session)
@@ -89,7 +97,7 @@ async def _create_integration(
             ),
         ),
     )
-    return repo, integration.id
+    return _CreatedIntegration(repository=repo, integration_id=integration.id)
 
 
 def _persistence_repository(

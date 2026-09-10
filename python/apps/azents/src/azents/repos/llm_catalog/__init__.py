@@ -1,7 +1,7 @@
 """LLM catalog repositories."""
 
 import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -49,6 +49,20 @@ from .data import (
     LLMCatalogSnapshotCounts,
     LLMCatalogSyncAttempt,
 )
+
+
+class CatalogEntryWithCatalog(NamedTuple):
+    """One selectable catalog entry with its owning catalog."""
+
+    catalog: LLMCatalog
+    entry: LLMCatalogEntry
+
+
+class ImageGenerationCatalogEntryWithCatalog(NamedTuple):
+    """One selectable image entry with its owning catalog."""
+
+    catalog: LLMCatalog
+    entry: ImageGenerationCatalogEntry
 
 
 def _catalog_entry_freshness_rank() -> sa.ColumnElement[int]:
@@ -622,7 +636,7 @@ class LLMCatalogRepository:
         integration_id: str,
         workspace_id: str,
         model_identifier: str,
-    ) -> tuple[LLMCatalog, ImageGenerationCatalogEntry] | None:
+    ) -> ImageGenerationCatalogEntryWithCatalog | None:
         """Fetch one current-generation selectable image model entry."""
         page = await self.list_image_generation_entries_by_integration(
             session,
@@ -650,7 +664,10 @@ class LLMCatalogRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return page.catalog, self._build_image_generation_entry(rdb)
+        return ImageGenerationCatalogEntryWithCatalog(
+            catalog=page.catalog,
+            entry=self._build_image_generation_entry(rdb),
+        )
 
     async def list_entries_by_integration(
         self,
@@ -835,7 +852,7 @@ class LLMCatalogRepository:
         workspace_id: str,
         model_identifier: str,
         purpose: LLMCatalogPurpose,
-    ) -> tuple[LLMCatalog, LLMCatalogEntry] | None:
+    ) -> CatalogEntryWithCatalog | None:
         """Fetch one selectable current entry for an integration/model."""
         page = await self.list_entries_by_integration(
             session,
@@ -860,7 +877,10 @@ class LLMCatalogRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return page.catalog, self._build_entry(rdb)
+        return CatalogEntryWithCatalog(
+            catalog=page.catalog,
+            entry=self._build_entry(rdb),
+        )
 
     async def get_system_catalog(
         self,

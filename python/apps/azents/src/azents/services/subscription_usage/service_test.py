@@ -4,7 +4,7 @@ import datetime
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Literal
+from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock
 
 import httpx
@@ -49,6 +49,13 @@ from .data import (
 from .service import SubscriptionUsageService
 
 _SERVICE_MODULE = "azents.services.subscription_usage.service"
+
+
+class _SubscriptionUsageFixture(NamedTuple):
+    """Subscription usage service test fixture."""
+
+    service: SubscriptionUsageService
+    repository: AsyncMock
 
 
 class _SessionManager:
@@ -231,13 +238,13 @@ async def _service(
     handler: Callable[[httpx.Request], httpx.Response],
     *,
     integration: LLMProviderIntegrationWithSecrets | None,
-) -> tuple[SubscriptionUsageService, AsyncMock]:
+) -> _SubscriptionUsageFixture:
     repository = AsyncMock()
     repository.get_by_id_with_secrets.return_value = integration
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(transport=transport)
-    return (
-        SubscriptionUsageService(
+    return _SubscriptionUsageFixture(
+        service=SubscriptionUsageService(
             repository=repository,
             chatgpt_oauth_runtime_repository=AsyncMock(),
             session_manager=_SessionManager(),
@@ -247,7 +254,7 @@ async def _service(
             openrouter_usage_base_url="https://openrouter.example.test/api/v1",
             kimi_usage_base_url="https://kimi-usage.example.test/coding/v1",
         ),
-        repository,
+        repository=repository,
     )
 
 
