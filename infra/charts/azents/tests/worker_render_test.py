@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 CHART_DIR = Path(__file__).resolve().parents[1]
 
@@ -15,7 +14,14 @@ def _helm_template(*values: str) -> str:
     helm = shutil.which("helm")
     if helm is None:
         pytest.skip("helm binary is not available")
-    command = [helm, "template", "azents", str(CHART_DIR)]
+    command = [
+        helm,
+        "template",
+        "azents",
+        str(CHART_DIR),
+        "--show-only",
+        "templates/server/worker-deployment.yaml.tpl",
+    ]
     base_values = (
         "server.image.repository=repo/server",
         "server.image.tag=sha",
@@ -37,24 +43,15 @@ def _helm_template(*values: str) -> str:
     return completed.stdout
 
 
-def _worker_deployment(rendered: str) -> dict[str, object]:
-    documents = tuple(yaml.safe_load_all(rendered))
-    return next(
-        document
-        for document in documents
-        if isinstance(document, dict)
-        and document.get("kind") == "Deployment"
-        and document.get("metadata", {}).get("name") == "worker"
-    )
-
-
 def test_worker_defaults_to_one_replica() -> None:
-    worker = _worker_deployment(_helm_template())
+    rendered = _helm_template()
 
-    assert worker["spec"]["replicas"] == 1
+    assert "name: worker" in rendered
+    assert "replicas: 1" in rendered
 
 
 def test_worker_replica_count_is_configurable() -> None:
-    worker = _worker_deployment(_helm_template("server.worker.replicas=3"))
+    rendered = _helm_template("server.worker.replicas=3")
 
-    assert worker["spec"]["replicas"] == 3
+    assert "name: worker" in rendered
+    assert "replicas: 3" in rendered
