@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 52
+spec_version: 53
 ---
 
 # E2E Primary Test Strategy
@@ -233,7 +233,12 @@ Always-on required CI does not depend on external credentials.
   for unmentioned activity and typing recovery; and
   `test_external_channel_discord_journeys.py` for activation, commands, components,
   and lifecycle. These files collect reusable implementations from
-  `external_channel_scenarios.py`.
+  `external_channel_scenarios.py`. Their shared Agent setup creates the required
+  Workspace, model integration, Runtime Profile, and Agent records without eagerly
+  starting every Agent Runtime. Journeys that execute Agent work rely on the product's
+  on-demand Runtime lifecycle and retain their existing observable completion,
+  recovery, delivery, and typing boundaries; management-only journeys avoid unrelated
+  Runtime startup entirely.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
@@ -412,6 +417,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-10** (spec_version 53) — Removed eager Runtime startup from shared
+  deterministic External Channel Agent setup. Runtime-bearing journeys retain
+  product-owned on-demand startup and observable completion boundaries, while
+  management-only journeys no longer prepare unrelated Runtimes.
 - **2026-09-10** (spec_version 52) — Replaced single-sample E2E lane weights with
   per-file high-watermarks from each suite's latest three successful timing samples
   while preserving deterministic fallback, same-SHA cache precedence, suite

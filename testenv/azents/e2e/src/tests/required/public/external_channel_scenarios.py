@@ -105,10 +105,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
-from support.runtime_profiles import (
-    create_workspace_runtime_profile,
-    start_and_wait_for_agent_runtime,
-)
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     decode_docker_exec_output,
@@ -261,22 +258,6 @@ def _create_agent(
     return _CreatedAgent(token, email, handle, agent_ids[0])
 
 
-def _wait_for_runtime_runner_ready(
-    public_api_client: azentspublicclient.ApiClient,
-    *,
-    token: str,
-    workspace_handle: str,
-    agent_id: str,
-) -> None:
-    """Start and wait for the Agent Runtime Runner required by file transfer."""
-    start_and_wait_for_agent_runtime(
-        public_api_client,
-        token=token,
-        workspace_handle=workspace_handle,
-        agent_id=agent_id,
-    )
-
-
 def _runtime_container(agent_id: str) -> Container:
     """Return the one Runtime container for an Agent."""
     client = docker_py.from_env()
@@ -413,13 +394,6 @@ def _create_workspace_agents(
         ).id
         for index in range(agent_count)
     ]
-    for agent_id in agent_ids:
-        _wait_for_runtime_runner_ready(
-            public_api_client,
-            token=token,
-            workspace_handle=handle,
-            agent_id=agent_id,
-        )
     return _CreatedWorkspaceAgents(token, email, handle, agent_ids)
 
 
