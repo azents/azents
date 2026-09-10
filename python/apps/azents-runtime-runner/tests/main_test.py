@@ -3,13 +3,16 @@
 import json
 import logging
 
+import grpc
 import pytest
+from azents_runtime_control.runner import RunnerConnectionRejected
 from pytest import MonkeyPatch
 
 from azents_runtime_runner.main import (
     _CAPABILITIES,
     RunnerLimitConfig,
     StructuredLogFormatter,
+    _runner_reprovisioning_error_code,
     _runtime_configuration_evidence_from_env,
     resolve_workspace_path,
     run_runtime_runner,
@@ -19,6 +22,21 @@ from azents_runtime_runner.main import (
 
 def test_runner_advertises_terminal_capability() -> None:
     assert "terminal.v1" in _CAPABILITIES
+
+
+def test_runner_authority_rejections_require_reprovisioning() -> None:
+    assert (
+        _runner_reprovisioning_error_code(grpc.StatusCode.UNAUTHENTICATED)
+        == "runner_credential_rejected"
+    )
+    assert (
+        _runner_reprovisioning_error_code(
+            RunnerConnectionRejected("heartbeat rejected")
+        )
+        == "runner_authority_rejected"
+    )
+    assert _runner_reprovisioning_error_code(grpc.StatusCode.UNAVAILABLE) is None
+    assert _runner_reprovisioning_error_code(grpc.StatusCode.CANCELLED) is None
 
 
 @pytest.mark.asyncio

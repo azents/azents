@@ -5,6 +5,7 @@ import dataclasses
 import json
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -306,6 +307,97 @@ async def test_reply_stream_cursor_resume(
     ]
     assert resumed[-1].cursor == final_cursor
     assert resumed[-1].event.final is True
+
+
+@pytest.mark.asyncio
+async def test_reply_wait_returns_existing_rows_without_blocking(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A bounded wait first replays rows already present after the cursor."""
+    first_cursor = await store.append_reply(
+        "reply:wait-existing",
+        _reply("req-wait-existing", "accepted"),
+    )
+    await store.append_reply(
+        "reply:wait-existing",
+        _reply("req-wait-existing", "progress"),
+    )
+
+    records = await store.wait_replies(
+        "reply:wait-existing",
+        after_cursor=first_cursor,
+        limit=10,
+        block_ms=1_000,
+    )
+
+    assert [record.event.payload["message"] for record in records] == ["progress"]
+
+
+@pytest.mark.asyncio
+async def test_reply_wait_observes_concurrent_append(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A concurrent append is observable whether it wins before or during wait."""
+    waiter = asyncio.create_task(
+        store.wait_replies(
+            "reply:wait-append",
+            after_cursor=None,
+            limit=10,
+            block_ms=1_000,
+        )
+    )
+    await store.append_reply(
+        "reply:wait-append",
+        _reply("req-wait-append", "final_success", final=True),
+    )
+
+    records = await asyncio.wait_for(waiter, timeout=1)
+
+    assert len(records) == 1
+    assert records[0].event.final is True
+
+
+@pytest.mark.asyncio
+async def test_reply_wait_returns_empty_after_bound(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A bounded wait returns no rows when no append occurs."""
+    records = await store.wait_replies(
+        "reply:wait-timeout",
+        after_cursor=None,
+        limit=10,
+        block_ms=1,
+    )
+
+    assert records == []
+
+
+@pytest.mark.asyncio
+async def test_redis_reply_observation_does_not_refresh_ttl(
+    store: RuntimeCoordinationStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis reply reads and waits remain non-mutating after append."""
+    if not isinstance(store, RedisRuntimeCoordinationStore):
+        pytest.skip("Redis-specific retention contract")
+    refresh = AsyncMock(wraps=store._refresh_stream_ttl)
+    monkeypatch.setattr(store, "_refresh_stream_ttl", refresh)
+    cursor = await store.append_reply(
+        "reply:ttl",
+        _reply("req-ttl", "accepted"),
+    )
+    refresh.assert_awaited_once()
+    refresh.reset_mock()
+
+    await store.read_replies("reply:ttl", after_cursor=None, limit=10)
+    await store.wait_replies(
+        "reply:ttl",
+        after_cursor=cursor,
+        limit=10,
+        block_ms=0,
+    )
+
+    refresh.assert_not_awaited()
 
 
 @pytest.mark.asyncio

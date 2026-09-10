@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import dataclasses
+import math
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
@@ -26,8 +27,9 @@ from azents.runtime.coordination.data import (
     RuntimeReplyRecord,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 
-_DEFAULT_POLL_INTERVAL_SECONDS = 0.01
+_MAX_REPLY_WAIT_SECONDS = 1.0
 _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS = 1.0
 _DEFAULT_BODY_CHUNK_SIZE_BYTES = 1024 * 1024
 
@@ -442,7 +444,7 @@ class RuntimeRunnerOperationClient:
         *,
         control_protocol: RuntimeControlProtocolService,
         coordination_store: RuntimeCoordinationStore,
-        poll_interval_seconds: float = _DEFAULT_POLL_INTERVAL_SECONDS,
+        metrics: RuntimeReplyDeliveryMetrics,
         body_chunk_size_bytes: int = _DEFAULT_BODY_CHUNK_SIZE_BYTES,
     ) -> None:
         """Initialize the Runner operation client."""
@@ -450,7 +452,7 @@ class RuntimeRunnerOperationClient:
             raise ValueError("body_chunk_size_bytes must be positive")
         self._control_protocol = control_protocol
         self._coordination_store = coordination_store
-        self._poll_interval_seconds = poll_interval_seconds
+        self._metrics = metrics
         self._body_chunk_size_bytes = body_chunk_size_bytes
 
     async def run_bash(
@@ -2231,18 +2233,60 @@ class RuntimeRunnerOperationClient:
                 next_cancel_check_at = (
                     time.monotonic() + _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS
                 )
-                records = await self._control_protocol.read_replies(
-                    reply_stream_id=reply_stream_id,
-                    after_cursor=cursor,
-                    limit=100,
-                )
-                if not records:
-                    await asyncio.sleep(self._poll_interval_seconds)
+                remaining_seconds = (
+                    deadline_at - datetime.now(timezone.utc)
+                ).total_seconds()
+                if remaining_seconds <= 0:
                     continue
+                block_ms = max(
+                    1,
+                    math.ceil(min(remaining_seconds, _MAX_REPLY_WAIT_SECONDS) * 1000),
+                )
+                wait_started_at = time.monotonic()
+                self._metrics.begin_wait()
+                try:
+                    records = await self._control_protocol.wait_replies(
+                        reply_stream_id=reply_stream_id,
+                        after_cursor=cursor,
+                        limit=100,
+                        block_ms=block_ms,
+                    )
+                except asyncio.CancelledError:
+                    self._metrics.finish_wait(
+                        outcome="cancel",
+                        duration_seconds=time.monotonic() - wait_started_at,
+                    )
+                    raise
+                except Exception:
+                    self._metrics.finish_wait(
+                        outcome="error",
+                        duration_seconds=time.monotonic() - wait_started_at,
+                    )
+                    raise
+                else:
+                    self._metrics.finish_wait(
+                        outcome="event" if records else "timeout",
+                        duration_seconds=time.monotonic() - wait_started_at,
+                    )
+                if not records:
+                    continue
+                observed_at = datetime.now(timezone.utc)
+                filtered = sum(
+                    1
+                    for record in records
+                    if request_id is not None and record.event.request_id != request_id
+                )
+                self._metrics.record_replies(
+                    examined=len(records),
+                    filtered=filtered,
+                )
                 for record in records:
                     cursor = record.cursor
                     if request_id is not None and record.event.request_id != request_id:
                         continue
+                    self._metrics.record_observation_latency(
+                        (observed_at - record.event.created_at).total_seconds()
+                    )
                     await folder.apply(record)
                     if record.event.final:
                         if record.event.event_type == RuntimeReplyEventType.FINAL_ERROR:

@@ -28,6 +28,10 @@ from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.observability import (
+    RuntimeReplyDeliveryMetrics,
+    get_runtime_reply_delivery_metrics,
+)
 from azents.runtime.terminal_coordination.redis import (
     RedisRuntimeTerminalCoordinationStore,
 )
@@ -162,11 +166,16 @@ def get_runtime_runner_operation_client(
         Depends(get_runtime_control_protocol),
     ],
     store: Annotated[RuntimeCoordinationStore, Depends(get_runtime_coordination_store)],
+    metrics: Annotated[
+        RuntimeReplyDeliveryMetrics,
+        Depends(get_runtime_reply_delivery_metrics),
+    ],
 ) -> RuntimeRunnerOperationClient:
     """Return the Runtime Runner operation client."""
     return RuntimeRunnerOperationClient(
         control_protocol=control_protocol,
         coordination_store=store,
+        metrics=metrics,
     )
 
 
