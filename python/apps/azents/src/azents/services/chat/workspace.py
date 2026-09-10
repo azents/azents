@@ -88,7 +88,7 @@ _WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
-_RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 120
+_DEFAULT_RUNNER_FILE_OPERATION_TIMEOUT = timedelta(seconds=120)
 _WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = 64 * 1024 * 1024
 _WORKSPACE_DOWNLOAD_DEADLINE = timedelta(minutes=5)
 _WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL = timedelta(milliseconds=250)
@@ -129,6 +129,19 @@ def get_runtime_workspace_download_service(
 def _utc_now() -> datetime:
     """Return the current timezone-aware UTC timestamp."""
     return datetime.now(UTC)
+
+
+def get_runner_file_operation_timeout(
+    config: Config = _CONFIG_DEP,
+) -> timedelta:
+    """Return the bounded Workspace Runner file operation timeout."""
+    timeout_seconds = config.testenv_workspace_runner_file_operation_timeout_seconds
+    if timeout_seconds is None:
+        return _DEFAULT_RUNNER_FILE_OPERATION_TIMEOUT
+    return timedelta(seconds=timeout_seconds)
+
+
+_RUNNER_FILE_OPERATION_TIMEOUT_DEP = Depends(get_runner_file_operation_timeout)
 
 
 def _transfer_object_prefix(config: Config) -> str:
@@ -634,6 +647,7 @@ class AgentWorkspaceFileService:
             _RUNTIME_TARGET_RESOLVER_DEP
         ),
         session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
+        runner_file_operation_timeout: timedelta = (_RUNNER_FILE_OPERATION_TIMEOUT_DEP),
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
             _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP
         ),
@@ -643,6 +657,7 @@ class AgentWorkspaceFileService:
         self._runner_operations = runner_operations
         self._runtime_target_resolver = runtime_target_resolver
         self._session_manager = session_manager
+        self._runner_file_operation_timeout = runner_file_operation_timeout
         self._runtime_workspace_download_service = runtime_workspace_download_service
 
     async def get_workspace(
@@ -1027,7 +1042,9 @@ class AgentWorkspaceFileService:
                 owner_session_id=None,
                 path=path.as_posix(),
                 parents=parents,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1067,7 +1084,9 @@ class AgentWorkspaceFileService:
                 owner_session_id=None,
                 path=path.as_posix(),
                 recursive=recursive,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1124,7 +1143,9 @@ class AgentWorkspaceFileService:
                 source_path=source_path.as_posix(),
                 destination_path=destination_path.as_posix(),
                 overwrite=overwrite,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(
                 AgentWorkspaceMoveResult(
@@ -1185,7 +1206,9 @@ class AgentWorkspaceFileService:
                 owner_session_id=None,
                 paths=[path.as_posix() for path in paths],
                 recursive=recursive,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(AgentWorkspaceBulkDeleteResult(paths=list(result.paths)))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1248,7 +1271,9 @@ class AgentWorkspaceFileService:
                 source_paths=[path.as_posix() for path in source_paths],
                 destination_directory=destination_directory.as_posix(),
                 overwrite=overwrite,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(
                 AgentWorkspaceBulkMoveResult(
@@ -1515,7 +1540,9 @@ class AgentWorkspaceFileService:
                     runner_generation=runtime.runner_generation,
                     owner_session_id=None,
                     path=path.as_posix(),
-                    deadline_at=_runner_file_operation_deadline(),
+                    deadline_at=_runner_file_operation_deadline(
+                        self._runner_file_operation_timeout
+                    ),
                 )
             )
         except RuntimeRunnerOperationUnavailable as error:
@@ -1538,7 +1565,9 @@ class AgentWorkspaceFileService:
                     runner_generation=runtime.runner_generation,
                     owner_session_id=None,
                     path=path.as_posix(),
-                    deadline_at=_runner_file_operation_deadline(),
+                    deadline_at=_runner_file_operation_deadline(
+                        self._runner_file_operation_timeout
+                    ),
                 )
             )
         except RuntimeRunnerOperationUnavailable as error:
@@ -1566,7 +1595,9 @@ class AgentWorkspaceFileService:
                 character_offset=0,
                 max_characters=max_characters,
                 encoding=encoding,
-                deadline_at=_runner_file_operation_deadline(),
+                deadline_at=_runner_file_operation_deadline(
+                    self._runner_file_operation_timeout
+                ),
             )
             return Success(result)
         except RuntimeRunnerOperationUnavailable as error:
@@ -1596,9 +1627,9 @@ def _runner_file_error(
     return Failure(AgentWorkspaceFileReadError(detail=message))
 
 
-def _runner_file_operation_deadline() -> datetime:
+def _runner_file_operation_deadline(timeout: timedelta) -> datetime:
     """Return Agent Workspace file operation round trip deadline."""
-    return datetime.now(UTC) + timedelta(seconds=_RUNNER_FILE_OPERATION_TIMEOUT_SECONDS)
+    return _utc_now() + timeout
 
 
 def _is_text_preview_candidate(media_type: str) -> bool:

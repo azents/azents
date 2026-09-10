@@ -20,6 +20,7 @@ from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1
 from kubernetes_asyncio.client.api_client import ApiClient
 from kubernetes_asyncio.config import load_incluster_config
 from mypy_boto3_rds import RDSClient
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -217,6 +218,10 @@ class RuntimeControlSettings(BaseSettings):
         _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS
     )
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
+    testenv_runtime_control_heartbeat_interval_seconds: int = Field(
+        default=20,
+        gt=0,
+    )
     runtime_control_kubernetes_token_review_enabled: bool = False
     runtime_control_transfer_backend: Literal["memory", "redis"] = "redis"
     runtime_control_transfer_redis_namespace: str = "azents:runtime:transfer:v2"
@@ -407,6 +412,9 @@ async def runtime_control_server_lifespan(
         coordination_store=coordination_store,
         provider_control=enrollment_service,
         clock=clock,
+        heartbeat_interval_seconds=(
+            settings.testenv_runtime_control_heartbeat_interval_seconds
+        ),
     )
     runner_connection_registrar = RuntimeRunnerConnectionRegistrationService(
         session_manager=session_manager,
@@ -414,6 +422,9 @@ async def runtime_control_server_lifespan(
         coordination_store=coordination_store,
         runner_authentication=runner_authenticator,
         generation_observer=runner_generation_observer,
+        heartbeat_interval_seconds=(
+            settings.testenv_runtime_control_heartbeat_interval_seconds
+        ),
     )
     reconciler = RuntimeLifecycleReconciler(
         agent_repository=agent_repository,

@@ -1164,6 +1164,10 @@ def _configure_azents_server_container(
             _DISCORD_PROVIDER_INTERNAL_API_URL,
         )
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
+        .with_env(
+            "AZ_TESTENV_WORKSPACE_RUNNER_FILE_OPERATION_TIMEOUT_SECONDS",
+            "10",
+        )
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
         .with_env("AZ_AGENT_HOME_SESSION_HIBERNATE_IDLE_SECONDS", "60")
@@ -1762,6 +1766,7 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")
+        .with_env("AZ_TESTENV_RUNTIME_CONTROL_HEARTBEAT_INTERVAL_SECONDS", "2")
         .with_env("AZ_RUNTIME_CONTROL_LIFECYCLE_RETRY_DELAY_SECONDS", "1")
         .with_env("AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS", "120")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)

@@ -137,6 +137,11 @@ class Settings(BaseSettings):
     testenv_github_platform_validation_base_url: str | None = None
     testenv_external_channel_gateway_lease_duration_seconds: float | None = None
     testenv_external_channel_gateway_renewal_interval_seconds: float | None = None
+    testenv_workspace_runner_file_operation_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
 
     # Session data S3 storage; unified file storage
     workspace_s3_bucket: str = ""
@@ -536,6 +541,11 @@ class Config(BaseModel):
     testenv_external_channel_gateway_lease: ExternalChannelGatewayLeaseConfig | None = (
         None
     )
+    testenv_workspace_runner_file_operation_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Self:
@@ -695,6 +705,9 @@ class Config(BaseModel):
                 and settings.testenv_external_channel_gateway_renewal_interval_seconds
                 is not None
                 else None
+            ),
+            testenv_workspace_runner_file_operation_timeout_seconds=(
+                settings.testenv_workspace_runner_file_operation_timeout_seconds
             ),
         )
 

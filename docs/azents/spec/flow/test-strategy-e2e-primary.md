@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-08
-spec_version: 48
+last_verified_at: 2026-09-10
+spec_version: 49
 ---
 
 # E2E Primary Test Strategy
@@ -190,9 +190,13 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files only within a suite using the latest successful `main` timing
-  baseline, with a deterministic source-based fallback. Required uses four lanes;
-  Web uses one lane. Lanes are parallel partitions, not additional profiles.
+  It balances files only within a suite using the latest successful timing baseline,
+  with a deterministic source-based fallback. The first pull request run starts from
+  the latest accessible `main` baseline. A successful internal pull request run saves
+  its observed timing under the head commit SHA, and later runs or attempts of that
+  same SHA restore the newest SHA-specific timing before falling back to `main`.
+  Fork pull requests do not publish timing caches. Required uses four lanes; Web uses
+  one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
   one reusable scenario module. When such a split replaces an existing collection
   file, the planner projects that file's historical per-test call timings onto the

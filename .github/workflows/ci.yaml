@@ -330,8 +330,10 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/e2e-timing-baseline
-          key: e2e-timing-baseline-${{ github.run_id }}
+          key: >-
+            ${{ github.event_name == 'pull_request' && format('e2e-pr-timing-baseline-{0}', github.event.pull_request.head.sha) || 'e2e-timing-baseline' }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            ${{ github.event_name == 'pull_request' && format('e2e-pr-timing-baseline-{0}-', github.event.pull_request.head.sha) || 'e2e-timing-baseline-' }}
             e2e-timing-baseline-
       - name: Plan enabled E2E suites
         id: plan
@@ -583,6 +585,16 @@ jobs:
             | sort -z \
             | xargs -0 -r cat \
             > "${RUNNER_TEMP}/e2e-timing-baseline/pytest-timings.jsonl"
+      - name: Save same-SHA PR E2E timing baseline
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.ci_e2e_run.result == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/e2e-timing-baseline
+          key: >-
+            e2e-pr-timing-baseline-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save E2E timing baseline
         if: >-
           github.event_name == 'push'
