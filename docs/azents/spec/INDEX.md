@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-10 | 75 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-10 | 164 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-10 | 165 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-10 | 75 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
@@ -46,6 +46,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-10 | 18 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-10 | 20 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-10 | 53 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-10 | 54 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |

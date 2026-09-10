@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 53
+spec_version: 54
 ---
 
 # E2E Primary Test Strategy
@@ -213,7 +213,9 @@ Always-on required CI does not depend on external credentials.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
   It balances files only within a suite using the per-file call-duration
   high-watermark from that suite's latest three successful timing samples, with a
-  deterministic source-based fallback. The first pull request run starts from the
+  deterministic source-based fallback. A collector that inherits reusable scenarios
+  and therefore has no local test bodies may declare an explicit positive fallback
+  weight in source; observed timing still takes precedence. The first pull request run starts from the
   latest accessible rolling `main` history. A successful internal pull request run
   saves its observed timing under the head commit SHA, and later runs or attempts of
   that same SHA restore the newest SHA-specific rolling history before falling back
@@ -233,8 +235,13 @@ Always-on required CI does not depend on external credentials.
   for unmentioned activity and typing recovery; and
   `test_external_channel_discord_journeys.py` for activation, commands, components,
   and lifecycle. These files collect reusable implementations from
-  `external_channel_scenarios.py`. Their shared Agent setup creates the required
-  Workspace, model integration, Runtime Profile, and Agent records without eagerly
+  `external_channel_scenarios.py`. Subagent behavior uses
+  `test_subagents.py` for lifecycle, wait, interrupt, and failure projection, while
+  `test_subagent_capacity.py` collects mailbox and bounded-capacity scenarios from
+  the reusable scenario class in `test_subagents.py`. Historical Subagent timings are
+  projected by test name so the split is balanced on its first CI plan. External
+  Channel shared Agent setup creates the required Workspace, model integration,
+  Runtime Profile, and Agent records without eagerly
   starting every Agent Runtime. Journeys that execute Agent work rely on the product's
   on-demand Runtime lifecycle and retain their existing observable completion,
   recovery, delivery, and typing boundaries; management-only journeys avoid unrelated
