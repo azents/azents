@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 49
+spec_version: 50
 ---
 
 # E2E Primary Test Strategy
@@ -71,6 +71,13 @@ Discord provider fakes publish sanitized delivery and operation evidence before 
 can observe controlled failure boundaries. Regression coverage synchronizes on
 authoritative evidence publication and the observable boundary instead of using
 sleeps.
+
+The Discord automatic-title journey arms a deterministic model-proxy barrier before
+triggering the provider flow. The Discord provider fake releases that barrier at the
+exact targeted message-delivery boundary, and the journey requires reached, released,
+and non-timeout evidence. The deterministic Gateway fixture may also shorten lease,
+renewal, and connection-discovery polling together through a complete testenv-only
+override; production defaults remain unchanged.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -389,6 +396,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-10** (spec_version 50) — Added protocol-observable Discord automatic-title
+  synchronization and the complete testenv-only Gateway timing override while
+  preserving production defaults and journey assertions.
 - **2026-09-08** (spec_version 48) — Split the Discord provisioning collector into
   independently planned Gateway binding, configured provisioning, and unmentioned
   activity journeys while preserving historical timing projection and coverage.

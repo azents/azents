@@ -176,6 +176,13 @@ _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_RELEASE_PATH = (
     f"{_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH}/release"
 )
 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_TIMEOUT_SECONDS = 60.0
+_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_PATH = (
+    "/v1/_external_channel_discord_title_barrier"
+)
+_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_PATH = (
+    f"{_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_PATH}/release"
+)
+_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS = 60.0
 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING = re.compile(r"[A-Za-z0-9_-]{1,256}")
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
@@ -185,11 +192,6 @@ _EXTERNAL_CHANNEL_SLACK_RESPONSE_MODE_TITLE_INPUT = (
     "Create a title from this request:\nInitial response-mode invocation"
 )
 _SESSION_TITLE_SYSTEM_MARKER = "Create a brief title from the request"
-_DISCORD_PROVIDER_BARRIER_URL = os.environ.get(
-    "DISCORD_PROVIDER_BARRIER_URL",
-    "http://discord-fake:8085/__testenv/barrier",
-)
-_DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS = 5.0
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
 _EXTERNAL_CHANNEL_FILE_DECLARED_SIZE = re.compile(r"Declared size: (\d+) bytes")
@@ -795,36 +797,6 @@ def is_external_channel_slack_response_mode_title_request(
     )
 
 
-def wait_for_external_channel_discord_title_barrier() -> bool:
-    """Wait until direct thread creation evidence is committed before title output."""
-    deadline = time.monotonic() + _DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(  # noqa: S310 - fixed test-network endpoint
-                _DISCORD_PROVIDER_BARRIER_URL,
-                timeout=0.2,
-            ) as response:
-                evidence: object = json.loads(response.read())
-        except OSError:
-            time.sleep(0.01)
-            continue
-        except ValueError:
-            time.sleep(0.01)
-            continue
-        if not isinstance(evidence, dict):
-            time.sleep(0.01)
-            continue
-        barrier = _object(evidence)
-        if (
-            barrier.get("operation") == "create_message"
-            and barrier.get("occurrence") == 2
-            and barrier.get("reached") is True
-        ):
-            return True
-        time.sleep(0.01)
-    return False
-
-
 def external_channel_progress_evidence(
     request: dict[str, object],
 ) -> dict[str, object]:
@@ -971,6 +943,80 @@ class _ProviderToolLiveBarrier:
 
 
 _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
+
+
+class _ExternalChannelDiscordTitleBarrier:
+    """Hold the deterministic Discord title response for explicit E2E release."""
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = (
+            _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS
+        ),
+    ) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._lock = threading.Lock()
+        self._armed = False
+        self._generation = 0
+        self._timed_out = False
+        self._reached = threading.Event()
+        self._released = threading.Event()
+
+    def arm(self) -> None:
+        """Reset and arm one automatic-title response boundary."""
+        with self._lock:
+            self._released.set()
+            self._armed = True
+            self._generation += 1
+            self._timed_out = False
+            self._reached = threading.Event()
+            self._released = threading.Event()
+
+    def evidence(self) -> dict[str, bool]:
+        """Return payload-free title synchronization evidence."""
+        with self._lock:
+            armed = self._armed
+            timed_out = self._timed_out
+            reached = self._reached
+            released = self._released
+        return {
+            "armed": armed,
+            "reached": reached.is_set(),
+            "released": released.is_set(),
+            "timed_out": timed_out,
+        }
+
+    def release(self) -> None:
+        """Release the current automatic-title response."""
+        with self._lock:
+            released = self._released
+        released.set()
+
+    def wait_until_reached(self, timeout: float) -> bool:
+        """Wait until the automatic-title request reaches the held boundary."""
+        with self._lock:
+            reached = self._reached
+        return reached.wait(timeout=timeout)
+
+    def wait_for_release(self) -> bool:
+        """Mark the title request reached and await the explicit test release."""
+        with self._lock:
+            if not self._armed:
+                return False
+            generation = self._generation
+            reached = self._reached
+            released = self._released
+        reached.set()
+        released_by_test = released.wait(timeout=self._timeout_seconds)
+        if not released_by_test:
+            with self._lock:
+                if generation == self._generation:
+                    self._timed_out = True
+        return released_by_test
+
+
+_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER = _ExternalChannelDiscordTitleBarrier()
 
 
 class _ExternalChannelQuietWorkBarrier:
@@ -1166,6 +1212,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH:
             self._write_json(200, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
             return
+        if self.path == _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_PATH:
+            self._write_json(200, _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.evidence())
+            return
         journal = self._journal_for_path()
         if journal is not None:
             with _State.lock:
@@ -1215,6 +1264,20 @@ class _Handler(BaseHTTPRequestHandler):
             _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.release()
             self._write_json(200, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
             return
+        if self.path == _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_PATH:
+            _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.arm()
+            self._write_json(
+                201,
+                _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.evidence(),
+            )
+            return
+        if self.path == _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_PATH:
+            _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.release()
+            self._write_json(
+                200,
+                _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.evidence(),
+            )
+            return
         body = self._read_body()
         if self.path == _OAUTH_CONNECTION_SCENARIO_PATH:
             self._queue_oauth_connection_scenario(body)
@@ -1255,12 +1318,12 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         if is_external_channel_discord_title_request(request):
-            if not wait_for_external_channel_discord_title_barrier():
+            if not _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER.wait_for_release():
                 self._write_json(
                     503,
                     {
                         "error": {
-                            "message": "Discord title E2E barrier was not reached."
+                            "message": "Discord title E2E barrier was not released."
                         }
                     },
                 )

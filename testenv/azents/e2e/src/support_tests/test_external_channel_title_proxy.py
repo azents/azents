@@ -1,10 +1,8 @@
 """Deterministic External Channel automatic-title proxy tests."""
 
 import json
+import threading
 from pathlib import Path
-from typing import Self
-
-import pytest
 
 from support import image_generation_openai_proxy as proxy
 
@@ -100,37 +98,47 @@ def test_slack_response_mode_title_request_match_is_specific() -> None:
     )
 
 
-def test_discord_title_barrier_requires_committed_direct_create_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Release title output only for the exact second message-delivery barrier."""
+def test_discord_title_barrier_holds_request_until_explicit_release() -> None:
+    """The title response waits on an observable test-controlled boundary."""
+    barrier = proxy._ExternalChannelDiscordTitleBarrier(timeout_seconds=1)
+    barrier.arm()
+    result: list[bool] = []
+    waiter = threading.Thread(target=lambda: result.append(barrier.wait_for_release()))
+    waiter.start()
 
-    class _Response:
-        def __enter__(self) -> Self:
-            return self
+    assert barrier.wait_until_reached(timeout=1)
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": True,
+        "released": False,
+        "timed_out": False,
+    }
 
-        def __exit__(self, *_: object) -> None:
-            return None
+    barrier.release()
+    waiter.join(timeout=1)
 
-        @staticmethod
-        def read() -> bytes:
-            return json.dumps(
-                {
-                    "operation": "create_message",
-                    "occurrence": 2,
-                    "request_count": 2,
-                    "reached": True,
-                    "released": False,
-                }
-            ).encode()
+    assert not waiter.is_alive()
+    assert result == [True]
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": True,
+        "released": True,
+        "timed_out": False,
+    }
 
-    def urlopen(*_args: object, **_kwargs: object) -> _Response:
-        return _Response()
 
-    monkeypatch.setattr(
-        proxy.urllib.request,
-        "urlopen",
-        urlopen,
-    )
+def test_discord_title_barrier_records_missing_arm_and_bounded_timeout() -> None:
+    """Missing synchronization fails immediately and unreleased work times out."""
+    barrier = proxy._ExternalChannelDiscordTitleBarrier(timeout_seconds=0.01)
 
-    assert proxy.wait_for_external_channel_discord_title_barrier()
+    assert barrier.wait_for_release() is False
+
+    barrier.arm()
+
+    assert barrier.wait_for_release() is False
+    assert barrier.evidence() == {
+        "armed": True,
+        "reached": True,
+        "released": False,
+        "timed_out": True,
+    }

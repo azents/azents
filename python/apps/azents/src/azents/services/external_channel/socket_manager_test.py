@@ -193,6 +193,7 @@ def test_socket_manager_uses_testenv_lease_override() -> None:
         testenv_external_channel_gateway_lease=ExternalChannelGatewayLeaseConfig(
             duration_seconds=5.0,
             renewal_interval_seconds=1.0,
+            poll_interval_seconds=0.1,
         ),
     )
     service = _service(_SessionDouble(), _RepositoryDouble(), config)

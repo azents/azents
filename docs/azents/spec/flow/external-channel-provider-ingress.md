@@ -71,8 +71,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-08
-spec_version: 60
+last_verified_at: 2026-09-10
+spec_version: 61
 ---
 
 # External Channel Provider Ingress
@@ -328,10 +328,11 @@ Slack Socket, Slack Work presence, and Discord Gateway managers use 45-second
 ownership leases renewed every 15 seconds by default. Slack presence ownership is
 independent of HTTP or Socket ingress and fences every projection against the claimed
 connection configuration generation. The deterministic E2E Gateway fixture may
-provide one paired testenv-only lease-duration and renewal-interval override. Both
-effective durations must remain non-zero after `timedelta` conversion, and renewal
-must remain strictly shorter than the lease. Without that explicit pair, production
-timing remains unchanged.
+provide one complete testenv-only lease-duration, renewal-interval, and
+connection-discovery poll-interval override. All three values must be configured
+together and remain positive; the effective lease and renewal durations must remain
+non-zero after `timedelta` conversion, and renewal must remain strictly shorter than
+the lease. Without that explicit override set, production timing remains unchanged.
 
 ## Durable Batched Conversation Ingress
 
@@ -594,6 +595,9 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-09-10** (spec_version 61) — Added the complete testenv-only Discord Gateway
+  lease, renewal, and connection-discovery poll timing override while preserving
+  production timing defaults.
 - **2026-09-06** (spec_version 58) — Made HTTP interaction admission lock the
   connection before principal upsert and interaction insertion, matching Gateway
   ingestion order and preventing concurrent Discord setup deadlocks.

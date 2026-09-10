@@ -102,6 +102,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
 from support.runtime_profiles import (
@@ -4398,10 +4399,11 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    openai_proxy_url: str,
     discord_provider_fake_url: str,
-    azents_engine_worker_container: Container,
+    azents_engine_worker_container: DockerContainer,
     azents_external_channel_gateway_factory: Callable[
-        [], AbstractContextManager[Container]
+        [], AbstractContextManager[DockerContainer]
     ],
 ) -> None:
     """Gate one Gateway mention until a signed Discord location selection."""
@@ -4526,9 +4528,24 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         json={"operation": "create_message", "occurrence": 2},
         timeout=5,
     ).raise_for_status()
+    title_barrier_url = f"{openai_proxy_url}/v1/_external_channel_discord_title_barrier"
+    title_barrier_arm = requests.post(title_barrier_url, timeout=5)
+    title_barrier_arm.raise_for_status()
+    assert title_barrier_arm.json() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
     request.addfinalizer(
         lambda: requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{title_barrier_url}/release",
             timeout=5,
         ).raise_for_status()
     )
@@ -4694,6 +4711,29 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         assert barrier_state["operation"] == "create_message"
         assert barrier_state["occurrence"] == 2
         assert barrier_state["request_count"] == 2
+        title_barrier_state = _object(
+            wait_until(
+                lambda: (
+                    state
+                    if (state := requests.get(title_barrier_url, timeout=5).json()).get(
+                        "reached"
+                    )
+                    is True
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord automatic-title request did not reach its proxy barrier"
+                ),
+            )
+        )
+        assert title_barrier_state == {
+            "armed": True,
+            "reached": True,
+            "released": True,
+            "timed_out": False,
+        }
 
         def generated_title_projection() -> AgentSessionResponse | None:
             generated_detail = chat_api.chat_v1_get_agent_session(
@@ -4736,18 +4776,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 final_counts = _int_dict(
                     _discord_provider_state(discord_provider_fake_url)["request_counts"]
                 )
-                worker_log_value = azents_engine_worker_container.logs(
-                    stdout=True,
-                    stderr=True,
-                    tail=200,
-                )
-                worker_logs = (
-                    worker_log_value.decode(errors="replace")
-                    if isinstance(worker_log_value, bytes)
-                    else worker_log_value
-                )
+                worker_stdout, worker_stderr = azents_engine_worker_container.get_logs()
                 title_log_lines = [
-                    line for line in worker_logs.splitlines() if "title" in line.lower()
+                    line
+                    for line in (
+                        worker_stdout.decode(errors="replace")
+                        + worker_stderr.decode(errors="replace")
+                    ).splitlines()
+                    if "title" in line.lower()
                 ][-20:]
                 title_source = (
                     final_detail.title_source.value

@@ -762,7 +762,14 @@ def discord_provider_fake_container(
         .with_command(["python", "/app/discord_fake.py"])
         .with_exposed_ports(8085)
         .with_network(container_network)
-        .with_network_aliases("discord-fake") as container
+        .with_network_aliases("discord-fake")
+        .with_env(
+            "EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL",
+            (
+                "http://openai-proxy:8081/v1/"
+                "_external_channel_discord_title_barrier/release"
+            ),
+        ) as container
     ):
         host = container.get_container_host_ip()
         port = container.get_exposed_port(8085)
@@ -1702,11 +1709,15 @@ def azents_external_channel_gateway_factory(
             .with_env("AZ_WORKER_HEALTH_PORT", "8013")
             .with_env(
                 "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_LEASE_DURATION_SECONDS",
-                "5",
+                "2",
             )
             .with_env(
                 "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_RENEWAL_INTERVAL_SECONDS",
-                "1",
+                "0.5",
+            )
+            .with_env(
+                "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_POLL_INTERVAL_SECONDS",
+                "0.1",
             )
         )
 
