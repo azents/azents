@@ -105,9 +105,22 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
 
 
 def load_file_timings(path: Path | None) -> dict[str, float]:
-    """Aggregate prior successful call timings by test file."""
-    if path is None or not path.is_file():
+    """Load high-watermark call timings from prior successful samples."""
+    if path is None or not path.exists():
         return {}
+    timing_paths = [path] if path.is_file() else sorted(path.rglob("*.jsonl"))
+    high_watermarks: dict[str, float] = {}
+    for timing_path in timing_paths:
+        for file_path, duration in _load_file_timing_sample(timing_path).items():
+            high_watermarks[file_path] = max(
+                high_watermarks.get(file_path, 0.0),
+                duration,
+            )
+    return high_watermarks
+
+
+def _load_file_timing_sample(path: Path) -> dict[str, float]:
+    """Aggregate one successful timing sample by test file."""
     totals: dict[str, float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line:

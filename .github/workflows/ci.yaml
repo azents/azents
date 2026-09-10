@@ -364,9 +364,11 @@ jobs:
           if [ "$WEB_E2E" = 'true' ]; then
             args+=(--enabled-suite web)
           fi
-          timing_file="${RUNNER_TEMP}/e2e-timing-baseline/pytest-timings.jsonl"
-          if [ -s "$timing_file" ]; then
-            args+=(--timings "$timing_file")
+          timing_root="${RUNNER_TEMP}/e2e-timing-baseline"
+          mkdir -p "$timing_root"
+          timing_file="$(find "$timing_root" -type f -name '*.jsonl' -print -quit 2>/dev/null)"
+          if [ -n "$timing_file" ]; then
+            args+=(--timings "$timing_root")
           fi
           python src/support/e2e_planner.py "${args[@]}"
       - name: Upload E2E plan
@@ -588,16 +590,75 @@ jobs:
         with:
           pattern: e2e-observability-*
           path: e2e-observability-artifacts
-      - name: Aggregate timing baseline
+      - name: Restore E2E timing history
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/e2e-timing-baseline
+          key: >-
+            ${{ github.event_name == 'pull_request' && format('e2e-pr-timing-baseline-{0}', github.event.pull_request.head.sha) || 'e2e-timing-baseline' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ github.event_name == 'pull_request' && format('e2e-pr-timing-baseline-{0}-', github.event.pull_request.head.sha) || 'e2e-timing-baseline-' }}
+            e2e-timing-baseline-
+      - name: Aggregate rolling timing history
         run: |
-          mkdir -p "${RUNNER_TEMP}/e2e-timing-baseline"
+          timing_root="${RUNNER_TEMP}/e2e-timing-baseline"
+          timing_runs="${timing_root}/runs"
+          mkdir -p "$timing_runs"
+          legacy_timing="${timing_root}/pytest-timings.jsonl"
+          if [ -s "$legacy_timing" ]; then
+            mv "$legacy_timing" "${timing_runs}/000000000000-0.jsonl"
+          else
+            rm -f "$legacy_timing"
+          fi
+          current_timing="${timing_runs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.jsonl"
           find e2e-observability-artifacts \
             -name pytest-timings.jsonl \
             -type f \
             -print0 \
             | sort -z \
             | xargs -0 -r cat \
-            > "${RUNNER_TEMP}/e2e-timing-baseline/pytest-timings.jsonl"
+            > "$current_timing"
+          if [ ! -s "$current_timing" ]; then
+            echo "::error::No E2E timing records were available to cache"
+            exit 1
+          fi
+          mapfile -t timing_files < <(
+            find "$timing_runs" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.jsonl' \
+              -printf '%f\n' \
+              | sort -V
+          )
+          declare -A retained_timing_files=()
+          for suite in required web; do
+            if [ "$suite" = 'required' ]; then
+              suite_path_pattern='src/tests/(required/|azents/(public|admin)/|test_)'
+            else
+              suite_path_pattern='src/tests/(web/|azents/admin/test_01_admin_web.py)'
+            fi
+            mapfile -t suite_timing_files < <(
+              grep \
+                -E \
+                -l \
+                "$suite_path_pattern" \
+                "${timing_runs}"/*.jsonl \
+                2>/dev/null \
+                | sort -V
+            )
+            retain_from=0
+            if [ "${#suite_timing_files[@]}" -gt 3 ]; then
+              retain_from=$(("${#suite_timing_files[@]}" - 3))
+            fi
+            for timing_file in "${suite_timing_files[@]:$retain_from}"; do
+              retained_timing_files["$(basename "$timing_file")"]=1
+            done
+          done
+          for timing_file in "${timing_files[@]}"; do
+            if [ -z "${retained_timing_files[$timing_file]:-}" ]; then
+              rm "${timing_runs}/${timing_file}"
+            fi
+          done
       - name: Save same-SHA PR E2E timing baseline
         if: >-
           github.event_name == 'pull_request'

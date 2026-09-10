@@ -112,6 +112,51 @@ def test_load_file_timings_maps_pre_suite_paths(tmp_path: Path) -> None:
     }
 
 
+def test_load_file_timings_uses_file_high_watermarks_across_samples(
+    tmp_path: Path,
+) -> None:
+    timings_root = tmp_path / "timings"
+    timings_root.mkdir()
+    samples = (
+        (
+            "100-1.jsonl",
+            (
+                ("src/tests/required/public/test_agent.py::test_a", 4.0),
+                ("src/tests/required/public/test_agent.py::test_b", 3.0),
+                ("src/tests/required/public/test_auth.py::test_auth", 8.0),
+            ),
+        ),
+        (
+            "100-2.jsonl",
+            (
+                ("src/tests/required/public/test_agent.py::test_a", 6.0),
+                ("src/tests/required/public/test_agent.py::test_b", 5.0),
+                ("src/tests/required/public/test_auth.py::test_auth", 2.0),
+            ),
+        ),
+    )
+    for name, records in samples:
+        (timings_root / name).write_text(
+            "\n".join(
+                json.dumps(
+                    {
+                        "record_type": "test_phase",
+                        "phase": "call",
+                        "node_id": node_id,
+                        "duration_seconds": duration,
+                    }
+                )
+                for node_id, duration in records
+            ),
+            encoding="utf-8",
+        )
+
+    assert load_file_timings(timings_root) == {
+        "src/tests/required/public/test_agent.py": 11.0,
+        "src/tests/required/public/test_auth.py": 8.0,
+    }
+
+
 def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> None:
     timings_path = tmp_path / "timings.jsonl"
     timings_path.write_text(

@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 51
+spec_version: 52
 ---
 
 # E2E Primary Test Strategy
@@ -211,11 +211,13 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files only within a suite using the latest successful timing baseline,
-  with a deterministic source-based fallback. The first pull request run starts from
-  the latest accessible `main` baseline. A successful internal pull request run saves
-  its observed timing under the head commit SHA, and later runs or attempts of that
-  same SHA restore the newest SHA-specific timing before falling back to `main`.
+  It balances files only within a suite using the per-file call-duration
+  high-watermark from that suite's latest three successful timing samples, with a
+  deterministic source-based fallback. The first pull request run starts from the
+  latest accessible rolling `main` history. A successful internal pull request run
+  saves its observed timing under the head commit SHA, and later runs or attempts of
+  that same SHA restore the newest SHA-specific rolling history before falling back
+  to `main`.
   Fork pull requests do not publish timing caches. Required uses four lanes; Web uses
   one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
@@ -410,6 +412,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-10** (spec_version 52) — Replaced single-sample E2E lane weights with
+  per-file high-watermarks from each suite's latest three successful timing samples
+  while preserving deterministic fallback, same-SHA cache precedence, suite
+  ownership, lane count, and file coverage.
 - **2026-09-10** (spec_version 51) — Added dependency-compatible Server snapshot
   source overlays for application-source-only pull request changes, with complete
   application replacement, exact-current-snapshot precedence, deterministic
