@@ -12,7 +12,7 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import LLMCatalogScope, LLMProvider
+from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -138,6 +138,7 @@ async def test_create_chatgpt_oauth_creates_integration_catalog(
             session,
             integration_id=created.id,
             workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.CONVERSATION,
         )
 
     assert catalog is not None

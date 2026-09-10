@@ -4,6 +4,7 @@ import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type {
+  ImageGenerationCatalogState,
   ProviderIntegrationOption,
   SelectableModelOptionFormValue,
 } from "../model-selection";
@@ -42,6 +43,52 @@ const providerOptions: ProviderIntegrationOption[] = [
   },
 ];
 
+const imageCatalogData = {
+  default_available: true,
+  explicit_selection_supported: true,
+  catalog_id: "image-catalog-main",
+  snapshot_id: "image-snapshot-main",
+  snapshot_configuration_version: 1,
+  current_configuration_version: 1,
+  snapshot_created_at: "2026-09-10T00:00:00Z",
+  latest_attempt: null,
+  stale: false,
+  generation_current: true,
+  sync_available_at: null,
+  automatic_retry_blocked: false,
+  entries: [
+    {
+      id: "image-entry-flare",
+      provider: "openai",
+      provider_model_identifier: "gpt-image-2.5-flare",
+      display_name: "GPT Image 2.5 Flare",
+      description: "Recommended for fast, cost-balanced image generation.",
+      recommendation_rank: 1,
+      lifecycle_status: "active",
+      visibility_status: "selectable",
+      source_metadata: null,
+      projection_metadata: null,
+    },
+    {
+      id: "image-entry-sunburst",
+      provider: "openai",
+      provider_model_identifier: "gpt-image-2.5-sunburst",
+      display_name: "GPT Image 2.5 Sunburst",
+      description: "Highest-quality image generation choice.",
+      recommendation_rank: 2,
+      lifecycle_status: "active",
+      visibility_status: "selectable",
+      source_metadata: null,
+      projection_metadata: null,
+    },
+  ],
+  total: 2,
+} satisfies Extract<ImageGenerationCatalogState, { type: "LOADED" }>["data"];
+
+const loadedImageCatalogStates = new Map<string, ImageGenerationCatalogState>([
+  ["integration-main", { type: "LOADED", data: imageCatalogData }],
+]);
+
 const defaultOption: SelectableModelOptionFormValue = {
   id: "default",
   label: "default",
@@ -53,8 +100,22 @@ const defaultOption: SelectableModelOptionFormValue = {
   context_window_tokens: 128_000,
   max_output_tokens: 8_000,
   builtin_tools: ["web_search", "image_generation"],
+  builtin_tool_configs: {
+    web_search: {},
+    image_generation: {},
+  },
   subagent_enabled: true,
   subagent_guidance: "Use for complex synthesis tasks.",
+};
+
+const explicitImageOption: SelectableModelOptionFormValue = {
+  ...defaultOption,
+  builtin_tool_configs: {
+    ...defaultOption.builtin_tool_configs,
+    image_generation: {
+      model: "gpt-image-2.5-flare",
+    },
+  },
 };
 
 const lightweightOption: SelectableModelOptionFormValue = {
@@ -72,6 +133,7 @@ const lightweightOption: SelectableModelOptionFormValue = {
   context_window_tokens: null,
   max_output_tokens: null,
   builtin_tools: [],
+  builtin_tool_configs: {},
   subagent_enabled: false,
   subagent_guidance: "Prefer for repository exploration.",
 };
@@ -98,6 +160,9 @@ function SelectableModelOptionsEditorHarness(): React.ReactElement {
       providerOptions={providerOptions}
       canEdit
       onSyncCatalog={() => Promise.resolve()}
+      imageGenerationCatalogStates={loadedImageCatalogStates}
+      canSyncImageCatalog
+      onSyncImageCatalog={() => Promise.resolve()}
       onChangeOptions={setCurrentOptions}
       onChangeMainModelLabel={setMainLabel}
       onChangeLightweightModelLabel={setLightweightLabel}
@@ -125,6 +190,9 @@ const meta = {
     providerOptions,
     canEdit: true,
     onSyncCatalog: () => Promise.resolve(),
+    imageGenerationCatalogStates: loadedImageCatalogStates,
+    canSyncImageCatalog: true,
+    onSyncImageCatalog: () => Promise.resolve(),
     onChangeOptions: () => {},
     onChangeMainModelLabel: () => {},
     onChangeLightweightModelLabel: () => {},
@@ -174,6 +242,159 @@ export const SettingsModal = {
     ).toBeVisible();
     await expect(body.getByLabelText("Web search")).toBeChecked();
     await expect(body.getByLabelText("Image generation")).toBeChecked();
+  },
+} satisfies Story;
+
+export const ImageGenerationModelSettings = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.getByRole("combobox", { name: "Image model" }),
+    ).toHaveValue("gpt-image-2.5-flare");
+  },
+} satisfies Story;
+
+export const ImageGenerationModelMenu = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await userEvent.click(body.getByRole("combobox", { name: "Image model" }));
+    await expect(body.getByText("GPT Image 2.5 Sunburst")).toBeVisible();
+  },
+} satisfies Story;
+
+export const ImageGenerationModelUnavailable = {
+  args: {
+    options: [
+      {
+        ...defaultOption,
+        builtin_tool_configs: {
+          ...defaultOption.builtin_tool_configs,
+          image_generation: { model: "gpt-image-2" },
+        },
+      },
+    ],
+    lightweightModelLabel: "default",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(body.getByText("Image model unavailable")).toBeVisible();
+  },
+} satisfies Story;
+
+export const ImageGenerationCatalogLoading = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      ["integration-main", { type: "LOADING" }],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(body.getByText("Loading image models")).toBeVisible();
+  },
+} satisfies Story;
+
+export const ImageGenerationLastSyncFailed = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      [
+        "integration-main",
+        {
+          type: "LOADED",
+          data: {
+            ...imageCatalogData,
+            latest_attempt: {
+              id: "image-attempt-failed",
+              status: "failed",
+              started_at: "2026-09-10T00:00:00Z",
+              finished_at: "2026-09-10T00:00:01Z",
+              failure_code: "provider_unavailable",
+              failure_message: "Provider listing failed.",
+              action_hint: "Try again.",
+              fetched_count: 0,
+              matched_count: 0,
+              skipped_count: 0,
+              hidden_count: 0,
+            },
+          },
+        },
+      ],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.getByText("Latest image model sync failed"),
+    ).toBeVisible();
+    await expect(
+      body.getByRole("combobox", { name: "Image model" }),
+    ).toHaveValue("gpt-image-2.5-flare");
+  },
+} satisfies Story;
+
+export const ImageGenerationDefaultOnly = {
+  args: {
+    options: [defaultOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      [
+        "integration-main",
+        {
+          type: "UNSUPPORTED",
+          data: {
+            ...imageCatalogData,
+            explicit_selection_supported: false,
+            catalog_id: null,
+            snapshot_id: null,
+            snapshot_configuration_version: null,
+            current_configuration_version: null,
+            snapshot_created_at: null,
+            entries: [],
+            total: 0,
+          },
+        },
+      ],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(body.getByText("Default model only")).toBeVisible();
+    await expect(body.queryByText("GPT Image 2.5 Flare")).toBeNull();
   },
 } satisfies Story;
 
@@ -252,6 +473,7 @@ export const PendingNewModel = {
         context_window_tokens: null,
         max_output_tokens: null,
         builtin_tools: [],
+        builtin_tool_configs: {},
         subagent_enabled: true,
         subagent_guidance: null,
       },

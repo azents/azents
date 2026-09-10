@@ -29,12 +29,14 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { useId } from "react";
+import { hasInvalidImageGenerationSelections } from "../model-selection";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type { AgentFormTranslator } from "../containers/useAgentFormTranslations";
 import type {
+  ImageGenerationCatalogState,
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
@@ -97,6 +99,7 @@ export interface AgentFormProps {
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
+  canManageIntegrations: boolean;
   onSyncCatalog: (integrationId: string) => Promise<void>;
   onSubmit: (values: AgentFormValues) => void;
   onAddAdmin: (workspaceUserId: string) => void;
@@ -115,6 +118,12 @@ interface AgentFormViewProps extends AgentFormProps {
   hasSubmitAttempted: boolean;
   onSubmitAttempted: () => void;
   selectedModelEffortLevels: ModelReasoningEffort[];
+  imageGenerationCatalogStates: ReadonlyMap<
+    string,
+    ImageGenerationCatalogState
+  >;
+  canSyncImageCatalog: boolean;
+  onSyncImageCatalog: (integrationId: string) => Promise<void>;
   t: AgentFormTranslator;
 }
 
@@ -134,6 +143,9 @@ export function AgentForm({
   runtimeProfiles,
   runtimeProfilesLoading,
   onSyncCatalog,
+  imageGenerationCatalogStates,
+  canSyncImageCatalog,
+  onSyncImageCatalog,
   onSubmit,
   onAddAdmin,
   onRemoveAdmin,
@@ -182,6 +194,14 @@ export function AgentForm({
 
   const handleSubmit = form.onSubmit((values) => {
     onSubmitAttempted();
+    if (
+      hasInvalidImageGenerationSelections(
+        values.selectable_model_options,
+        imageGenerationCatalogStates,
+      )
+    ) {
+      return;
+    }
     onSubmit(values);
   }, onSubmitAttempted);
 
@@ -317,6 +337,9 @@ export function AgentForm({
                 canEdit
                 showValidationErrors={hasSubmitAttempted}
                 onSyncCatalog={onSyncCatalog}
+                imageGenerationCatalogStates={imageGenerationCatalogStates}
+                canSyncImageCatalog={canSyncImageCatalog}
+                onSyncImageCatalog={onSyncImageCatalog}
                 onChangeOptions={(options) =>
                   form.setFieldValue("selectable_model_options", options)
                 }

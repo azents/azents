@@ -75,6 +75,12 @@ class InferenceProfileFailureCode(enum.StrEnum):
     MODEL_TARGET_RESOLUTION_FAILED = "model_target_resolution_failed"
     REASONING_EFFORT_UNSUPPORTED = "reasoning_effort_unsupported"
     EXECUTION_OPTION_UNSUPPORTED = "execution_option_unsupported"
+    IMAGE_INTEGRATION_DISABLED = "integration_disabled"
+    IMAGE_EXPLICIT_SELECTION_UNSUPPORTED = "explicit_selection_unsupported"
+    IMAGE_CATALOG_UNAVAILABLE = "catalog_unavailable"
+    IMAGE_CATALOG_GENERATION_MISMATCH = "catalog_generation_mismatch"
+    IMAGE_MODEL_UNAVAILABLE = "model_unavailable"
+    IMAGE_PROVIDER_MODEL_MISMATCH = "provider_model_mismatch"
 
 
 class RequestedInferenceProfile(BaseModel):

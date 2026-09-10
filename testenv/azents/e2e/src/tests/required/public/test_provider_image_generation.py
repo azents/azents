@@ -9,10 +9,14 @@ from collections.abc import Callable
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentspublicclient.api.llm_provider_integration_v1_api import (
+    LLMProviderIntegrationV1Api,
+)
+from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
-from support.utils import unique
+from support.utils import unique, wait_until
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
     connect_chat,
@@ -193,6 +197,88 @@ def _request_for_prompt(
     raise AssertionError(f"proxy request was not captured for prompt: {prompt!r}")
 
 
+def _image_tool(request: dict[str, object]) -> dict[str, object]:
+    """Return the exact image-generation tool from one provider request."""
+    tools = json_object_list_payload(
+        request.get("tools"),
+        label="provider request tools",
+    )
+    image_tools = [tool for tool in tools if tool.get("type") == "image_generation"]
+    assert len(image_tools) == 1, tools
+    return image_tools[0]
+
+
+def _profile_workspace_and_integration(
+    *,
+    public_api_client: azentspublicclient.ApiClient,
+    token: str,
+) -> tuple[str, str]:
+    """Resolve the unique workspace and OpenAI integration created by setup."""
+    headers = auth_headers(token)
+    workspaces = WorkspaceV1Api(public_api_client).workspace_v1_list_workspaces(
+        _headers=headers,
+    )
+    assert len(workspaces.items) == 1
+    handle = workspaces.items[0].handle
+    integrations = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_list_integrations(
+        handle=handle,
+        _headers=headers,
+    )
+    assert len(integrations.items) == 1
+    return handle, integrations.items[0].id
+
+
+def _wait_for_image_catalog(
+    *,
+    server_url: str,
+    token: str,
+    handle: str,
+    integration_id: str,
+) -> dict[str, object]:
+    """Wait for the initial exact-registry image catalog projection."""
+    catalog_url = (
+        f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
+        f"llm-provider-integrations/{integration_id}/"
+        "image-generation-model-catalog"
+    )
+
+    def current_catalog() -> dict[str, object] | None:
+        response = requests.get(
+            catalog_url,
+            headers=auth_headers(token),
+            timeout=10,
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        payload = json_object_payload(
+            response.json(),
+            label="image generation catalog",
+        )
+        entries = json_object_list_payload(
+            payload.get("entries"),
+            label="image generation catalog entries",
+        )
+        identifiers = [entry.get("provider_model_identifier") for entry in entries]
+        if identifiers != [
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+        ]:
+            return None
+        return payload
+
+    catalog = wait_until(
+        current_catalog,
+        timeout=15,
+        interval=0.2,
+        message="Image generation catalog did not become readable",
+    )
+    assert catalog is not None
+    return catalog
+
+
 def _count_string_occurrences(value: object, needle: str) -> int:
     """Count a bounded string across nested request values without serializing it."""
     if isinstance(value, str):
@@ -216,6 +302,165 @@ def _count_typed_items(value: object, item_type: str) -> int:
 
 class TestProviderImageGeneration:
     """Validate hosted image output, storage, replay, and payload hygiene."""
+
+    def test_default_omission_and_explicit_pin_reach_provider_request(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+        openai_proxy_url: str,
+    ) -> None:
+        """Stored catalog selection controls the exact hosted tool payload."""
+        del azents_engine_worker_container
+        token, agent_id, session_id = setup_profile_agent(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        handle, integration_id = _profile_workspace_and_integration(
+            public_api_client=public_api_client,
+            token=token,
+        )
+        catalog = _wait_for_image_catalog(
+            server_url=azents_public_server_url,
+            token=token,
+            handle=handle,
+            integration_id=integration_id,
+        )
+        assert catalog.get("default_available") is True
+        assert catalog.get("explicit_selection_supported") is True
+        assert catalog.get("generation_current") is True
+        assert catalog.get("total") == 2
+
+        requests.delete(
+            f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
+        _submit(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=_PROMPT,
+            reasoning_effort=None,
+        )
+        _wait_for_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        default_request = _request_for_prompt(
+            _proxy_journal(openai_proxy_url),
+            _PROMPT,
+        )
+        assert _image_tool(default_request) == {"type": "image_generation"}
+
+        update = requests.patch(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/"
+            f"agents/{agent_id}",
+            headers={**auth_headers(token), "Content-Type": "application/json"},
+            json={
+                "selectable_model_options": [
+                    {
+                        "label": "Quality",
+                        "model_selection": {
+                            "llm_provider_integration_id": integration_id,
+                            "model_identifier": "gpt-5.5",
+                        },
+                        "settings": {
+                            "context_window_tokens": 96_000,
+                            "max_output_tokens": 12_000,
+                            "builtin_tools": [
+                                {"name": "web_search"},
+                                {
+                                    "name": "image_generation",
+                                    "config": {
+                                        "model": "gpt-image-2.5-flare",
+                                        "quality": "high",
+                                    },
+                                },
+                            ],
+                            "subagent_enabled": False,
+                            "subagent_guidance": "Reserve for complex synthesis.",
+                        },
+                    },
+                    {
+                        "label": "Fast",
+                        "model_selection": {
+                            "llm_provider_integration_id": integration_id,
+                            "model_identifier": "gpt-5.5-mini",
+                        },
+                        "settings": {
+                            "context_window_tokens": 32_000,
+                            "max_output_tokens": 4_000,
+                            "builtin_tools": [],
+                            "subagent_enabled": True,
+                            "subagent_guidance": "Prefer for bounded investigation.",
+                        },
+                    },
+                ],
+                "main_model_label": "Quality",
+                "lightweight_model_label": "Fast",
+            },
+            timeout=10,
+        )
+        update.raise_for_status()
+        updated_agent = json_object_payload(
+            update.json(),
+            label="updated explicit image model Agent",
+        )
+        quality_option = next(
+            option
+            for option in json_object_list_payload(
+                updated_agent.get("selectable_model_options"),
+                label="updated selectable model options",
+            )
+            if option.get("label") == "Quality"
+        )
+        quality_settings = json_object_payload(
+            quality_option.get("settings"),
+            label="updated Quality settings",
+        )
+        assert json_object_list_payload(
+            quality_settings.get("builtin_tools"),
+            label="updated Quality built-in tools",
+        )[1] == {
+            "name": "image_generation",
+            "config": {
+                "model": "gpt-image-2.5-flare",
+                "quality": "high",
+            },
+        }
+
+        requests.delete(
+            f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
+        _submit(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=_PROMPT,
+            reasoning_effort=None,
+        )
+        _wait_for_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        explicit_request = _request_for_prompt(
+            _proxy_journal(openai_proxy_url),
+            _PROMPT,
+        )
+        assert _image_tool(explicit_request) == {
+            "type": "image_generation",
+            "model": "gpt-image-2.5-flare",
+            "quality": "high",
+        }
 
     def test_materializes_downloads_and_replays_generated_image(
         self,

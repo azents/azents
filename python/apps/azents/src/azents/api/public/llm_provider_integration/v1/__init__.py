@@ -19,6 +19,11 @@ from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.llm_provider_integration.data import NotFound
+from azents.services.image_generation_catalog import (
+    ImageGenerationCatalogService,
+    ImageGenerationCatalogSyncNotFound,
+    ImageGenerationCatalogSyncSuperseded,
+)
 from azents.services.llm_catalog import (
     IntegrationCatalogAutomaticRetryBlocked,
     IntegrationCatalogProjectionService,
@@ -48,6 +53,7 @@ from azents.testing.deterministic_model_listing import (
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    ImageGenerationModelCatalogResponse,
     LLMProviderCapabilityListResponse,
     LLMProviderCapabilityResponse,
     LLMProviderIntegrationCreateRequest,
@@ -127,6 +133,7 @@ async def create_integration(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[LLMProviderIntegrationService, Depends()],
     catalog_sync_service: Annotated[IntegrationCatalogProjectionService, Depends()],
+    image_catalog_service: Annotated[ImageGenerationCatalogService, Depends()],
     background_tasks: BackgroundTasks,
     *,
     request_body: LLMProviderIntegrationCreateRequest,
@@ -159,6 +166,15 @@ async def create_integration(
         workspace_id=member.workspace_id,
         provider=integration.provider,
         name=integration.name,
+        enabled=integration.enabled,
+        trigger=IntegrationCatalogSyncTrigger.CREATE,
+    )
+    enqueue_initial_image_catalog_sync(
+        background_tasks,
+        service=image_catalog_service,
+        integration_id=integration.id,
+        workspace_id=member.workspace_id,
+        provider=integration.provider,
         enabled=integration.enabled,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
@@ -263,6 +279,120 @@ async def get_subscription_usage(
                 )
             case _:
                 assert_never(error)
+
+
+@router.get(
+    "/workspaces/{handle}/llm-provider-integrations/{integration_id}/"
+    "image-generation-model-catalog"
+)
+async def get_image_model_catalog(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ImageGenerationCatalogService, Depends()],
+    background_tasks: BackgroundTasks,
+    *,
+    integration_id: str,
+) -> ImageGenerationModelCatalogResponse:
+    """Read stored image-generation model availability for an integration."""
+    if not member.has_permission(Permissions.LLM_INTEGRATIONS_READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="LLM integration read permission is required.",
+        )
+    result = await service.read(
+        integration_id=integration_id,
+        workspace_id=member.workspace_id,
+    )
+    if result.success:
+        value = result.value
+        enqueue_stale_image_catalog_sync(
+            background_tasks,
+            service=service,
+            integration_id=integration_id,
+            workspace_id=member.workspace_id,
+            stale=value.stale,
+            explicit_selection_supported=value.explicit_selection_supported,
+            automatic_retry_blocked=value.automatic_retry_blocked,
+        )
+        return ImageGenerationModelCatalogResponse.convert_from(value)
+    error = result.error
+    match error:
+        case CatalogNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="LLM provider integration was not found.",
+            )
+        case _:
+            assert_never(error)
+
+
+@router.post(
+    "/workspaces/{handle}/llm-provider-integrations/{integration_id}/"
+    "image-generation-model-catalog-sync"
+)
+async def sync_image_model_catalog(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ImageGenerationCatalogService, Depends()],
+    *,
+    integration_id: str,
+) -> ModelCatalogSyncResponse:
+    """Synchronize stored image-generation model availability."""
+    if not member.has_permission(Permissions.LLM_INTEGRATIONS_WRITE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="LLM integration management permission is required.",
+        )
+    result = await service.sync(
+        integration_id=integration_id,
+        workspace_id=member.workspace_id,
+    )
+    if result.success:
+        return ModelCatalogSyncResponse.convert_from(result.value)
+    error = result.error
+    match error:
+        case ImageGenerationCatalogSyncNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="LLM provider integration was not found.",
+            )
+        case IntegrationCatalogSyncUnsupportedProvider():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Integration provider does not support explicit image model sync."
+                ),
+            )
+        case IntegrationCatalogSyncAlreadyRunning():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Image model catalog sync is already running.",
+            )
+        case ImageGenerationCatalogSyncSuperseded():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Image model catalog sync was superseded by newer configuration."
+                ),
+            )
+        case IntegrationCatalogSyncThrottled(retry_at=retry_at):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Image model catalog sync is throttled until "
+                    f"{retry_at.isoformat()}."
+                ),
+                headers={
+                    "Retry-After": format_datetime(
+                        retry_at.astimezone(datetime.UTC),
+                        usegmt=True,
+                    )
+                },
+            )
+        case (
+            IntegrationCatalogAutomaticRetryBlocked() | IntegrationCatalogSyncNotStale()
+        ):
+            raise RuntimeError("Explicit image catalog sync was denied unexpectedly.")
+        case _:
+            assert_never(error)
 
 
 @router.get(
@@ -407,6 +537,7 @@ async def update_integration(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[LLMProviderIntegrationService, Depends()],
     catalog_sync_service: Annotated[IntegrationCatalogProjectionService, Depends()],
+    image_catalog_service: Annotated[ImageGenerationCatalogService, Depends()],
     background_tasks: BackgroundTasks,
     *,
     integration_id: str,
@@ -437,6 +568,15 @@ async def update_integration(
                 workspace_id=member.workspace_id,
                 provider=value.integration.provider,
                 name=value.integration.name,
+                enabled=value.integration.enabled,
+                trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+            )
+            enqueue_initial_image_catalog_sync(
+                background_tasks,
+                service=image_catalog_service,
+                integration_id=value.integration.id,
+                workspace_id=member.workspace_id,
+                provider=value.integration.provider,
                 enabled=value.integration.enabled,
                 trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
             )
@@ -493,6 +633,71 @@ async def delete_integration(
                 )
             case _:
                 assert_never(error)
+
+
+def enqueue_stale_image_catalog_sync(
+    background_tasks: BackgroundTasks,
+    *,
+    service: ImageGenerationCatalogService,
+    integration_id: str,
+    workspace_id: str,
+    stale: bool,
+    explicit_selection_supported: bool,
+    automatic_retry_blocked: bool,
+) -> None:
+    """Queue lazy image catalog refresh after returning stored state."""
+    if not stale or not explicit_selection_supported or automatic_retry_blocked:
+        return
+    background_tasks.add_task(
+        _run_image_catalog_sync,
+        service=service,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+    )
+
+
+def enqueue_initial_image_catalog_sync(
+    background_tasks: BackgroundTasks,
+    *,
+    service: ImageGenerationCatalogService,
+    integration_id: str,
+    workspace_id: str,
+    provider: LLMProvider,
+    enabled: bool,
+    trigger: IntegrationCatalogSyncTrigger,
+) -> None:
+    """Queue image catalog sync after an OpenAI integration state change."""
+    if not enabled or provider != LLMProvider.OPENAI:
+        return
+    background_tasks.add_task(
+        _run_image_catalog_sync,
+        service=service,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+        trigger=trigger,
+    )
+
+
+async def _run_image_catalog_sync(
+    *,
+    service: ImageGenerationCatalogService,
+    integration_id: str,
+    workspace_id: str,
+    trigger: IntegrationCatalogSyncTrigger,
+) -> None:
+    """Run best-effort image catalog sync after the initiating response."""
+    try:
+        await service.sync(
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            trigger=trigger,
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected image generation catalog sync failure.",
+            extra={"integration_id": integration_id, "workspace_id": workspace_id},
+        )
 
 
 def enqueue_stale_catalog_sync(

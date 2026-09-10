@@ -100,7 +100,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-10
-spec_version: 74
+spec_version: 75
 ---
 
 # Agent Domain Spec
@@ -205,8 +205,9 @@ automatically.
 - labels are trimmed, non-empty, case-sensitive, and unique within the list;
 - labels are at most 80 characters;
 - selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option;
-- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, `settings.builtin_tools`, `settings.subagent_enabled`, and `settings.subagent_guidance` independently;
+- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, complete `settings.builtin_tools` name/config entries, `settings.subagent_enabled`, and `settings.subagent_guidance` independently;
 - nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that option;
+- built-in configuration is scoped by semantic tool name. `image_generation` omits `config.model` for the maintained provider default and stores an exact provider identifier for an explicit pin; changing that field preserves unrelated configuration keys, while disabling the tool removes its complete entry;
 - `subagent_enabled` defaults to true and controls only whether the label is available as an explicit `spawn_agent` model target;
 - `subagent_guidance` is nullable parent-model routing guidance, is trimmed with blank input normalized to null, and is limited to 500 characters.
 
@@ -258,7 +259,7 @@ Rules:
 - Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
 - Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
-- New Agents copy each Workspace option's model snapshot and complete model-scoped settings; later Workspace changes do not change existing Agent options or effective snapshots.
+- New Agents copy each Workspace option's model snapshot and complete model-scoped settings, including built-in tool configs; later Workspace changes do not change existing Agent options or effective snapshots.
 - During the direct-model transition, explicit legacy `default_model_selection` inputs are still accepted and converted into an equivalent default selectable option list.
 
 ### 1.3 Provider integration and model listing
@@ -303,7 +304,13 @@ Create/update requests accept selectable model options as the current model cont
       "settings": {
         "context_window_tokens": 128000,
         "max_output_tokens": 8192,
-        "builtin_tools": [{"name": "web_search"}],
+        "builtin_tools": [
+          {"name": "web_search"},
+          {
+            "name": "image_generation",
+            "config": {"model": "gpt-image-2.5-flare"}
+          }
+        ],
         "subagent_enabled": false,
         "subagent_guidance": "Reserve for complex synthesis tasks."
       }
@@ -340,7 +347,7 @@ Create/update requests accept selectable model options as the current model cont
 - `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time, and its settings are normalized against that resolved option capability.
 - Omitted option settings default to null token caps, every supported implemented built-in tool enabled, explicit subagent targeting enabled, and null subagent guidance. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
 - Subagent guidance is trimmed and blank input becomes null. Guidance longer than 500 characters is rejected.
-- Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per option.
+- Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per option. Image-generation defaults and explicit pins are also validated against the selected model capability, enabled provider integration, reviewed registry, and current stored image catalog before save.
 - Empty lists, more than 10 entries, empty labels, duplicate labels, and unresolved model selections are rejected.
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
 - Effective `model_selection` and `lightweight_model_selection` are recomputed from the final labels and returned in responses.
@@ -381,7 +388,13 @@ PUT accepts Workspace default selectable model options and labels:
       "settings": {
         "context_window_tokens": null,
         "max_output_tokens": null,
-        "builtin_tools": [{"name": "web_search"}],
+        "builtin_tools": [
+          {"name": "web_search"},
+          {
+            "name": "image_generation",
+            "config": {"model": "gpt-image-2.5-flare"}
+          }
+        ],
         "subagent_enabled": true,
         "subagent_guidance": null
       }
@@ -609,6 +622,10 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-10** (spec_version 75) — Preserved complete per-tool config,
+  represented maintained-default image generation by omitting `config.model`,
+  validated explicit pins through current stored authority, and copied the full
+  settings into newly created Agents.
 - **2026-09-08** (spec_version 74) — Added model execution-option support,
   enabled intent, and composer definitions independently of static model
   capabilities and built-in tools.

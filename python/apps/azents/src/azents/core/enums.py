@@ -84,6 +84,13 @@ class LLMCatalogScope(enum.StrEnum):
     INTEGRATION = "integration"
 
 
+class LLMCatalogPurpose(enum.StrEnum):
+    """Product purpose served by an LLM catalog."""
+
+    CONVERSATION = "conversation"
+    IMAGE_GENERATION = "image_generation"
+
+
 class LLMCatalogLowererTarget(enum.StrEnum):
     """Runtime lowerer target used for catalog projection."""
 

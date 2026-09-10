@@ -40,6 +40,13 @@ class TestLLMProviderIntegrationV1Api(unittest.TestCase):
         """
         pass
 
+    def test_llm_provider_integration_v1_get_image_model_catalog(self) -> None:
+        """Test case for llm_provider_integration_v1_get_image_model_catalog
+
+        Get Image Model Catalog
+        """
+        pass
+
     def test_llm_provider_integration_v1_get_integration(self) -> None:
         """Test case for llm_provider_integration_v1_get_integration
 
@@ -72,6 +79,13 @@ class TestLLMProviderIntegrationV1Api(unittest.TestCase):
         """Test case for llm_provider_integration_v1_list_integrations
 
         List Integrations
+        """
+        pass
+
+    def test_llm_provider_integration_v1_sync_image_model_catalog(self) -> None:
+        """Test case for llm_provider_integration_v1_sync_image_model_catalog
+
+        Sync Image Model Catalog
         """
         pass
 

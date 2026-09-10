@@ -4,11 +4,14 @@ import test from "node:test";
 import {
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
+  hasInvalidImageGenerationSelections,
+  imageGenerationModelIdentifier,
   isSubagentGuidanceWithinLimit,
   modelContextBadgeValue,
   resolveModelContextRange,
   type SelectableModelOptionFormValue,
   selectableModelOptionInputsFromFormValues,
+  withImageGenerationModelIdentifier,
 } from "./model-selection.ts";
 
 function option(id: string, label: string): SelectableModelOptionFormValue {
@@ -23,6 +26,7 @@ function option(id: string, label: string): SelectableModelOptionFormValue {
     context_window_tokens: null,
     max_output_tokens: null,
     builtin_tools: [],
+    builtin_tool_configs: {},
     subagent_enabled: true,
     subagent_guidance: null,
   };
@@ -83,6 +87,123 @@ void test("selectable model input mapping preserves and normalizes subagent poli
       },
     },
   ]);
+});
+
+void test("image generation model updates preserve unrelated built-in config keys", () => {
+  const configured = {
+    ...option("default", "default"),
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: {
+        quality: "high",
+        model: "gpt-image-old",
+      },
+    },
+  };
+
+  const explicit = withImageGenerationModelIdentifier(
+    configured,
+    "gpt-image-current",
+  );
+  assert.equal(imageGenerationModelIdentifier(explicit), "gpt-image-current");
+  assert.deepEqual(explicit.builtin_tool_configs.image_generation, {
+    quality: "high",
+    model: "gpt-image-current",
+  });
+
+  const maintainedDefault = withImageGenerationModelIdentifier(explicit, null);
+  assert.equal(imageGenerationModelIdentifier(maintainedDefault), null);
+  assert.deepEqual(maintainedDefault.builtin_tool_configs.image_generation, {
+    quality: "high",
+  });
+});
+
+void test("form serialization preserves complete built-in tool config", () => {
+  const configured = {
+    ...option("default", "default"),
+    model_selection_value: "integration-1:model-1",
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: {
+        model: "gpt-image-current",
+        quality: "high",
+      },
+    },
+  };
+
+  const [input] = selectableModelOptionInputsFromFormValues([configured]);
+  assert.ok(input?.settings);
+  assert.deepEqual(input.settings.builtin_tools, [
+    {
+      name: "image_generation",
+      config: {
+        model: "gpt-image-current",
+        quality: "high",
+      },
+    },
+  ]);
+});
+
+void test("explicit image selection is invalid until a current catalog authorizes it", () => {
+  const configured = {
+    ...option("default", "default"),
+    model_provider_integration_id: "integration-1",
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: { model: "gpt-image-current" },
+    },
+  };
+
+  assert.equal(
+    hasInvalidImageGenerationSelections(
+      [configured],
+      new Map([["integration-1", { type: "LOADING" }]]),
+    ),
+    true,
+  );
+  assert.equal(
+    hasInvalidImageGenerationSelections(
+      [configured],
+      new Map([
+        [
+          "integration-1",
+          {
+            type: "LOADED",
+            data: {
+              default_available: true,
+              explicit_selection_supported: true,
+              catalog_id: "catalog-1",
+              snapshot_id: "snapshot-1",
+              snapshot_configuration_version: 1,
+              current_configuration_version: 1,
+              snapshot_created_at: "2026-09-10T00:00:00Z",
+              latest_attempt: null,
+              stale: false,
+              generation_current: true,
+              sync_available_at: null,
+              automatic_retry_blocked: false,
+              entries: [
+                {
+                  id: "entry-1",
+                  provider: "openai",
+                  provider_model_identifier: "gpt-image-current",
+                  display_name: "Current Image Model",
+                  description: "Current image model.",
+                  recommendation_rank: 1,
+                  lifecycle_status: "active",
+                  visibility_status: "selectable",
+                  source_metadata: null,
+                  projection_metadata: null,
+                },
+              ],
+              total: 1,
+            },
+          },
+        ],
+      ]),
+    ),
+    false,
+  );
 });
 
 void test("subagent guidance is bounded to 500 characters", () => {

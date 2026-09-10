@@ -1448,6 +1448,7 @@ def _executor(
     mailbox_item_service: Any | None = None,  # noqa: ANN401
     session_git_worktree_service: Any | None = None,  # noqa: ANN401
     vfs_projection_service: Any | None = None,  # noqa: ANN401
+    image_generation_catalog_service: Any | None = None,  # noqa: ANN401
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
@@ -1500,6 +1501,9 @@ def _executor(
         session_git_worktree_service = _SessionGitWorktreeService()
     if vfs_projection_service is None:
         vfs_projection_service = _VfsProjectionService()
+    if image_generation_catalog_service is None:
+        image_generation_catalog_service = AsyncMock()
+        image_generation_catalog_service.validate_runtime.return_value = None
     capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
         "skill_store": object(),
         "vfs_projection_service": None,
@@ -1536,6 +1540,7 @@ def _executor(
         ),
         exchange_file_service=object(),
         model_file_service=object(),
+        image_generation_catalog_service=image_generation_catalog_service,
         mailbox_item_service=mailbox_item_service,
         session_git_worktree_service=session_git_worktree_service,
         operation_action_executor=OperationActionExecutorRegistry(

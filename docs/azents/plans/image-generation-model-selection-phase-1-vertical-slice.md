@@ -33,7 +33,7 @@ tags: [agent, workspace, image-generation, model-catalog, implementation]
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
 | Schema and repositories | `/root` | backend enums, RDB catalog/integration models, migration, catalog repositories | approved Design | purpose/version/image entry persistence | migration and repository tests |
-| Catalog service and API | `/root` | model listing, image registry/service, integration routes/data | schema | stored read/sync contract | service and route tests |
+| Catalog service and API | `implementation-catalog` | model listing, image registry/service, integration routes/data | schema contract | stored read/sync contract | service and route tests |
 | Settings and runtime | `/root` | built-in config, model option normalization, Agent/Workspace services, run resolution | catalog read authority | canonical save and pre-dispatch validation | focused backend tests |
 | Generated clients and UI | `/root` | public OpenAPI/clients, web container/component/form/i18n/stories | API and settings contract | catalog-driven UI | format/lint/typecheck/unit/story tests |
 | E2E and Specs | `/root` | testenv fixtures/tests and current Living Specs | complete vertical behavior | deterministic acceptance evidence and current behavior docs | required focused E2E and spec review |
@@ -50,3 +50,8 @@ tags: [agent, workspace, image-generation, model-catalog, implementation]
   consequence; quality/size controls and new providers remain absent
 - Context checkpoint: design is approved, current prototype is untrusted except for its
   UI shell, and no implementation blocker remains
+- Completion checkpoint: M1-M11 are implemented with `Design delta: None`; backend,
+  generated-client, frontend, production-build, deterministic E2E, Living Spec,
+  generated-index, and clean-diff validation passed. Independent review found and
+  verified corrections for credential-generation fencing and runtime capability
+  revalidation, with no remaining blocking findings.

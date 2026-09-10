@@ -1202,6 +1202,7 @@ def _integration() -> LLMProviderIntegrationWithSecrets:
         enabled=True,
         created_at=now,
         updated_at=now,
+        catalog_configuration_version=1,
     )
 
 

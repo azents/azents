@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import Protocol
 
 import boto3
 import google.auth.transport.requests
@@ -72,12 +73,14 @@ from azents.core.xai_oauth import (
     XAI_MODELS_CLIENT_VERSION,
     resolve_xai_usage_base_url,
 )
+from azents.engine.events.openai_responses import openai_responses_client_config
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.services.builtin_capabilities import supported_builtin_capabilities
 
 from .data import (
+    ImageGenerationModelListingOutput,
     ModelListingOutput,
     ModelListingSkipSummary,
     ModelListingSummary,
@@ -207,6 +210,28 @@ class InvalidProviderResponseError(ValueError):
     """Provider returned a response that cannot be projected."""
 
 
+class _OpenAIModelItem(Protocol):
+    """Minimal official SDK model item shape used by image discovery."""
+
+    @property
+    def id(self) -> str | None:
+        """Return the exact provider model identifier."""
+
+
+class _OpenAIModelPage(Protocol):
+    """Minimal official SDK page shape used by image discovery."""
+
+    @property
+    def data(self) -> Sequence[_OpenAIModelItem]:
+        """Return the current provider page items."""
+
+    def has_next_page(self) -> bool:
+        """Return whether one provider page remains."""
+
+    async def get_next_page(self) -> "_OpenAIModelPage":
+        """Fetch the next provider page."""
+
+
 class XaiListingProviderError(ListingProviderError):
     """Sanitized xAI listing failure safe for persisted diagnostics."""
 
@@ -307,6 +332,19 @@ async def list_xai_models_for_integration(
         ValueError,
     ) as exc:
         raise _xai_listing_provider_error(exc) from None
+
+
+async def list_openai_image_generation_models_for_integration(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ImageGenerationModelListingOutput:
+    """List every exact model identifier visible to an OpenAI API-key integration."""
+    try:
+        return await _list_openai_image_generation_models(integration)
+    except (OpenAIError, ValueError) as exc:
+        raise ListingProviderError(
+            "OpenAI image model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
 
 
 def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
@@ -777,6 +815,62 @@ async def _list_xai_api_key_models(
         models=models,
         skips=[],
     )
+
+
+async def _list_openai_image_generation_models(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ImageGenerationModelListingOutput:
+    """Fetch every visible OpenAI model through the official SDK paginator."""
+    if integration.provider != LLMProvider.OPENAI:
+        raise ValueError("OpenAI image model listing requires an OpenAI integration.")
+    secrets = _require_api_key_secrets(integration.secrets)
+    client_config = openai_responses_client_config(
+        provider=LLMProvider.OPENAI,
+        credential_kwargs={"api_key": secrets.api_key},
+    )
+    fetched_at = datetime.now(timezone.utc)
+    async with AsyncOpenAI(
+        api_key=secrets.api_key,
+        base_url=client_config.base_url,
+        organization=client_config.organization,
+        project=client_config.project,
+        default_headers=client_config.default_headers,
+        max_retries=0,
+        timeout=20.0,
+    ) as client:
+        page: _OpenAIModelPage = await client.models.list()
+        identifiers = await _complete_openai_model_identifiers(page)
+    return ImageGenerationModelListingOutput(
+        provider=LLMProvider.OPENAI,
+        source="openai:models_list",
+        fetched_at=fetched_at,
+        provider_model_identifiers=identifiers,
+    )
+
+
+async def _complete_openai_model_identifiers(
+    initial_page: _OpenAIModelPage,
+) -> list[str]:
+    """Consume all SDK pages and reject malformed or ambiguous identifiers."""
+    page = initial_page
+    identifiers: list[str] = []
+    seen: set[str] = set()
+    while True:
+        for model in page.data:
+            model_id = model.id
+            if not isinstance(model_id, str) or not model_id:
+                raise InvalidProviderResponseError(
+                    "OpenAI model listing contained a malformed model identifier."
+                )
+            if model_id in seen:
+                raise InvalidProviderResponseError(
+                    "OpenAI model listing contained duplicate model identifiers."
+                )
+            seen.add(model_id)
+            identifiers.append(model_id)
+        if not page.has_next_page():
+            return identifiers
+        page = await page.get_next_page()
 
 
 def _candidate_from_xai_api_key_model(

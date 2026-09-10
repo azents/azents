@@ -21,7 +21,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMCatalogLowererTarget, LLMProvider
+from azents.core.enums import LLMCatalogLowererTarget, LLMCatalogPurpose, LLMProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
@@ -314,6 +314,7 @@ class ChatGPTOAuthService:
                         integration_id=integration.id,
                         provider=integration.provider,
                         lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                        purpose=LLMCatalogPurpose.CONVERSATION,
                     )
                 return Success(ChatGPTOAuthExchangeOutput(integration=integration))
             case Failure(error):

@@ -51,6 +51,12 @@ class RDBLLMProviderIntegration(RDBModel):
     encrypted_credentials: Mapped[str] = mapped_column(sa.Text, nullable=False)
     config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    catalog_configuration_version: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=1,
+        server_default=sa.text("1"),
+    )
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

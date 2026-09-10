@@ -43,6 +43,7 @@ def _openrouter_integration() -> LLMProviderIntegrationWithSecrets:
         created_at=now,
         updated_at=now,
         secrets=ApiKeySecrets(api_key="openrouter-test-key"),
+        catalog_configuration_version=1,
     )
 
 
@@ -66,6 +67,7 @@ def _chatgpt_integration() -> LLMProviderIntegrationWithSecrets:
             refresh_token="refresh-token",
             expires_at=now + datetime.timedelta(hours=1),
         ),
+        catalog_configuration_version=1,
     )
 
 
@@ -94,6 +96,7 @@ def _kimi_integration() -> LLMProviderIntegrationWithSecrets:
             expires_at=now + datetime.timedelta(hours=1),
             device_id="kimi-device-id",
         ),
+        catalog_configuration_version=1,
     )
 
 
@@ -110,6 +113,24 @@ def _xai_api_key_integration() -> LLMProviderIntegrationWithSecrets:
         created_at=now,
         updated_at=now,
         secrets=ApiKeySecrets(api_key="xai-test-key"),
+        catalog_configuration_version=1,
+    )
+
+
+def _openai_integration() -> LLMProviderIntegrationWithSecrets:
+    """Build one OpenAI API-key integration for image model listing tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="openai-integration-id",
+        workspace_id="workspace-id",
+        provider=LLMProvider.OPENAI,
+        name="OpenAI",
+        config=None,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        secrets=ApiKeySecrets(api_key="openai-test-key"),
+        catalog_configuration_version=1,
     )
 
 
@@ -137,6 +158,7 @@ def _xai_oauth_integration() -> LLMProviderIntegrationWithSecrets:
             refresh_token="xai-refresh-token",
             expires_at=now + datetime.timedelta(hours=1),
         ),
+        catalog_configuration_version=1,
     )
 
 
@@ -254,6 +276,134 @@ async def test_list_xai_api_key_models_uses_sdk_and_conservative_capabilities(
     assert candidate.normalized_capabilities.reasoning.supported is False
     assert candidate.normalized_capabilities.built_in_tools.supported == []
     assert candidate.source_metadata == {"created": 1_787_000_000}
+
+
+class _FakeOpenAIPage:
+    def __init__(
+        self,
+        *,
+        data: list[SimpleNamespace],
+        next_page: "_FakeOpenAIPage | None" = None,
+    ) -> None:
+        self.data = data
+        self.next_page = next_page
+
+    def has_next_page(self) -> bool:
+        """Return whether a deterministic page remains."""
+        return self.next_page is not None
+
+    async def get_next_page(self) -> "_FakeOpenAIPage":
+        """Return the configured next page."""
+        if self.next_page is None:
+            raise AssertionError("No page should be requested.")
+        return self.next_page
+
+
+class _FakeOpenAIModels:
+    def __init__(self, page: _FakeOpenAIPage) -> None:
+        self.page = page
+
+    async def list(self) -> _FakeOpenAIPage:
+        """Return the first complete SDK-like page."""
+        return self.page
+
+
+class _FakeOpenAISdkClient:
+    page: _FakeOpenAIPage
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str | None,
+        organization: str | None,
+        project: str | None,
+        default_headers: dict[str, str] | None,
+        max_retries: int,
+        timeout: float,
+    ) -> None:
+        assert api_key == "openai-test-key"
+        assert base_url == "https://openai.example/v1"
+        assert organization == "org-test"
+        assert project == "project-test"
+        assert default_headers == {"X-OpenAI-Test": "true"}
+        assert max_retries == 0
+        assert timeout == 20.0
+        self.models = _FakeOpenAIModels(self.page)
+
+    async def __aenter__(self) -> "_FakeOpenAISdkClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+
+async def test_openai_image_model_listing_consumes_complete_sdk_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the supported SDK and return every exact visible identifier."""
+    _FakeOpenAISdkClient.page = _FakeOpenAIPage(
+        data=[SimpleNamespace(id="gpt-image-2.5-flare")],
+        next_page=_FakeOpenAIPage(data=[SimpleNamespace(id="gpt-image-2.5-sunburst")]),
+    )
+    monkeypatch.setattr(providers, "AsyncOpenAI", _FakeOpenAISdkClient)
+    monkeypatch.setattr(
+        providers,
+        "openai_responses_client_config",
+        lambda **kwargs: SimpleNamespace(
+            base_url="https://openai.example/v1",
+            organization="org-test",
+            project="project-test",
+            default_headers={"X-OpenAI-Test": "true"},
+        ),
+    )
+
+    result = await providers.list_openai_image_generation_models_for_integration(
+        _openai_integration()
+    )
+
+    assert result.provider == LLMProvider.OPENAI
+    assert result.source == "openai:models_list"
+    assert result.provider_model_identifiers == [
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-sunburst",
+    ]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [SimpleNamespace(id=None)],
+        [
+            SimpleNamespace(id="gpt-image-2.5-flare"),
+            SimpleNamespace(id="gpt-image-2.5-flare"),
+        ],
+    ],
+)
+async def test_openai_image_model_listing_rejects_malformed_or_ambiguous_data(
+    monkeypatch: pytest.MonkeyPatch,
+    data: list[SimpleNamespace],
+) -> None:
+    """Do not publish a partial or ambiguous provider visibility result."""
+    _FakeOpenAISdkClient.page = _FakeOpenAIPage(data=data)
+    monkeypatch.setattr(providers, "AsyncOpenAI", _FakeOpenAISdkClient)
+    monkeypatch.setattr(
+        providers,
+        "openai_responses_client_config",
+        lambda **kwargs: SimpleNamespace(
+            base_url="https://openai.example/v1",
+            organization="org-test",
+            project="project-test",
+            default_headers={"X-OpenAI-Test": "true"},
+        ),
+    )
+
+    with pytest.raises(providers.ListingProviderError) as caught:
+        await providers.list_openai_image_generation_models_for_integration(
+            _openai_integration()
+        )
+
+    assert caught.value.automatic_retry_blocked is False
 
 
 class _FakeXaiOAuthAsyncClient:

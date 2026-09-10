@@ -20,6 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ActionIcon,
   Alert,
+  Badge,
   Box,
   Button,
   Checkbox,
@@ -42,13 +43,18 @@ import { ModelCatalogPickerContainer } from "../containers/ModelCatalogPickerCon
 import {
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
+  hasInvalidImageGenerationSelections,
+  imageGenerationModelAvailability,
+  imageGenerationModelIdentifier,
   MAX_SELECTABLE_MODEL_OPTIONS,
   MAX_SUBAGENT_GUIDANCE_LENGTH,
   resolveModelContextRange,
   selectableModelLabelSelectData,
+  withImageGenerationModelIdentifier,
 } from "../model-selection";
 import classes from "./SelectableModelOptionsEditor.module.css";
 import type {
+  ImageGenerationCatalogState,
   ProviderIntegrationOption,
   SelectableModelCandidate,
   SelectableModelOptionFormValue,
@@ -68,6 +74,12 @@ export interface SelectableModelOptionsEditorProps {
   canEdit: boolean;
   showValidationErrors?: boolean;
   onSyncCatalog: (integrationId: string) => Promise<void>;
+  imageGenerationCatalogStates: ReadonlyMap<
+    string,
+    ImageGenerationCatalogState
+  >;
+  canSyncImageCatalog: boolean;
+  onSyncImageCatalog: (integrationId: string) => Promise<void>;
   onChangeOptions: (options: SelectableModelOptionFormValue[]) => void;
   onChangeMainModelLabel: (label: string | null) => void;
   onChangeLightweightModelLabel: (label: string | null) => void;
@@ -237,15 +249,26 @@ function SelectableModelRow({
 interface SelectableModelSettingsModalProps {
   opened: boolean;
   option: SelectableModelOptionFormValue;
+  imageGenerationCatalogStates: ReadonlyMap<
+    string,
+    ImageGenerationCatalogState
+  >;
+  canSyncImageCatalog: boolean;
   onClose: () => void;
   onChange: (option: SelectableModelOptionFormValue) => void;
+  onSyncImageCatalog: (integrationId: string) => Promise<void>;
 }
+
+const IMAGE_GENERATION_DEFAULT_VALUE = "__azents_default_image_model__";
 
 function SelectableModelSettingsModal({
   opened,
   option,
+  imageGenerationCatalogStates,
+  canSyncImageCatalog,
   onClose,
   onChange,
+  onSyncImageCatalog,
 }: SelectableModelSettingsModalProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const format = useFormatter();
@@ -256,6 +279,183 @@ function SelectableModelSettingsModal({
     option.normalized_capabilities?.context_window?.max_output_tokens ?? null;
   const supportedTools =
     option.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const imageGenerationEnabled =
+    option.builtin_tools.includes("image_generation");
+  const integrationId = option.model_provider_integration_id;
+  const imageCatalogState =
+    integrationId == null
+      ? null
+      : (imageGenerationCatalogStates.get(integrationId) ?? null);
+  const selectedImageModelIdentifier = imageGenerationModelIdentifier(option);
+  const selectedImageModelValue =
+    selectedImageModelIdentifier ?? IMAGE_GENERATION_DEFAULT_VALUE;
+  const loadedCatalog =
+    imageCatalogState?.type === "LOADED" ? imageCatalogState.data : null;
+  const selectableImageEntries =
+    loadedCatalog?.generation_current === true ? loadedCatalog.entries : [];
+  const selectedImageModelAvailability =
+    selectedImageModelIdentifier == null
+      ? "AVAILABLE"
+      : imageGenerationModelAvailability(
+          selectedImageModelIdentifier,
+          imageCatalogState,
+        );
+  const savedImageModelNeedsRecovery =
+    selectedImageModelIdentifier != null &&
+    selectedImageModelAvailability !== "AVAILABLE";
+  const selectedImageEntry = selectableImageEntries.find(
+    (entry) => entry.provider_model_identifier === selectedImageModelIdentifier,
+  );
+  const imageModelData = [
+    {
+      value: IMAGE_GENERATION_DEFAULT_VALUE,
+      label: t("imageModelDefault"),
+    },
+    ...selectableImageEntries.map((entry) => ({
+      value: entry.provider_model_identifier,
+      label: entry.display_name,
+    })),
+    ...(savedImageModelNeedsRecovery
+      ? [
+          {
+            value: selectedImageModelIdentifier,
+            label: t("imageModelSavedUnavailable", {
+              model: selectedImageModelIdentifier,
+            }),
+            disabled: true,
+          },
+        ]
+      : []),
+  ];
+  const imageModelError =
+    selectedImageModelAvailability === "UNAVAILABLE"
+      ? t("imageModelUnavailableError")
+      : selectedImageModelAvailability === "UNVERIFIED"
+        ? t("imageModelUnverifiedError")
+        : loadedCatalog?.default_available === false
+          ? t("imageDefaultUnavailableError")
+          : null;
+  const imageModelDescription =
+    selectedImageModelIdentifier == null
+      ? t("imageModelDefaultDescription")
+      : (selectedImageEntry?.description ?? t("imageModelPinnedDescription"));
+  const savedImageModelNotice =
+    selectedImageModelAvailability === "UNAVAILABLE" ? (
+      <Alert color="orange" title={t("imageModelUnavailableTitle")}>
+        {t("imageModelUnavailableDescription")}
+      </Alert>
+    ) : selectedImageModelAvailability === "UNVERIFIED" ? (
+      <Alert color="orange" title={t("imageModelUnverifiedTitle")}>
+        {t("imageModelUnverifiedDescription")}
+      </Alert>
+    ) : null;
+  const syncImageCatalogButton =
+    integrationId != null && canSyncImageCatalog ? (
+      <Button
+        size="xs"
+        variant="light"
+        onClick={() => {
+          void onSyncImageCatalog(integrationId);
+        }}
+      >
+        {t("imageCatalogSync")}
+      </Button>
+    ) : null;
+  let imageCatalogNotice: ReactNode = null;
+  if (imageCatalogState == null) {
+    imageCatalogNotice = (
+      <Alert color="yellow" title={t("imageCatalogUnavailableTitle")}>
+        {t("imageCatalogUnavailableDescription")}
+      </Alert>
+    );
+  } else {
+    switch (imageCatalogState.type) {
+      case "LOADING":
+        imageCatalogNotice = (
+          <Alert color="blue" title={t("imageCatalogLoadingTitle")}>
+            {t("imageCatalogLoadingDescription")}
+          </Alert>
+        );
+        break;
+      case "ERROR":
+        imageCatalogNotice = (
+          <Alert color="orange" title={t("imageCatalogErrorTitle")}>
+            <Stack gap="xs">
+              <Text size="sm">{t("imageCatalogErrorDescription")}</Text>
+              {syncImageCatalogButton}
+            </Stack>
+          </Alert>
+        );
+        break;
+      case "UNSUPPORTED":
+        imageCatalogNotice = (
+          <Alert color="blue" title={t("imageCatalogDefaultOnlyTitle")}>
+            {imageCatalogState.data.default_available
+              ? t("imageCatalogDefaultOnlyDescription")
+              : t("imageDefaultUnavailableDescription")}
+          </Alert>
+        );
+        break;
+      case "LOADED": {
+        const catalog = imageCatalogState.data;
+        if (!catalog.default_available) {
+          imageCatalogNotice = (
+            <Alert color="red" title={t("imageDefaultUnavailableTitle")}>
+              {t("imageDefaultUnavailableDescription")}
+            </Alert>
+          );
+        } else if (!catalog.generation_current) {
+          imageCatalogNotice = (
+            <Alert color="orange" title={t("imageCatalogChangedTitle")}>
+              <Stack gap="xs">
+                <Text size="sm">{t("imageCatalogChangedDescription")}</Text>
+                {syncImageCatalogButton}
+              </Stack>
+            </Alert>
+          );
+        } else if (catalog.snapshot_id == null) {
+          imageCatalogNotice = (
+            <Alert color="blue" title={t("imageCatalogNeverSyncedTitle")}>
+              <Stack gap="xs">
+                <Text size="sm">{t("imageCatalogNeverSyncedDescription")}</Text>
+                {syncImageCatalogButton}
+              </Stack>
+            </Alert>
+          );
+        } else if (catalog.latest_attempt?.status === "failed") {
+          imageCatalogNotice = (
+            <Alert color="yellow" title={t("imageCatalogLastSyncFailedTitle")}>
+              <Stack gap="xs">
+                <Text size="sm">
+                  {t("imageCatalogLastSyncFailedDescription")}
+                </Text>
+                {syncImageCatalogButton}
+              </Stack>
+            </Alert>
+          );
+        } else if (catalog.stale) {
+          imageCatalogNotice = (
+            <Alert color="yellow" title={t("imageCatalogStaleTitle")}>
+              <Stack gap="xs">
+                <Text size="sm">{t("imageCatalogStaleDescription")}</Text>
+                {syncImageCatalogButton}
+              </Stack>
+            </Alert>
+          );
+        } else if (catalog.entries.length === 0) {
+          imageCatalogNotice = (
+            <Alert color="blue" title={t("imageCatalogEmptyTitle")}>
+              <Stack gap="xs">
+                <Text size="sm">{t("imageCatalogEmptyDescription")}</Text>
+                {syncImageCatalogButton}
+              </Stack>
+            </Alert>
+          );
+        }
+        break;
+      }
+    }
+  }
   const formatToolLabel = (tool: string): string => {
     switch (tool) {
       case "web_search":
@@ -339,9 +539,21 @@ function SelectableModelSettingsModal({
           ) : (
             <Checkbox.Group
               value={option.builtin_tools}
-              onChange={(builtinTools) =>
-                onChange({ ...option, builtin_tools: builtinTools })
-              }
+              onChange={(builtinTools) => {
+                const builtinToolConfigs = {
+                  ...option.builtin_tool_configs,
+                };
+                for (const toolName of Object.keys(builtinToolConfigs)) {
+                  if (!builtinTools.includes(toolName)) {
+                    delete builtinToolConfigs[toolName];
+                  }
+                }
+                onChange({
+                  ...option,
+                  builtin_tools: builtinTools,
+                  builtin_tool_configs: builtinToolConfigs,
+                });
+              }}
             >
               <Stack gap="xs">
                 {supportedTools.map((tool) => (
@@ -353,6 +565,86 @@ function SelectableModelSettingsModal({
                 ))}
               </Stack>
             </Checkbox.Group>
+          )}
+          {imageGenerationEnabled && (
+            <Box ml="xl">
+              <Stack gap="xs">
+                <Select
+                  label={t("imageModelLabel")}
+                  description={t("imageModelDescription")}
+                  data={imageModelData}
+                  value={selectedImageModelValue}
+                  allowDeselect={false}
+                  error={imageModelError}
+                  renderOption={({ option: imageModelOption }) => (
+                    <Group
+                      gap="sm"
+                      justify="space-between"
+                      wrap="nowrap"
+                      w="100%"
+                    >
+                      <Stack gap={0}>
+                        <Text size="sm">{imageModelOption.label}</Text>
+                        <Text c="dimmed" size="xs">
+                          {imageModelOption.value ===
+                          IMAGE_GENERATION_DEFAULT_VALUE
+                            ? t("imageModelDefaultDescription")
+                            : (selectableImageEntries.find(
+                                (entry) =>
+                                  entry.provider_model_identifier ===
+                                  imageModelOption.value,
+                              )?.description ??
+                              t("imageModelUnavailableDescription"))}
+                        </Text>
+                      </Stack>
+                      {(imageModelOption.value ===
+                        IMAGE_GENERATION_DEFAULT_VALUE ||
+                        selectableImageEntries.find(
+                          (entry) =>
+                            entry.provider_model_identifier ===
+                            imageModelOption.value,
+                        )?.recommendation_rank === 1) && (
+                        <Badge size="xs" variant="light">
+                          {t("imageModelRecommended")}
+                        </Badge>
+                      )}
+                    </Group>
+                  )}
+                  onChange={(imageGenerationModel) => {
+                    if (imageGenerationModel == null) {
+                      return;
+                    }
+                    if (
+                      imageGenerationModel === IMAGE_GENERATION_DEFAULT_VALUE
+                    ) {
+                      onChange(
+                        withImageGenerationModelIdentifier(option, null),
+                      );
+                      return;
+                    }
+                    if (
+                      selectableImageEntries.some(
+                        (entry) =>
+                          entry.provider_model_identifier ===
+                          imageGenerationModel,
+                      )
+                    ) {
+                      onChange(
+                        withImageGenerationModelIdentifier(
+                          option,
+                          imageGenerationModel,
+                        ),
+                      );
+                    }
+                  }}
+                />
+                <Text c="dimmed" size="xs">
+                  {imageModelDescription}
+                </Text>
+                {savedImageModelNotice}
+                {imageCatalogNotice}
+              </Stack>
+            </Box>
           )}
         </Stack>
         <Stack gap="xs">
@@ -414,6 +706,9 @@ export function SelectableModelOptionsEditor({
   canEdit,
   showValidationErrors = false,
   onSyncCatalog,
+  imageGenerationCatalogStates,
+  canSyncImageCatalog,
+  onSyncImageCatalog,
   onChangeOptions,
   onChangeMainModelLabel,
   onChangeLightweightModelLabel,
@@ -461,6 +756,8 @@ export function SelectableModelOptionsEditor({
   const hasDuplicateLabels = options.some((_, index) =>
     rowHasDuplicateLabel(options, index),
   );
+  const hasInvalidImageGenerationSelection =
+    hasInvalidImageGenerationSelections(options, imageGenerationCatalogStates);
 
   useEffect(() => {
     if (pendingFocusOptionId == null) {
@@ -533,6 +830,9 @@ export function SelectableModelOptionsEditor({
         {showValidationErrors && hasMissingModels && (
           <Alert color="red">{t("missingModel")}</Alert>
         )}
+        {showValidationErrors && hasInvalidImageGenerationSelection && (
+          <Alert color="red">{t("invalidImageModel")}</Alert>
+        )}
       </Stack>
 
       {activeOption != null && (
@@ -558,6 +858,7 @@ export function SelectableModelOptionsEditor({
                 context_window_tokens: null,
                 max_output_tokens: null,
                 builtin_tools: [],
+                builtin_tool_configs: {},
               })),
             );
           }}
@@ -578,6 +879,7 @@ export function SelectableModelOptionsEditor({
                   ...(model.normalized_capabilities.built_in_tools?.supported ??
                     []),
                 ],
+                builtin_tool_configs: {},
               })),
             );
           }}
@@ -589,12 +891,15 @@ export function SelectableModelOptionsEditor({
         <SelectableModelSettingsModal
           opened={settingsOptionId != null}
           option={settingsOption}
+          imageGenerationCatalogStates={imageGenerationCatalogStates}
+          canSyncImageCatalog={canSyncImageCatalog}
           onClose={() => setSettingsOptionId(null)}
           onChange={(nextOption) => {
             handleChangeOptions(
               updateOption(options, nextOption.id, () => nextOption),
             );
           }}
+          onSyncImageCatalog={onSyncImageCatalog}
         />
       )}
 

@@ -66,6 +66,7 @@ async def test_reconnect_replaces_existing_integration_credentials() -> None:
         enabled=True,
         created_at=now,
         updated_at=now,
+        catalog_configuration_version=1,
     )
     oauth_session = KimiOAuthSessionWithSecrets(
         id="session-2",

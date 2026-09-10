@@ -25,6 +25,7 @@ from azentspublicclient.models.agent_session_product_mode import AgentSessionPro
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_session_status import AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource
+from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
@@ -37,6 +38,7 @@ class AgentSessionResponse(BaseModel):
     agent_id: StrictStr = Field(description="Agent ID")
     current_model_target_label: Optional[StrictStr]
     current_reasoning_effort: Optional[ModelReasoningEffort]
+    current_enabled_execution_options: List[ModelExecutionOptionId] = Field(description="Execution options applied to future Session turns")
     title: Optional[StrictStr]
     title_source: Optional[AgentSessionTitleSource]
     status: AgentSessionStatus = Field(description="Session status")
@@ -52,7 +54,7 @@ class AgentSessionResponse(BaseModel):
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "product_mode", "run_state", "pinned", "unread_terminal_run_id", "auto_archive_after", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "current_enabled_execution_options", "title", "title_source", "status", "primary_kind", "product_mode", "run_state", "pinned", "unread_terminal_run_id", "auto_archive_after", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -171,6 +173,7 @@ class AgentSessionResponse(BaseModel):
             "agent_id": obj.get("agent_id"),
             "current_model_target_label": obj.get("current_model_target_label"),
             "current_reasoning_effort": obj.get("current_reasoning_effort"),
+            "current_enabled_execution_options": obj.get("current_enabled_execution_options"),
             "title": obj.get("title"),
             "title_source": obj.get("title_source"),
             "status": obj.get("status"),

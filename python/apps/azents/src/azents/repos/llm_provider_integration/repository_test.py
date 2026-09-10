@@ -370,6 +370,33 @@ class TestLLMProviderIntegrationRepository:
         assert isinstance(result, Success)
         assert result.value.name == "After update"
         assert result.value.enabled is False
+        assert result.value.catalog_configuration_version == 2
+
+    async def test_name_only_update_preserves_catalog_configuration_version(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Display-name changes do not invalidate credential-visible catalogs."""
+        ws_id = await _create_workspace(rdb_session)
+        repo = _make_repo()
+        created = await repo.create(
+            rdb_session,
+            LLMProviderIntegrationCreate(
+                workspace_id=ws_id,
+                provider=LLMProvider.OPENAI,
+                name="Before rename",
+                secrets=ApiKeySecrets(api_key="sk-test"),
+            ),
+        )
+
+        result = await repo.update_by_id(
+            rdb_session,
+            created.id,
+            LLMProviderIntegrationUpdate(name="After rename"),
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.catalog_configuration_version == 1
 
     async def test_update_secrets(self, rdb_session: AsyncSession) -> None:
         """Check decryption after secrets update."""

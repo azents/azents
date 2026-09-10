@@ -12,6 +12,7 @@ from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelLifecycleStatus,
     LLMProvider,
@@ -28,6 +29,12 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
 llm_catalog_scope_enum = ENUM(
     LLMCatalogScope,
     name="llm_catalog_scope",
+    create_type=False,
+    values_callable=_enum_values,
+)
+llm_catalog_purpose_enum = ENUM(
+    LLMCatalogPurpose,
+    name="llm_catalog_purpose",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -69,16 +76,18 @@ class RDBLLMCatalog(RDBModel):
     __tablename__ = "llm_catalogs"
 
     UQ_SYSTEM_CATALOG = sa.Index(
-        "uq_llm_catalogs_system_scope_provider_target",
+        "uq_llm_catalogs_system_scope_provider_target_purpose",
         "provider",
         "lowerer_target",
+        "purpose",
         unique=True,
         postgresql_where=sa.text("scope = 'system'"),
     )
     UQ_INTEGRATION_CATALOG = sa.Index(
-        "uq_llm_catalogs_integration_target",
+        "uq_llm_catalogs_integration_target_purpose",
         "provider_integration_id",
         "lowerer_target",
+        "purpose",
         unique=True,
         postgresql_where=sa.text("scope = 'integration'"),
     )
@@ -92,6 +101,10 @@ class RDBLLMCatalog(RDBModel):
         nullable=False,
     )
     provider: Mapped[LLMProvider] = mapped_column(llm_provider_enum, nullable=False)
+    purpose: Mapped[LLMCatalogPurpose] = mapped_column(
+        llm_catalog_purpose_enum,
+        nullable=False,
+    )
     lowerer_target: Mapped[LLMCatalogLowererTarget] = mapped_column(
         llm_catalog_lowerer_target_enum,
         nullable=False,
@@ -176,6 +189,11 @@ class RDBLLMCatalogSnapshot(RDBModel):
     diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, default=None
     )
+    catalog_configuration_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime, init=False, server_default=sa.func.now()
     )
@@ -259,6 +277,83 @@ class RDBLLMCatalogEntry(RDBModel):
     __table_args__ = (IX_CATALOG_DISPLAY, IX_CATALOG_MODEL, IX_SNAPSHOT_ID)
 
 
+class RDBImageGenerationCatalogEntry(RDBModel):
+    """Projected image-generation model catalog entry."""
+
+    __tablename__ = "image_generation_catalog_entries"
+
+    UQ_SNAPSHOT_MODEL = sa.UniqueConstraint(
+        "snapshot_id",
+        "provider_model_identifier",
+        name="uq_image_generation_catalog_entries_snapshot_model",
+    )
+    IX_CATALOG_RANK = sa.Index(
+        "ix_image_generation_catalog_entries_catalog_rank",
+        "catalog_id",
+        "recommendation_rank",
+        "display_name",
+    )
+    IX_SNAPSHOT_ID = sa.Index(
+        "ix_image_generation_catalog_entries_snapshot_id",
+        "snapshot_id",
+    )
+
+    id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
+    catalog_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("llm_catalogs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("llm_catalog_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider: Mapped[LLMProvider] = mapped_column(llm_provider_enum, nullable=False)
+    provider_model_identifier: Mapped[str] = mapped_column(
+        sa.String(300),
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(sa.String(300), nullable=False)
+    description: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    recommendation_rank: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+    )
+    lifecycle_status: Mapped[LLMModelLifecycleStatus] = mapped_column(
+        llm_model_lifecycle_status_enum,
+        nullable=False,
+    )
+    visibility_status: Mapped[LLMCatalogEntryVisibility] = mapped_column(
+        llm_catalog_entry_visibility_enum,
+        nullable=False,
+    )
+    provider_integration_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("llm_provider_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    projection_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    hidden_reason: Mapped[str | None] = mapped_column(
+        sa.String(160),
+        nullable=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+    )
+
+    __table_args__ = (UQ_SNAPSHOT_MODEL, IX_CATALOG_RANK, IX_SNAPSHOT_ID)
+
+
 class RDBLLMCatalogSyncAttempt(RDBModel):
     """Latest catalog source/projection attempt state."""
 
@@ -301,6 +396,11 @@ class RDBLLMCatalogSyncAttempt(RDBModel):
     )
     diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, default=None
+    )
+    catalog_configuration_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
     )
 
     __table_args__ = (IX_CATALOG_ID,)

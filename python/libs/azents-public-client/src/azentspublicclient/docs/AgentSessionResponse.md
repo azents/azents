@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **agent_id** | **str** | Agent ID | 
 **current_model_target_label** | **str** |  | 
 **current_reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | 
+**current_enabled_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Execution options applied to future Session turns | 
 **title** | **str** |  | 
 **title_source** | [**AgentSessionTitleSource**](AgentSessionTitleSource.md) |  | 
 **status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status | 

@@ -8,6 +8,7 @@ from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelLifecycleStatus,
     LLMProvider,
@@ -21,6 +22,7 @@ class LLMCatalog:
     id: str
     scope: LLMCatalogScope
     provider: LLMProvider
+    purpose: LLMCatalogPurpose
     provider_integration_id: str | None
     lowerer_target: LLMCatalogLowererTarget
     current_snapshot_id: str | None
@@ -74,6 +76,44 @@ class LLMCatalogEntryCreate:
 
 
 @dataclass(frozen=True)
+class ImageGenerationCatalogEntry:
+    """Stored projected image-generation catalog entry."""
+
+    id: str
+    catalog_id: str
+    snapshot_id: str
+    provider: LLMProvider
+    provider_model_identifier: str
+    display_name: str
+    description: str
+    recommendation_rank: int | None
+    lifecycle_status: LLMModelLifecycleStatus
+    visibility_status: LLMCatalogEntryVisibility
+    provider_integration_id: str
+    source_metadata: dict[str, Any] | None
+    projection_metadata: dict[str, Any] | None
+    hidden_reason: str | None
+    created_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class ImageGenerationCatalogEntryCreate:
+    """Image catalog entry values to materialize."""
+
+    provider: LLMProvider
+    provider_model_identifier: str
+    display_name: str
+    description: str
+    recommendation_rank: int | None
+    lifecycle_status: LLMModelLifecycleStatus
+    visibility_status: LLMCatalogEntryVisibility
+    provider_integration_id: str
+    source_metadata: dict[str, Any] | None
+    projection_metadata: dict[str, Any] | None
+    hidden_reason: str | None
+
+
+@dataclass(frozen=True)
 class LLMCatalogEntryList:
     """Catalog entry list page."""
 
@@ -81,6 +121,19 @@ class LLMCatalogEntryList:
     entries: list[LLMCatalogEntry]
     total: int
     current_snapshot_created_at: datetime.datetime | None
+    latest_attempt: "LLMCatalogSyncAttempt | None"
+
+
+@dataclass(frozen=True)
+class ImageGenerationCatalogEntryList:
+    """Complete current image-generation catalog entry list."""
+
+    catalog: LLMCatalog
+    entries: list[ImageGenerationCatalogEntry]
+    total: int
+    current_snapshot_created_at: datetime.datetime | None
+    snapshot_catalog_configuration_version: int | None
+    current_integration_catalog_configuration_version: int
     latest_attempt: "LLMCatalogSyncAttempt | None"
 
 
@@ -126,6 +179,16 @@ class LLMCatalogSyncAttempt:
     skipped_count: int
     hidden_count: int
     diagnostics: dict[str, Any] | None
+    catalog_configuration_version: int | None
+
+
+@dataclass(frozen=True)
+class ImageGenerationCatalogPublication:
+    """Image catalog publication result after generation fencing."""
+
+    snapshot_id: str | None
+    superseding_attempt_id: str | None
+    current_catalog_configuration_version: int
 
 
 @dataclass(frozen=True)

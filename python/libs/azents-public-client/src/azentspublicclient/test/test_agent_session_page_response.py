@@ -41,6 +41,9 @@ class TestAgentSessionPageResponse(unittest.TestCase):
                         agent_id = '', 
                         current_model_target_label = '', 
                         current_reasoning_effort = 'none', 
+                        current_enabled_execution_options = [
+                            'fast'
+                            ], 
                         title = '', 
                         title_source = 'manual', 
                         status = 'active', 
@@ -69,6 +72,9 @@ class TestAgentSessionPageResponse(unittest.TestCase):
                         agent_id = '', 
                         current_model_target_label = '', 
                         current_reasoning_effort = 'none', 
+                        current_enabled_execution_options = [
+                            'fast'
+                            ], 
                         title = '', 
                         title_source = 'manual', 
                         status = 'active', 

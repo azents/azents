@@ -9,7 +9,10 @@ code_paths:
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_catalog_sync.py
+  - python/apps/azents/src/azents/core/image_generation_catalog.py
+  - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
+  - python/apps/azents/src/azents/services/image_generation_catalog/**
   - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
   - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
   - python/apps/azents/src/azents/services/kimi_oauth/**
@@ -17,6 +20,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/dde8c8826107_add_image_generation_model_catalogs.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -27,13 +31,15 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
+  - typescript/apps/azents-web/src/features/agents/containers/useImageGenerationCatalogs.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmIntegrationsContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-09-10
-spec_version: 22
+spec_version: 23
 ---
 
 # Model Catalog Domain Spec
@@ -44,7 +50,10 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 ## Catalog scopes
 
-Catalogs have two ownership scopes.
+Catalogs have two ownership scopes and an explicit purpose. The catalog identity
+includes `purpose = conversation | image_generation`, so one integration can own
+independent conversation and image-generation snapshots without sharing entries,
+attempts, or publication state.
 
 - System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the active lowerer target projection source.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, xAI API key, xAI OAuth, Kimi OAuth, Google Vertex AI, and OpenRouter.
@@ -78,6 +87,28 @@ maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
 capability, including historical catalog and Agent snapshots, resolves that maximum
 as its default. The capability remains additive JSON and requires no relational
 migration.
+
+### Image-generation entries
+
+Image-generation catalogs use a separate entry table because their reviewed
+metadata and lifecycle do not represent conversation-model capabilities. An entry
+records the provider integration, exact provider model identifier, display name,
+description, recommendation rank, lifecycle, visibility, source metadata, and
+projection metadata.
+
+Explicit image-model selection is currently supported only for enabled OpenAI
+API-key integrations. A code-owned reviewed registry is intersected with exact
+credential-visible identifiers returned by the official OpenAI model-list SDK
+operation. The initial registry contains `gpt-image-2.5-flare` at recommendation
+rank 1 and `gpt-image-2.5-sunburst` at rank 2. Provider-visible identifiers absent
+from the registry are not selectable, and registry entries absent from the
+credential-visible response are not published.
+
+OpenAI API key, ChatGPT OAuth, xAI API key, and xAI OAuth support a maintained
+provider default while their integration is enabled. The default is synthetic
+Azents behavior represented by omitting `config.model`; it is not stored as a
+catalog entry or discovered provider identifier. ChatGPT OAuth and both xAI
+providers are default-only and return no explicit image catalog entries.
 
 ## Switchable model execution options
 
@@ -153,6 +184,13 @@ Built-in tool capability projection is filtered through the implemented configur
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
+Integration catalogs and their attempts carry the integration's positive
+`catalog_configuration_version`. Credential/configuration changes advance that
+version. An image sync publishes only when its claimed attempt is still latest and
+its version still matches the integration. The last successful snapshot remains
+diagnostic after a generation change or failed sync, but `generation_current =
+false` prevents it from authorizing new saves or runtime dispatch.
+
 ## Public read API
 
 The public catalog entry list endpoint returns the stored catalog entries for one integration. It supports search, limit, and offset. The response includes:
@@ -172,9 +210,22 @@ Selectable entries are ordered by a stored or derived freshness rank before disp
 
 The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. It returns the stored response first. When an integration-scoped projection is stale, the route queues a best-effort background refresh whose synchronization policy rechecks eligibility before provider work begins.
 
+The image-generation catalog read endpoint returns `default_available`,
+`explicit_selection_supported`, generation/version state, the latest attempt, and
+the ordered complete entry list for one integration. Standard Agent and Workspace
+reads never perform image-model discovery. Default-only providers receive a
+successful synthetic response without creating a discovery catalog.
+
 ## Sync API
 
 The integration catalog sync endpoint refreshes the stored catalog for one integration.
+
+The separate image-generation sync endpoint is available only to a Workspace Owner
+for OpenAI API-key integrations. It applies the same running-attempt, integration
+cooldown, workspace cooldown, retry backoff, stale threshold, recovery, and
+superseded-completion policy as the conversation catalog. Enabled integration
+creation and catalog-affecting updates trigger initial image sync in addition to
+conversation sync; name-only updates and disable operations do not.
 
 For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use LiteLLM only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
 
@@ -203,6 +254,15 @@ System catalog sync is not user-triggered from the public picker. It is invoked 
 
 Agent creation/update and Workspace model settings update accept selectable model option entries. Each entry contains a label, a model selection input with an LLM provider integration id and provider model identifier, and optional model-scoped settings. During submit normalization, services resolve every option entry through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot, then the option settings are defaulted and validated against that snapshot's implemented capabilities. Omitted built-in tool intent enables every supported implemented tool; an explicit empty list preserves all-off intent.
 
+An enabled `image_generation` setting additionally validates its complete config
+against the selected conversation snapshot and the selected integration. An
+omitted image model accepts the maintained default only for supported enabled
+providers. An explicit model requires an OpenAI API-key integration, an executable
+reviewed registry entry, a current-generation catalog snapshot, and a matching
+selectable entry. Agent and Workspace save paths share this validation, and
+Workspace defaults copy the complete built-in configuration into newly created
+Agents.
+
 Transition compatibility direct model selection inputs use the same normalization path. If no selectable stored catalog entry matches a requested integration and model identifier, the service rejects the selection. Submit normalization must not refetch a dynamic provider listing as a fallback.
 
 ## Snapshot semantics
@@ -230,10 +290,19 @@ presentation.
 
 For user-scoped integration catalogs, the picker can trigger integration sync. For providers backed by system catalogs, public users do not trigger system sync.
 
+The selectable-model settings modal reads stored image catalog state for each
+selected integration without embedding a frontend model registry. Enabling image
+generation exposes the maintained default first and then current stored entries in
+recommendation order. The UI preserves an unavailable saved explicit identifier,
+blocks submission until it is recovered, and distinguishes loading, initial or
+refresh failure, default-only, generation-changed, never-synced, stale, and empty
+catalog states. Only Workspace Owners receive the explicit image sync action.
+
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-10 | 23 | Added purpose-separated image-generation catalogs, OpenAI registry-and-credential intersection, generation fencing, maintained-default semantics, owner sync, save/runtime authority, and stored-catalog UI behavior. |
 | 2026-08-27 | 21 | Added provider-neutral default and maximum input context capabilities, maximum-only fallback, and split-aware picker and Agent settings presentation |
 | 2026-08-18 | 20 | Replaced xAI system catalogs with credential-specific integration discovery and optional fill-only LiteLLM enrichment |
 | 2026-08-18 | 19 | Made explicitly validated remote LiteLLM DB snapshots authoritative, quarantined fallback/malformed/materially smaller sources, and removed remote source fetching from integration sync |
@@ -257,4 +326,16 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use the latest explicitly validated remote LiteLLM DB snapshot for the active lowerer target. The process-local or package-bundled LiteLLM model map is diagnostic fallback data only and cannot replace source authority. ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system catalog; their authenticated integration catalogs are authoritative for model visibility. The xAI projections may enrich provider-visible models from an exact or expanded-alias LiteLLM `xai/<model>` entry without requiring a match. Provider-facing xAI model identifiers omit the `xai/` prefix, and runtime invocation reconstructs the LiteLLM route prefix.
+The current implementation does not use models.dev for model catalog source data.
+OpenAI and Anthropic provider API listing are not part of the conversation model
+catalog path. OpenAI provider listing is used only for the purpose-separated
+credential-visible image-generation registry intersection. Current system
+conversation providers use the latest explicitly validated remote LiteLLM DB
+snapshot for the active lowerer target. The process-local or package-bundled
+LiteLLM model map is diagnostic fallback data only and cannot replace source
+authority. ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system
+catalog; their authenticated integration catalogs are authoritative for
+conversation-model visibility. The xAI projections may enrich provider-visible
+models from an exact or expanded-alias LiteLLM `xai/<model>` entry without
+requiring a match. Provider-facing xAI model identifiers omit the `xai/` prefix,
+and runtime invocation reconstructs the LiteLLM route prefix.

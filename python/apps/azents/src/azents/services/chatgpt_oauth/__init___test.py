@@ -13,7 +13,7 @@ from azents.core.chatgpt_oauth import (
     ChatGPTOAuthSessionStatus,
 )
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import LLMCatalogScope
+from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
@@ -207,6 +207,7 @@ class TestChatGPTOAuthService:
             rdb_session,
             integration_id=connected.value.integration.id,
             workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.CONVERSATION,
         )
         assert catalog is not None
         assert catalog.scope == LLMCatalogScope.INTEGRATION

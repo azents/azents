@@ -62,6 +62,9 @@ from azents.repos.toolkit.data import (
     ToolkitConfig,
 )
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.image_generation_catalog import (
+    ImageGenerationRuntimeConfigurationError,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -75,6 +78,7 @@ from .resolve import (
     resolve_agent_tools,
     resolve_invoke_input,
     resolve_invoke_input_with_profile,
+    resolve_invoke_input_with_resolved_profile,
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
@@ -201,7 +205,15 @@ def _make_integration() -> LLMProviderIntegrationWithSecrets:
         enabled=True,
         created_at=_NOW,
         updated_at=_NOW,
+        catalog_configuration_version=1,
     )
+
+
+def _make_image_generation_catalog_service() -> AsyncMock:
+    """Create an image catalog service that accepts the selected settings."""
+    service = AsyncMock()
+    service.validate_runtime.return_value = None
+    return service
 
 
 class _FakeClaudeRulesAppendixDedupeStateStore:
@@ -538,12 +550,297 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert isinstance(result, Success)
         run_request = result.value
         assert run_request.model == "gpt-4o"
         assert run_request.tool_search_enabled is True
+
+    async def test_validates_maintained_default_before_provider_io(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Validate default image intent before refreshing provider credentials."""
+        agent = _make_agent()
+        selection = agent.selectable_model_options[0].model_selection
+        selection.normalized_capabilities.built_in_tools.supported = [
+            "image_generation"
+        ]
+        settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[BuiltinToolConfig(name="image_generation", config={})],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        agent.selectable_model_options[0].settings = settings
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        image_service = _make_image_generation_catalog_service()
+        ensure_tokens = AsyncMock(return_value=Success(_make_integration()))
+        monkeypatch.setattr(
+            resolve_module,
+            "_ensure_provider_runtime_tokens",
+            ensure_tokens,
+        )
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=image_service,
+        )
+
+        assert isinstance(result, Success)
+        image_service.validate_runtime.assert_awaited_once_with(
+            integration_id="integ-1",
+            workspace_id="ws-1",
+            provider=LLMProvider.OPENAI,
+            integration_enabled=True,
+            image_generation_supported=True,
+            settings=settings,
+        )
+        ensure_tokens.assert_awaited()
+
+    async def test_rejects_image_tool_when_conversation_capability_is_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pass current conversation capability into pre-dispatch validation."""
+        agent = _make_agent()
+        selection = agent.selectable_model_options[0].model_selection
+        selection.normalized_capabilities.built_in_tools.supported = []
+        settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[BuiltinToolConfig(name="image_generation", config={})],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        agent.selectable_model_options[0].settings = settings
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        error = ImageGenerationRuntimeConfigurationError(
+            reason="model_unavailable",
+            integration_id="integ-1",
+            model_identifier=None,
+        )
+        image_service = _make_image_generation_catalog_service()
+        image_service.validate_runtime.return_value = error
+        ensure_tokens = AsyncMock()
+        monkeypatch.setattr(
+            resolve_module,
+            "_ensure_provider_runtime_tokens",
+            ensure_tokens,
+        )
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=image_service,
+        )
+
+        assert result == Failure(error)
+        image_service.validate_runtime.assert_awaited_once_with(
+            integration_id="integ-1",
+            workspace_id="ws-1",
+            provider=LLMProvider.OPENAI,
+            integration_enabled=True,
+            image_generation_supported=False,
+            settings=settings,
+        )
+        ensure_tokens.assert_not_awaited()
+
+    async def test_rejects_invalid_image_pin_before_provider_io(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reject stale explicit image intent before provider credential I/O."""
+        agent = _make_agent()
+        selection = agent.selectable_model_options[0].model_selection
+        selection.normalized_capabilities.built_in_tools.supported = [
+            "image_generation"
+        ]
+        settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[
+                BuiltinToolConfig(
+                    name="image_generation",
+                    config={"model": "gpt-image-2.5-flare"},
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        agent.selectable_model_options[0].settings = settings
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        error = ImageGenerationRuntimeConfigurationError(
+            reason="model_unavailable",
+            integration_id="integ-1",
+            model_identifier="gpt-image-2.5-flare",
+        )
+        image_service = _make_image_generation_catalog_service()
+        image_service.validate_runtime.return_value = error
+        ensure_tokens = AsyncMock()
+        monkeypatch.setattr(
+            resolve_module,
+            "_ensure_provider_runtime_tokens",
+            ensure_tokens,
+        )
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=image_service,
+        )
+
+        assert result == Failure(error)
+        ensure_tokens.assert_not_awaited()
+
+    async def test_profile_revalidates_effective_image_settings(self) -> None:
+        """Profile resolution validates the settings owned by its selected target."""
+        agent = _make_agent()
+        selection = agent.selectable_model_options[0].model_selection
+        selection.normalized_capabilities.built_in_tools.supported = [
+            "image_generation"
+        ]
+        settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[
+                BuiltinToolConfig(
+                    name="image_generation",
+                    config={"model": "gpt-image-2.5-flare"},
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        agent.selectable_model_options[0].settings = settings
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        error = ImageGenerationRuntimeConfigurationError(
+            reason="catalog_generation_mismatch",
+            integration_id="integ-1",
+            model_identifier="gpt-image-2.5-flare",
+        )
+        image_service = _make_image_generation_catalog_service()
+        image_service.validate_runtime.return_value = error
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                enabled_execution_options=[],
+                model_target_label="default",
+                reasoning_effort=None,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=image_service,
+        )
+
+        assert result == Failure(error)
+        image_service.validate_runtime.assert_awaited_once_with(
+            integration_id="integ-1",
+            workspace_id="ws-1",
+            provider=LLMProvider.OPENAI,
+            integration_enabled=True,
+            image_generation_supported=True,
+            settings=settings,
+        )
+
+    async def test_resolved_profile_revalidates_persisted_image_settings(self) -> None:
+        """Recovered Session settings cannot bypass image catalog validation."""
+        agent = _make_agent()
+        selection = agent.selectable_model_options[0].model_selection
+        selection.normalized_capabilities.built_in_tools.supported = [
+            "image_generation"
+        ]
+        settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[
+                BuiltinToolConfig(
+                    name="image_generation",
+                    config={"model": "gpt-image-2.5-flare"},
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        error = ImageGenerationRuntimeConfigurationError(
+            reason="provider_model_mismatch",
+            integration_id="integ-1",
+            model_identifier="gpt-image-2.5-flare",
+        )
+        image_service = _make_image_generation_catalog_service()
+        image_service.validate_runtime.return_value = error
+
+        result = await resolve_invoke_input_with_resolved_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            resolved_model_selection=selection,
+            resolved_model_settings=settings,
+            resolved_reasoning_effort=None,
+            resolved_enabled_execution_options=[],
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=image_service,
+        )
+
+        assert result == Failure(error)
 
     async def test_applies_selected_model_settings_and_lightweight_cap(self) -> None:
         """Use option-owned output, tool, and context settings at runtime."""
@@ -603,6 +900,7 @@ class TestResolveInvokeInput:
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert isinstance(result, Success)
@@ -639,6 +937,7 @@ class TestResolveInvokeInput:
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(
@@ -708,6 +1007,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert isinstance(result, Success)
@@ -742,6 +1042,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert isinstance(result, Success)
@@ -773,6 +1074,7 @@ class TestResolveInvokeInput:
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert isinstance(result, Success)
@@ -803,6 +1105,7 @@ class TestResolveInvokeInput:
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(
@@ -837,6 +1140,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
@@ -872,6 +1176,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(
@@ -908,6 +1213,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(
@@ -945,6 +1251,7 @@ class TestResolveInvokeInput:
             session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
+            image_generation_catalog_service=(_make_image_generation_catalog_service()),
         )
 
         assert result == Failure(

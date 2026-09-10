@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.services.llm_catalog as llm_catalog_service
 from azents.core.credentials import ApiKeySecrets, XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import LLMCatalogEntryVisibility, LLMModelDeveloper, LLMProvider
+from azents.core.enums import (
+    LLMCatalogEntryVisibility,
+    LLMCatalogPurpose,
+    LLMModelDeveloper,
+    LLMProvider,
+)
 from azents.core.llm_catalog import (
     ModelBuiltInToolCapabilities,
     ModelCapabilities,
@@ -846,6 +851,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             session,
             integration_id=integration.id,
             workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.CONVERSATION,
         )
         assert catalog is not None
         assert catalog.current_snapshot_id == first_snapshot_id

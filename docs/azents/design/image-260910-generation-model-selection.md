@@ -2,6 +2,7 @@
 title: "Image Generation Model Selection Design"
 created: 2026-09-10
 updated: 2026-09-10
+implemented: 2026-09-10
 tags: [agent, workspace, image-generation, model-catalog, backend, frontend]
 document_role: primary
 document_type: design

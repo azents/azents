@@ -43,6 +43,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/inference_profile.py
+  - python/apps/azents/src/azents/core/image_generation_catalog.py
+  - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
@@ -56,6 +58,7 @@ code_paths:
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/image_generation_catalog/**
   - python/apps/azents/src/azents/services/xai_imagine.py
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/kimi_oauth/runtime.py
@@ -93,8 +96,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-08
-spec_version: 173
+last_verified_at: 2026-09-10
+spec_version: 174
 ---
 
 # Agent Execution Loop
@@ -612,6 +615,18 @@ while another provider requires explicit trusted metadata. Only provider-hosted 
 lowerer; LiteLLM receives those specs as Responses semantic tools for provider-dialect translation.
 An unsupported, unimplemented, or unbound required capability fails before provider dispatch, and no
 configured builtin is silently omitted.
+
+Before every initial, recovered, or profile-switched run dispatch, image-generation
+configuration is revalidated against the selected enabled integration and current
+stored image authority. The maintained default requires a supported provider and
+lowers without a `model` field. An explicit pin requires an executable reviewed
+registry entry, a current-generation integration catalog snapshot, a matching
+selectable entry, and a provider matching the selected conversation model. A
+disabled integration, unsupported explicit mode, missing or generation-mismatched
+catalog, unavailable model, or provider mismatch becomes a typed profile-resolution
+failure before credentials are refreshed or a provider request is sent. For a valid
+OpenAI hosted image tool, the lowerer forwards the exact explicit `model` and
+preserves other configured fields; the maintained default omits only `model`.
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
@@ -1424,6 +1439,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-10** (spec_version 174) — Added pre-dispatch image-generation
+  catalog/generation revalidation, typed profile failures, maintained-default model
+  omission, and exact explicit hosted-tool model forwarding.
 - **2026-09-08** (spec_version 173) — Split Mailbox preparation from its
   repository-owned final transaction so managed VFS I/O occurs without an active
   transaction while FIFO, generation, Skill, event, action, Run, and delete

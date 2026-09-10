@@ -18,6 +18,7 @@ const selectableModelOptionFormValueSchema = z.object({
   context_window_tokens: z.number().int().positive().nullable(),
   max_output_tokens: z.number().int().positive().nullable(),
   builtin_tools: z.array(z.string()),
+  builtin_tool_configs: z.record(z.string(), z.record(z.string(), z.unknown())),
   subagent_enabled: z.boolean(),
   subagent_guidance: z
     .string()

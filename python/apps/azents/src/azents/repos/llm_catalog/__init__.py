@@ -12,6 +12,7 @@ from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMProvider,
 )
@@ -24,6 +25,7 @@ from azents.core.llm_catalog_sync import (
     evaluate_integration_catalog_sync_policy,
 )
 from azents.rdb.models.llm_catalog import (
+    RDBImageGenerationCatalogEntry,
     RDBLiteLLMSourceSnapshot,
     RDBLLMCatalog,
     RDBLLMCatalogEntry,
@@ -35,6 +37,10 @@ from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
     CatalogSyncAlreadyRunning,
+    ImageGenerationCatalogEntry,
+    ImageGenerationCatalogEntryCreate,
+    ImageGenerationCatalogEntryList,
+    ImageGenerationCatalogPublication,
     LiteLLMSourceSnapshot,
     LLMCatalog,
     LLMCatalogEntry,
@@ -105,6 +111,7 @@ class LLMCatalogRepository:
                 matched_count=0,
                 skipped_count=0,
                 hidden_count=0,
+                catalog_configuration_version=None,
             )
         )
         if catalog_id is not None:
@@ -141,6 +148,17 @@ class LLMCatalogRepository:
         )
         catalog_rdb = catalog_result.scalar_one()
         catalog = self._build_catalog(catalog_rdb)
+        if catalog.provider_integration_id is None:
+            raise RuntimeError("Integration catalog is missing its integration.")
+        integration_result = await session.execute(
+            sa.select(RDBLLMProviderIntegration)
+            .where(
+                RDBLLMProviderIntegration.id == catalog.provider_integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        integration = integration_result.scalar_one()
         latest_catalog_attempt = await self.get_latest_attempt(
             session,
             catalog=catalog,
@@ -191,7 +209,13 @@ class LLMCatalogRepository:
                 matched_count=0,
                 skipped_count=0,
                 hidden_count=0,
-                diagnostics={"trigger": trigger.value},
+                diagnostics={
+                    "trigger": trigger.value,
+                    "catalog_purpose": catalog.purpose.value,
+                },
+                catalog_configuration_version=(
+                    integration.catalog_configuration_version
+                ),
             )
         )
         catalog_rdb.latest_attempt_id = attempt_id
@@ -275,6 +299,7 @@ class LLMCatalogRepository:
         integration_id: str,
         provider: LLMProvider,
         lowerer_target: LLMCatalogLowererTarget,
+        purpose: LLMCatalogPurpose,
     ) -> LLMCatalog:
         """Create or fetch an integration catalog."""
         result = await session.execute(
@@ -285,9 +310,14 @@ class LLMCatalogRepository:
                 provider=provider,
                 provider_integration_id=integration_id,
                 lowerer_target=lowerer_target,
+                purpose=purpose,
             )
             .on_conflict_do_nothing(
-                index_elements=["provider_integration_id", "lowerer_target"],
+                index_elements=[
+                    "provider_integration_id",
+                    "lowerer_target",
+                    "purpose",
+                ],
                 # Keep this predicate literal so PostgreSQL can infer the partial
                 # unique index after psycopg prepares the repeated statement.
                 index_where=sa.text("scope = 'integration'"),
@@ -300,6 +330,7 @@ class LLMCatalogRepository:
                 sa.select(RDBLLMCatalog).where(
                     RDBLLMCatalog.provider_integration_id == integration_id,
                     RDBLLMCatalog.lowerer_target == lowerer_target,
+                    RDBLLMCatalog.purpose == purpose,
                 )
             )
             rdb = existing.scalar_one()
@@ -312,6 +343,7 @@ class LLMCatalogRepository:
         *,
         provider: LLMProvider,
         lowerer_target: LLMCatalogLowererTarget,
+        purpose: LLMCatalogPurpose,
     ) -> LLMCatalog:
         """Create or fetch a system catalog."""
         result = await session.execute(
@@ -322,9 +354,10 @@ class LLMCatalogRepository:
                 provider=provider,
                 provider_integration_id=None,
                 lowerer_target=lowerer_target,
+                purpose=purpose,
             )
             .on_conflict_do_nothing(
-                index_elements=["provider", "lowerer_target"],
+                index_elements=["provider", "lowerer_target", "purpose"],
                 # Keep this predicate literal so PostgreSQL can infer the partial
                 # unique index after psycopg prepares the repeated statement.
                 index_where=sa.text("scope = 'system'"),
@@ -338,6 +371,7 @@ class LLMCatalogRepository:
                     RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                     RDBLLMCatalog.provider == provider,
                     RDBLLMCatalog.lowerer_target == lowerer_target,
+                    RDBLLMCatalog.purpose == purpose,
                 )
             )
             rdb = existing.scalar_one()
@@ -368,6 +402,7 @@ class LLMCatalogRepository:
                 visible_count=visible_count,
                 hidden_count=len(entries) - visible_count,
                 diagnostics=diagnostics,
+                catalog_configuration_version=None,
             )
         )
         await session.flush()
@@ -408,12 +443,222 @@ class LLMCatalogRepository:
         await session.flush()
         return snapshot_id
 
+    async def replace_current_image_generation_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        catalog: LLMCatalog,
+        attempt_id: str,
+        entries: list[ImageGenerationCatalogEntryCreate],
+        diagnostics: dict[str, Any] | None,
+    ) -> ImageGenerationCatalogPublication:
+        """Publish an image catalog snapshot when attempt and config remain current."""
+        if catalog.purpose != LLMCatalogPurpose.IMAGE_GENERATION:
+            raise ValueError(
+                "Image catalog publication requires image-generation purpose."
+            )
+        if catalog.provider_integration_id is None:
+            raise ValueError("Image catalog publication requires an integration.")
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog.id)
+            .with_for_update()
+        )
+        catalog_rdb = catalog_result.scalar_one()
+        integration_result = await session.execute(
+            sa.select(RDBLLMProviderIntegration)
+            .where(RDBLLMProviderIntegration.id == catalog.provider_integration_id)
+            .with_for_update()
+        )
+        integration = integration_result.scalar_one()
+        attempt = await session.get(RDBLLMCatalogSyncAttempt, attempt_id)
+        if attempt is None or attempt.catalog_id != catalog.id:
+            raise ValueError("Image catalog attempt does not belong to the catalog.")
+        if (
+            catalog_rdb.latest_attempt_id != attempt_id
+            or attempt.catalog_configuration_version
+            != integration.catalog_configuration_version
+        ):
+            return ImageGenerationCatalogPublication(
+                snapshot_id=None,
+                superseding_attempt_id=catalog_rdb.latest_attempt_id,
+                current_catalog_configuration_version=(
+                    integration.catalog_configuration_version
+                ),
+            )
+
+        snapshot_id = uuid7().hex
+        visible_count = sum(
+            entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
+            for entry in entries
+        )
+        session.add(
+            RDBLLMCatalogSnapshot(
+                id=snapshot_id,
+                catalog_id=catalog.id,
+                source_snapshot_id=None,
+                entry_count=len(entries),
+                visible_count=visible_count,
+                hidden_count=len(entries) - visible_count,
+                diagnostics=diagnostics,
+                catalog_configuration_version=attempt.catalog_configuration_version,
+            )
+        )
+        await session.flush()
+        for entry in entries:
+            session.add(
+                RDBImageGenerationCatalogEntry(
+                    id=uuid7().hex,
+                    catalog_id=catalog.id,
+                    snapshot_id=snapshot_id,
+                    provider=entry.provider,
+                    provider_model_identifier=entry.provider_model_identifier,
+                    display_name=entry.display_name,
+                    description=entry.description,
+                    recommendation_rank=entry.recommendation_rank,
+                    lifecycle_status=entry.lifecycle_status,
+                    visibility_status=entry.visibility_status,
+                    provider_integration_id=entry.provider_integration_id,
+                    source_metadata=entry.source_metadata,
+                    projection_metadata=entry.projection_metadata,
+                    hidden_reason=entry.hidden_reason,
+                )
+            )
+        previous_snapshot_id = catalog_rdb.current_snapshot_id
+        catalog_rdb.current_snapshot_id = snapshot_id
+        if previous_snapshot_id is not None:
+            await session.execute(
+                sa.delete(RDBLLMCatalogSnapshot).where(
+                    RDBLLMCatalogSnapshot.id == previous_snapshot_id
+                )
+            )
+        await session.flush()
+        return ImageGenerationCatalogPublication(
+            snapshot_id=snapshot_id,
+            superseding_attempt_id=None,
+            current_catalog_configuration_version=(
+                integration.catalog_configuration_version
+            ),
+        )
+
+    async def list_image_generation_entries_by_integration(
+        self,
+        session: AsyncSession,
+        *,
+        integration_id: str,
+        workspace_id: str,
+    ) -> ImageGenerationCatalogEntryList | None:
+        """List current stored image-generation entries for an integration."""
+        integration_result = await session.execute(
+            sa.select(RDBLLMProviderIntegration).where(
+                RDBLLMProviderIntegration.id == integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+            )
+        )
+        integration = integration_result.scalar_one_or_none()
+        if integration is None:
+            return None
+        catalog = await self.get_by_integration(
+            session,
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            purpose=LLMCatalogPurpose.IMAGE_GENERATION,
+        )
+        if catalog is None:
+            return None
+        latest_attempt = await self.get_latest_attempt(session, catalog=catalog)
+        if catalog.current_snapshot_id is None:
+            return ImageGenerationCatalogEntryList(
+                catalog=catalog,
+                entries=[],
+                total=0,
+                current_snapshot_created_at=None,
+                snapshot_catalog_configuration_version=None,
+                current_integration_catalog_configuration_version=(
+                    integration.catalog_configuration_version
+                ),
+                latest_attempt=latest_attempt,
+            )
+        snapshot_result = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot).where(
+                RDBLLMCatalogSnapshot.id == catalog.current_snapshot_id
+            )
+        )
+        snapshot = snapshot_result.scalar_one()
+        filters = [
+            RDBImageGenerationCatalogEntry.catalog_id == catalog.id,
+            RDBImageGenerationCatalogEntry.snapshot_id == catalog.current_snapshot_id,
+            RDBImageGenerationCatalogEntry.visibility_status
+            == LLMCatalogEntryVisibility.SELECTABLE,
+        ]
+        result = await session.execute(
+            sa.select(RDBImageGenerationCatalogEntry)
+            .where(*filters)
+            .order_by(
+                RDBImageGenerationCatalogEntry.recommendation_rank.asc().nullslast(),
+                RDBImageGenerationCatalogEntry.display_name.asc(),
+                RDBImageGenerationCatalogEntry.provider_model_identifier.asc(),
+            )
+        )
+        entries = [self._build_image_generation_entry(row) for row in result.scalars()]
+        return ImageGenerationCatalogEntryList(
+            catalog=catalog,
+            entries=entries,
+            total=len(entries),
+            current_snapshot_created_at=snapshot.created_at,
+            snapshot_catalog_configuration_version=(
+                snapshot.catalog_configuration_version
+            ),
+            current_integration_catalog_configuration_version=(
+                integration.catalog_configuration_version
+            ),
+            latest_attempt=latest_attempt,
+        )
+
+    async def get_selectable_image_generation_entry(
+        self,
+        session: AsyncSession,
+        *,
+        integration_id: str,
+        workspace_id: str,
+        model_identifier: str,
+    ) -> tuple[LLMCatalog, ImageGenerationCatalogEntry] | None:
+        """Fetch one current-generation selectable image model entry."""
+        page = await self.list_image_generation_entries_by_integration(
+            session,
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+        )
+        if (
+            page is None
+            or page.catalog.current_snapshot_id is None
+            or page.snapshot_catalog_configuration_version
+            != page.current_integration_catalog_configuration_version
+        ):
+            return None
+        result = await session.execute(
+            sa.select(RDBImageGenerationCatalogEntry).where(
+                RDBImageGenerationCatalogEntry.catalog_id == page.catalog.id,
+                RDBImageGenerationCatalogEntry.snapshot_id
+                == page.catalog.current_snapshot_id,
+                RDBImageGenerationCatalogEntry.visibility_status
+                == LLMCatalogEntryVisibility.SELECTABLE,
+                RDBImageGenerationCatalogEntry.provider_model_identifier
+                == model_identifier,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return page.catalog, self._build_image_generation_entry(rdb)
+
     async def list_entries_by_integration(
         self,
         session: AsyncSession,
         *,
         integration_id: str,
         workspace_id: str,
+        purpose: LLMCatalogPurpose,
         search: str | None,
         limit: int,
         offset: int,
@@ -432,6 +677,7 @@ class LLMCatalogRepository:
             session,
             integration_id=integration_id,
             workspace_id=workspace_id,
+            purpose=purpose,
         )
         if (
             catalog is None
@@ -441,6 +687,7 @@ class LLMCatalogRepository:
                 session,
                 provider=integration.provider,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=purpose,
             )
         if catalog is None:
             return None
@@ -587,12 +834,14 @@ class LLMCatalogRepository:
         integration_id: str,
         workspace_id: str,
         model_identifier: str,
+        purpose: LLMCatalogPurpose,
     ) -> tuple[LLMCatalog, LLMCatalogEntry] | None:
         """Fetch one selectable current entry for an integration/model."""
         page = await self.list_entries_by_integration(
             session,
             integration_id=integration_id,
             workspace_id=workspace_id,
+            purpose=purpose,
             search=None,
             limit=1,
             offset=0,
@@ -619,6 +868,7 @@ class LLMCatalogRepository:
         *,
         provider: LLMProvider,
         lowerer_target: LLMCatalogLowererTarget,
+        purpose: LLMCatalogPurpose,
     ) -> LLMCatalog | None:
         """Fetch a system catalog."""
         result = await session.execute(
@@ -626,6 +876,7 @@ class LLMCatalogRepository:
                 RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                 RDBLLMCatalog.provider == provider,
                 RDBLLMCatalog.lowerer_target == lowerer_target,
+                RDBLLMCatalog.purpose == purpose,
             )
         )
         rdb = result.scalar_one_or_none()
@@ -662,6 +913,7 @@ class LLMCatalogRepository:
         *,
         integration_id: str,
         workspace_id: str,
+        purpose: LLMCatalogPurpose,
     ) -> LLMCatalog | None:
         """Fetch an integration catalog in workspace scope."""
         result = await session.execute(
@@ -673,6 +925,7 @@ class LLMCatalogRepository:
             .where(
                 RDBLLMCatalog.provider_integration_id == integration_id,
                 RDBLLMProviderIntegration.workspace_id == workspace_id,
+                RDBLLMCatalog.purpose == purpose,
             )
         )
         rdb = result.scalar_one_or_none()
@@ -702,6 +955,7 @@ class LLMCatalogRepository:
             id=rdb.id,
             scope=rdb.scope,
             provider=rdb.provider,
+            purpose=rdb.purpose,
             provider_integration_id=rdb.provider_integration_id,
             lowerer_target=rdb.lowerer_target,
             current_snapshot_id=rdb.current_snapshot_id,
@@ -731,6 +985,28 @@ class LLMCatalogRepository:
             created_at=rdb.created_at,
         )
 
+    def _build_image_generation_entry(
+        self,
+        rdb: RDBImageGenerationCatalogEntry,
+    ) -> ImageGenerationCatalogEntry:
+        return ImageGenerationCatalogEntry(
+            id=rdb.id,
+            catalog_id=rdb.catalog_id,
+            snapshot_id=rdb.snapshot_id,
+            provider=rdb.provider,
+            provider_model_identifier=rdb.provider_model_identifier,
+            display_name=rdb.display_name,
+            description=rdb.description,
+            recommendation_rank=rdb.recommendation_rank,
+            lifecycle_status=rdb.lifecycle_status,
+            visibility_status=rdb.visibility_status,
+            provider_integration_id=rdb.provider_integration_id,
+            source_metadata=rdb.source_metadata,
+            projection_metadata=rdb.projection_metadata,
+            hidden_reason=rdb.hidden_reason,
+            created_at=rdb.created_at,
+        )
+
     def _build_attempt(self, rdb: RDBLLMCatalogSyncAttempt) -> LLMCatalogSyncAttempt:
         return LLMCatalogSyncAttempt(
             id=rdb.id,
@@ -748,6 +1024,7 @@ class LLMCatalogRepository:
             skipped_count=rdb.skipped_count,
             hidden_count=rdb.hidden_count,
             diagnostics=rdb.diagnostics,
+            catalog_configuration_version=rdb.catalog_configuration_version,
         )
 
 
@@ -803,6 +1080,7 @@ class LiteLLMSourceSnapshotRepository:
                 matched_count=0,
                 skipped_count=0,
                 hidden_count=0,
+                catalog_configuration_version=None,
             )
         )
         await session.flush()
@@ -1034,6 +1312,7 @@ class LiteLLMSourceSnapshotRepository:
             skipped_count=rdb.skipped_count,
             hidden_count=rdb.hidden_count,
             diagnostics=rdb.diagnostics,
+            catalog_configuration_version=rdb.catalog_configuration_version,
         )
 
     def _build(self, rdb: RDBLiteLLMSourceSnapshot) -> LiteLLMSourceSnapshot:

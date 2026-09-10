@@ -236,6 +236,9 @@ azentspublicclient/docs/HTTPValidationError.md
 azentspublicclient/docs/HealthStatus.md
 azentspublicclient/docs/HealthV1Api.md
 azentspublicclient/docs/ImageFile.md
+azentspublicclient/docs/ImageGenerationCatalogAttemptResponse.md
+azentspublicclient/docs/ImageGenerationCatalogEntryResponse.md
+azentspublicclient/docs/ImageGenerationModelCatalogResponse.md
 azentspublicclient/docs/ImageThumbnails.md
 azentspublicclient/docs/InputActionAttachmentPolicyResponse.md
 azentspublicclient/docs/InputActionAvailabilityHintResponse.md
@@ -738,6 +741,9 @@ azentspublicclient/models/goal_update_request.py
 azentspublicclient/models/health_status.py
 azentspublicclient/models/http_validation_error.py
 azentspublicclient/models/image_file.py
+azentspublicclient/models/image_generation_catalog_attempt_response.py
+azentspublicclient/models/image_generation_catalog_entry_response.py
+azentspublicclient/models/image_generation_model_catalog_response.py
 azentspublicclient/models/image_thumbnails.py
 azentspublicclient/models/input_action_attachment_policy_response.py
 azentspublicclient/models/input_action_availability_hint_response.py
@@ -1230,6 +1236,9 @@ azentspublicclient/test/test_health_status.py
 azentspublicclient/test/test_health_v1_api.py
 azentspublicclient/test/test_http_validation_error.py
 azentspublicclient/test/test_image_file.py
+azentspublicclient/test/test_image_generation_catalog_attempt_response.py
+azentspublicclient/test/test_image_generation_catalog_entry_response.py
+azentspublicclient/test/test_image_generation_model_catalog_response.py
 azentspublicclient/test/test_image_thumbnails.py
 azentspublicclient/test/test_input_action_attachment_policy_response.py
 azentspublicclient/test/test_input_action_availability_hint_response.py

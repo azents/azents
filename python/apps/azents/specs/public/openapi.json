@@ -10347,6 +10347,120 @@
         }
       }
     },
+    "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/image-generation-model-catalog": {
+      "get": {
+        "tags": [
+          "LLM Provider Integration v1"
+        ],
+        "summary": "Get Image Model Catalog",
+        "description": "Read stored image-generation model availability for an integration.",
+        "operationId": "llm_provider_integration_v1_get_image_model_catalog",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Integration Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageGenerationModelCatalogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/image-generation-model-catalog-sync": {
+      "post": {
+        "tags": [
+          "LLM Provider Integration v1"
+        ],
+        "summary": "Sync Image Model Catalog",
+        "description": "Synchronize stored image-generation model availability.",
+        "operationId": "llm_provider_integration_v1_sync_image_model_catalog",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Integration Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries": {
       "get": {
         "tags": [
@@ -22344,6 +22458,313 @@
         ],
         "title": "ImageFile",
         "description": "Single image for API response — resolved URL + resolution."
+      },
+      "ImageGenerationCatalogAttemptResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "fetched_count": {
+            "type": "integer",
+            "title": "Fetched Count"
+          },
+          "matched_count": {
+            "type": "integer",
+            "title": "Matched Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "started_at",
+          "finished_at",
+          "failure_code",
+          "failure_message",
+          "action_hint",
+          "fetched_count",
+          "matched_count",
+          "skipped_count",
+          "hidden_count"
+        ],
+        "title": "ImageGenerationCatalogAttemptResponse",
+        "description": "Latest image-generation catalog synchronization attempt response."
+      },
+      "ImageGenerationCatalogEntryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider"
+          },
+          "provider_model_identifier": {
+            "type": "string",
+            "title": "Provider Model Identifier"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "recommendation_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Rank"
+          },
+          "lifecycle_status": {
+            "type": "string",
+            "title": "Lifecycle Status"
+          },
+          "visibility_status": {
+            "type": "string",
+            "title": "Visibility Status"
+          },
+          "source_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Metadata"
+          },
+          "projection_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "provider_model_identifier",
+          "display_name",
+          "description",
+          "recommendation_rank",
+          "lifecycle_status",
+          "visibility_status",
+          "source_metadata",
+          "projection_metadata"
+        ],
+        "title": "ImageGenerationCatalogEntryResponse",
+        "description": "Stored image-generation catalog entry response."
+      },
+      "ImageGenerationModelCatalogResponse": {
+        "properties": {
+          "default_available": {
+            "type": "boolean",
+            "title": "Default Available"
+          },
+          "explicit_selection_supported": {
+            "type": "boolean",
+            "title": "Explicit Selection Supported"
+          },
+          "catalog_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Id"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "snapshot_configuration_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Configuration Version"
+          },
+          "current_configuration_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Configuration Version"
+          },
+          "snapshot_created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Created At"
+          },
+          "latest_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageGenerationCatalogAttemptResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "generation_current": {
+            "type": "boolean",
+            "title": "Generation Current"
+          },
+          "sync_available_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Available At"
+          },
+          "automatic_retry_blocked": {
+            "type": "boolean",
+            "title": "Automatic Retry Blocked"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ImageGenerationCatalogEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_available",
+          "explicit_selection_supported",
+          "catalog_id",
+          "snapshot_id",
+          "snapshot_configuration_version",
+          "current_configuration_version",
+          "snapshot_created_at",
+          "latest_attempt",
+          "stale",
+          "generation_current",
+          "sync_available_at",
+          "automatic_retry_blocked",
+          "entries",
+          "total"
+        ],
+        "title": "ImageGenerationModelCatalogResponse",
+        "description": "Stored image-generation model availability response."
       },
       "ImageThumbnails": {
         "properties": {

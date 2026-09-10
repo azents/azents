@@ -20,6 +20,9 @@ class LLMProviderIntegration(BaseModel):
     name: str = Field(description="Display name")
     config: ProviderConfig | None = Field(default=None, description="Plaintext config")
     enabled: bool = Field(description="Enabled flag")
+    catalog_configuration_version: int = Field(
+        description="Discovery-affecting configuration generation"
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 

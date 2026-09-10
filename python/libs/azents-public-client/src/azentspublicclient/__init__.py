@@ -253,6 +253,9 @@ __all__ = [
     "HTTPValidationError",
     "HealthStatus",
     "ImageFile",
+    "ImageGenerationCatalogAttemptResponse",
+    "ImageGenerationCatalogEntryResponse",
+    "ImageGenerationModelCatalogResponse",
     "ImageThumbnails",
     "InputActionAttachmentPolicyResponse",
     "InputActionAvailabilityHintResponse",
@@ -776,6 +779,9 @@ from azentspublicclient.models.goal_update_request import GoalUpdateRequest as G
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.image_file import ImageFile as ImageFile
+from azentspublicclient.models.image_generation_catalog_attempt_response import ImageGenerationCatalogAttemptResponse as ImageGenerationCatalogAttemptResponse
+from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse as ImageGenerationCatalogEntryResponse
+from azentspublicclient.models.image_generation_model_catalog_response import ImageGenerationModelCatalogResponse as ImageGenerationModelCatalogResponse
 from azentspublicclient.models.image_thumbnails import ImageThumbnails as ImageThumbnails
 from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse as InputActionAttachmentPolicyResponse
 from azentspublicclient.models.input_action_availability_hint_response import InputActionAvailabilityHintResponse as InputActionAvailabilityHintResponse

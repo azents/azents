@@ -1,6 +1,7 @@
 import type {
   AgentModelSelection,
   AgentModelSelectionInput,
+  ImageGenerationModelCatalogResponse,
   LlmProviderIntegrationResponse,
   ModelCapabilities,
   SelectableModelOption,
@@ -82,6 +83,7 @@ export interface SelectableModelOptionFormValue {
   context_window_tokens: number | null;
   max_output_tokens: number | null;
   builtin_tools: string[];
+  builtin_tool_configs: Record<string, Record<string, unknown>>;
   subagent_enabled: boolean;
   subagent_guidance: string | null;
 }
@@ -100,6 +102,7 @@ export function createSelectableModelOptionFormValue(
     context_window_tokens: null,
     max_output_tokens: null,
     builtin_tools: [],
+    builtin_tool_configs: {},
     subagent_enabled: true,
     subagent_guidance: null,
   };
@@ -129,6 +132,91 @@ export interface ModelCatalogState {
   automaticRetryBlocked: boolean;
   total: number;
   loaded: number;
+}
+
+export type ImageGenerationCatalogState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "UNSUPPORTED"; data: ImageGenerationModelCatalogResponse }
+  | { type: "LOADED"; data: ImageGenerationModelCatalogResponse };
+
+export type ImageGenerationModelAvailability =
+  "AVAILABLE" | "UNAVAILABLE" | "UNVERIFIED";
+
+export function imageGenerationModelIdentifier(
+  option: SelectableModelOptionFormValue,
+): string | null {
+  const model = option.builtin_tool_configs.image_generation?.model;
+  return typeof model === "string" && model.trim().length > 0 ? model : null;
+}
+
+export function withImageGenerationModelIdentifier(
+  option: SelectableModelOptionFormValue,
+  modelIdentifier: string | null,
+): SelectableModelOptionFormValue {
+  const imageGenerationConfig = {
+    ...(option.builtin_tool_configs.image_generation ?? {}),
+  };
+  if (modelIdentifier == null) {
+    delete imageGenerationConfig.model;
+  } else {
+    imageGenerationConfig.model = modelIdentifier;
+  }
+  return {
+    ...option,
+    builtin_tool_configs: {
+      ...option.builtin_tool_configs,
+      image_generation: imageGenerationConfig,
+    },
+  };
+}
+
+export function imageGenerationModelAvailability(
+  modelIdentifier: string,
+  state: ImageGenerationCatalogState | null,
+): ImageGenerationModelAvailability {
+  if (state == null || state.type === "LOADING" || state.type === "ERROR") {
+    return "UNVERIFIED";
+  }
+  if (state.type === "UNSUPPORTED") {
+    return "UNAVAILABLE";
+  }
+  if (!state.data.generation_current || state.data.snapshot_id == null) {
+    return "UNVERIFIED";
+  }
+  return state.data.entries.some(
+    (entry) => entry.provider_model_identifier === modelIdentifier,
+  )
+    ? "AVAILABLE"
+    : "UNAVAILABLE";
+}
+
+export function hasInvalidImageGenerationSelections(
+  options: SelectableModelOptionFormValue[],
+  states: ReadonlyMap<string, ImageGenerationCatalogState>,
+): boolean {
+  return options.some((option) => {
+    if (!option.builtin_tools.includes("image_generation")) {
+      return false;
+    }
+    const integrationId = option.model_provider_integration_id;
+    const state =
+      integrationId == null ? null : (states.get(integrationId) ?? null);
+    if (
+      (state?.type === "LOADED" || state?.type === "UNSUPPORTED") &&
+      !state.data.default_available
+    ) {
+      return true;
+    }
+    const modelIdentifier = imageGenerationModelIdentifier(option);
+    if (modelIdentifier == null) {
+      return false;
+    }
+    return (
+      integrationId == null ||
+      imageGenerationModelAvailability(modelIdentifier, state) !== "AVAILABLE"
+    );
+  });
 }
 
 export interface ProviderIntegrationOption {
@@ -241,6 +329,12 @@ export function selectableModelOptionFormValueFromStoredOption(
     context_window_tokens: option.settings.context_window_tokens,
     max_output_tokens: option.settings.max_output_tokens,
     builtin_tools: option.settings.builtin_tools.map((tool) => tool.name),
+    builtin_tool_configs: Object.fromEntries(
+      option.settings.builtin_tools.map((tool) => [
+        tool.name,
+        tool.config ?? {},
+      ]),
+    ),
     subagent_enabled: option.settings.subagent_enabled,
     subagent_guidance: option.settings.subagent_guidance,
   };
@@ -272,7 +366,10 @@ export function selectableModelOptionInputsFromFormValues(
         settings: {
           context_window_tokens: option.context_window_tokens,
           max_output_tokens: option.max_output_tokens,
-          builtin_tools: option.builtin_tools.map((name) => ({ name })),
+          builtin_tools: option.builtin_tools.map((name) => ({
+            name,
+            config: option.builtin_tool_configs[name] ?? {},
+          })),
           subagent_enabled: option.subagent_enabled,
           subagent_guidance: option.subagent_guidance?.trim() || null,
         },

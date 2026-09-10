@@ -12,12 +12,12 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-10 | 74 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-10 | 75 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-10 | 164 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-10 | 75 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-10 | 22 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-10 | 23 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-10 | 11 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-10 | 5 |
@@ -29,7 +29,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-08 | 173 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-10 | 174 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-10 | 78 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-08 | 46 |

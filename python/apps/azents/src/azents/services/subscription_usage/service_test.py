@@ -98,6 +98,7 @@ def _integration(
             refresh_token="refresh-1",
             expires_at=now + datetime.timedelta(hours=1),
         ),
+        catalog_configuration_version=1,
     )
 
 
@@ -135,6 +136,7 @@ def _xai_integration(
             refresh_token="xai-refresh-1",
             expires_at=now + datetime.timedelta(hours=1),
         ),
+        catalog_configuration_version=1,
     )
 
 
@@ -153,6 +155,7 @@ def _openrouter_integration(
         created_at=now,
         updated_at=now,
         secrets=ApiKeySecrets(api_key="openrouter-key"),
+        catalog_configuration_version=1,
     )
 
 
@@ -188,6 +191,7 @@ def _kimi_integration(
             expires_at=now + datetime.timedelta(hours=1),
             device_id="kimi-device-1",
         ),
+        catalog_configuration_version=1,
     )
 
 

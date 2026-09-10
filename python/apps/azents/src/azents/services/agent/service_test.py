@@ -163,6 +163,8 @@ def _make_service() -> AgentService:
     admin_repository = AsyncMock()
     workspace_model_settings_repository = AsyncMock()
     model_catalog_read_service = AsyncMock()
+    image_generation_catalog_service = AsyncMock()
+    image_generation_catalog_service.validate_option.return_value = []
     workspace_user_repository = AsyncMock()
     agent_decommission_repository = AsyncMock()
     archived_session_retention_repository = AsyncMock()
@@ -180,6 +182,7 @@ def _make_service() -> AgentService:
         admin_repository=admin_repository,
         workspace_model_settings_repository=workspace_model_settings_repository,
         model_catalog_read_service=model_catalog_read_service,
+        image_generation_catalog_service=image_generation_catalog_service,
         workspace_user_repository=workspace_user_repository,
         agent_decommission_repository=agent_decommission_repository,
         archived_session_retention_repository=archived_session_retention_repository,
