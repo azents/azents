@@ -4399,7 +4399,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    openai_proxy_url: str,
     discord_provider_fake_url: str,
     azents_engine_worker_container: DockerContainer,
     azents_external_channel_gateway_factory: Callable[
@@ -4528,24 +4527,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         json={"operation": "create_message", "occurrence": 2},
         timeout=5,
     ).raise_for_status()
-    title_barrier_url = f"{openai_proxy_url}/v1/_external_channel_discord_title_barrier"
-    title_barrier_arm = requests.post(title_barrier_url, timeout=5)
-    title_barrier_arm.raise_for_status()
-    assert title_barrier_arm.json() == {
-        "armed": True,
-        "reached": False,
-        "released": False,
-        "timed_out": False,
-    }
     request.addfinalizer(
         lambda: requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
-            timeout=5,
-        ).raise_for_status()
-    )
-    request.addfinalizer(
-        lambda: requests.post(
-            f"{title_barrier_url}/release",
             timeout=5,
         ).raise_for_status()
     )
@@ -4668,6 +4652,19 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         setup_gate_counts = _int_dict(setup_gate_state["request_counts"])
         assert setup_gate_counts.get("create_thread", 0) == 0
         assert setup_gate_counts.get("create_message", 0) == 1
+        engine_worker = azents_engine_worker_container.get_wrapped_container()
+
+        def ensure_engine_worker_running() -> None:
+            engine_worker.reload()
+            if engine_worker.status == "paused":
+                engine_worker.unpause()
+                engine_worker.reload()
+            assert engine_worker.status == "running"
+
+        request.addfinalizer(ensure_engine_worker_running)
+        engine_worker.pause()
+        engine_worker.reload()
+        assert engine_worker.status == "paused"
         _select_discord_setup_location(
             discord_provider_fake_url=discord_provider_fake_url,
             interaction_id="700000000000000004",
@@ -4711,29 +4708,44 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         assert barrier_state["operation"] == "create_message"
         assert barrier_state["occurrence"] == 2
         assert barrier_state["request_count"] == 2
-        title_barrier_state = _object(
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+
+        def direct_thread_delivery_committed() -> dict[str, object] | None:
+            state = _discord_provider_state(discord_provider_fake_url)
+            thread_channel_ids = {
+                operation.get("thread_channel_id")
+                for operation in _objects(state["operations"])
+                if operation.get("event") == "thread_create"
+                and operation.get("outcome") == "delivered"
+                and isinstance(operation.get("thread_channel_id"), str)
+            }
+            if len(thread_channel_ids) != 1:
+                return None
+            thread_channel_id = next(iter(thread_channel_ids))
+            if not any(
+                delivery.get("operation") == "create_message"
+                and delivery.get("outcome") == "created"
+                and delivery.get("channel_id") == thread_channel_id
+                for delivery in _objects(state["deliveries"])
+            ):
+                return None
+            return state
+
+        _required(
             wait_until(
-                lambda: (
-                    state
-                    if (state := requests.get(title_barrier_url, timeout=5).json()).get(
-                        "reached"
-                    )
-                    is True
-                    else None
-                ),
+                direct_thread_delivery_committed,
                 timeout=30,
                 interval=0.2,
                 message=(
-                    "Discord automatic-title request did not reach its proxy barrier"
+                    "Discord direct-created thread delivery did not commit before "
+                    "title generation"
                 ),
             )
         )
-        assert title_barrier_state == {
-            "armed": True,
-            "reached": True,
-            "released": True,
-            "timed_out": False,
-        }
+        ensure_engine_worker_running()
 
         def generated_title_projection() -> AgentSessionResponse | None:
             generated_detail = chat_api.chat_v1_get_agent_session(
@@ -4801,10 +4813,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     f"title_failure_diagnostics_unavailable={diagnostic_error!r}"
                 )
             pytest.fail(f"{error}; {diagnostic_summary}")
-        requests.post(
-            f"{discord_provider_fake_url}/__testenv/barrier/release",
-            timeout=5,
-        ).raise_for_status()
         state = _object(
             wait_until(
                 lambda: _joined_session_navigation_state(

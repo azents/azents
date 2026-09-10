@@ -73,12 +73,14 @@ can observe controlled failure boundaries. Regression coverage synchronizes on
 authoritative evidence publication and the observable boundary instead of using
 sleeps.
 
-The Discord automatic-title journey arms a deterministic model-proxy barrier before
-triggering the provider flow. The Discord provider fake releases that barrier at the
-exact targeted message-delivery boundary, and the journey requires reached, released,
-and non-timeout evidence. The deterministic Gateway fixture may also shorten lease,
-renewal, and connection-discovery polling together through a complete testenv-only
-override; production defaults remain unchanged.
+The Discord automatic-title journey pauses its already-ready Engine Worker before
+triggering the provider flow, waits for the exact targeted message-delivery barrier
+and committed direct-thread delivery evidence, then resumes the Worker. The title
+model request therefore begins only after the successful rename precondition exists,
+without holding a model response against its stream watchdog. The deterministic
+Gateway fixture may also shorten lease, renewal, and connection-discovery polling
+together through a complete testenv-only override; production defaults remain
+unchanged.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment

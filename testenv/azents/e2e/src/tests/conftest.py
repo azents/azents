@@ -767,14 +767,7 @@ def discord_provider_fake_container(
         .with_exposed_ports(8085)
         .with_network(container_network)
         .with_network_aliases("discord-fake")
-        .with_env(
-            "EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL",
-            (
-                "http://openai-proxy:8081/v1/"
-                "_external_channel_discord_title_barrier/release"
-            ),
-        ) as container
-    ):
+    ) as container:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(8085)
         for _ in range(30):

@@ -17,9 +17,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 _HTTP_PORT = 8085
 _API_PREFIX = "/api/v10"
-_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL = os.environ.get(
-    "EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL"
-)
 _VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
 _SIGNING_PRIVATE_KEY = (
     "644f7f07f1f19acdc59e86fb018ac1532875f14b4401a3baa2b8a3f88d137d9c"
@@ -518,8 +515,6 @@ class FakeState:
             ):
                 return True
         self._delivery_barrier_reached.set()
-        if operation == "create_message":
-            _release_external_channel_discord_title_barrier()
         return self._delivery_barrier_release.wait(timeout=60)
 
     def record_operation(
@@ -2283,22 +2278,6 @@ def _gateway_scenarios(value: object) -> list[str]:
     ):
         raise ValueError("gateway_scenarios contains an unsupported value.")
     return [item for item in scenarios if isinstance(item, str)]
-
-
-def _release_external_channel_discord_title_barrier() -> None:
-    """Release the title response at the exact provider delivery boundary."""
-    if _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL is None:
-        return
-    request = Request(
-        _EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL,
-        data=b"",
-        method="POST",
-    )
-    with urlopen(request, timeout=5) as response:  # noqa: S310 - fixed test network
-        if response.status != 200:
-            raise RuntimeError(
-                "Discord title barrier release returned an unexpected status."
-            )
 
 
 def _json_object_or_empty(raw_body: bytes) -> dict[str, object]:

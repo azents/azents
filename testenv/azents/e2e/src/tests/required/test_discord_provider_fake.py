@@ -9,7 +9,6 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from testcontainers.core.container import DockerContainer
 
-from support import discord_provider_fake as discord_fake
 from support.discord_provider_fake import (
     STATE,
     DiscordHTTPHandler,
@@ -37,58 +36,6 @@ class _ImmediateBarrierExpiry:
         """Expire immediately without using wall-clock delay."""
         del timeout
         return False
-
-
-def test_discord_fake_releases_title_at_message_delivery_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Release the title proxy exactly when the targeted message delivery is reached."""
-    calls: list[tuple[str, str, object, float]] = []
-
-    class _Response:
-        status = 200
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-    def urlopen(
-        request: discord_fake.Request,
-        timeout: float,
-    ) -> _Response:
-        calls.append(
-            (
-                request.full_url,
-                request.get_method(),
-                request.data,
-                timeout,
-            )
-        )
-        return _Response()
-
-    monkeypatch.setattr(
-        discord_fake,
-        "_EXTERNAL_CHANNEL_DISCORD_TITLE_BARRIER_RELEASE_URL",
-        "http://openai-proxy:8081/v1/title-barrier/release",
-    )
-    monkeypatch.setattr(discord_fake, "urlopen", urlopen)
-    state = discord_fake.FakeState()
-    state.configure_delivery_barrier({"operation": "create_message", "occurrence": 2})
-    with state.lock:
-        state.request_counts["create_message"] = 2
-    state.release_delivery_barrier()
-
-    assert state.wait_for_delivery_barrier("create_message")
-    assert calls == [
-        (
-            "http://openai-proxy:8081/v1/title-barrier/release",
-            "POST",
-            b"",
-            5,
-        )
-    ]
 
 
 class _SignedInteractionHandler(BaseHTTPRequestHandler):
