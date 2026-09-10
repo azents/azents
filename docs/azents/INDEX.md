@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-10 | 75 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 23 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 24 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-10 | 11 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |

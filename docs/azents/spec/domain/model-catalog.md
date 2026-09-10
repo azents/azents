@@ -39,7 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-09-10
-spec_version: 23
+spec_version: 24
 ---
 
 # Model Catalog Domain Spec
@@ -291,17 +291,20 @@ presentation.
 For user-scoped integration catalogs, the picker can trigger integration sync. For providers backed by system catalogs, public users do not trigger system sync.
 
 The selectable-model settings modal reads stored image catalog state for each
-selected integration without embedding a frontend model registry. Enabling image
-generation exposes the maintained default first and then current stored entries in
-recommendation order. The UI preserves an unavailable saved explicit identifier,
+selected integration without embedding a frontend model registry. When explicit
+selection is supported, enabling image generation exposes the maintained default
+first and then current stored entries in recommendation order. Default-only
+providers retain the image-generation capability toggle but expose no image-model
+selection controls. The UI preserves an unavailable saved explicit identifier,
 blocks submission until it is recovered, and distinguishes loading, initial or
-refresh failure, default-only, generation-changed, never-synced, stale, and empty
-catalog states. Only Workspace Owners receive the explicit image sync action.
+refresh failure, generation-changed, never-synced, stale, and empty catalog states.
+Only Workspace Owners receive the explicit image sync action.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-10 | 24 | Hid image-model selection controls for providers that support maintained-default image generation only. |
 | 2026-09-10 | 23 | Added purpose-separated image-generation catalogs, OpenAI registry-and-credential intersection, generation fencing, maintained-default semantics, owner sync, save/runtime authority, and stored-catalog UI behavior. |
 | 2026-08-27 | 21 | Added provider-neutral default and maximum input context capabilities, maximum-only fallback, and split-aware picker and Agent settings presentation |
 | 2026-08-18 | 20 | Replaced xAI system catalogs with credential-specific integration discovery and optional fill-only LiteLLM enrichment |

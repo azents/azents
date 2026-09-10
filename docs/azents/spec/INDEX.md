@@ -17,7 +17,7 @@ Details of all living specs. Synchronized from frontmatter.
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-10 | 75 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-10 | 23 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-10 | 24 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-10 | 11 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-10 | 5 |

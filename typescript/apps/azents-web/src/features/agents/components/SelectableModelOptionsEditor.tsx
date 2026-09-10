@@ -46,6 +46,7 @@ import {
   hasInvalidImageGenerationSelections,
   imageGenerationModelAvailability,
   imageGenerationModelIdentifier,
+  imageGenerationModelSelectionVisible,
   MAX_SELECTABLE_MODEL_OPTIONS,
   MAX_SUBAGENT_GUIDANCE_LENGTH,
   resolveModelContextRange,
@@ -286,6 +287,9 @@ function SelectableModelSettingsModal({
     integrationId == null
       ? null
       : (imageGenerationCatalogStates.get(integrationId) ?? null);
+  const imageModelSelectionVisible =
+    imageGenerationEnabled &&
+    imageGenerationModelSelectionVisible(imageCatalogState);
   const selectedImageModelIdentifier = imageGenerationModelIdentifier(option);
   const selectedImageModelValue =
     selectedImageModelIdentifier ?? IMAGE_GENERATION_DEFAULT_VALUE;
@@ -388,13 +392,6 @@ function SelectableModelSettingsModal({
         );
         break;
       case "UNSUPPORTED":
-        imageCatalogNotice = (
-          <Alert color="blue" title={t("imageCatalogDefaultOnlyTitle")}>
-            {imageCatalogState.data.default_available
-              ? t("imageCatalogDefaultOnlyDescription")
-              : t("imageDefaultUnavailableDescription")}
-          </Alert>
-        );
         break;
       case "LOADED": {
         const catalog = imageCatalogState.data;
@@ -566,7 +563,7 @@ function SelectableModelSettingsModal({
               </Stack>
             </Checkbox.Group>
           )}
-          {imageGenerationEnabled && (
+          {imageModelSelectionVisible && (
             <Box ml="xl">
               <Stack gap="xs">
                 <Select

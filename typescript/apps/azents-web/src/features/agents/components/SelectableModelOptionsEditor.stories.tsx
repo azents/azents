@@ -393,7 +393,11 @@ export const ImageGenerationDefaultOnly = {
       canvas.getByRole("button", { name: "Model settings" }),
     );
     const body = within(document.body);
-    await expect(body.getByText("Default model only")).toBeVisible();
+    await expect(body.getByLabelText("Image generation")).toBeChecked();
+    await expect(
+      body.queryByRole("combobox", { name: "Image model" }),
+    ).toBeNull();
+    await expect(body.queryByText("Default model only")).toBeNull();
     await expect(body.queryByText("GPT Image 2.5 Flare")).toBeNull();
   },
 } satisfies Story;

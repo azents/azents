@@ -6,6 +6,7 @@ import {
   fallbackSelectableModelLabel,
   hasInvalidImageGenerationSelections,
   imageGenerationModelIdentifier,
+  imageGenerationModelSelectionVisible,
   isSubagentGuidanceWithinLimit,
   modelContextBadgeValue,
   resolveModelContextRange,
@@ -116,6 +117,32 @@ void test("image generation model updates preserve unrelated built-in config key
   assert.deepEqual(maintainedDefault.builtin_tool_configs.image_generation, {
     quality: "high",
   });
+});
+
+void test("default-only image providers hide explicit model selection", () => {
+  assert.equal(
+    imageGenerationModelSelectionVisible({
+      type: "UNSUPPORTED",
+      data: {
+        default_available: true,
+        explicit_selection_supported: false,
+        catalog_id: null,
+        snapshot_id: null,
+        snapshot_configuration_version: null,
+        current_configuration_version: 1,
+        snapshot_created_at: null,
+        latest_attempt: null,
+        stale: false,
+        generation_current: true,
+        sync_available_at: null,
+        automatic_retry_blocked: false,
+        entries: [],
+        total: 0,
+      },
+    }),
+    false,
+  );
+  assert.equal(imageGenerationModelSelectionVisible({ type: "LOADING" }), true);
 });
 
 void test("form serialization preserves complete built-in tool config", () => {

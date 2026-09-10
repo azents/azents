@@ -143,6 +143,12 @@ export type ImageGenerationCatalogState =
 export type ImageGenerationModelAvailability =
   "AVAILABLE" | "UNAVAILABLE" | "UNVERIFIED";
 
+export function imageGenerationModelSelectionVisible(
+  state: ImageGenerationCatalogState | null,
+): boolean {
+  return state?.type !== "UNSUPPORTED";
+}
+
 export function imageGenerationModelIdentifier(
   option: SelectableModelOptionFormValue,
 ): string | null {
