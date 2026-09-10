@@ -9,7 +9,7 @@ from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "6fe0e95dfea13e458b83646b174ff2b25580b976342e5cd78f648f40c8b746f4"
+    "31b9ee9c30f30c920a7985459be854c226bd061a338d1098d3d1cfab53477b32"
 )
 
 
