@@ -231,6 +231,7 @@ Design documents are accumulated records and are not listed individually in this
 | [azents-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
 | [Idempotent Sandbox Lifecycle State Historical Requirements Reconstruction](requirements/idempotent-260524-idempotent-sandbox-lifecycle.md) | idempotent-260524 | 2026-05-24 | - |
 | [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
+| [Image Generation Model Selection Requirements](requirements/image-260910-generation-model-selection.md) | image-260910 | 2026-09-10 | - |
 | [Todo-Owned Slack Activity Indicator Requirements](requirements/indicator-260723-todo-owned-progress.md) | indicator-260723 | 2026-07-23 | - |
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
@@ -654,6 +655,7 @@ Design documents are accumulated records and are not listed individually in this
 - [azents-web i18n Architecture Historical Decision Reconstruction](adr/i18n-260216-i18n.md)
 - [Idempotent Sandbox Lifecycle State Historical Decision Reconstruction](adr/idempotent-260524-idempotent-sandbox-lifecycle.md)
 - [Model-Specific Image Generation Execution Historical Decision Reconstruction](adr/image-260718-image-generation.md)
+- [Image Generation Model Selection](adr/image-260910-generation-model-selection.md)
 - [Todo-Owned Slack Activity Indicator](adr/indicator-260723-todo-owned-progress.md)
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
