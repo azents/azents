@@ -16,6 +16,5 @@ The standard checks cover:
 
 - one Alembic head;
 - base-to-head upgrade;
-- upgrade/downgrade consistency for revisions introduced after the suite baseline;
-- migration-specific PostgreSQL DDL contracts; and
-- migration-specific data backfill and fail-fast invariants.
+- the pre-consolidation public-schema fingerprint and required singleton seeds; and
+- baseline upgrade/downgrade consistency.

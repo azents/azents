@@ -13,8 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/7de5749cadd5_drop_shell_enabled_from_agents.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/agent_runtime_add/**
@@ -45,7 +44,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-03
+last_verified_at: 2026-09-10
 spec_version: 34
 ---
 

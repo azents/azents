@@ -6,8 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/25a661df4ff6_add_xai_api_key_provider.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/5c044388362c_move_xai_catalogs_to_integrations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/core/llm_mapping.py
@@ -23,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-08-18
+last_verified_at: 2026-09-10
 spec_version: 4
 ---
 
@@ -61,7 +60,7 @@ Rules:
 - The existing workspace LLM integration read/write permissions govern the CRUD routes.
 - The key is sent to xAI only for model-catalog synchronization and inference. Internal secret-bearing repository paths may decrypt it for those provider calls but do not otherwise validate it against xAI.
 
-The PostgreSQL `llm_provider` enum includes the additive `xai` value. Deployments apply revision `25a661df4ff6` before application instances accept `provider=xai` writes. Rollback may hide or disable the provider but does not remove the PostgreSQL enum value.
+The consolidated PostgreSQL baseline includes the `xai` value in the `llm_provider` enum. Application instances accept `provider=xai` writes only when the database is at the current Alembic head.
 
 ## Model Catalog
 

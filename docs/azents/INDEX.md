@@ -15,18 +15,18 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-08 | 74 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-08 | 164 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-08 | 75 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-10 | 74 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-10 | 164 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-10 | 75 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-08 | 22 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 22 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
-| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-08 | 11 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-08 | 113 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-10 | 11 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-10 | 113 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 16 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-08 | 81 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-10 | 81 |
 
 ## Living Specs — Flow
 
@@ -34,7 +34,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-08 | 173 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-08 | 77 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-03 | 34 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-08 | 46 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-08 | 39 |
@@ -42,16 +42,16 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 44 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-08 | 60 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-08 | 48 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-10 | 48 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
-| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-04 | 4 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-06 | 18 |
+| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-10 | 18 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-06 | 20 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-10 | 20 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-08 | 48 |
-| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-04 | 8 |
+| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
 
 ## Requirements Snapshots
 
@@ -140,6 +140,7 @@ Design documents are accumulated records and are not listed individually in this
 | [User & WorkspaceUser CRUD Document Historical Requirements Reconstruction](requirements/crud-260212-crud.md) | crud-260212 | 2026-02-12 | 2026-02-19 |
 | [Remove Percentage Rollout from Apply-Patch Custom Selection Historical Requirements Reconstruction](requirements/custom-260721-patch-custom-rollout.md) | custom-260721 | 2026-07-21 | - |
 | [azents Daily Log Historical Requirements Reconstruction](requirements/daily-260322-daily-log.md) | daily-260322 | 2026-03-22 | 2026-03-22 |
+| [Alembic Baseline Consolidation Requirements](requirements/database-260910-alembic-baseline.md) | database-260910 | 2026-09-10 | 2026-09-10 |
 | [Declarative Improvements for Async Toolkit Loading State Historical Requirements Reconstruction](requirements/declarative-260331-declarative-toolkit-status.md) | declarative-260331 | 2026-03-31 | 2026-03-31 |
 | [Agent Decommission Test-Double Contracts Requirements](requirements/decommission-260804-test-double-contracts.md) | decommission-260804 | 2026-08-04 | 2026-08-05 |
 | [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts Historical Requirements Reconstruction](requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) | deterministic-260628 | 2026-06-28 | - |
@@ -561,6 +562,7 @@ Design documents are accumulated records and are not listed individually in this
 - [User & WorkspaceUser CRUD Document Historical Decision Reconstruction](adr/crud-260212-crud.md)
 - [Remove Percentage Rollout from Apply-Patch Custom Selection](adr/custom-260721-patch-custom-rollout.md)
 - [azents Daily Log Historical Decision Reconstruction](adr/daily-260322-daily-log.md)
+- [Alembic Baseline Consolidation Decision](adr/database-260910-alembic-baseline.md)
 - [Declarative Improvements for Async Toolkit Loading State](adr/declarative-260331-declarative-toolkit-status.md)
 - [Agent Decommission Test-Double Contracts](adr/decommission-260804-test-double-contracts.md)
 - [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md)

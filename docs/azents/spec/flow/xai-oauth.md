@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/5c044388362c_move_xai_catalogs_to_integrations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/xai.py
   - python/apps/azents/src/azents/core/xai_oauth.py
   - python/apps/azents/src/azents/core/config.py
@@ -26,7 +26,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-04
+last_verified_at: 2026-09-10
 spec_version: 8
 ---
 

@@ -6,9 +6,7 @@ spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/*external_channel*.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/*channel_work*.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/external_channel_file.py
@@ -76,7 +74,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 75
 ---
 

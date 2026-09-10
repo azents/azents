@@ -6,13 +6,7 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/82df4f970f57_add_terminal_enabled_policy.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/7de5749cadd5_drop_shell_enabled_from_agents.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/10d8111b556c_add_session_auto_archive_fields.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/d0a55d801644_add_external_channel_response_modes.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/30c55c0ef241_add_agent_avatar_cleanup_jobs.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_add_model_execution_option_lifecycle.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -105,7 +99,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-10
 spec_version: 74
 ---
 

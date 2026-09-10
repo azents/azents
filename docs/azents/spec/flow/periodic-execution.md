@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/30c55c0ef241_add_agent_avatar_cleanup_jobs.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
@@ -36,11 +36,10 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/c7b64368f3a1_add_scheduled_task_states.py
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-09-06
+last_verified_at: 2026-09-10
 spec_version: 18
 ---
 

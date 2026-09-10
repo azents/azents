@@ -14,7 +14,6 @@ from testcontainers.postgres import PostgresContainer
 from azents.consts import PROJECT_ROOT
 
 _DATABASE_URL_ENV = "AZENTS_MIGRATION_TEST_DATABASE_URL"
-_MINIMUM_DOWNGRADE_REVISION = "cb091fe69575"
 
 
 def _docker_available() -> bool:
@@ -78,7 +77,4 @@ def alembic_config(
         "sqlalchemy.url",
         migration_database_url.replace("%", "%%"),
     )
-    return PytestAlembicConfig(
-        alembic_config=native_config,
-        minimum_downgrade_revision=_MINIMUM_DOWNGRADE_REVISION,
-    )
+    return PytestAlembicConfig(alembic_config=native_config)
