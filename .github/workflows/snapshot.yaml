@@ -110,8 +110,16 @@ jobs:
             tags+=(--tag "${{ steps.meta.outputs.image }}:dev-main")
             moving_tag='"dev-main"'
           fi
+          output=(--push)
+          if [ "$GITHUB_REF" != 'refs/heads/main' ] \
+            && [ "${{ inputs.dispatch_downstream }}" = 'false' ]; then
+            output=(
+              --output
+              "type=registry,compression=zstd,compression-level=3,force-compression=true"
+            )
+          fi
           docker buildx build \
-            --push \
+            "${output[@]}" \
             --provenance=true \
             --sbom=true \
             --metadata-file /tmp/build-metadata.json \

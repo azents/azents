@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-11
-spec_version: 56
+spec_version: 57
 ---
 
 # E2E Primary Test Strategy
@@ -180,12 +180,16 @@ Always-on required CI does not depend on external credentials.
   tagged for the exact current commit SHA. Snapshot availability is never a workflow
   dependency or wait condition: a missing, late, cancelled, or failed publication
   immediately preserves the existing local Buildx/cache build path. Snapshot pulls
-  run in parallel. The direct snapshot attempt also best-effort pre-pulls the exact
-  public fixture images already required by the lane, overlapping their network
-  transfer without replacing the ordinary Testcontainers pull fallback. Lane
-  observability records snapshot sources, selected commit SHAs, fallback state, and
-  snapshot and
-  prerequisite image timings. For pull requests where only `python/apps/azents`
+  run in parallel. The direct snapshot attempt starts immediately after checkout and
+  overlaps uv installation, Python setup, dependency synchronization, and plan
+  download. A durable status handoff joins the attempt before ancestor fallback and
+  Buildx selection; an abnormal exit or nonzero result fails the preparation step
+  rather than silently bypassing fallback decisions. The direct attempt also
+  best-effort pre-pulls the exact public fixture images already required by the lane,
+  overlapping their network transfer without replacing the ordinary Testcontainers
+  pull fallback. Lane observability records snapshot sources, selected commit SHAs,
+  fallback state, and snapshot and prerequisite image timings. For pull requests
+  where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
   lane may pull a dependency-compatible predecessor or bounded ancestor Server
@@ -200,7 +204,11 @@ Always-on required CI does not depend on external credentials.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
-  isolated same-SHA CI measurement without mutating live infrastructure.
+  isolated same-SHA CI measurement without mutating live infrastructure. Snapshot
+  publications on non-main refs with downstream dispatch disabled use OCI
+  zstd-compressed layers to reduce transfer volume for isolated branch measurements.
+  Main-ref publication and any downstream-dispatched publication retain the default
+  gzip-compatible registry output.
 - CI workflow dispatch keeps automatic image-change detection by default. Its
   opt-in `force_current_snapshots: true` diagnostic treats all required images as
   changed so an already-published exact-current-SHA set and the unchanged local
@@ -255,8 +263,12 @@ Always-on required CI does not depend on external credentials.
   Runtime startup entirely.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
-  and Engine Worker then start concurrently; their ordinary launchers retain the
-  current-revision check without competing to own an upgrade.
+  and Engine Worker then start concurrently through the launchers' underlying
+  uvicorn or Python entrypoints, avoiding repeated schema queries after the explicit
+  migration dependency has completed. Function-scoped External Channel Gateway
+  processes use the same direct Python entrypoint after the already-migrated Public
+  API dependency is ready. Production image defaults and shell launchers retain their
+  current-revision validation.
 - E2E image preparation and the independent PostgreSQL, RustFS, Valkey, deterministic
   model, GitHub validation, and Slack provider prerequisites start concurrently within
   one session fixture. Real dependencies remain ordered: the OpenAI proxy starts only
