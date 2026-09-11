@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-10
-spec_version: 54
+spec_version: 55
 ---
 
 # E2E Primary Test Strategy
@@ -180,8 +180,11 @@ Always-on required CI does not depend on external credentials.
   exact current commit SHA. Snapshot availability is never a workflow dependency or
   wait condition: a missing, late, cancelled, or failed publication immediately
   preserves the existing local Buildx/cache build path. Snapshot pulls run in
-  parallel, and lane observability records attempted sources, selected commit SHAs,
-  timing, and fallback state. For pull requests where only `python/apps/azents`
+  parallel. The direct snapshot attempt also best-effort pre-pulls the exact public
+  fixture images already required by the lane, overlapping their network transfer
+  without replacing the ordinary Testcontainers pull fallback. Lane observability
+  records snapshot sources, selected commit SHAs, fallback state, and snapshot and
+  prerequisite image timings. For pull requests where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
   lane may pull a dependency-compatible predecessor or bounded ancestor Server
@@ -227,8 +230,11 @@ Always-on required CI does not depend on external credentials.
   file, the planner projects that file's historical per-test call timings onto the
   new collection files so the first plan retains representative weights.
   Deterministic External Channel collection uses
-  `test_external_channel_management.py` for Slack HTTP, connection management, and
-  provider-native progress; `test_external_channel_slack_socket.py` for Socket Mode;
+  `test_external_channel_management.py` for Slack HTTP admission, binding, and
+  connection management; `test_external_channel_workspace_management.py` for
+  multi-app workspace and mention-selector management;
+  `test_external_channel_provider_progress.py` for provider-native progress;
+  `test_external_channel_slack_socket.py` for Socket Mode;
   `test_external_channel_discord_gateway_binding.py` for Gateway location wait and
   binding; `test_external_channel_discord_configured_provisioning.py` for durable
   conversation provisioning; `test_external_channel_discord_unmentioned_activity.py`
@@ -424,6 +430,13 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-11** (spec_version 55) — Split the remaining External Channel management
+  collector into connection, workspace, and provider-progress files, projected both
+  legacy and immediately prior timing paths, and overlapped best-effort prerequisite
+  image pulls with immutable snapshot preparation while preserving fixture fallback.
+- **2026-09-11** (spec_version 54) — Split Subagent lifecycle and capacity collectors,
+  projected historical per-test timings, and added finite explicit source fallback
+  weights for indirectly collected scenarios.
 - **2026-09-10** (spec_version 53) — Removed eager Runtime startup from shared
   deterministic External Channel Agent setup. Runtime-bearing journeys retain
   product-owned on-demand startup and observable completion boundaries, while

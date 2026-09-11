@@ -11,6 +11,7 @@ from pathlib import Path
 from support.e2e_snapshot_images import (
     SnapshotPreparation,
     _write_observability,
+    prepare_prerequisite_images,
     prepare_required_snapshot_images,
 )
 
@@ -51,6 +52,25 @@ def _unchanged_environment() -> dict[str, str]:
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED": "false",
         "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED": "false",
     }
+
+
+def test_prerequisite_pulls_are_best_effort_and_complete() -> None:
+    runner = FakeCommandRunner(frozenset({"postgres:18"}))
+
+    pulls = prepare_prerequisite_images(command_runner=runner)
+
+    assert len(pulls) == 5
+    assert {pull.image for pull in pulls} == {
+        "postgres:18",
+        "rustfs/rustfs:1.0.0-alpha.90",
+        "valkey/valkey:9-alpine",
+        "ghcr.io/copilotkit/aimock:1.36.1",
+        "python:3.14-alpine",
+    }
+    assert (
+        next(pull for pull in pulls if pull.image == "postgres:18").completed is False
+    )
+    assert all(pull.completed for pull in pulls if pull.image != "postgres:18")
 
 
 def test_prepares_all_unchanged_images() -> None:

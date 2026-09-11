@@ -27,13 +27,13 @@ _EXTERNAL_CHANNEL_TIMING_FILES = {
         "test_external_channel_management.py"
     ),
     "test_multi_app_workspace_management_default_and_disconnect_journey": (
-        "test_external_channel_management.py"
+        "test_external_channel_workspace_management.py"
     ),
     "test_multi_app_mention_selector_deduplicates_and_binds_open_access_route": (
-        "test_external_channel_management.py"
+        "test_external_channel_workspace_management.py"
     ),
     "test_provider_native_channel_work_progress_journey": (
-        "test_external_channel_management.py"
+        "test_external_channel_provider_progress.py"
     ),
     "test_socket_mode_recovers_then_acknowledges_and_preserves_route": (
         "test_external_channel_slack_socket.py"
@@ -283,6 +283,7 @@ def _current_timing_path(node_id: str) -> str:
         return path.rsplit("/", 1)[0] + "/test_subagent_capacity.py"
     if timing_source not in {
         "test_external_channels.py",
+        "test_external_channel_management.py",
         "test_external_channel_discord_provisioning.py",
     }:
         return path

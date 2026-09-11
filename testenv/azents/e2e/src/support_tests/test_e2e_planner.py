@@ -280,17 +280,17 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
                     3.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_multi_app_workspace_management_default_and_disconnect_journey",
                     4.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_multi_app_mention_selector_deduplicates_and_binds_open_access_route",
                     5.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_provider_native_channel_work_progress_journey",
                     6.0,
                 ),
@@ -335,7 +335,9 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
     )
 
     assert load_file_timings(timings_path) == {
-        "src/tests/required/public/test_external_channel_management.py": 21.0,
+        "src/tests/required/public/test_external_channel_management.py": 6.0,
+        "src/tests/required/public/test_external_channel_workspace_management.py": 9.0,
+        "src/tests/required/public/test_external_channel_provider_progress.py": 6.0,
         "src/tests/required/public/test_external_channel_slack_socket.py": 7.0,
         (
             "src/tests/required/public/test_external_channel_discord_gateway_binding.py"
