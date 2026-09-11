@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-12
-spec_version: 57
+spec_version: 58
 ---
 
 # E2E Primary Test Strategy
@@ -229,10 +229,12 @@ Always-on required CI does not depend on external credentials.
   deterministic source-based fallback. A collector that inherits reusable scenarios
   and therefore has no local test bodies may declare an explicit positive fallback
   weight in source; observed timing still takes precedence. The first pull request run starts from the
-  latest accessible rolling `main` history. A successful internal pull request run
-  saves its observed timing under the head commit SHA, and later runs or attempts of
-  that same SHA restore the newest SHA-specific rolling history before falling back
-  to `main`.
+  latest accessible rolling `main` history. Each successful `main` push attempt saves
+  observed timing under a run-and-attempt-unique key, so a rerun cannot collide with
+  an earlier attempt and later workflows can restore the newest rolling history. A
+  successful internal pull request run saves its observed timing under the head
+  commit SHA and an attempt-unique suffix, and later runs or attempts of that same SHA
+  restore the newest SHA-specific rolling history before falling back to `main`.
   Fork pull requests do not publish timing caches. Required uses four lanes; Web uses
   one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
@@ -448,6 +450,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
+  cache saves unique per workflow attempt while retaining SHA-scoped pull request
+  history and rolling `main` restore fallback.
 - **2026-09-11** (spec_version 57) — Overlapped exact-SHA snapshot preparation
   with lane dependency setup through a durable fail-closed handoff, used
   zstd-compressed registry output for isolated non-main snapshot publications,
