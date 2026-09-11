@@ -402,6 +402,8 @@ jobs:
         if: matrix.suite == 'required'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           base_sha=''
@@ -409,6 +411,9 @@ jobs:
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               base_sha="$PR_BASE_SHA"
+              if [ "$PR_HEAD_REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
+                current_snapshot_sha="$PR_HEAD_SHA"
+              fi
               ;;
             push)
               if [ "$GITHUB_REF" = 'refs/heads/main' ]; then

@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-10
-spec_version: 55
+last_verified_at: 2026-09-11
+spec_version: 56
 ---
 
 # E2E Primary Test Strategy
@@ -175,15 +175,16 @@ Always-on required CI does not depend on external credentials.
   CI resources requires explicit approval and complete cost accounting.
 - Required lanes resolve immutable snapshot images before enabling local Buildx.
   Unchanged images may reuse the pull request base, the direct `main` predecessor, or
-  a compatible first-parent ancestor. On `main` push and explicit workflow dispatch,
-  a changed image may additionally reuse an already-published snapshot tagged for the
-  exact current commit SHA. Snapshot availability is never a workflow dependency or
-  wait condition: a missing, late, cancelled, or failed publication immediately
-  preserves the existing local Buildx/cache build path. Snapshot pulls run in
-  parallel. The direct snapshot attempt also best-effort pre-pulls the exact public
-  fixture images already required by the lane, overlapping their network transfer
-  without replacing the ordinary Testcontainers pull fallback. Lane observability
-  records snapshot sources, selected commit SHAs, fallback state, and snapshot and
+  a compatible first-parent ancestor. A same-repository pull request, `main` push, or
+  explicit workflow dispatch may additionally reuse an already-published snapshot
+  tagged for the exact current commit SHA. Snapshot availability is never a workflow
+  dependency or wait condition: a missing, late, cancelled, or failed publication
+  immediately preserves the existing local Buildx/cache build path. Snapshot pulls
+  run in parallel. The direct snapshot attempt also best-effort pre-pulls the exact
+  public fixture images already required by the lane, overlapping their network
+  transfer without replacing the ordinary Testcontainers pull fallback. Lane
+  observability records snapshot sources, selected commit SHAs, fallback state, and
+  snapshot and
   prerequisite image timings. For pull requests where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
@@ -279,6 +280,8 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider images whose complete build inputs are unchanged.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and
   manually dispatched measurements use the checked-out commit's first parent.
+  Same-repository pull requests also try an already-published snapshot for the exact
+  pull request head commit SHA for each changed image before building it locally.
   The direct predecessor is the fast path. When an unchanged image's exact tag is
   unavailable, the lane fetches bounded first-parent history and may reuse the nearest
   available immutable ancestor only when `git diff` proves that image's complete
@@ -287,7 +290,9 @@ Always-on required CI does not depend on external credentials.
   retain both direct and fallback pull evidence. Authentication, history fetch,
   compatibility, availability, pull, or local-tag failure falls back to the existing
   current-worktree BuildKit build for the affected image. Changed image components
-  always build the current worktree.
+  without an exact-current snapshot build the current worktree. Manual Snapshot
+  runs on non-main refs publish immutable unique, SHA, and run tags without moving
+  the shared `dev-main` tag; main-ref runs continue publishing `dev-main`.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -430,6 +435,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-11** (spec_version 56) — Allowed same-repository pull requests to
+  consume already-published exact-current-SHA image snapshots with immediate
+  current-worktree fallback, and prevented non-main manual Snapshot runs from
+  moving the shared `dev-main` package tag.
 - **2026-09-11** (spec_version 55) — Split the remaining External Channel management
   collector into connection, workspace, and provider-progress files, projected both
   legacy and immediately prior timing paths, and overlapped best-effort prerequisite

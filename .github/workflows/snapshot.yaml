@@ -100,6 +100,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p image-metadata
+          tags=(
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.unique_tag }}"
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }}"
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.run_tag }}"
+          )
+          moving_tag='null'
+          if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+            tags+=(--tag "${{ steps.meta.outputs.image }}:dev-main")
+            moving_tag='"dev-main"'
+          fi
           docker buildx build \
             --push \
             --provenance=true \
@@ -111,10 +121,7 @@ jobs:
             --label "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "org.opencontainers.image.title=${{ matrix.component }}" \
-            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.unique_tag }}" \
-            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }}" \
-            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.run_tag }}" \
-            --tag "${{ steps.meta.outputs.image }}:dev-main" \
+            "${tags[@]}" \
             -f "${{ matrix.dockerfile }}" \
             .
           digest="$(jq -r '."containerimage.digest"' /tmp/build-metadata.json)"
@@ -126,7 +133,8 @@ jobs:
             --arg sha_tag "${{ steps.meta.outputs.sha_tag }}" \
             --arg run_tag "${{ steps.meta.outputs.run_tag }}" \
             --arg digest "$digest" \
-            '{component: $component, package: $package, image: $image, uniqueTag: $unique_tag, shaTag: $sha_tag, runTag: $run_tag, movingTag: "dev-main", digest: $digest}' \
+            --argjson moving_tag "$moving_tag" \
+            '{component: $component, package: $package, image: $image, uniqueTag: $unique_tag, shaTag: $sha_tag, runTag: $run_tag, movingTag: $moving_tag, digest: $digest}' \
             > "image-metadata/${{ matrix.component }}.json"
       - name: Upload image metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
