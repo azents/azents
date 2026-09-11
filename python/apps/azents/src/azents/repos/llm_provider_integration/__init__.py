@@ -19,7 +19,9 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
+from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
     LLMProviderIntegration,
@@ -208,15 +210,43 @@ class LLMProviderIntegrationRepository:
             return Failure(NotFound(integration_id=integration_id))
         return Success(self._build(rdb))
 
-    async def delete_by_id(self, session: AsyncSession, integration_id: str) -> None:
+    async def delete_by_id(
+        self,
+        session: AsyncSession,
+        integration_id: str,
+        *,
+        workspace_id: str,
+    ) -> None:
         """Delete LLM Provider Integration by ID.
 
         :param session: Database session
         :param integration_id: Integration ID
+        :param workspace_id: Owning Workspace ID
         """
         await session.execute(
+            sa.select(RDBWorkspace.id)
+            .where(RDBWorkspace.id == workspace_id)
+            .with_for_update()
+        )
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog.id)
+            .where(RDBLLMCatalog.provider_integration_id == integration_id)
+            .order_by(RDBLLMCatalog.id)
+            .with_for_update()
+        )
+        catalog_result.scalars().all()
+        await session.execute(
+            sa.select(RDBLLMProviderIntegration.id)
+            .where(
+                RDBLLMProviderIntegration.id == integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        await session.execute(
             sa.delete(RDBLLMProviderIntegration).where(
-                RDBLLMProviderIntegration.id == integration_id
+                RDBLLMProviderIntegration.id == integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
             )
         )
 

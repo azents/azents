@@ -206,5 +206,9 @@ class LLMProviderIntegrationService:
             return Failure(NotBelongToWorkspace(integration_id=integration_id))
 
         async with self.session_manager() as session:
-            await self.repository.delete_by_id(session, integration_id)
+            await self.repository.delete_by_id(
+                session,
+                integration_id,
+                workspace_id=workspace_id,
+            )
         return Success(None)

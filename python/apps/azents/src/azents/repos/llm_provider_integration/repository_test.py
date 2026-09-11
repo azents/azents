@@ -1,10 +1,13 @@
 """LLM Provider Integration repository tests."""
 
+import asyncio
 import datetime
+from uuid import uuid4
 
+import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -18,8 +21,15 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import LLMProvider
+from azents.core.enums import (
+    LLMCatalogLowererTarget,
+    LLMCatalogPurpose,
+    LLMProvider,
+)
+from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 
@@ -38,15 +48,19 @@ def _make_repo() -> LLMProviderIntegrationRepository:
     return LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(
+    session: AsyncSession,
+    *,
+    handle: str = "llm-integ-test-ws",
+) -> str:
     """Create Workspace for tests and return internal ID."""
     repo = WorkspaceRepository()
     result = await repo.create(
         session,
-        WorkspaceCreate(name="Test workspace", handle="llm-integ-test-ws"),
+        WorkspaceCreate(name="Test workspace", handle=handle),
     )
     assert isinstance(result, Success)
-    workspace_id = await repo.resolve_id(session, "llm-integ-test-ws")
+    workspace_id = await repo.resolve_id(session, handle)
     assert workspace_id is not None
     return workspace_id
 
@@ -488,8 +502,137 @@ class TestLLMProviderIntegrationRepository:
         )
 
         # When: delete
-        await repo.delete_by_id(rdb_session, created.id)
+        await repo.delete_by_id(
+            rdb_session,
+            created.id,
+            workspace_id=ws_id,
+        )
 
         # Then: None when fetching
         integration = await repo.get_by_id(rdb_session, created.id)
         assert integration is None
+
+    async def test_delete_locks_catalog_before_integration(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Catalog synchronization cannot deadlock with integration deletion."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        application_name = f"integration-delete-lock-order-{suffix}"
+        repo = _make_repo()
+        catalog_repo = LLMCatalogRepository()
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                handle=f"llm-integration-delete-lock-order-{suffix}",
+            )
+            integration = await repo.create(
+                setup_session,
+                LLMProviderIntegrationCreate(
+                    workspace_id=workspace_id,
+                    provider=LLMProvider.OPENAI,
+                    name="Concurrent deletion target",
+                    secrets=ApiKeySecrets(api_key="sk-concurrent-delete"),
+                ),
+            )
+            catalog = await catalog_repo.ensure_integration_catalog(
+                setup_session,
+                integration_id=integration.id,
+                provider=integration.provider,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+            )
+            await setup_session.commit()
+
+        async def delete_integration() -> None:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as delete_session:
+                await delete_session.execute(
+                    sa.text("SELECT set_config('application_name', :name, true)"),
+                    {"name": application_name},
+                )
+                await repo.delete_by_id(
+                    delete_session,
+                    integration.id,
+                    workspace_id=workspace_id,
+                )
+                await delete_session.commit()
+
+        async def wait_for_workspace_lock() -> None:
+            deadline = asyncio.get_running_loop().time() + 5
+            while asyncio.get_running_loop().time() < deadline:
+                async with AsyncSession(rdb_engine) as observer:
+                    waiting = await observer.scalar(
+                        sa.text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE application_name = :application_name
+                                  AND wait_event_type = 'Lock'
+                                  AND query LIKE '%FROM workspaces%'
+                                  AND query LIKE '%FOR UPDATE%'
+                            )
+                            """
+                        ),
+                        {"application_name": application_name},
+                    )
+                if waiting:
+                    return
+                await asyncio.sleep(0.01)
+            raise TimeoutError("Integration deletion did not wait for the Workspace")
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as sync_session:
+            locked_workspace_id = await sync_session.scalar(
+                sa.select(RDBWorkspace.id)
+                .where(RDBWorkspace.id == workspace_id)
+                .with_for_update()
+            )
+            assert locked_workspace_id == workspace_id
+            locked_catalog_id = await sync_session.scalar(
+                sa.select(RDBLLMCatalog.id)
+                .where(RDBLLMCatalog.id == catalog.id)
+                .with_for_update()
+            )
+            assert locked_catalog_id == catalog.id
+
+            deletion_task = asyncio.create_task(delete_integration())
+            await wait_for_workspace_lock()
+            locked_integration_id = await asyncio.wait_for(
+                sync_session.scalar(
+                    sa.select(RDBLLMProviderIntegration.id)
+                    .where(RDBLLMProviderIntegration.id == integration.id)
+                    .with_for_update()
+                ),
+                timeout=5,
+            )
+            assert locked_integration_id == integration.id
+            await sync_session.commit()
+
+        await asyncio.wait_for(deletion_task, timeout=5)
+
+        async with AsyncSession(rdb_engine) as verification_session:
+            assert (
+                await verification_session.get(
+                    RDBLLMProviderIntegration,
+                    integration.id,
+                )
+                is None
+            )
+            assert (
+                await verification_session.get(
+                    RDBLLMCatalog,
+                    catalog.id,
+                )
+                is None
+            )
