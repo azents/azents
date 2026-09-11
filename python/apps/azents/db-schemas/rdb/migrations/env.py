@@ -45,6 +45,10 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = RDBModel.metadata
 
+_AUTOGENERATE_PLUGINS = [
+    "alembic.autogenerate.*",
+    "alembic.ext.checkconstraint_byname",
+]
 _MIGRATION_LOCK_KEY = (0x415A454E, 0x54534442)
 
 # Model imports
@@ -88,6 +92,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        autogenerate_plugins=_AUTOGENERATE_PLUGINS,
     )
 
     with context.begin_transaction():
@@ -98,6 +103,7 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
+        autogenerate_plugins=_AUTOGENERATE_PLUGINS,
     )
 
     with context.begin_transaction():
