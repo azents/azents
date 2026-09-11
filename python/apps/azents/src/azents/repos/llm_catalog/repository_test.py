@@ -1,6 +1,7 @@
 """LLM catalog repository tests."""
 
 import datetime
+from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
@@ -44,11 +45,19 @@ from azents.repos.workspace.data import WorkspaceCreate
 pytestmark = pytest.mark.asyncio
 
 
+class _OpenAIIntegrationFixture(NamedTuple):
+    """OpenAI integration repository test fixture."""
+
+    workspace_id: str
+    repository: LLMProviderIntegrationRepository
+    integration_id: str
+
+
 async def _create_openai_integration(
     rdb_session: AsyncSession,
     *,
     handle: str,
-) -> tuple[str, LLMProviderIntegrationRepository, str]:
+) -> _OpenAIIntegrationFixture:
     """Create an OpenAI integration and return its workspace and repositories."""
     workspace_repository = WorkspaceRepository()
     workspace_result = await workspace_repository.create(
@@ -73,7 +82,11 @@ async def _create_openai_integration(
             secrets=ApiKeySecrets(api_key="sk-test"),
         ),
     )
-    return workspace_id, integration_repository, integration.id
+    return _OpenAIIntegrationFixture(
+        workspace_id=workspace_id,
+        repository=integration_repository,
+        integration_id=integration.id,
+    )
 
 
 async def test_replace_current_snapshot_persists_snapshot_before_entries(

@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import pytest
 from azcommon.result import Success
@@ -43,6 +44,15 @@ from azents.services.image_generation_catalog import (
 )
 from azents.services.model_listing.data import ImageGenerationModelListingOutput
 from azents.testing.model_selection import make_test_model_selection
+
+
+class _ImageCatalogServiceFixture(NamedTuple):
+    """Image catalog service test fixture."""
+
+    service: ImageGenerationCatalogService
+    integration_repository: LLMProviderIntegrationRepository
+    workspace_id: str
+    integration_id: str
 
 
 def test_default_only_provider_returns_no_catalog_or_discovery_state() -> None:
@@ -94,12 +104,7 @@ async def _create_service(
     rdb_session: AsyncSession,
     *,
     handle: str,
-) -> tuple[
-    ImageGenerationCatalogService,
-    LLMProviderIntegrationRepository,
-    str,
-    str,
-]:
+) -> _ImageCatalogServiceFixture:
     """Create a service backed by one OpenAI integration."""
     workspace_repository = WorkspaceRepository()
     workspace_result = await workspace_repository.create(
@@ -126,7 +131,12 @@ async def _create_service(
         catalog_repository=LLMCatalogRepository(),
         integration_repository=integration_repository,
     )
-    return service, integration_repository, workspace_id, integration.id
+    return _ImageCatalogServiceFixture(
+        service=service,
+        integration_repository=integration_repository,
+        workspace_id=workspace_id,
+        integration_id=integration.id,
+    )
 
 
 async def _publish_flare(
