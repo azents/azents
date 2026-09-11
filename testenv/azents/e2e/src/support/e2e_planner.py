@@ -3,11 +3,18 @@
 import argparse
 import ast
 import json
+import math
 import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_SUBAGENT_CAPACITY_TIMING_TESTS = {
+    "test_targetless_wait_observes_any_child_mailbox_message",
+    "test_bounded_list_contract_and_historical_reuse",
+    "test_active_overflow_remains_visible_and_blocks_new_activation",
+}
 
 _EXTERNAL_CHANNEL_TIMING_FILES = {
     "test_http_admission_unknown_participant_and_approval_journey": (
@@ -20,13 +27,13 @@ _EXTERNAL_CHANNEL_TIMING_FILES = {
         "test_external_channel_management.py"
     ),
     "test_multi_app_workspace_management_default_and_disconnect_journey": (
-        "test_external_channel_management.py"
+        "test_external_channel_workspace_management.py"
     ),
     "test_multi_app_mention_selector_deduplicates_and_binds_open_access_route": (
-        "test_external_channel_management.py"
+        "test_external_channel_workspace_management.py"
     ),
     "test_provider_native_channel_work_progress_journey": (
-        "test_external_channel_management.py"
+        "test_external_channel_provider_progress.py"
     ),
     "test_socket_mode_recovers_then_acknowledges_and_preserves_route": (
         "test_external_channel_slack_socket.py"
@@ -105,9 +112,22 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
 
 
 def load_file_timings(path: Path | None) -> dict[str, float]:
-    """Aggregate prior successful call timings by test file."""
-    if path is None or not path.is_file():
+    """Load high-watermark call timings from prior successful samples."""
+    if path is None or not path.exists():
         return {}
+    timing_paths = [path] if path.is_file() else sorted(path.rglob("*.jsonl"))
+    high_watermarks: dict[str, float] = {}
+    for timing_path in timing_paths:
+        for file_path, duration in _load_file_timing_sample(timing_path).items():
+            high_watermarks[file_path] = max(
+                high_watermarks.get(file_path, 0.0),
+                duration,
+            )
+    return high_watermarks
+
+
+def _load_file_timing_sample(path: Path) -> dict[str, float]:
+    """Aggregate one successful timing sample by test file."""
     totals: dict[str, float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line:
@@ -202,12 +222,37 @@ def _file_weight(path: Path, timings: dict[str, float]) -> float:
     if len(suffix_matches) == 1:
         return max(suffix_matches[0], 0.001)
     source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    declared_weight = _declared_fallback_weight(path, tree)
+    if declared_weight is not None:
+        return declared_weight
     test_count = sum(
         isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name.startswith("test_")
-        for node in ast.walk(ast.parse(source))
+        for node in ast.walk(tree)
     )
     return max(float(test_count), len(source.splitlines()) / 100.0, 1.0)
+
+
+def _declared_fallback_weight(path: Path, tree: ast.Module) -> float | None:
+    """Read an explicit source fallback for indirectly collected scenarios."""
+    name = "E2E_PLANNER_FALLBACK_WEIGHT"
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or target.id != name:
+            continue
+        value = ast.literal_eval(node.value)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"{path}: {name} must be a finite positive number")
+        return float(value)
+    return None
 
 
 def _current_suite_path(path: str) -> str:
@@ -228,16 +273,20 @@ def _current_timing_path(node_id: str) -> str:
     parts = node_id.split("::")
     path = _current_suite_path(parts[0])
     timing_source = path.rsplit("/", 1)[-1]
-    if (
-        timing_source
-        not in {
-            "test_external_channels.py",
-            "test_external_channel_discord_provisioning.py",
-        }
-        or len(parts) < 2
-    ):
+    if len(parts) < 2:
         return path
-    test_name = parts[1].split("[", 1)[0]
+    test_name = parts[-1].split("[", 1)[0]
+    if (
+        timing_source == "test_subagents.py"
+        and test_name in _SUBAGENT_CAPACITY_TIMING_TESTS
+    ):
+        return path.rsplit("/", 1)[0] + "/test_subagent_capacity.py"
+    if timing_source not in {
+        "test_external_channels.py",
+        "test_external_channel_management.py",
+        "test_external_channel_discord_provisioning.py",
+    }:
+        return path
     current_name = _EXTERNAL_CHANNEL_TIMING_FILES.get(test_name)
     if current_name is None:
         return path

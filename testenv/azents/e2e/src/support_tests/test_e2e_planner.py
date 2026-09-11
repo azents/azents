@@ -71,6 +71,58 @@ def test_plan_suites_balances_files_and_assigns_cache_writer(tmp_path: Path) -> 
     assert "test_c.py" in lane_files[1]
 
 
+def test_plan_suites_uses_declared_source_fallback_weight(tmp_path: Path) -> None:
+    tests_root = tmp_path / "tests"
+    suite_root = _write_suite(tests_root, "required")
+    (suite_root / "test_inherited.py").write_text(
+        (
+            "E2E_PLANNER_FALLBACK_WEIGHT = 20.0\n\n"
+            "class TestInherited(ScenarioBase):\n"
+            "    pass\n"
+        ),
+        encoding="utf-8",
+    )
+    for name in ("test_a.py", "test_b.py"):
+        (suite_root / name).write_text(
+            f"def {name.removesuffix('.py')}():\n    pass\n",
+            encoding="utf-8",
+        )
+
+    plan_suites(
+        tests_root=tests_root,
+        enabled_suites={"required"},
+        timings_path=None,
+        output_dir=tmp_path / "plan",
+    )
+
+    first_lane = (tmp_path / "plan" / "required-1.txt").read_text(encoding="utf-8")
+    second_lane = (tmp_path / "plan" / "required-2.txt").read_text(encoding="utf-8")
+    assert "test_inherited.py" in first_lane
+    assert "test_a.py" not in first_lane
+    assert "test_b.py" not in first_lane
+    assert "test_a.py" in second_lane
+    assert "test_b.py" in second_lane
+
+
+def test_plan_suites_rejects_non_finite_source_fallback_weight(
+    tmp_path: Path,
+) -> None:
+    tests_root = tmp_path / "tests"
+    suite_root = _write_suite(tests_root, "required")
+    (suite_root / "test_inherited.py").write_text(
+        "E2E_PLANNER_FALLBACK_WEIGHT = 1e309\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be a finite positive number"):
+        plan_suites(
+            tests_root=tests_root,
+            enabled_suites={"required"},
+            timings_path=None,
+            output_dir=tmp_path / "plan",
+        )
+
+
 def test_load_suites_rejects_test_outside_suite_folder(tmp_path: Path) -> None:
     tests_root = tmp_path / "tests"
     _write_suite(tests_root, "required")
@@ -112,6 +164,93 @@ def test_load_file_timings_maps_pre_suite_paths(tmp_path: Path) -> None:
     }
 
 
+def test_load_file_timings_projects_subagent_capacity_split(tmp_path: Path) -> None:
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": node_id,
+                    "duration_seconds": duration,
+                }
+            )
+            for node_id, duration in (
+                (
+                    "src/tests/required/public/test_subagents.py"
+                    "::TestSubagents"
+                    "::test_spawn_wait_tree_projection_and_child_detail_history",
+                    3.0,
+                ),
+                (
+                    "src/tests/required/public/test_subagents.py"
+                    "::TestSubagents"
+                    "::test_targetless_wait_observes_any_child_mailbox_message",
+                    5.0,
+                ),
+                (
+                    "src/tests/required/public/test_subagents.py"
+                    "::TestSubagents"
+                    "::test_active_overflow_remains_visible_and_blocks_new_activation",
+                    7.0,
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_file_timings(timings_path) == {
+        "src/tests/required/public/test_subagents.py": 3.0,
+        "src/tests/required/public/test_subagent_capacity.py": 12.0,
+    }
+
+
+def test_load_file_timings_uses_file_high_watermarks_across_samples(
+    tmp_path: Path,
+) -> None:
+    timings_root = tmp_path / "timings"
+    timings_root.mkdir()
+    samples = (
+        (
+            "100-1.jsonl",
+            (
+                ("src/tests/required/public/test_agent.py::test_a", 4.0),
+                ("src/tests/required/public/test_agent.py::test_b", 3.0),
+                ("src/tests/required/public/test_auth.py::test_auth", 8.0),
+            ),
+        ),
+        (
+            "100-2.jsonl",
+            (
+                ("src/tests/required/public/test_agent.py::test_a", 6.0),
+                ("src/tests/required/public/test_agent.py::test_b", 5.0),
+                ("src/tests/required/public/test_auth.py::test_auth", 2.0),
+            ),
+        ),
+    )
+    for name, records in samples:
+        (timings_root / name).write_text(
+            "\n".join(
+                json.dumps(
+                    {
+                        "record_type": "test_phase",
+                        "phase": "call",
+                        "node_id": node_id,
+                        "duration_seconds": duration,
+                    }
+                )
+                for node_id, duration in records
+            ),
+            encoding="utf-8",
+        )
+
+    assert load_file_timings(timings_root) == {
+        "src/tests/required/public/test_agent.py": 11.0,
+        "src/tests/required/public/test_auth.py": 8.0,
+    }
+
+
 def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> None:
     timings_path = tmp_path / "timings.jsonl"
     timings_path.write_text(
@@ -141,17 +280,17 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
                     3.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_multi_app_workspace_management_default_and_disconnect_journey",
                     4.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_multi_app_mention_selector_deduplicates_and_binds_open_access_route",
                     5.0,
                 ),
                 (
-                    "src/tests/required/public/test_external_channels.py"
+                    "src/tests/required/public/test_external_channel_management.py"
                     "::test_provider_native_channel_work_progress_journey",
                     6.0,
                 ),
@@ -196,7 +335,9 @@ def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> No
     )
 
     assert load_file_timings(timings_path) == {
-        "src/tests/required/public/test_external_channel_management.py": 21.0,
+        "src/tests/required/public/test_external_channel_management.py": 6.0,
+        "src/tests/required/public/test_external_channel_workspace_management.py": 9.0,
+        "src/tests/required/public/test_external_channel_provider_progress.py": 6.0,
         "src/tests/required/public/test_external_channel_slack_socket.py": 7.0,
         (
             "src/tests/required/public/test_external_channel_discord_gateway_binding.py"

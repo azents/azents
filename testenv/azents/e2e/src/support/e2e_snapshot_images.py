@@ -17,6 +17,13 @@ _REGISTRY = "ghcr.io"
 _OWNER = "azents"
 _SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE"
 _SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
+_PREREQUISITE_IMAGES = (
+    "postgres:18",
+    "rustfs/rustfs:1.0.0-alpha.90",
+    "valkey/valkey:9-alpine",
+    "ghcr.io/copilotkit/aimock:1.36.1",
+    "python:3.14-alpine",
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +52,15 @@ class SnapshotPull:
     failure_stage: str | None
     environment_variable: str
     purpose: Literal["final", "source_overlay_base"]
+
+
+@dataclass(frozen=True)
+class PrerequisiteImagePull:
+    """Record one best-effort prerequisite image pull."""
+
+    image: str
+    completed: bool
+    duration_seconds: float
 
 
 @dataclass(frozen=True)
@@ -140,6 +156,38 @@ def _run_command(
         capture_output=True,
         text=True,
     )
+
+
+def _pull_prerequisite_image(
+    image: str,
+    *,
+    command_runner: CommandRunner,
+) -> PrerequisiteImagePull:
+    """Pull one existing E2E prerequisite without replacing fixture fallback."""
+    started_at = time.monotonic()
+    pull = command_runner(("docker", "pull", image), None)
+    return PrerequisiteImagePull(
+        image=image,
+        completed=pull.returncode == 0,
+        duration_seconds=time.monotonic() - started_at,
+    )
+
+
+def prepare_prerequisite_images(
+    *,
+    command_runner: CommandRunner,
+) -> tuple[PrerequisiteImagePull, ...]:
+    """Best-effort pre-pull fixture images concurrently with snapshot images."""
+    with ThreadPoolExecutor(max_workers=len(_PREREQUISITE_IMAGES)) as executor:
+        return tuple(
+            executor.map(
+                lambda image: _pull_prerequisite_image(
+                    image,
+                    command_runner=command_runner,
+                ),
+                _PREREQUISITE_IMAGES,
+            )
+        )
 
 
 def _compatible_with_base(
@@ -428,6 +476,28 @@ def _write_observability(
             )
 
 
+def _write_prerequisite_observability(
+    artifact_dir: Path,
+    pulls: Sequence[PrerequisiteImagePull],
+) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    with (artifact_dir / "prerequisite-image-timings.jsonl").open(
+        "w", encoding="utf-8"
+    ) as output:
+        for pull in pulls:
+            output.write(
+                json.dumps(
+                    {
+                        "image": pull.image,
+                        "completed": pull.completed,
+                        "duration_seconds": round(pull.duration_seconds, 3),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifact-dir", type=Path, required=True)
@@ -445,15 +515,29 @@ def main() -> None:
         ).split(",")
         if candidate_sha
     )
-    preparation = prepare_required_snapshot_images(
-        base_sha=base_sha,
-        candidate_shas=candidate_shas,
-        current_sha=os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
-        github_token=os.environ.get("GHCR_TOKEN"),
-        github_actor=os.environ.get("GITHUB_ACTOR"),
-        environment=dict(os.environ),
-        command_runner=_run_command,
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        preparation_future = executor.submit(
+            prepare_required_snapshot_images,
+            base_sha=base_sha,
+            candidate_shas=candidate_shas,
+            current_sha=os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
+            github_token=os.environ.get("GHCR_TOKEN"),
+            github_actor=os.environ.get("GITHUB_ACTOR"),
+            environment=dict(os.environ),
+            command_runner=_run_command,
+        )
+        prerequisite_future = (
+            None
+            if args.append_observability
+            else executor.submit(
+                prepare_prerequisite_images,
+                command_runner=_run_command,
+            )
+        )
+        preparation = preparation_future.result()
+        prerequisite_pulls = (
+            () if prerequisite_future is None else prerequisite_future.result()
+        )
     _write_github_environment(args.github_env, preparation.environment)
     _write_github_output(args.github_output, preparation)
     _write_observability(
@@ -464,6 +548,8 @@ def main() -> None:
         os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
         args.append_observability,
     )
+    if prerequisite_pulls:
+        _write_prerequisite_observability(args.artifact_dir, prerequisite_pulls)
 
 
 if __name__ == "__main__":

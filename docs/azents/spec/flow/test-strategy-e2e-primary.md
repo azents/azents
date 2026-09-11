@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-10
-spec_version: 51
+last_verified_at: 2026-09-11
+spec_version: 57
 ---
 
 # E2E Primary Test Strategy
@@ -175,13 +175,21 @@ Always-on required CI does not depend on external credentials.
   CI resources requires explicit approval and complete cost accounting.
 - Required lanes resolve immutable snapshot images before enabling local Buildx.
   Unchanged images may reuse the pull request base, the direct `main` predecessor, or
-  a compatible first-parent ancestor. On `main` push and explicit workflow dispatch,
-  a changed image may additionally reuse an already-published snapshot tagged for the
-  exact current commit SHA. Snapshot availability is never a workflow dependency or
-  wait condition: a missing, late, cancelled, or failed publication immediately
-  preserves the existing local Buildx/cache build path. Snapshot pulls run in
-  parallel, and lane observability records attempted sources, selected commit SHAs,
-  timing, and fallback state. For pull requests where only `python/apps/azents`
+  a compatible first-parent ancestor. A same-repository pull request, `main` push, or
+  explicit workflow dispatch may additionally reuse an already-published snapshot
+  tagged for the exact current commit SHA. Snapshot availability is never a workflow
+  dependency or wait condition: a missing, late, cancelled, or failed publication
+  immediately preserves the existing local Buildx/cache build path. Snapshot pulls
+  run in parallel. The direct snapshot attempt starts immediately after checkout and
+  overlaps uv installation, Python setup, dependency synchronization, and plan
+  download. A durable status handoff joins the attempt before ancestor fallback and
+  Buildx selection; an abnormal exit or nonzero result fails the preparation step
+  rather than silently bypassing fallback decisions. The direct attempt also
+  best-effort pre-pulls the exact public fixture images already required by the lane,
+  overlapping their network transfer without replacing the ordinary Testcontainers
+  pull fallback. Lane observability records snapshot sources, selected commit SHAs,
+  fallback state, and snapshot and prerequisite image timings. For pull requests
+  where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
   lane may pull a dependency-compatible predecessor or bounded ancestor Server
@@ -196,7 +204,11 @@ Always-on required CI does not depend on external credentials.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
-  isolated same-SHA CI measurement without mutating live infrastructure.
+  isolated same-SHA CI measurement without mutating live infrastructure. Snapshot
+  publications on non-main refs with downstream dispatch disabled use OCI
+  zstd-compressed layers to reduce transfer volume for isolated branch measurements.
+  Main-ref publication and any downstream-dispatched publication retain the default
+  gzip-compatible registry output.
 - CI workflow dispatch keeps automatic image-change detection by default. Its
   opt-in `force_current_snapshots: true` diagnostic treats all required images as
   changed so an already-published exact-current-SHA set and the unchanged local
@@ -211,11 +223,15 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files only within a suite using the latest successful timing baseline,
-  with a deterministic source-based fallback. The first pull request run starts from
-  the latest accessible `main` baseline. A successful internal pull request run saves
-  its observed timing under the head commit SHA, and later runs or attempts of that
-  same SHA restore the newest SHA-specific timing before falling back to `main`.
+  It balances files only within a suite using the per-file call-duration
+  high-watermark from that suite's latest three successful timing samples, with a
+  deterministic source-based fallback. A collector that inherits reusable scenarios
+  and therefore has no local test bodies may declare an explicit positive fallback
+  weight in source; observed timing still takes precedence. The first pull request run starts from the
+  latest accessible rolling `main` history. A successful internal pull request run
+  saves its observed timing under the head commit SHA, and later runs or attempts of
+  that same SHA restore the newest SHA-specific rolling history before falling back
+  to `main`.
   Fork pull requests do not publish timing caches. Required uses four lanes; Web uses
   one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
@@ -223,19 +239,36 @@ Always-on required CI does not depend on external credentials.
   file, the planner projects that file's historical per-test call timings onto the
   new collection files so the first plan retains representative weights.
   Deterministic External Channel collection uses
-  `test_external_channel_management.py` for Slack HTTP, connection management, and
-  provider-native progress; `test_external_channel_slack_socket.py` for Socket Mode;
+  `test_external_channel_management.py` for Slack HTTP admission, binding, and
+  connection management; `test_external_channel_workspace_management.py` for
+  multi-app workspace and mention-selector management;
+  `test_external_channel_provider_progress.py` for provider-native progress;
+  `test_external_channel_slack_socket.py` for Socket Mode;
   `test_external_channel_discord_gateway_binding.py` for Gateway location wait and
   binding; `test_external_channel_discord_configured_provisioning.py` for durable
   conversation provisioning; `test_external_channel_discord_unmentioned_activity.py`
   for unmentioned activity and typing recovery; and
   `test_external_channel_discord_journeys.py` for activation, commands, components,
   and lifecycle. These files collect reusable implementations from
-  `external_channel_scenarios.py`.
+  `external_channel_scenarios.py`. Subagent behavior uses
+  `test_subagents.py` for lifecycle, wait, interrupt, and failure projection, while
+  `test_subagent_capacity.py` collects mailbox and bounded-capacity scenarios from
+  the reusable scenario class in `test_subagents.py`. Historical Subagent timings are
+  projected by test name so the split is balanced on its first CI plan. External
+  Channel shared Agent setup creates the required Workspace, model integration,
+  Runtime Profile, and Agent records without eagerly
+  starting every Agent Runtime. Journeys that execute Agent work rely on the product's
+  on-demand Runtime lifecycle and retain their existing observable completion,
+  recovery, delivery, and typing boundaries; management-only journeys avoid unrelated
+  Runtime startup entirely.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
-  and Engine Worker then start concurrently; their ordinary launchers retain the
-  current-revision check without competing to own an upgrade.
+  and Engine Worker then start concurrently through the launchers' underlying
+  uvicorn or Python entrypoints, avoiding repeated schema queries after the explicit
+  migration dependency has completed. Function-scoped External Channel Gateway
+  processes use the same direct Python entrypoint after the already-migrated Public
+  API dependency is ready. Production image defaults and shell launchers retain their
+  current-revision validation.
 - E2E image preparation and the independent PostgreSQL, RustFS, Valkey, deterministic
   model, GitHub validation, and Slack provider prerequisites start concurrently within
   one session fixture. Real dependencies remain ordered: the OpenAI proxy starts only
@@ -259,6 +292,8 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider images whose complete build inputs are unchanged.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and
   manually dispatched measurements use the checked-out commit's first parent.
+  Same-repository pull requests also try an already-published snapshot for the exact
+  pull request head commit SHA for each changed image before building it locally.
   The direct predecessor is the fast path. When an unchanged image's exact tag is
   unavailable, the lane fetches bounded first-parent history and may reuse the nearest
   available immutable ancestor only when `git diff` proves that image's complete
@@ -267,7 +302,9 @@ Always-on required CI does not depend on external credentials.
   retain both direct and fallback pull evidence. Authentication, history fetch,
   compatibility, availability, pull, or local-tag failure falls back to the existing
   current-worktree BuildKit build for the affected image. Changed image components
-  always build the current worktree.
+  without an exact-current snapshot build the current worktree. Manual Snapshot
+  runs on non-main refs publish immutable unique, SHA, and run tags without moving
+  the shared `dev-main` tag; main-ref runs continue publishing `dev-main`.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -410,6 +447,25 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-11** (spec_version 56) — Allowed same-repository pull requests to
+  consume already-published exact-current-SHA image snapshots with immediate
+  current-worktree fallback, and prevented non-main manual Snapshot runs from
+  moving the shared `dev-main` package tag.
+- **2026-09-11** (spec_version 55) — Split the remaining External Channel management
+  collector into connection, workspace, and provider-progress files, projected both
+  legacy and immediately prior timing paths, and overlapped best-effort prerequisite
+  image pulls with immutable snapshot preparation while preserving fixture fallback.
+- **2026-09-11** (spec_version 54) — Split Subagent lifecycle and capacity collectors,
+  projected historical per-test timings, and added finite explicit source fallback
+  weights for indirectly collected scenarios.
+- **2026-09-10** (spec_version 53) — Removed eager Runtime startup from shared
+  deterministic External Channel Agent setup. Runtime-bearing journeys retain
+  product-owned on-demand startup and observable completion boundaries, while
+  management-only journeys no longer prepare unrelated Runtimes.
+- **2026-09-10** (spec_version 52) — Replaced single-sample E2E lane weights with
+  per-file high-watermarks from each suite's latest three successful timing samples
+  while preserving deterministic fallback, same-SHA cache precedence, suite
+  ownership, lane count, and file coverage.
 - **2026-09-10** (spec_version 51) — Added dependency-compatible Server snapshot
   source overlays for application-source-only pull request changes, with complete
   application replacement, exact-current-snapshot precedence, deterministic

@@ -1217,198 +1217,6 @@ class TestSubagents:
         ]
         assert len(completed_results) == 1
 
-    def test_targetless_wait_observes_any_child_mailbox_message(
-        self,
-        azents_public_server_url: str,
-        barrier_subagent_setup: _SharedSubagentSetup,
-        mock_openai_url: str,
-    ) -> None:
-        """Observe one child message while every descendant remains active."""
-        _reset_mock_openai(mock_openai_url)
-        workspace = barrier_subagent_setup.workspace
-        agent_id = barrier_subagent_setup.barrier_agent_id
-        release_file_path = barrier_subagent_setup.barrier_release_file_path
-        azents_engine_worker_container = barrier_subagent_setup.engine_worker_container
-        root_session_id = _team_primary_session(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-        )
-
-        _run_message(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            message=_MAILBOX_MESSAGE,
-        )
-        _wait_for_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            expected=_MAILBOX_IDLE_SPAWN_RESPONSE,
-        )
-        _, idle = _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="idle_child",
-            expected_status="running",
-            expected_unread=False,
-        )
-        _wait_for_session_run_state(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            expected="idle",
-        )
-
-        _run_message(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            message=_MAILBOX_WAIT_MESSAGE,
-        )
-        _, sender = _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="sender_child",
-            expected_status="running",
-            expected_unread=False,
-        )
-        _wait_for_tool_result_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=sender.agent_session_id,
-            call_id=_MAILBOX_SENDER_CALL_ID,
-            expected="queued",
-        )
-        _wait_for_release_barriers(
-            azents_engine_worker_container,
-            release_file_path,
-            baseline_count=barrier_subagent_setup.barrier_log_baseline,
-            expected_count=2,
-        )
-        wait_event = _wait_for_tool_result_outcome(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            call_id=_MAILBOX_WAIT_CALL_ID,
-            outcome="activity",
-        )
-        _wait_for_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            expected=_MAILBOX_RESPONSE,
-        )
-        _set_release_file(
-            azents_engine_worker_container,
-            release_file_path,
-            present=True,
-        )
-        _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="sender_child",
-            expected_status="completed",
-            expected_unread=True,
-        )
-        _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="idle_child",
-            expected_status="completed",
-            expected_unread=True,
-        )
-        sender_completed_event = _wait_for_run_complete(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=sender.agent_session_id,
-        )
-        idle_completed_event = _wait_for_run_complete(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=idle.agent_session_id,
-        )
-        wait_order = _event_order_key(wait_event)
-        assert wait_order < _event_order_key(sender_completed_event)
-        assert wait_order < _event_order_key(idle_completed_event)
-        _wait_for_session_run_state(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            expected="idle",
-        )
-
-        _run_message(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            message=_MAILBOX_PROMOTION_MESSAGE,
-        )
-        _wait_for_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            expected=_MAILBOX_PROMOTION_RESPONSE,
-        )
-        _wait_for_mock_openai_journal_content(
-            mock_openai_url,
-            "\n".join(
-                [
-                    "Message Type: MESSAGE",
-                    "Task name: /root",
-                    "Sender: /root/sender_child",
-                    "Payload:",
-                    "Subagent intermediate mailbox message.",
-                ]
-            ),
-        )
-        _wait_for_agent_result(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            source_path="/root/sender_child",
-            run_status="completed",
-        )
-        _wait_for_agent_result(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            source_path="/root/idle_child",
-            run_status="completed",
-        )
-        _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="sender_child",
-            expected_status="completed",
-            expected_unread=False,
-        )
-        _wait_for_child_node(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-            name="idle_child",
-            expected_status="completed",
-            expected_unread=False,
-        )
-
     def test_targetless_wait_without_descendants_returns_immediately(
         self,
         azents_public_server_url: str,
@@ -1739,6 +1547,202 @@ class TestSubagents:
             session_id=root_session_id,
             name="failed_child",
             expected_status="errored",
+            expected_unread=False,
+        )
+
+
+class SubagentCapacityScenarios:
+    """Reusable mailbox and capacity scenarios for a separate collector."""
+
+    def test_targetless_wait_observes_any_child_mailbox_message(
+        self,
+        azents_public_server_url: str,
+        barrier_subagent_setup: _SharedSubagentSetup,
+        mock_openai_url: str,
+    ) -> None:
+        """Observe one child message while every descendant remains active."""
+        _reset_mock_openai(mock_openai_url)
+        workspace = barrier_subagent_setup.workspace
+        agent_id = barrier_subagent_setup.barrier_agent_id
+        release_file_path = barrier_subagent_setup.barrier_release_file_path
+        azents_engine_worker_container = barrier_subagent_setup.engine_worker_container
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_MAILBOX_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_MAILBOX_IDLE_SPAWN_RESPONSE,
+        )
+        _, idle = _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_MAILBOX_WAIT_MESSAGE,
+        )
+        _, sender = _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=sender.agent_session_id,
+            call_id=_MAILBOX_SENDER_CALL_ID,
+            expected="queued",
+        )
+        _wait_for_release_barriers(
+            azents_engine_worker_container,
+            release_file_path,
+            baseline_count=barrier_subagent_setup.barrier_log_baseline,
+            expected_count=2,
+        )
+        wait_event = _wait_for_tool_result_outcome(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_MAILBOX_WAIT_CALL_ID,
+            outcome="activity",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_MAILBOX_RESPONSE,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=True,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        sender_completed_event = _wait_for_run_complete(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=sender.agent_session_id,
+        )
+        idle_completed_event = _wait_for_run_complete(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=idle.agent_session_id,
+        )
+        wait_order = _event_order_key(wait_event)
+        assert wait_order < _event_order_key(sender_completed_event)
+        assert wait_order < _event_order_key(idle_completed_event)
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_MAILBOX_PROMOTION_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_MAILBOX_PROMOTION_RESPONSE,
+        )
+        _wait_for_mock_openai_journal_content(
+            mock_openai_url,
+            "\n".join(
+                [
+                    "Message Type: MESSAGE",
+                    "Task name: /root",
+                    "Sender: /root/sender_child",
+                    "Payload:",
+                    "Subagent intermediate mailbox message.",
+                ]
+            ),
+        )
+        _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/sender_child",
+            run_status="completed",
+        )
+        _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/idle_child",
+            run_status="completed",
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="completed",
+            expected_unread=False,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="completed",
             expected_unread=False,
         )
 

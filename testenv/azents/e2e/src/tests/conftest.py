@@ -1489,6 +1489,22 @@ def azents_core_service_containers(
         )
         .with_name(f"azents-public-server-{random_secret(4)}")
         .with_network_aliases("azents-public-server")
+        .with_command(
+            [
+                "uvicorn",
+                "apiserver:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8010",
+                "--ws",
+                "websockets-sansio",
+                "--ws-ping-interval",
+                "30",
+                "--ws-ping-timeout",
+                "60",
+            ]
+        )
         .with_exposed_ports(8010)
     )
     public_container = _configure_azents_server_container(
@@ -1509,7 +1525,16 @@ def azents_core_service_containers(
         )
         .with_name(f"azents-admin-server-{random_secret(4)}")
         .with_network_aliases("azents-admin-server")
-        .with_command(["./bin/adminserver.sh"])
+        .with_command(
+            [
+                "uvicorn",
+                "adminserver:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8011",
+            ]
+        )
         .with_exposed_ports(8011)
     )
     admin_container = (
@@ -1550,7 +1575,7 @@ def azents_core_service_containers(
         )
         .with_name(f"azents-engine-worker-{random_secret(4)}")
         .with_network_aliases("azents-engine-worker")
-        .with_command(["./bin/engineworker.sh"])
+        .with_command(["python", "src/cli/engineworker.py"])
         .with_exposed_ports(8012)
         .with_volume_mapping("/var/run/docker.sock", "/var/run/docker.sock", "rw")
     )
@@ -1713,7 +1738,7 @@ def azents_external_channel_gateway_factory(
             )
             .with_name(f"azents-external-channel-gateway-{random_secret(4)}")
             .with_network_aliases("azents-external-channel-gateway")
-            .with_command(["./bin/externalchannelgateway.sh"])
+            .with_command(["python", "src/cli/externalchannelgateway.py"])
             .with_exposed_ports(8013)
         )
         container = (
