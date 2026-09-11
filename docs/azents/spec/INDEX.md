@@ -46,6 +46,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-10 | 18 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-08 | 33 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-10 | 20 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-11 | 57 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 57 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
