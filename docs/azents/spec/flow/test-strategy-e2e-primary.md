@@ -12,6 +12,7 @@ code_paths:
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
   - .github/workflows/snapshot.yaml
+  - azents.Dockerfile
   - azents-e2e-server-overlay.Dockerfile
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
@@ -27,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-11
+last_verified_at: 2026-09-12
 spec_version: 57
 ---
 
@@ -447,6 +448,11 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-11** (spec_version 57) — Overlapped exact-SHA snapshot preparation
+  with lane dependency setup through a durable fail-closed handoff, used
+  zstd-compressed registry output for isolated non-main snapshot publications,
+  and started already-migrated E2E services through their direct process
+  entrypoints.
 - **2026-09-11** (spec_version 56) — Allowed same-repository pull requests to
   consume already-published exact-current-SHA image snapshots with immediate
   current-worktree fallback, and prevented non-main manual Snapshot runs from
