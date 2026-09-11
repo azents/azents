@@ -8,6 +8,8 @@ from pytest_alembic import tests
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 
+from azents.rdb.models.base import RDBModel
+
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
     "31b9ee9c30f30c920a7985459be854c226bd061a338d1098d3d1cfab53477b32"
 )
@@ -178,6 +180,22 @@ def test_single_head_revision(alembic_runner: MigrationContext) -> None:
 def test_upgrade(alembic_runner: MigrationContext) -> None:
     """Require a complete base-to-head upgrade."""
     tests.test_upgrade(alembic_runner)
+
+
+def test_all_check_constraints_are_named(
+    alembic_runner: MigrationContext,
+) -> None:
+    """Keep named CHECK constraint autogeneration safe to enable."""
+    alembic_runner.migrate_up_to("head")
+    check_constraints = [
+        constraint
+        for table in RDBModel.metadata.tables.values()
+        for constraint in table.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    ]
+
+    assert check_constraints
+    assert all(constraint.name is not None for constraint in check_constraints)
 
 
 def test_baseline_schema_and_seed_state(
