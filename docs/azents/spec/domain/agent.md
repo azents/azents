@@ -42,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
+  - python/apps/azents/src/azents/services/model_options.py
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/runtime_profile_resolution/**
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**

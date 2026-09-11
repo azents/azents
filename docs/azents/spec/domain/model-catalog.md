@@ -27,6 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent/__init__.py
   - python/apps/azents/src/azents/services/workspace_model_settings/__init__.py
   - python/apps/azents/src/azents/services/model_listing/providers.py
+  - python/apps/azents/src/azents/services/model_options.py
   - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
