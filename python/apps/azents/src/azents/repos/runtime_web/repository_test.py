@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -121,7 +122,7 @@ async def test_concurrent_identical_prepare_replays_one_committed_result(
     """Concurrent identical operations serialize before receipt lookup."""
     del latest_db_schema
     async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
-        workspace_id, agent_id, session_id, _ = await _authority_fixture(
+        workspace_id, agent_id, session_id, user_id = await _authority_fixture(
             setup,
             handle="runtime-web-concurrent",
             email="runtime-web-concurrent@example.com",
@@ -154,6 +155,86 @@ async def test_concurrent_identical_prepare_replays_one_committed_result(
             configuration = await cleanup.get(RDBRuntimeWebAuthConfiguration, 1)
             assert configuration is not None
             configuration.enabled = False
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM runtime_web_operation_receipts
+                    WHERE actor_id = :agent_id
+                    """
+                ),
+                {"agent_id": agent_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM runtime_web_endpoints
+                    WHERE agent_session_id = :session_id
+                    """
+                ),
+                {"session_id": session_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM runtime_web_quota_scopes
+                    WHERE subject_id = :agent_id OR subject_id = :session_id
+                    """
+                ),
+                {"agent_id": agent_id, "session_id": session_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    UPDATE session_agent_contexts
+                    SET root_session_agent_id = NULL
+                    WHERE agent_id = :agent_id AND workspace_id = :workspace_id
+                    """
+                ),
+                {"agent_id": agent_id, "workspace_id": workspace_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM session_agents
+                    WHERE agent_session_id = :session_id
+                    """
+                ),
+                {"session_id": session_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM session_agent_contexts
+                    WHERE agent_id = :agent_id AND workspace_id = :workspace_id
+                    """
+                ),
+                {"agent_id": agent_id, "workspace_id": workspace_id},
+            )
+            await cleanup.execute(
+                sa.text("DELETE FROM agent_sessions WHERE id = :session_id"),
+                {"session_id": session_id},
+            )
+            await cleanup.execute(
+                sa.text("DELETE FROM agents WHERE id = :agent_id"),
+                {"agent_id": agent_id},
+            )
+            await cleanup.execute(
+                sa.text(
+                    """
+                    DELETE FROM llm_provider_integrations
+                    WHERE workspace_id = :workspace_id
+                    """
+                ),
+                {"workspace_id": workspace_id},
+            )
+            await cleanup.execute(
+                sa.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.execute(
+                sa.text("DELETE FROM workspaces WHERE id = :workspace_id"),
+                {"workspace_id": workspace_id},
+            )
             await cleanup.commit()
 
 
