@@ -12255,6 +12255,532 @@
         }
       }
     },
+    "/runtime-web/v1/services/{endpoint_id}": {
+      "get": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Get Service By Endpoint Id",
+        "description": "Return one authorized service projection by opaque endpoint ID.",
+        "operationId": "runtime_web_v1_get_service_by_endpoint_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Endpoint Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/approve": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Approve Runtime Web Request By Endpoint Id",
+        "description": "Approve one exact pending request reached through a trusted endpoint ID.",
+        "operationId": "runtime_web_v1_approve_runtime_web_request_by_endpoint_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/reject": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Reject Runtime Web Request By Endpoint Id",
+        "description": "Reject one exact pending request reached through a trusted endpoint ID.",
+        "operationId": "runtime_web_v1_reject_runtime_web_request_by_endpoint_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Cancel Runtime Web Request By Endpoint Id",
+        "description": "Cancel one exact pending request reached through a trusted endpoint ID.",
+        "operationId": "runtime_web_v1_cancel_runtime_web_request_by_endpoint_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/services/{endpoint_id}/cycles/{cycle_id}/close": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Close Runtime Web Cycle By Endpoint Id",
+        "description": "Close one exact cycle reached through a trusted endpoint ID.",
+        "operationId": "runtime_web_v1_close_runtime_web_cycle_by_endpoint_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cycle Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebCloseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/requests": {
       "post": {
         "tags": [

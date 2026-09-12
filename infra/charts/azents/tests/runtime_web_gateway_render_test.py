@@ -85,6 +85,18 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
     assert "AZ_RUNTIME_CONTROL_TRUSTED_GATEWAY_PEER_IDENTITIES" in rendered
     assert "AZ_RUNTIME_CONTROL_TRUSTED_CONTROL_PEER_IDENTITIES" in rendered
     assert "name: AZ_RUNTIME_WEB_GATEWAY_IDENTITY_LIFETIME_SECONDS" in rendered
+    assert 'RUNTIME_WEB_GATEWAY_ENABLED: "true"' in rendered
+    assert 'RUNTIME_WEB_GATEWAY_AUTH_MODE: "shared_cookie"' in rendered
+    assert 'RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN: "https://app.example.com"' in rendered
+    assert (
+        'RUNTIME_WEB_GATEWAY_BROKER_ORIGIN: "https://auth.services.example.com"'
+        in rendered
+    )
+    assert 'RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN: "example.com"' in rendered
+    assert (
+        'RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME: "__Http-Azents-Runtime-Web"'
+        in rendered
+    )
 
 
 def test_gateway_requires_the_trusted_control_transport() -> None:

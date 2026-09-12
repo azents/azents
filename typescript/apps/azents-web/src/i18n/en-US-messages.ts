@@ -19,6 +19,7 @@ import oauth from "../../messages/en-US/oauth.json";
 import oauthCallback from "../../messages/en-US/oauthCallback.json";
 import runtimeLifecycle from "../../messages/en-US/runtimeLifecycle.json";
 import runtimeMetrics from "../../messages/en-US/runtimeMetrics.json";
+import runtimeWeb from "../../messages/en-US/runtimeWeb.json";
 import security from "../../messages/en-US/security.json";
 import skills from "../../messages/en-US/skills.json";
 import useCases from "../../messages/en-US/useCases.json";
@@ -48,6 +49,7 @@ const messages = composeMessages([
   ["oauthCallback", oauthCallback],
   ["runtimeLifecycle", runtimeLifecycle],
   ["runtimeMetrics", runtimeMetrics],
+  ["runtimeWeb", runtimeWeb],
   ["security", security],
   ["skills", skills],
   ["useCases", useCases],

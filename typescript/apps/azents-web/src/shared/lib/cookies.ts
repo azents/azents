@@ -9,14 +9,14 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { getServerConfig } from "@/config/server";
+import { authCookiePolicy } from "./auth-cookie-policy";
+import type { AuthCookieNames } from "./auth-cookie-policy";
 
-// Cookie names
-export const COOKIE_NAMES = {
-  ACCESS_TOKEN: "az-token",
-  REFRESH_TOKEN: "az-refresh",
-  /** Access token expiration time (Unix ms) */
-  EXPIRES_AT: "az-token-expires-at",
-} as const;
+export type { AuthCookieNames } from "./auth-cookie-policy";
+
+export function getAuthCookieNames(): AuthCookieNames {
+  return authCookiePolicy(getServerConfig().nodeEnv).names;
+}
 
 /** Access token information read from cookie */
 export interface StoredAccessToken {
@@ -38,8 +38,9 @@ export interface AuthTokens {
  */
 export async function getAccessToken(): Promise<StoredAccessToken | null> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAMES.ACCESS_TOKEN)?.value;
-  const expiresAtStr = cookieStore.get(COOKIE_NAMES.EXPIRES_AT)?.value;
+  const names = getAuthCookieNames();
+  const token = cookieStore.get(names.ACCESS_TOKEN)?.value;
+  const expiresAtStr = cookieStore.get(names.EXPIRES_AT)?.value;
 
   if (!token || !expiresAtStr) {
     return null;
@@ -58,7 +59,7 @@ export async function getAccessToken(): Promise<StoredAccessToken | null> {
  */
 export async function getRefreshToken(): Promise<string | null> {
   const cookieStore = await cookies();
-  return cookieStore.get(COOKIE_NAMES.REFRESH_TOKEN)?.value ?? null;
+  return cookieStore.get(getAuthCookieNames().REFRESH_TOKEN)?.value ?? null;
 }
 
 /**
@@ -114,30 +115,27 @@ export function setAuthCookiesToHeaders(
   resHeaders: Headers,
   tokens: AuthTokens,
 ): void {
-  const isProduction = getServerConfig().nodeEnv === "production";
+  const policy = authCookiePolicy(getServerConfig().nodeEnv);
+  const names = policy.names;
   const expiresAt = Date.now() + tokens.expiresInSeconds * 1000;
 
   const commonOptions = {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: "lax" as const,
+    secure: policy.secure,
+    sameSite: policy.sameSite,
     path: "/",
   };
 
   // Access Token cookie (no maxAge — expiration is managed by EXPIRES_AT cookie)
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(
-      COOKIE_NAMES.ACCESS_TOKEN,
-      tokens.accessToken,
-      commonOptions,
-    ),
+    buildCookieString(names.ACCESS_TOKEN, tokens.accessToken, commonOptions),
   );
 
   // Refresh Token cookie (30 days)
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(COOKIE_NAMES.REFRESH_TOKEN, tokens.refreshToken, {
+    buildCookieString(names.REFRESH_TOKEN, tokens.refreshToken, {
       ...commonOptions,
       maxAge: 30 * 24 * 60 * 60,
     }),
@@ -146,11 +144,7 @@ export function setAuthCookiesToHeaders(
   // Expiration time cookie (httpOnly because JavaScript does not need to read it)
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(
-      COOKIE_NAMES.EXPIRES_AT,
-      String(expiresAt),
-      commonOptions,
-    ),
+    buildCookieString(names.EXPIRES_AT, String(expiresAt), commonOptions),
   );
 }
 
@@ -158,26 +152,27 @@ export function setAuthCookiesToHeaders(
  * Delete authentication cookies through Response Headers.
  */
 export function clearAuthCookiesToHeaders(resHeaders: Headers): void {
-  const isProduction = getServerConfig().nodeEnv === "production";
+  const policy = authCookiePolicy(getServerConfig().nodeEnv);
+  const names = policy.names;
 
   const clearOptions = {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: "lax" as const,
+    secure: policy.secure,
+    sameSite: policy.sameSite,
     path: "/",
     maxAge: 0,
   };
 
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(COOKIE_NAMES.ACCESS_TOKEN, "", clearOptions),
+    buildCookieString(names.ACCESS_TOKEN, "", clearOptions),
   );
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(COOKIE_NAMES.REFRESH_TOKEN, "", clearOptions),
+    buildCookieString(names.REFRESH_TOKEN, "", clearOptions),
   );
   resHeaders.append(
     "Set-Cookie",
-    buildCookieString(COOKIE_NAMES.EXPIRES_AT, "", clearOptions),
+    buildCookieString(names.EXPIRES_AT, "", clearOptions),
   );
 }

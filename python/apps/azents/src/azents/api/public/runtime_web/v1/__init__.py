@@ -1,5 +1,6 @@
 """Runtime Web service control v1 Public API."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from textwrap import dedent
 from typing import Annotated, Any, NoReturn, assert_never
@@ -24,6 +25,7 @@ from azents.services.runtime_web.data import (
     RuntimeWebNotFound,
     RuntimeWebOperation,
     RuntimeWebQuotaExceeded,
+    RuntimeWebServiceProjection,
 )
 from azents.services.runtime_web.gateway_auth import RuntimeWebGatewayAuthService
 from azents.services.runtime_web.gateway_auth_deps import (
@@ -57,6 +59,7 @@ from .data import (
 
 router = APIRouter()
 RuntimeWebPort = Annotated[int, Path(ge=1, le=65_535)]
+RuntimeWebEndpointId = Annotated[str, Path(min_length=32, max_length=32)]
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_403_FORBIDDEN: {
@@ -363,6 +366,223 @@ async def get_runtime_web_service_projection(
         user_id=member.user_id,
         port=port,
         actor=_user_actor(member),
+    )
+    match result:
+        case Success(value):
+            return RuntimeWebServiceResponse.convert_from(value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@router.get(
+    "/services/{endpoint_id}",
+    response_model=RuntimeWebServiceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def get_service_by_endpoint_id(
+    endpoint_id: RuntimeWebEndpointId,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebServiceResponse:
+    """Return one authorized service projection by opaque endpoint ID."""
+    actor = RuntimeWebActor(
+        kind=RuntimeWebRequesterKind.USER,
+        actor_id=current_user.user_id,
+        execution_id=current_user.session_id,
+        call_id=None,
+    )
+    result = await service.get_service_by_endpoint_id(
+        endpoint_id=endpoint_id,
+        user_id=current_user.user_id,
+        actor=actor,
+    )
+    match result:
+        case Success(value):
+            return RuntimeWebServiceResponse.convert_from(value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@dataclass(frozen=True)
+class _EndpointContext:
+    actor: RuntimeWebActor
+    projection: RuntimeWebServiceProjection
+
+
+async def _endpoint_context(
+    *,
+    endpoint_id: str,
+    current_user: CurrentUser,
+    service: RuntimeWebService,
+) -> _EndpointContext:
+    actor = RuntimeWebActor(
+        kind=RuntimeWebRequesterKind.USER,
+        actor_id=current_user.user_id,
+        execution_id=current_user.session_id,
+        call_id=None,
+    )
+    result = await service.get_service_by_endpoint_id(
+        endpoint_id=endpoint_id,
+        user_id=current_user.user_id,
+        actor=actor,
+    )
+    match result:
+        case Success(value):
+            return _EndpointContext(actor=actor, projection=value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@router.post(
+    "/services/{endpoint_id}/requests/{request_id}/approve",
+    response_model=RuntimeWebServiceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def approve_runtime_web_request_by_endpoint_id(
+    endpoint_id: RuntimeWebEndpointId,
+    request_id: str,
+    request_body: RuntimeWebApprovalRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebServiceResponse:
+    """Approve one exact pending request reached through a trusted endpoint ID."""
+    context = await _endpoint_context(
+        endpoint_id=endpoint_id,
+        current_user=current_user,
+        service=service,
+    )
+    endpoint = context.projection.endpoint
+    result = await service.approve_request(
+        workspace_id=endpoint.workspace_id,
+        agent_id=endpoint.agent_id,
+        session_id=endpoint.agent_session_id,
+        user_id=current_user.user_id,
+        actor=context.actor,
+        request_id=request_id,
+        expected_revision=request_body.expected_revision,
+        operation=_operation(request_body.operation_key),
+        duration_seconds=request_body.duration_seconds,
+        duration_configuration_revision=(request_body.duration_configuration_revision),
+    )
+    match result:
+        case Success(value):
+            return RuntimeWebServiceResponse.convert_from(value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@router.post(
+    "/services/{endpoint_id}/requests/{request_id}/reject",
+    response_model=RuntimeWebServiceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def reject_runtime_web_request_by_endpoint_id(
+    endpoint_id: RuntimeWebEndpointId,
+    request_id: str,
+    request_body: RuntimeWebExpectedRevisionRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebServiceResponse:
+    """Reject one exact pending request reached through a trusted endpoint ID."""
+    context = await _endpoint_context(
+        endpoint_id=endpoint_id,
+        current_user=current_user,
+        service=service,
+    )
+    endpoint = context.projection.endpoint
+    result = await service.reject_request(
+        workspace_id=endpoint.workspace_id,
+        agent_id=endpoint.agent_id,
+        session_id=endpoint.agent_session_id,
+        user_id=current_user.user_id,
+        actor=context.actor,
+        request_id=request_id,
+        expected_revision=request_body.expected_revision,
+        operation=_operation(request_body.operation_key),
+    )
+    match result:
+        case Success(value):
+            return RuntimeWebServiceResponse.convert_from(value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@router.post(
+    "/services/{endpoint_id}/requests/{request_id}/cancel",
+    response_model=RuntimeWebServiceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def cancel_runtime_web_request_by_endpoint_id(
+    endpoint_id: RuntimeWebEndpointId,
+    request_id: str,
+    request_body: RuntimeWebExpectedRevisionRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebServiceResponse:
+    """Cancel one exact pending request reached through a trusted endpoint ID."""
+    context = await _endpoint_context(
+        endpoint_id=endpoint_id,
+        current_user=current_user,
+        service=service,
+    )
+    endpoint = context.projection.endpoint
+    result = await service.cancel_request(
+        workspace_id=endpoint.workspace_id,
+        agent_id=endpoint.agent_id,
+        session_id=endpoint.agent_session_id,
+        user_id=current_user.user_id,
+        actor=context.actor,
+        request_id=request_id,
+        expected_revision=request_body.expected_revision,
+        operation=_operation(request_body.operation_key),
+    )
+    match result:
+        case Success(value):
+            return RuntimeWebServiceResponse.convert_from(value)
+        case Failure(error):
+            _raise_runtime_web_error(error)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@router.post(
+    "/services/{endpoint_id}/cycles/{cycle_id}/close",
+    response_model=RuntimeWebServiceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def close_runtime_web_cycle_by_endpoint_id(
+    endpoint_id: RuntimeWebEndpointId,
+    cycle_id: str,
+    request_body: RuntimeWebCloseRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebServiceResponse:
+    """Close one exact cycle reached through a trusted endpoint ID."""
+    context = await _endpoint_context(
+        endpoint_id=endpoint_id,
+        current_user=current_user,
+        service=service,
+    )
+    endpoint = context.projection.endpoint
+    result = await service.close_cycle(
+        workspace_id=endpoint.workspace_id,
+        agent_id=endpoint.agent_id,
+        session_id=endpoint.agent_session_id,
+        user_id=current_user.user_id,
+        actor=context.actor,
+        cycle_id=cycle_id,
+        expected_endpoint_revision=request_body.expected_endpoint_revision,
+        operation=_operation(request_body.operation_key),
     )
     match result:
         case Success(value):

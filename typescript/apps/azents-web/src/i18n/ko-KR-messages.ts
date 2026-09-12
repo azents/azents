@@ -19,6 +19,7 @@ import oauth from "../../messages/ko-KR/oauth.json";
 import oauthCallback from "../../messages/ko-KR/oauthCallback.json";
 import runtimeLifecycle from "../../messages/ko-KR/runtimeLifecycle.json";
 import runtimeMetrics from "../../messages/ko-KR/runtimeMetrics.json";
+import runtimeWeb from "../../messages/ko-KR/runtimeWeb.json";
 import security from "../../messages/ko-KR/security.json";
 import skills from "../../messages/ko-KR/skills.json";
 import useCases from "../../messages/ko-KR/useCases.json";
@@ -49,6 +50,7 @@ const messages = composeMessages([
   ["oauthCallback", oauthCallback],
   ["runtimeLifecycle", runtimeLifecycle],
   ["runtimeMetrics", runtimeMetrics],
+  ["runtimeWeb", runtimeWeb],
   ["security", security],
   ["skills", skills],
   ["useCases", useCases],

@@ -3,11 +3,18 @@
  * - tRPC endpoint for Next.js App Router
  */
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { rejectUntrustedMainWebOrigin } from "@/shared/lib/request-origin";
 import { createContext } from "@/trpc/context";
 import { appRouter } from "@/trpc/routers/_app";
 
-const handler = (req: Request) =>
-  fetchRequestHandler({
+const handler = (req: Request): Promise<Response> => {
+  if (req.method !== "GET") {
+    const rejection = rejectUntrustedMainWebOrigin(req);
+    if (rejection !== null) {
+      return Promise.resolve(rejection);
+    }
+  }
+  return fetchRequestHandler({
     endpoint: "/api/trpc",
     req,
     router: appRouter,
@@ -19,5 +26,6 @@ const handler = (req: Request) =>
       }
     },
   });
+};
 
 export { handler as GET, handler as POST };

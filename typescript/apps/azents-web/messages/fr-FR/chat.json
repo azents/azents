@@ -146,6 +146,7 @@
     "subtitle": "Fichiers Agent Workspace et projets",
     "openPanel": "Ouvrir l'agent workspace",
     "workspaceTab": "Agent Runtime",
+    "servicesTab": "Services",
     "metricsTab": "Métriques",
     "settingsTab": "Paramètres",
     "settingsTitle": "Paramètres du runtime",
@@ -394,7 +395,8 @@
       "addScheduledTask": "Tâche planifiée créée",
       "listScheduledTasks": "Tâches planifiées listées",
       "deleteScheduledTask": "Tâche planifiée supprimée",
-      "submitScheduledTaskResult": "Résultat de la tâche planifiée envoyé"
+      "submitScheduledTaskResult": "Résultat de la tâche planifiée envoyé",
+      "runtimeWeb": "Service web géré"
     },
     "actionRunning": {
       "read": "Lecture du fichier en cours",
@@ -434,7 +436,8 @@
       "addScheduledTask": "Création de la tâche planifiée en cours",
       "listScheduledTasks": "Liste des tâches planifiées en cours",
       "deleteScheduledTask": "Suppression de la tâche planifiée en cours",
-      "submitScheduledTaskResult": "Envoi du résultat de la tâche planifiée en cours"
+      "submitScheduledTaskResult": "Envoi du résultat de la tâche planifiée en cours",
+      "runtimeWeb": "Gestion du service web"
     },
     "field": {
       "source": "Source",
@@ -473,7 +476,9 @@
       "nextRun": "Prochaine exécution",
       "taskId": "ID de tâche",
       "registration": "Enregistrement du canal",
-      "recovered": "Récupéré"
+      "recovered": "Récupéré",
+      "port": "Port",
+      "url": "URL"
     },
     "changeAction": {
       "add": "Ajouté",

@@ -450,6 +450,36 @@ class RuntimeWebService:
                 return Failure(RuntimeWebNotFound())
             return Success(await self._projection(session, endpoint, configuration))
 
+    async def get_service_by_endpoint_id(
+        self,
+        *,
+        endpoint_id: str,
+        user_id: str,
+        actor: RuntimeWebActor,
+    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
+        """Get one authorized service projection by opaque endpoint ID."""
+        async with self.session_manager() as session:
+            endpoint = await self.repository.get_endpoint_by_id(
+                session,
+                endpoint_id,
+            )
+            if endpoint is None:
+                return Failure(RuntimeWebNotFound())
+            access = await self._authorize(
+                session,
+                workspace_id=endpoint.workspace_id,
+                agent_id=endpoint.agent_id,
+                session_id=endpoint.agent_session_id,
+                user_id=user_id,
+                actor=actor,
+            )
+            if not isinstance(access, AuthorizedPublicSessionResource):
+                return Failure(access)
+            configuration = await self._configuration(session, require_enabled=False)
+            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
+                return Failure(configuration)
+            return Success(await self._projection(session, endpoint, configuration))
+
     async def list_services(
         self,
         *,

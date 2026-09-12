@@ -16,6 +16,7 @@ import {
   mapWorkspacePathStat,
   type ProjectGitRefPreviewState,
   type ProjectRegistrationMode,
+  type RuntimeServicesState,
   type WorkspaceBrowserMode,
   type WorkspaceDirectoryLoadState,
   type WorkspaceEntry,
@@ -30,7 +31,10 @@ import type {
   ProjectDirectoryPickerState,
 } from "../components/WorkspaceDirectoryPickerModal";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
-import type { GitRefEntryResponse } from "@azents/public-client";
+import type {
+  GitRefEntryResponse,
+  RuntimeWebServiceResponse,
+} from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
 
@@ -45,6 +49,18 @@ export interface WorkspacePanelContainerOutput {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
+  servicesState: RuntimeServicesState;
+  servicesMutating: boolean;
+  preparedRuntimeService: RuntimeWebServiceResponse | null;
+  servicesMutationError: string | null;
+  onPrepareRuntimeService: (port: number, label: string | null) => void;
+  onConfirmCreateRuntimeService: () => void;
+  onResetPreparedRuntimeService: () => void;
+  onApproveRuntimeService: (service: RuntimeWebServiceResponse) => void;
+  onRejectRuntimeService: (service: RuntimeWebServiceResponse) => void;
+  onCancelRuntimeService: (service: RuntimeWebServiceResponse) => void;
+  onRequestRuntimeServiceAgain: (service: RuntimeWebServiceResponse) => void;
+  onCloseRuntimeService: (service: RuntimeWebServiceResponse) => void;
   fileBrowserQuery?: string;
   expandedFileNodeIds?: Set<string>;
   onSetFileBrowserQuery?: (query: string) => void;
@@ -165,7 +181,43 @@ export function useWorkspacePanelContainer({
   const [directoryLoadStatesByPath, setDirectoryLoadStatesByPath] = useState<
     Record<string, WorkspaceDirectoryLoadState>
   >({});
+  const [preparedRuntimeService, setPreparedRuntimeService] =
+    useState<RuntimeWebServiceResponse | null>(null);
   const utils = trpc.useUtils();
+  const servicesInput = useMemo(
+    () => ({ handle, agentId, sessionId }),
+    [agentId, handle, sessionId],
+  );
+  const servicesQuery = trpc.runtimeWeb.list.useQuery(servicesInput, {
+    refetchInterval: autoRefreshVisible ? 5_000 : false,
+  });
+  const invalidateServices = async (): Promise<void> => {
+    await utils.runtimeWeb.list.invalidate(servicesInput);
+  };
+  const prepareServiceMutation = trpc.runtimeWeb.prepare.useMutation({
+    onSuccess: setPreparedRuntimeService,
+  });
+  const directCreateServiceMutation = trpc.runtimeWeb.directCreate.useMutation({
+    onSuccess: async () => {
+      setPreparedRuntimeService(null);
+      await invalidateServices();
+    },
+  });
+  const requestServiceMutation = trpc.runtimeWeb.request.useMutation({
+    onSuccess: invalidateServices,
+  });
+  const approveServiceMutation = trpc.runtimeWeb.approve.useMutation({
+    onSuccess: invalidateServices,
+  });
+  const rejectServiceMutation = trpc.runtimeWeb.reject.useMutation({
+    onSuccess: invalidateServices,
+  });
+  const cancelServiceMutation = trpc.runtimeWeb.cancel.useMutation({
+    onSuccess: invalidateServices,
+  });
+  const closeServiceMutation = trpc.runtimeWeb.close.useMutation({
+    onSuccess: invalidateServices,
+  });
   const agentQuery = trpc.agent.get.useQuery({ handle, agentId });
   const agentSessionQuery = trpc.chat.getAgentSession.useQuery({
     agentId,
@@ -1349,10 +1401,152 @@ export function useWorkspacePanelContainer({
     runtimeManaged,
   ]);
 
+  const servicesState = useMemo<RuntimeServicesState>(() => {
+    if (servicesQuery.isLoading) {
+      return { type: "LOADING" };
+    }
+    if (servicesQuery.isError) {
+      return { type: "ERROR", message: getErrorMessage(servicesQuery.error) };
+    }
+    return {
+      type: "READY",
+      services: servicesQuery.data?.items ?? [],
+      runtimeAvailable: state.type === "SERVER",
+    };
+  }, [
+    servicesQuery.data?.items,
+    servicesQuery.error,
+    servicesQuery.isError,
+    servicesQuery.isLoading,
+    state.type,
+  ]);
+
+  const onPrepareRuntimeService = useCallback(
+    (port: number, label: string | null): void => {
+      prepareServiceMutation.mutate({ ...servicesInput, port, label });
+    },
+    [prepareServiceMutation, servicesInput],
+  );
+
+  const onConfirmCreateRuntimeService = useCallback((): void => {
+    if (preparedRuntimeService === null) {
+      return;
+    }
+    directCreateServiceMutation.mutate({
+      ...servicesInput,
+      port: preparedRuntimeService.endpoint.port,
+      label: preparedRuntimeService.endpoint.label,
+      durationSeconds: preparedRuntimeService.duration_seconds,
+      durationRevision: preparedRuntimeService.duration_configuration_revision,
+    });
+  }, [directCreateServiceMutation, preparedRuntimeService, servicesInput]);
+
+  const onApproveRuntimeService = useCallback(
+    (service: RuntimeWebServiceResponse): void => {
+      const request = service.current_request;
+      if (request === null) {
+        return;
+      }
+      approveServiceMutation.mutate({
+        ...servicesInput,
+        requestId: request.id,
+        expectedRevision: request.revision,
+        durationSeconds: service.duration_seconds,
+        durationRevision: service.duration_configuration_revision,
+      });
+    },
+    [approveServiceMutation, servicesInput],
+  );
+
+  const onRejectRuntimeService = useCallback(
+    (service: RuntimeWebServiceResponse): void => {
+      const request = service.current_request;
+      if (request !== null) {
+        rejectServiceMutation.mutate({
+          ...servicesInput,
+          requestId: request.id,
+          expectedRevision: request.revision,
+        });
+      }
+    },
+    [rejectServiceMutation, servicesInput],
+  );
+
+  const onCancelRuntimeService = useCallback(
+    (service: RuntimeWebServiceResponse): void => {
+      const request = service.current_request;
+      if (request !== null) {
+        cancelServiceMutation.mutate({
+          ...servicesInput,
+          requestId: request.id,
+          expectedRevision: request.revision,
+        });
+      }
+    },
+    [cancelServiceMutation, servicesInput],
+  );
+
+  const onRequestRuntimeServiceAgain = useCallback(
+    (service: RuntimeWebServiceResponse): void => {
+      requestServiceMutation.mutate({
+        ...servicesInput,
+        port: service.endpoint.port,
+        label: service.endpoint.label,
+      });
+    },
+    [requestServiceMutation, servicesInput],
+  );
+
+  const onCloseRuntimeService = useCallback(
+    (service: RuntimeWebServiceResponse): void => {
+      const cycle = service.current_cycle;
+      if (cycle !== null) {
+        closeServiceMutation.mutate({
+          ...servicesInput,
+          cycleId: cycle.id,
+          expectedEndpointRevision: service.endpoint.authority_revision,
+        });
+      }
+    },
+    [closeServiceMutation, servicesInput],
+  );
+
+  const servicesMutating =
+    prepareServiceMutation.isPending ||
+    directCreateServiceMutation.isPending ||
+    requestServiceMutation.isPending ||
+    approveServiceMutation.isPending ||
+    rejectServiceMutation.isPending ||
+    cancelServiceMutation.isPending ||
+    closeServiceMutation.isPending;
+  const servicesMutationError =
+    prepareServiceMutation.error ??
+    directCreateServiceMutation.error ??
+    requestServiceMutation.error ??
+    approveServiceMutation.error ??
+    rejectServiceMutation.error ??
+    cancelServiceMutation.error ??
+    closeServiceMutation.error;
+
   return {
     state,
     projectState,
     metricsState: metrics.state,
+    servicesState,
+    servicesMutating,
+    preparedRuntimeService,
+    servicesMutationError:
+      servicesMutationError === null
+        ? null
+        : getErrorMessage(servicesMutationError),
+    onPrepareRuntimeService,
+    onConfirmCreateRuntimeService,
+    onResetPreparedRuntimeService: () => setPreparedRuntimeService(null),
+    onApproveRuntimeService,
+    onRejectRuntimeService,
+    onCancelRuntimeService,
+    onRequestRuntimeServiceAgain,
+    onCloseRuntimeService,
     fileBrowserQuery,
     expandedFileNodeIds,
     onSetFileBrowserQuery,

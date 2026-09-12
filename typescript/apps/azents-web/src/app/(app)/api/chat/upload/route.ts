@@ -6,6 +6,7 @@
 import { TRPCError } from "@trpc/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerConfig } from "@/config/server";
+import { rejectUntrustedMainWebOrigin } from "@/shared/lib/request-origin";
 import { withRouteLogging } from "@/shared/lib/route-logging";
 import { getFreshAccessToken } from "@/trpc/context";
 
@@ -24,6 +25,13 @@ async function parseJsonOrText(response: Response): Promise<unknown> {
 }
 
 async function post(request: NextRequest): Promise<NextResponse> {
+  const rejection = rejectUntrustedMainWebOrigin(request);
+  if (rejection !== null) {
+    return new NextResponse(rejection.body, {
+      status: rejection.status,
+      headers: rejection.headers,
+    });
+  }
   const resHeaders = new Headers();
 
   const formData = await request.formData();

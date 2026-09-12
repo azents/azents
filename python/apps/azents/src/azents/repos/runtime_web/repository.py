@@ -518,6 +518,19 @@ class RuntimeWebRepository:
         )
         return None if rdb is None else self._endpoint(rdb)
 
+    async def get_endpoint_by_id(
+        self,
+        session: AsyncSession,
+        endpoint_id: str,
+    ) -> RuntimeWebEndpoint | None:
+        """Load one endpoint by its opaque public identifier."""
+        rdb = await self._endpoint_by_id(
+            session,
+            endpoint_id,
+            for_update=False,
+        )
+        return None if rdb is None else self._endpoint(rdb)
+
     async def list_endpoints(
         self,
         session: AsyncSession,

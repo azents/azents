@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 
 // --- Enums ---
 const NodeEnvSchema = z.enum(["development", "production", "test"]);
+const RuntimeWebAuthModeSchema = z.enum(["shared_cookie", "separate_domain"]);
 
 // --- Server Config (server-only) ---
 const ServerConfigSchema = z.object({
@@ -13,6 +14,12 @@ const ServerConfigSchema = z.object({
   internalApiUrl: z.string(),
   /** Optional external Admin Web URL shown only to system administrators. */
   adminWebUrl: z.string().url().nullable(),
+  runtimeWebGatewayEnabled: z.boolean(),
+  runtimeWebGatewayAuthMode: RuntimeWebAuthModeSchema,
+  runtimeWebGatewayMainWebOrigin: z.string().url().nullable(),
+  runtimeWebGatewayBrokerOrigin: z.string().url().nullable(),
+  runtimeWebGatewayCookieDomain: z.string().min(1).nullable(),
+  runtimeWebGatewayIdentityCookieName: z.string().min(1),
 });
 
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
@@ -25,6 +32,19 @@ function loadServerConfig(): ServerConfig {
     publicApiUrl,
     internalApiUrl: process.env.INTERNAL_API_URL || publicApiUrl,
     adminWebUrl: process.env.ADMIN_WEB_URL || null,
+    runtimeWebGatewayEnabled:
+      process.env.RUNTIME_WEB_GATEWAY_ENABLED === "true",
+    runtimeWebGatewayAuthMode:
+      process.env.RUNTIME_WEB_GATEWAY_AUTH_MODE || "shared_cookie",
+    runtimeWebGatewayMainWebOrigin:
+      process.env.RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN || null,
+    runtimeWebGatewayBrokerOrigin:
+      process.env.RUNTIME_WEB_GATEWAY_BROKER_ORIGIN || null,
+    runtimeWebGatewayCookieDomain:
+      process.env.RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN || null,
+    runtimeWebGatewayIdentityCookieName:
+      process.env.RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME ||
+      "__Http-Azents-Runtime-Web",
   });
 }
 

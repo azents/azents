@@ -1,0 +1,73 @@
+{
+  "retry": "다시 시도",
+  "auth": {
+    "title": "웹 서비스에 연결하는 중",
+    "description": "Runtime 애플리케이션을 열기 전에 브라우저와 Azents 로그인을 확인하고 있습니다.",
+    "errorDescription": "웹 서비스에 안전하게 연결하지 못했습니다.",
+    "invalidResponse": "인증 응답이 올바르지 않습니다.",
+    "failed": "Runtime Web 인증에 실패했습니다."
+  },
+  "confirmation": {
+    "title": "웹 서비스 접근 검토",
+    "subtitle": "이 Session의 정확한 서비스 요청만 여기서 승인할 수 있습니다.",
+    "loading": "현재 서비스 요청을 불러오는 중…",
+    "errorTitle": "웹 서비스를 불러오지 못했습니다",
+    "duration": "접근 권한은 {minutes}분 후 만료됩니다.",
+    "untrustedNotice": "Runtime 애플리케이션의 안전성은 Azents가 검증하지 않습니다. 콘텐츠, 다운로드, 민감한 정보 요청을 신뢰하지 마세요.",
+    "alreadyActive": "이 서비스는 현재 노출 중입니다. 서비스를 열어도 만료 시간이 연장되지 않습니다.",
+    "stale": "이 요청은 더 이상 대기 중이 아닙니다. 승인 제어 없이 현재 상태를 표시합니다."
+  },
+  "panel": {
+    "tab": "서비스",
+    "title": "웹 서비스",
+    "description": "이 Session에서 이미 실행 중인 애플리케이션을 프로세스 중단 없이 노출합니다.",
+    "loading": "웹 서비스를 불러오는 중…",
+    "errorTitle": "웹 서비스를 불러오지 못했습니다",
+    "emptyTitle": "아직 웹 서비스가 없습니다",
+    "emptyDescription": "애플리케이션이 준비되면 숫자 localhost 포트에 안정적인 주소를 만드세요.",
+    "create": "서비스 만들기",
+    "createTitle": "웹 서비스 만들기",
+    "port": "로컬 포트",
+    "portPlaceholder": "3000",
+    "label": "서비스 이름",
+    "labelPlaceholder": "미리보기 앱",
+    "continue": "노출 검토",
+    "confirmTitle": "이 서비스를 노출할까요?",
+    "confirmDescription": "승인된 Session 멤버가 {minutes}분 동안 이 주소에 접근할 수 있습니다. 노출을 닫아도 애플리케이션은 중지되지 않습니다.",
+    "cancelDialog": "취소"
+  },
+  "service": {
+    "portLabel": "포트 {port}",
+    "localPort": "localhost:{port}",
+    "expiresAt": "{time}에 만료",
+    "endedAt": "{time}에 종료"
+  },
+  "status": {
+    "active": "활성",
+    "pending": "승인 대기",
+    "activePending": "활성 · 새 승인 대기",
+    "inactive": "비활성",
+    "expired": "만료됨",
+    "closed": "닫힘",
+    "unconfigured": "설치 준비 필요",
+    "unavailable": "애플리케이션 연결 불가"
+  },
+  "actions": {
+    "approve": "승인",
+    "approveDuration": "{minutes}분 동안 승인",
+    "reject": "거절",
+    "cancel": "요청 취소",
+    "requestAgain": "다시 요청",
+    "close": "노출 닫기",
+    "copy": "URL 복사",
+    "copied": "URL 복사됨",
+    "open": "서비스 열기"
+  },
+  "chat": {
+    "request": "웹 서비스 요청",
+    "preparing": "웹 서비스 준비",
+    "listing": "웹 서비스 확인",
+    "closing": "웹 서비스 닫기",
+    "stale": "이 Chat 항목은 이전 상태입니다. 현재 서비스 상태를 표시합니다."
+  }
+}

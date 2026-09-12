@@ -146,6 +146,7 @@
     "subtitle": "Agent WorkspaceのファイルとProject",
     "openPanel": "Agent Workspaceを開く",
     "workspaceTab": "Agent Runtime",
+    "servicesTab": "サービス",
     "metricsTab": "メトリクス",
     "settingsTab": "設定",
     "settingsTitle": "Runtime 設定",
@@ -394,7 +395,8 @@
       "addScheduledTask": "Scheduled Taskを作成",
       "listScheduledTasks": "Scheduled Taskを一覧表示",
       "deleteScheduledTask": "Scheduled Taskを削除",
-      "submitScheduledTaskResult": "Scheduled Taskの結果を送信"
+      "submitScheduledTaskResult": "Scheduled Taskの結果を送信",
+      "runtimeWeb": "Web サービスを管理"
     },
     "actionRunning": {
       "read": "ファイルを読み取り中",
@@ -434,7 +436,8 @@
       "addScheduledTask": "Scheduled Taskを作成中",
       "listScheduledTasks": "Scheduled Taskを一覧表示中",
       "deleteScheduledTask": "Scheduled Taskを削除中",
-      "submitScheduledTaskResult": "Scheduled Taskの結果を送信中"
+      "submitScheduledTaskResult": "Scheduled Taskの結果を送信中",
+      "runtimeWeb": "Web サービスを管理中"
     },
     "field": {
       "source": "ソース",
@@ -473,7 +476,9 @@
       "nextRun": "次回実行",
       "taskId": "タスクID",
       "registration": "チャンネル登録",
-      "recovered": "復旧済み"
+      "recovered": "復旧済み",
+      "port": "ポート",
+      "url": "URL"
     },
     "changeAction": {
       "add": "追加",
