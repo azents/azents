@@ -16,8 +16,8 @@ from azents.services.runtime_web.gateway_authority import (
 )
 
 
-def test_http_tunnel_bounds_approval_to_transport_deadline() -> None:
-    """Keep every HTTP identity deadline within its absolute transport window."""
+def test_http_tunnel_preserves_approval_beyond_transport_deadline() -> None:
+    """Keep cycle approval authority beyond one finite HTTP transport."""
     now = datetime(2026, 9, 12, tzinfo=UTC)
     cycle_expires_at = now + timedelta(minutes=30)
     service = RuntimeWebGatewayAuthorityService(
@@ -91,7 +91,8 @@ def test_http_tunnel_bounds_approval_to_transport_deadline() -> None:
 
     http_deadline = now + timedelta(minutes=10)
     assert http_identity.registration_deadline_at == now + timedelta(seconds=10)
-    assert http_identity.approval_deadline_at == http_deadline
+    assert http_identity.approval_deadline_at == cycle_expires_at
     assert http_identity.transport_deadline_at == http_deadline
+    assert http_identity.approval_deadline_at > http_identity.transport_deadline_at
     assert websocket_identity.approval_deadline_at == cycle_expires_at
     assert websocket_identity.transport_deadline_at == cycle_expires_at

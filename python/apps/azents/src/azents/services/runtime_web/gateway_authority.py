@@ -279,7 +279,7 @@ class RuntimeWebGatewayAuthorityService:
                 cycle.expires_at,
                 now + _REGISTRATION_WINDOW,
             ),
-            approval_deadline_at=transport_deadline,
+            approval_deadline_at=cycle.expires_at,
             transport_deadline_at=transport_deadline,
         )
 

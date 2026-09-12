@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "d8e7ee093948393badcc814b0c8ff9a5f238313bf78b687ab557f6a85d6cd2d2"
+    "06880a303de454d8192ae22f6c730bd76e90e2531518ee3ee306760a51b5de9a"
 )
 
 
