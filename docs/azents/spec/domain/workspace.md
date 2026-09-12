@@ -115,7 +115,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 82
 ---
 
@@ -833,6 +833,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-12 (spec_version=82)** — Kept Chat mounted as the primary
+  concrete-session surface and moved Files, Runtime, Context, Subagents, Channels,
+  Scheduled Tasks, Metrics, and Terminal into one responsive supporting panel.
 - **2026-09-08 (spec_version=81)** — Moved existing-session Project and
   working-folder database atomic groups into composing repositories, with Runtime
   and filesystem work between completed database operations, final authority

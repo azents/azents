@@ -67,7 +67,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 79
 ---
 
@@ -925,6 +925,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-12 (spec_version=79)** — Assigned each newly dispatched Provider,
+  Runner, and Runtime Transfer operation a request-scoped reply stream while
+  preserving metadata-recorded streams for existing operations.
 - **2026-09-10 (spec_version=78)** — Replaced foreground Runtime reply polling with
   bounded Redis/in-memory event waits, made reply reads retention-neutral, added
   bounded reply and Worker event-loop observations, exposed fixed Worker replicas,

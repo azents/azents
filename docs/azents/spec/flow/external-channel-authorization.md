@@ -32,6 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/repos/session_model_profile/**
+  - python/apps/azents/src/azents/repos/workspace_user/__init__.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/broker/types.py
@@ -42,7 +43,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 26
 ---
 

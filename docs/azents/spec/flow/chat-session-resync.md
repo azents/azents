@@ -12,16 +12,18 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/message/**
+  - python/apps/azents/src/azents/broker/broadcast.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/events/publisher.py
   - python/apps/azents/src/azents/worker/live/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 48
 ---
 
