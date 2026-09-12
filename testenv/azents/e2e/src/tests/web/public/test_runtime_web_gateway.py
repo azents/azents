@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +70,7 @@ from tests.required.public.test_runtime_terminal import (
 )
 
 _RUNTIME_PROVIDER_ID = "system-docker"
+_RUNTIME_RUNNER_PYTHON = "/workspace/python/apps/azents-runtime-runner/.venv/bin/python"
 _RUNTIME_WEB_PORT = 8765
 _MAIN_ORIGIN = "https://web.runtime-e2e.test"
 _BROKER_ORIGIN = "https://auth.services.runtime-e2e.test"
@@ -103,6 +104,40 @@ class _RuntimeWebStack:
     edge_ip: str
     edge_host_url: str
     selenium_url: str
+
+
+@dataclass(frozen=True, repr=False)
+class _RuntimeWebStackFactory:
+    """Create one mode-specific stack without exposing fixture secrets in failures."""
+
+    network: Network
+    postgres: PostgresContainer
+    server_image: str
+    web_image: str
+    runner_image: str
+    credential_encryption_key: str
+    auth_jwt_secret_key: str
+    system_bootstrap_setup_token: str
+    s3_bucket_name: str
+    s3_access_key: str
+    s3_secret_key: str
+
+    def start(self, mode: str) -> AbstractContextManager[_RuntimeWebStack]:
+        """Create one function-scoped Runtime Web stack."""
+        return _runtime_web_stack(
+            mode=mode,
+            network=self.network,
+            postgres=self.postgres,
+            server_image=self.server_image,
+            web_image=self.web_image,
+            runner_image=self.runner_image,
+            credential_encryption_key=self.credential_encryption_key,
+            auth_jwt_secret_key=self.auth_jwt_secret_key,
+            system_bootstrap_setup_token=self.system_bootstrap_setup_token,
+            s3_bucket_name=self.s3_bucket_name,
+            s3_access_key=self.s3_access_key,
+            s3_secret_key=self.s3_secret_key,
+        )
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -672,6 +707,36 @@ def _runtime_web_stack(
                     container.get_wrapped_container().reload()
 
 
+@pytest.fixture
+def runtime_web_stack_factory(
+    container_network: Network,
+    postgres_container: PostgresContainer,
+    azents_server_image: str,
+    azents_web_image: str,
+    azents_runtime_runner_image: str,
+    credential_encryption_key: str,
+    auth_jwt_secret_key: str,
+    system_bootstrap_setup_token: str,
+    s3_bucket_name: str,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+) -> _RuntimeWebStackFactory:
+    """Capture secret fixture values behind a redacted stack factory."""
+    return _RuntimeWebStackFactory(
+        network=container_network,
+        postgres=postgres_container,
+        server_image=azents_server_image,
+        web_image=azents_web_image,
+        runner_image=azents_runtime_runner_image,
+        credential_encryption_key=credential_encryption_key,
+        auth_jwt_secret_key=auth_jwt_secret_key,
+        system_bootstrap_setup_token=system_bootstrap_setup_token,
+        s3_bucket_name=s3_bucket_name,
+        s3_access_key=rustfs_access_key,
+        s3_secret_key=rustfs_secret_key,
+    )
+
+
 def _create_workspace(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -835,15 +900,42 @@ def _start_runtime_application(
         server_url=server_url,
         origin=_TERMINAL_ORIGIN,
     )
-    encoded = base64.b64encode(_runtime_application_script().encode()).decode()
-    terminal.command(
-        (
-            "python -c \"import base64;exec(base64.b64decode('"
-            f"{encoded}'))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
-        ),
-        f"APP_STARTED_{unique()}",
-    )
-    terminal.close()
+    try:
+        encoded = base64.b64encode(_runtime_application_script().encode()).decode()
+        terminal.command(
+            (
+                f'{_RUNTIME_RUNNER_PYTHON} -c "import base64;'
+                "exec(base64.b64decode('"
+                f"{encoded}'))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
+            ),
+            f"APP_STARTED_{unique()}",
+        )
+        ready_marker = f"APP_READY_{unique()}"
+        probe_script = f"""
+import socket
+import time
+
+deadline = time.monotonic() + 30
+while True:
+    try:
+        connection = socket.create_connection(("127.0.0.1", {_RUNTIME_WEB_PORT}), 1)
+    except OSError:
+        if time.monotonic() >= deadline:
+            raise
+        time.sleep(0.1)
+    else:
+        connection.close()
+        print("{ready_marker}")
+        break
+""".strip()
+        encoded_probe = base64.b64encode(probe_script.encode()).decode()
+        probe_output = terminal.command(
+            f"python -c \"import base64;exec(base64.b64decode('{encoded_probe}'))\"",
+            f"APP_PROBE_DONE_{unique()}",
+        )
+        assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+    finally:
+        terminal.close()
 
 
 def _browser(
@@ -907,11 +999,22 @@ def _approve_in_browser(driver: WebDriver, *, endpoint_url: str) -> None:
         )
     )
     driver.get(endpoint_url)
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[@id='ready' and normalize-space()='Runtime Web E2E ready']")
+    try:
+        wait.until(
+            ec.visibility_of_element_located(
+                (
+                    By.XPATH,
+                    "//*[@id='ready' and normalize-space()='Runtime Web E2E ready']",
+                )
+            )
         )
-    )
+    except TimeoutException as error:
+        current_url = driver.current_url.split("?", maxsplit=1)[0]
+        body_text = driver.find_element(By.TAG_NAME, "body").text[:2_000]
+        raise AssertionError(
+            "Runtime Web application did not become visible after approval: "
+            f"url={current_url!r}, title={driver.title!r}, body={body_text!r}"
+        ) from error
 
 
 def _browser_transport_evidence(driver: WebDriver) -> dict[str, object]:
@@ -956,17 +1059,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: DockerContainer,
     azents_runtime_control_container: DockerContainer,
-    container_network: Network,
-    postgres_container: PostgresContainer,
-    azents_server_image: str,
-    azents_web_image: str,
-    azents_runtime_runner_image: str,
-    credential_encryption_key: str,
-    auth_jwt_secret_key: str,
-    system_bootstrap_setup_token: str,
-    s3_bucket_name: str,
-    rustfs_access_key: str,
-    rustfs_secret_key: str,
+    runtime_web_stack_factory: _RuntimeWebStackFactory,
 ) -> None:
     """Prove both auth modes, relay, revision fencing, and streamed transport."""
     del azents_runtime_provider_docker_container, azents_runtime_control_container
@@ -981,20 +1074,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         server_url=azents_public_server_url,
     )
 
-    with _runtime_web_stack(
-        mode=auth_mode,
-        network=container_network,
-        postgres=postgres_container,
-        server_image=azents_server_image,
-        web_image=azents_web_image,
-        runner_image=azents_runtime_runner_image,
-        credential_encryption_key=credential_encryption_key,
-        auth_jwt_secret_key=auth_jwt_secret_key,
-        system_bootstrap_setup_token=system_bootstrap_setup_token,
-        s3_bucket_name=s3_bucket_name,
-        s3_access_key=rustfs_access_key,
-        s3_secret_key=rustfs_secret_key,
-    ) as stack:
+    with runtime_web_stack_factory.start(auth_mode) as stack:
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
