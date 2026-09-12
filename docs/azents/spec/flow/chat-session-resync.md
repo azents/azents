@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-09-12
-spec_version: 47
+spec_version: 48
 ---
 
 # Chat Session Resync
@@ -150,6 +150,15 @@ PostgreSQL owner reseeds the live generation. Partial buffers and process-local
 active Run/tool maps are separated by `(session_id, owner_generation)`, so an old
 Worker cannot flush or clear projections produced by the replacement owner even
 when both are recovering the same durable Run.
+
+Every actual generation seed or advance publishes a generation-gated
+`live_projection_reset` before per-event removals and new live updates. The browser
+clears partial history and pending input-buffer projections on that reset while
+retaining the current durable/live Run phase. A later takeover therefore repeats
+the reset even if an intermediate generation could not finish publishing individual
+removals. Terminal cleanup always releases the eligible generation's local partial
+batcher, timer, active-Run, and active-tool maps even when Valkey or broadcast is
+unavailable; a mismatched newer Run is not evicted.
 
 `GET /chat/v1/sessions/{session_id}/live` returns live state snapshot of current session, not durable history. Live state separates partial history and other live state.
 
@@ -493,6 +502,9 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-12** — v48. Added an explicit generation-reset frame for
+  takeover-safe browser convergence and unconditional eligible terminal cleanup
+  of process-local live projection state.
 - **2026-09-12** — v47. Added PostgreSQL-derived generation fencing for live
   projection storage, buffered flushes, clears, and WebSocket projection frames,
   including empty-Valkey reseeding by the current owner.

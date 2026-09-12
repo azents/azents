@@ -1,5 +1,6 @@
 """Event chat live event projection store."""
 
+import dataclasses
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
@@ -94,14 +95,22 @@ _ADVANCE_OWNER_SCRIPT = """
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 local requested = tonumber(ARGV[2])
 if current and tonumber(current) > requested then
-  return 0
+  return {0, 0}
 end
+local result = {1, 0}
 if not current or tonumber(current) < requested then
+  result[2] = 1
+  local entries = redis.call("HGETALL", KEYS[1])
+  for index = 1, #entries, 2 do
+    if entries[index] ~= ARGV[1] then
+      table.insert(result, entries[index + 1])
+    end
+  end
   redis.call("DEL", KEYS[1])
   redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 end
 redis.call("EXPIRE", KEYS[1], ARGV[3])
-return 1
+return result
 """
 
 _OWNER_LIST_SCRIPT = """
@@ -156,6 +165,19 @@ end
 redis.call("EXPIRE", KEYS[1], ARGV[3])
 return 1
 """
+
+
+@dataclasses.dataclass(frozen=True)
+class LiveOwnerAdvance:
+    """Atomic result of advancing the ephemeral live projection owner."""
+
+    accepted: bool
+    advanced: bool
+    removed_events: tuple[Event, ...]
+
+    def __bool__(self) -> bool:
+        """Preserve concise accepted-result checks at call sites."""
+        return self.accepted
 
 
 def _stable_live_id(session_id: str, *parts: object) -> str:
@@ -748,7 +770,7 @@ class BaseLiveEventStore:
         self,
         session_id: str,
         owner_generation: int,
-    ) -> bool:
+    ) -> LiveOwnerAdvance:
         """Advance the ephemeral projection writer generation monotonically."""
         raise NotImplementedError
 
@@ -1031,9 +1053,9 @@ class RedisLiveEventStore(BaseLiveEventStore):
         self,
         session_id: str,
         owner_generation: int,
-    ) -> bool:
-        """Seed or monotonically advance the PostgreSQL-derived writer fence."""
-        result = await cast(Any, self.redis).eval(
+    ) -> LiveOwnerAdvance:
+        """Advance the writer fence and atomically return removed projections."""
+        raw_result = await cast(Any, self.redis).eval(
             _ADVANCE_OWNER_SCRIPT,
             1,
             _live_event_key(session_id),
@@ -1041,7 +1063,26 @@ class RedisLiveEventStore(BaseLiveEventStore):
             owner_generation,
             self.ttl_seconds,
         )
-        return result == 1
+        accepted = bool(raw_result) and raw_result[0] == 1
+        advanced = accepted and raw_result[1] == 1
+        removed_events = (
+            tuple(
+                sorted(
+                    (
+                        _live_event_adapter.validate_json(value)
+                        for value in raw_result[2:]
+                    ),
+                    key=lambda event: (event.created_at, event.id),
+                )
+            )
+            if accepted
+            else ()
+        )
+        return LiveOwnerAdvance(
+            accepted=accepted,
+            advanced=advanced,
+            removed_events=removed_events,
+        )
 
     async def _list_for_owner(
         self,
@@ -1160,15 +1201,30 @@ class InMemoryLiveEventStore(BaseLiveEventStore):
         self,
         session_id: str,
         owner_generation: int,
-    ) -> bool:
-        """Seed or monotonically advance the PostgreSQL-derived writer fence."""
+    ) -> LiveOwnerAdvance:
+        """Advance the writer fence and atomically return removed projections."""
         current = self._owner_generations.get(session_id)
         if current is not None and current > owner_generation:
-            return False
+            return LiveOwnerAdvance(
+                accepted=False,
+                advanced=False,
+                removed_events=(),
+            )
+        removed_events: tuple[Event, ...] = ()
         if current is None or current < owner_generation:
+            removed_events = tuple(
+                sorted(
+                    self._events.get(session_id, {}).values(),
+                    key=lambda event: (event.created_at, event.id),
+                )
+            )
             self._events.pop(session_id, None)
             self._owner_generations[session_id] = owner_generation
-        return True
+        return LiveOwnerAdvance(
+            accepted=True,
+            advanced=current is None or current < owner_generation,
+            removed_events=removed_events,
+        )
 
     async def _list_for_owner(
         self,
@@ -1271,7 +1327,7 @@ class _OwnerBoundLiveEventStore(BaseLiveEventStore):
         self,
         session_id: str,
         owner_generation: int,
-    ) -> bool:
+    ) -> LiveOwnerAdvance:
         raise RuntimeError("An owner-bound live store cannot change authority")
 
     async def _list_for_owner(

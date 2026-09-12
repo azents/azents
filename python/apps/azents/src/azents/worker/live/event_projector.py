@@ -35,6 +35,7 @@ from azents.services.chat.live_events import (
 from azents.transport.chat import (
     chat_live_event_removed_dump,
     chat_live_event_upserted_dump,
+    chat_live_projection_reset_dump,
     chat_live_run_cleared_dump,
     chat_live_run_updated_dump,
 )
@@ -92,6 +93,53 @@ class LiveEventProjector:
             self._partial_batchers[key] = batcher
         return batcher
 
+    @staticmethod
+    async def _discard_without_projection() -> None:
+        """Discard one local batch without mutating shared live state."""
+
+    async def _evict_generation(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> set[str]:
+        """Cancel one generation's local buffers and release correlation state."""
+        key = self._owner_key(session_id, owner_generation)
+        batcher = self._partial_batchers.pop(key, None)
+        if batcher is not None:
+            await batcher.discard_session(
+                session_id,
+                self._discard_without_projection,
+            )
+        self._active_run_ids.pop(key, None)
+        active_events = self._active_tool_events.pop(key, {})
+        return set(active_events)
+
+    async def _evict_superseded_generations(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> set[str]:
+        """Release every older in-process generation after durable takeover."""
+        keys = (
+            set(self._partial_batchers)
+            | set(self._active_run_ids)
+            | set(self._active_tool_events)
+        )
+        removed_event_ids: set[str] = set()
+        for candidate_session_id, candidate_generation in sorted(keys):
+            if (
+                candidate_session_id != session_id
+                or candidate_generation == owner_generation
+            ):
+                continue
+            removed_event_ids.update(
+                await self._evict_generation(
+                    candidate_session_id,
+                    candidate_generation,
+                )
+            )
+        return removed_event_ids
+
     async def _owned_store(
         self,
         session_id: str,
@@ -105,11 +153,31 @@ class LiveEventProjector:
             )
         if current is None or current.owner_generation != owner_generation:
             return None
-        if not await self._live_event_store.advance_owner(
+        advance = await self._live_event_store.advance_owner(
             session_id,
             owner_generation,
-        ):
+        )
+        if not advance.accepted:
             return None
+        removed_local_event_ids = await self._evict_superseded_generations(
+            session_id,
+            owner_generation,
+        )
+        removed_event_ids = {
+            event.id for event in advance.removed_events
+        } | removed_local_event_ids
+        if advance.advanced:
+            await self._broadcast.publish_live_projection(
+                session_id,
+                chat_live_projection_reset_dump(session_id),
+                owner_generation=owner_generation,
+            )
+        for event_id in sorted(removed_event_ids):
+            await self._publish_event_removed(
+                session_id,
+                event_id,
+                owner_generation=owner_generation,
+            )
         return self._live_event_store.for_owner(session_id, owner_generation)
 
     async def flush_session(
@@ -120,10 +188,11 @@ class LiveEventProjector:
     ) -> None:
         """Reflect pending live partial batches best-effort."""
         try:
-            await self._partial_batcher(
-                session_id,
-                owner_generation,
-            ).flush_session(session_id)
+            batcher = self._partial_batchers.get(
+                self._owner_key(session_id, owner_generation)
+            )
+            if batcher is not None:
+                await batcher.flush_session(session_id)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -159,11 +228,13 @@ class LiveEventProjector:
         owner_generation: int,
     ) -> None:
         """Reflect Runtime event to live projection store best-effort."""
-        batcher = self._partial_batcher(session_id, owner_generation)
         try:
             match event:
                 case RunComplete() | RunStopped():
-                    await batcher.flush_session(session_id)
+                    await self.flush_session(
+                        session_id,
+                        owner_generation=owner_generation,
+                    )
                 case _:
                     pass
 
@@ -177,7 +248,10 @@ class LiveEventProjector:
                         self._owner_key(session_id, owner_generation)
                     ] = run_id
                 case ContentDelta(delta=delta, content_index=content_index):
-                    await batcher.append_content_delta(
+                    await self._partial_batcher(
+                        session_id,
+                        owner_generation,
+                    ).append_content_delta(
                         session_id=session_id,
                         delta=delta,
                         content_index=content_index,
@@ -188,7 +262,10 @@ class LiveEventProjector:
                     output_index=output_index,
                     summary_index=summary_index,
                 ):
-                    await batcher.append_reasoning_delta(
+                    await self._partial_batcher(
+                        session_id,
+                        owner_generation,
+                    ).append_reasoning_delta(
                         session_id=session_id,
                         delta=delta,
                         item_id=item_id,
@@ -201,7 +278,10 @@ class LiveEventProjector:
                     status=status,
                     arguments=arguments,
                 ):
-                    await batcher.flush_session_and_transition(
+                    await self._partial_batcher(
+                        session_id,
+                        owner_generation,
+                    ).flush_session_and_transition(
                         session_id,
                         lambda: self._upsert_provider_tool_activity(
                             session_id=session_id,
@@ -213,7 +293,10 @@ class LiveEventProjector:
                         ),
                     )
                 case Event():
-                    await batcher.flush_session_and_transition(
+                    await self._partial_batcher(
+                        session_id,
+                        owner_generation,
+                    ).flush_session_and_transition(
                         session_id,
                         lambda: self._replace_live_counterpart(
                             session_id,
@@ -230,10 +313,6 @@ class LiveEventProjector:
                         await self.clear_session(
                             session_id,
                             owner_generation=owner_generation,
-                        )
-                        self._active_run_ids.pop(
-                            self._owner_key(session_id, owner_generation),
-                            None,
                         )
                 case _:
                     pass
@@ -402,16 +481,26 @@ class LiveEventProjector:
         owner_generation: int,
     ) -> None:
         """Clear projections and broadcast removals under one writer generation."""
-        await self._partial_batcher(
-            session_id,
-            owner_generation,
-        ).discard_session(
-            session_id,
-            lambda: self._clear_session_projections(
-                session_id,
-                owner_generation=owner_generation,
-            ),
-        )
+        owner_key = self._owner_key(session_id, owner_generation)
+        batcher = self._partial_batchers.get(owner_key)
+        try:
+            if batcher is None:
+                await self._clear_session_projections(
+                    session_id,
+                    owner_generation=owner_generation,
+                )
+            else:
+                await batcher.discard_session(
+                    session_id,
+                    lambda: self._clear_session_projections(
+                        session_id,
+                        owner_generation=owner_generation,
+                    ),
+                )
+        finally:
+            self._partial_batchers.pop(owner_key, None)
+            self._active_run_ids.pop(owner_key, None)
+            self._active_tool_events.pop(owner_key, None)
 
     async def _clear_session_projections(
         self,
@@ -468,14 +557,16 @@ class LiveEventProjector:
         owner_generation: int,
     ) -> None:
         """Broadcast live Run removal under one writer generation."""
+        eligible = False
         try:
-            if await self._owned_store(session_id, owner_generation) is None:
-                return
             if not await self._terminal_matches_current_run(
                 session_id,
                 run_id,
                 owner_generation,
             ):
+                return
+            eligible = True
+            if await self._owned_store(session_id, owner_generation) is None:
                 return
             self._active_run_ids.pop(
                 self._owner_key(session_id, owner_generation),
@@ -493,6 +584,9 @@ class LiveEventProjector:
                 "Failed to broadcast live run removal",
                 extra={"session_id": session_id, "run_id": run_id},
             )
+        finally:
+            if eligible:
+                await self._evict_generation(session_id, owner_generation)
 
     async def publish_control_event(
         self,

@@ -27,6 +27,7 @@ import {
   emptyPendingMailboxState,
   pendingMailboxReducer,
   type PendingMailboxState,
+  pendingMailboxWaitsForModel,
   selectPendingMailboxEntries,
 } from "../hooks/pendingMailboxState";
 import {
@@ -2319,6 +2320,7 @@ export function useChatSessionContainer(
         if (
           event.type === "live_event_upserted" ||
           event.type === "live_event_removed" ||
+          event.type === "live_projection_reset" ||
           event.type === "mailbox_item_upserted" ||
           event.type === "mailbox_item_removed" ||
           event.type === "live_run_updated" ||
@@ -2456,6 +2458,18 @@ export function useChatSessionContainer(
           pendingInputBuffers: prev.pendingInputBuffers.filter(
             (buffer) => buffer.id !== event.event_id,
           ),
+        }));
+        return;
+      }
+
+      if ("type" in event && event.type === "live_projection_reset") {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          partialHistory: emptyPartialHistoryState(),
+          pendingInputBuffers: [],
+          isResponsePending:
+            isUserBlockingRunPhase(prev.liveRunPhase) ||
+            pendingMailboxWaitsForModel(prev.pendingMailbox),
         }));
         return;
       }

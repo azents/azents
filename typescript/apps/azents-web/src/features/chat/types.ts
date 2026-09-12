@@ -562,6 +562,11 @@ export interface LiveEventRemovedEvent {
   event_id: string;
 }
 
+export interface LiveProjectionResetEvent {
+  type: "live_projection_reset";
+  session_id: string;
+}
+
 export interface MailboxItemUpsertedEvent {
   type: "mailbox_item_upserted";
   session_id: string;
@@ -681,6 +686,7 @@ export type ChatEvent =
   | HistoryEventAppendedEvent
   | LiveEventUpsertedEvent
   | LiveEventRemovedEvent
+  | LiveProjectionResetEvent
   | MailboxItemUpsertedEvent
   | MailboxItemRemovedEvent
   | SubscribedEvent

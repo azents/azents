@@ -57,6 +57,7 @@ from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
+from azents.services.chat.live_events import LiveOwnerAdvance
 from azents.services.mailbox import (
     MailboxService,
     PendingInputInferenceProfile,
@@ -263,10 +264,12 @@ class _LiveEventStore:
         self.cleared_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
 
-    async def advance_owner(self, session_id: str, owner_generation: int) -> bool:
+    async def advance_owner(
+        self, session_id: str, owner_generation: int
+    ) -> LiveOwnerAdvance:
         """Accept the current test projection owner."""
         del session_id, owner_generation
-        return True
+        return LiveOwnerAdvance(accepted=True, advanced=False, removed_events=())
 
     def for_owner(self, session_id: str, owner_generation: int) -> "_LiveEventStore":
         """Return the owner-scoped in-memory test store."""

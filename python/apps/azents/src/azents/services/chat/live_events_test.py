@@ -731,15 +731,19 @@ async def test_redis_live_event_store_contract(redis: Redis) -> None:
 async def _assert_owner_generation_fence(store: BaseLiveEventStore) -> None:
     """Verify old projection writers cannot modify a replacement owner's state."""
     session_id = "session-owner-fence"
-    assert await store.advance_owner(session_id, 1)
+    first_advance = await store.advance_owner(session_id, 1)
+    assert first_advance.accepted
+    assert first_advance.removed_events == ()
     old_owner = store.for_owner(session_id, 1)
-    await old_owner.append_assistant_delta(
+    old = await old_owner.append_assistant_delta(
         session_id,
         delta="old",
         content_index=0,
     )
 
-    assert await store.advance_owner(session_id, 2)
+    takeover = await store.advance_owner(session_id, 2)
+    assert takeover.accepted
+    assert takeover.removed_events == (old,)
     new_owner = store.for_owner(session_id, 2)
     fresh = await new_owner.append_assistant_delta(
         session_id,
@@ -753,7 +757,7 @@ async def _assert_owner_generation_fence(store: BaseLiveEventStore) -> None:
         delta=" stale",
         content_index=0,
     )
-    assert await store.advance_owner(session_id, 1) is False
+    assert not (await store.advance_owner(session_id, 1)).accepted
     assert await store.list_by_session_id(session_id) == [fresh]
 
     await new_owner.clear_session(session_id)
@@ -774,7 +778,9 @@ async def _assert_owner_generation_fence(store: BaseLiveEventStore) -> None:
         content_index=0,
     )
     assert await store.list_by_session_id(session_id) == []
-    assert await store.advance_owner(session_id, 2)
+    reseed = await store.advance_owner(session_id, 2)
+    assert reseed.accepted
+    assert reseed.removed_events == ()
     await new_owner.append_assistant_delta(
         session_id,
         delta="reseeded",

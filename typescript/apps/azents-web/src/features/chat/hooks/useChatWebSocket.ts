@@ -106,6 +106,8 @@ function isChatEventWire(
       return (
         isSessionFrame(value, sessionId) && hasStringField(value, "event_id")
       );
+    case "live_projection_reset":
+      return isSessionFrame(value, sessionId);
     case "mailbox_item_upserted":
       return (
         isSessionFrame(value, sessionId) &&

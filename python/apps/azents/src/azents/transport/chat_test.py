@@ -13,10 +13,19 @@ from azents.services.chat.data import (
 )
 from azents.testing.types import is_string_object_dict
 from azents.transport.chat import (
+    chat_live_projection_reset_dump,
     chat_live_run_updated_dump,
     chat_mailbox_item_removed_dump,
     chat_mailbox_item_upserted_dump,
 )
+
+
+def test_live_projection_reset_dump_has_session_scope() -> None:
+    """Projection reset keeps the existing session-scoped wire contract."""
+    assert chat_live_projection_reset_dump("session-1") == {
+        "type": "live_projection_reset",
+        "session_id": "session-1",
+    }
 
 
 def test_live_run_dump_exposes_minimal_operation() -> None:

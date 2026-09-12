@@ -247,6 +247,14 @@ export function selectPendingMailboxEntries(
   });
 }
 
+export function pendingMailboxWaitsForModel(
+  state: PendingMailboxState,
+): boolean {
+  return selectPendingMailboxEntries(state).some(
+    (entry) => entry.item.presentation.type !== "action_message",
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
