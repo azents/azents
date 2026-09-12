@@ -1,6 +1,6 @@
 """Gateway HTTP security boundary tests."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -14,6 +14,7 @@ from azents.rdb.models.runtime_web import RuntimeWebAuthMode
 from azents.repos.runtime_web.data import RuntimeWebEndpoint
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebAdmissionLimits,
+    RuntimeWebAuthBinding,
     RuntimeWebBrokerBinding,
     RuntimeWebGatewayAuthority,
     RuntimeWebRedeemedIdentity,
@@ -82,8 +83,20 @@ class _Auth:
         initiation_id: str,
         now: datetime,
     ) -> RuntimeWebBrokerBinding:
-        del initiation_id, now
-        raise AssertionError("Broker authentication is not expected")
+        return RuntimeWebBrokerBinding(
+            binding=RuntimeWebAuthBinding(
+                id="b" * 32,
+                initiation_id=initiation_id,
+                user_id="u" * 32,
+                auth_session_id="s" * 32,
+                endpoint_id=_ENDPOINT.id,
+                epoch=1,
+                expires_at=now + timedelta(seconds=120),
+                broker_bound=True,
+                settled=False,
+            ),
+            broker_binding_secret="broker-secret",
+        )
 
     async def redeem_ticket(
         self,
@@ -211,6 +224,30 @@ async def test_valid_same_root_preflight_is_local_and_credentialed() -> None:
             == "https://source.services.example.net"
         )
         assert response.headers["Access-Control-Allow-Credentials"] == "true"
+        assert not proxy.opened
+    finally:
+        await client.close()
+
+
+async def test_broker_auto_post_preserves_only_its_origin() -> None:
+    proxy = _Proxy()
+    client = await _client(proxy)
+    try:
+        response = await client.post(
+            "/bind",
+            headers={
+                "Host": "auth.services.example.net",
+                "Origin": "https://app.example.com",
+            },
+            data={"initiation_id": "i" * 32},
+        )
+        assert response.status == 200
+        assert response.headers["Referrer-Policy"] == "strict-origin"
+        content_security_policy = response.headers["Content-Security-Policy"]
+        assert "form-action https://app.example.com" in content_security_policy
+        assert "frame-ancestors 'none'" in content_security_policy
+        assert "script-src 'nonce-runtime-web'" in content_security_policy
+        assert "https://app.example.com/runtime-web/auth/bound" in await response.text()
         assert not proxy.opened
     finally:
         await client.close()

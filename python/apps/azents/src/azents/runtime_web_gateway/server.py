@@ -401,6 +401,7 @@ async def _broker_bind(
         content_type="text/html",
         headers=_security_page_headers(
             form_action=state.config.main_web_origin,
+            referrer_policy="strict-origin",
         ),
     )
     response.set_cookie(
@@ -1114,11 +1115,12 @@ def _security_headers(config: RuntimeWebGatewayConfig) -> dict[str, str]:
 def _security_page_headers(
     *,
     form_action: str = "'self'",
+    referrer_policy: str = "no-referrer",
 ) -> dict[str, str]:
     csp = _SECURITY_CSP.replace("form-action 'self'", f"form-action {form_action}")
     return {
         "Cache-Control": "no-store",
-        "Referrer-Policy": "no-referrer",
+        "Referrer-Policy": referrer_policy,
         "X-Frame-Options": "DENY",
         "Content-Security-Policy": csp,
     }
