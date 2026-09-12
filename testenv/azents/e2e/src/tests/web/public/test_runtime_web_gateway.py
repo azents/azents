@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import itertools
 import json
+import logging
 import subprocess
 import tempfile
 import time
@@ -45,6 +46,7 @@ from azentspublicclient.models.runtime_web_exposure_request import (
 from azentspublicclient.models.runtime_web_request_state import RuntimeWebRequestState
 from azentspublicclient.models.secrets import Secrets
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -76,7 +78,9 @@ _SHARED_COOKIE_DOMAIN = "runtime-e2e.test"
 _SEPARATE_COOKIE_DOMAIN = _SERVICE_SUFFIX
 _TERMINAL_ORIGIN = "https://azents-web-gateway:8443"
 _SIGNUP_PASSWORD = "TestPass123!"
+_CHROMIUM_MAJOR_VERSION = "149"
 _CONFIGURATION_REVISIONS = itertools.count(10_000)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -272,8 +276,14 @@ def _runtime_web_gateway_container(
             "runtime-control-relay:8033",
         )
         .with_env("AZ_RUNTIME_WEB_GATEWAY_CONTROL_ALLOW_INSECURE", "true")
-        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION", "152")
-        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION", "152")
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION",
+            _CHROMIUM_MAJOR_VERSION,
+        )
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION",
+            _CHROMIUM_MAJOR_VERSION,
+        )
     )
 
 
@@ -330,8 +340,14 @@ def _runtime_web_public_api_container(
         .with_env("AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN", _BROKER_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX", _SERVICE_SUFFIX)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN", cookie_domain)
-        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION", "152")
-        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION", "152")
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION",
+            _CHROMIUM_MAJOR_VERSION,
+        )
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION",
+            _CHROMIUM_MAJOR_VERSION,
+        )
     )
 
 
@@ -635,6 +651,22 @@ def _runtime_web_stack(
                     edge_host_url=f"https://{edge_host}:{edge_port}",
                     selenium_url=selenium_url,
                 )
+            except Exception:
+                for name, container in (
+                    ("Runtime Control relay", relay),
+                    ("Runtime Web Gateway", gateway),
+                    ("Runtime Web Public API", public_api),
+                    ("Runtime Web Main Web", main_web),
+                    ("Runtime Web TLS edge", edge),
+                ):
+                    logger.warning(
+                        "Runtime Web E2E container logs",
+                        extra={
+                            "container_name": name,
+                            "container_logs": _container_logs(container),
+                        },
+                    )
+                raise
             finally:
                 for container in reversed(containers):
                     container.get_wrapped_container().reload()
@@ -851,11 +883,19 @@ def _approve_in_browser(driver: WebDriver, *, endpoint_url: str) -> None:
     """Complete browser authentication and exact pending-request approval."""
     wait = WebDriverWait(driver, 60)
     driver.get(endpoint_url)
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[normalize-space()='Review web service access']")
+    try:
+        wait.until(
+            ec.visibility_of_element_located(
+                (By.XPATH, "//*[normalize-space()='Review web service access']")
+            )
         )
-    )
+    except TimeoutException as error:
+        current_url = driver.current_url.split("?", maxsplit=1)[0]
+        body_text = driver.find_element(By.TAG_NAME, "body").text[:2_000]
+        raise AssertionError(
+            "Runtime Web confirmation did not become visible: "
+            f"url={current_url!r}, title={driver.title!r}, body={body_text!r}"
+        ) from error
     wait.until(
         ec.element_to_be_clickable(
             (By.XPATH, "//button[starts-with(normalize-space(), 'Approve for ')]")
