@@ -40,6 +40,7 @@ export function AgentDraftChat(
     pendingFiles,
     defaultInferenceProfile,
     subscriptionUsage,
+    onInferenceProfileChange,
     workspaceItems,
     activeWorktreeItemId,
     gitRefPreviewState,
@@ -162,6 +163,7 @@ export function AgentDraftChat(
             uploadAll={uploadAll}
             selectableModelOptions={agent.selectable_model_options}
             defaultInferenceProfile={defaultInferenceProfile}
+            onInferenceProfileChange={onInferenceProfileChange}
             onSendInput={onSendInput}
             clearFiles={clearFiles}
             resetDoneFiles={resetDoneFiles}

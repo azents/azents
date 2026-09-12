@@ -137,6 +137,7 @@ const args: AgentDraftChatContainerOutput = {
     enabled_execution_options: [],
   },
   subscriptionUsage,
+  onInferenceProfileChange: () => {},
   selectedProjectPaths: [],
   workspaceItems: [],
   activeWorktreeItemId: null,

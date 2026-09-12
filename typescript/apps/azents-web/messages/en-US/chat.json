@@ -573,7 +573,10 @@
     "cacheCreation": "Cache write",
     "reasoning": "Reasoning",
     "modelIdentity": "{model} · {provider}",
-    "unknownProvenance": "Run provenance is not available yet."
+    "unknownProvenance": "Run provenance is not available yet.",
+    "fast": "Fast",
+    "fastEnabled": "On",
+    "fastDisabled": "Off"
   },
   "editMessage": "Edit",
   "senderUnavailable": "Sender unavailable",

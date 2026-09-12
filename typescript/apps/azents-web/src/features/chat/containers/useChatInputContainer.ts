@@ -81,6 +81,8 @@ export interface ChatInputProps {
   onApplyInferenceProfile?: (
     profile: RequestedInferenceProfile,
   ) => Promise<boolean>;
+  /** publishes the profile currently displayed by the composer */
+  onInferenceProfileChange?: (profile: RequestedInferenceProfile) => void;
   /** Whether any attachment is currently uploading */
   isUploading: boolean;
   /** pending file list */
@@ -458,6 +460,7 @@ function useChatInputContainerImplementation({
   contextUsage = null,
   contextUsageActiveRun = null,
   onApplyInferenceProfile,
+  onInferenceProfileChange,
   isUploading,
   pendingFiles,
   goal,
@@ -656,6 +659,10 @@ function useChatInputContainerImplementation({
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
   }, [editingMessageId, initialInputValue, inputActions, parsedDraft]);
+
+  useEffect(() => {
+    onInferenceProfileChange?.(inferenceProfile);
+  }, [inferenceProfile, onInferenceProfileChange]);
 
   useEffect(() => {
     const identityChanged = profileIdentityRef.current !== profileIdentity;

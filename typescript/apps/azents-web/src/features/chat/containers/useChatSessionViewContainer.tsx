@@ -38,6 +38,7 @@ import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscr
 import type {
   AgentResponse,
   AgentSessionResponse,
+  RequestedInferenceProfile,
 } from "@azents/public-client";
 import type { ReactNode } from "react";
 
@@ -61,6 +62,7 @@ export interface ChatSessionViewContainerOutput {
   chatSession: ReturnType<typeof useChatSessionContainer>;
   currentWorkspaceProfile: CurrentWorkspaceProfile | null;
   subscriptionUsage: ComposerSubscriptionUsagePresentationProps | null;
+  onInferenceProfileChange: (profile: RequestedInferenceProfile) => void;
   workspacePanel: WorkspacePanelContainerOutput;
   subagentNavigation: SubagentNavigationLinks | null;
   terminal: RuntimeTerminalContainerOutput;
@@ -94,6 +96,26 @@ export function useChatSessionViewContainer(
     agent,
     onConnectionStatusChange,
   });
+  const [composerModelTargetLabel, setComposerModelTargetLabel] = useState(
+    chatSession.appliedInferenceProfile?.model_target_label ??
+      chatSession.defaultInferenceProfile.model_target_label,
+  );
+  useEffect(() => {
+    setComposerModelTargetLabel(
+      chatSession.appliedInferenceProfile?.model_target_label ??
+        chatSession.defaultInferenceProfile.model_target_label,
+    );
+  }, [
+    chatSession.appliedInferenceProfile?.model_target_label,
+    chatSession.defaultInferenceProfile.model_target_label,
+    sessionId,
+  ]);
+  const onInferenceProfileChange = useCallback(
+    (profile: RequestedInferenceProfile): void => {
+      setComposerModelTargetLabel(profile.model_target_label);
+    },
+    [],
+  );
   const currentWorkspaceProfileQuery = trpc.memberProfile.getMyProfile.useQuery(
     { handle },
     { retry: false },
@@ -110,12 +132,9 @@ export function useChatSessionViewContainer(
     () =>
       resolveComposerSubscriptionSelection(
         agent.selectable_model_options,
-        chatSession.defaultInferenceProfile.model_target_label,
+        composerModelTargetLabel,
       ),
-    [
-      agent.selectable_model_options,
-      chatSession.defaultInferenceProfile.model_target_label,
-    ],
+    [agent.selectable_model_options, composerModelTargetLabel],
   );
   const subscriptionUsageContainer = useSubscriptionUsageContainer({
     enabled: subscriptionSelection !== null,
@@ -219,6 +238,7 @@ export function useChatSessionViewContainer(
     chatSession,
     currentWorkspaceProfile,
     subscriptionUsage,
+    onInferenceProfileChange,
     workspacePanel,
     subagentNavigation,
     terminal,

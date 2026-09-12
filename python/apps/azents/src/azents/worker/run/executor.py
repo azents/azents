@@ -80,6 +80,7 @@ from azents.engine.run.contracts import (
 from azents.engine.run.emit import Emit, handle_engine_event
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
+    ModelCallError,
     NonRetryableModelCallError,
     TransientModelCallError,
     UserVisibleRuntimeError,
@@ -1538,6 +1539,56 @@ class RunExecutor:
                 ),
             )
 
+        def apply_fresh_main_model_turn(
+            prepared_value: FreshTurnPreparation,
+        ) -> None:
+            """Replace the active request with one freshly prepared model turn."""
+            nonlocal inference_profile, run_request, selected_profile
+            current_request = run_request
+            if current_request is None:
+                raise RuntimeError("Active model request is not prepared")
+            next_inference_state = prepared_value.inference_state
+            rebuilt = prepared_value.run_request
+            run_request = dataclasses.replace(
+                rebuilt,
+                toolkits=current_request.toolkits,
+                agent_prompt=current_request.agent_prompt,
+                max_input_tokens=next_inference_state.effective_context_window_tokens,
+                context_window_tokens=(
+                    next_inference_state.effective_context_window_tokens
+                ),
+                compaction_max_input_tokens=(
+                    next_inference_state.effective_context_window_tokens
+                ),
+                auto_compaction_threshold_tokens=(
+                    next_inference_state.effective_auto_compaction_threshold_tokens
+                ),
+                inference_state=next_inference_state,
+            )
+            selected_profile = RequestedProfileSelection(
+                profile=prepared_value.profile,
+                source=prepared_value.source,
+            )
+            inference_profile = next_inference_state.applied_profile
+
+        async def refresh_retry_model_turn() -> None:
+            """Prepare the next retry attempt from current Session model intent."""
+            previous_profile = inference_profile
+            prepared = await self._prepare_fresh_main_model_turn(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                owner_generation=owner_generation,
+                invoke_input=invoke_input,
+                override=None,
+            )
+            if prepared.failure:
+                raise ProfileResolutionRuntimeError(
+                    _profile_resolution_failure(prepared.error)
+                )
+            apply_fresh_main_model_turn(prepared.value)
+            if inference_profile != previous_profile:
+                await publish_live_run()
+
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
             await self.session_lifecycle.set_session_activity(
@@ -1717,6 +1768,7 @@ class RunExecutor:
         )
 
         try:
+            retry_model_refresh_required = False
             if current_retry_state is not None:
                 if not await record_user_stop_if_requested():
                     finalization_reason = _failed_run_finalization_reason(
@@ -1749,8 +1801,18 @@ class RunExecutor:
                         )
                         if retry_stopped:
                             await record_user_stop()
+                        else:
+                            retry_model_refresh_required = command_handler is None and (
+                                current_retry_state.last_source == "model"
+                                or current_retry_state.provider_failure is not None
+                                or current_retry_state.last_error_type
+                                == UnclassifiedModelProviderError.__name__
+                            )
             while not run_completed:
                 try:
+                    if retry_model_refresh_required:
+                        await refresh_retry_model_turn()
+                        retry_model_refresh_required = False
                     if command_handler is None:
                         boundary_poll = self.make_boundary_poll(
                             snapshot=snapshot,
@@ -1790,42 +1852,7 @@ class RunExecutor:
                             raise ProfileResolutionRuntimeError(
                                 _profile_resolution_failure(prepared.error)
                             )
-                        prepared_value = prepared.value
-                        next_inference_state = prepared_value.inference_state
-                        rebuilt = prepared_value.run_request
-                        run_request = dataclasses.replace(
-                            rebuilt,
-                            toolkits=run_request.toolkits,
-                            agent_prompt=run_request.agent_prompt,
-                            max_input_tokens=(
-                                next_inference_state.effective_context_window_tokens
-                            ),
-                            context_window_tokens=(
-                                next_inference_state.effective_context_window_tokens
-                            ),
-                            compaction_max_input_tokens=(
-                                next_inference_state.effective_context_window_tokens
-                            ),
-                            auto_compaction_threshold_tokens=(
-                                next_inference_state.effective_auto_compaction_threshold_tokens
-                            ),
-                            inference_state=next_inference_state,
-                        )
-                        selected_profile = RequestedProfileSelection(
-                            profile=RequestedInferenceProfile(
-                                model_target_label=(
-                                    prepared_value.profile.model_target_label
-                                ),
-                                reasoning_effort=(
-                                    prepared_value.profile.reasoning_effort
-                                ),
-                                enabled_execution_options=(
-                                    prepared_value.profile.enabled_execution_options
-                                ),
-                            ),
-                            source=prepared_value.source,
-                        )
-                        inference_profile = next_inference_state.applied_profile
+                        apply_fresh_main_model_turn(prepared.value)
                         turn_boundary_context_invalidated = False
                         await publish_live_run()
                         continue
@@ -1898,6 +1925,9 @@ class RunExecutor:
                         await record_user_stop()
                         break
                     attempt_number += 1
+                    retry_model_refresh_required = (
+                        command_handler is None and isinstance(exc, ModelCallError)
+                    )
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
                         snapshot.session_id
@@ -1999,6 +2029,10 @@ class RunExecutor:
                         await record_user_stop()
                         break
                     attempt_number += 1
+                    retry_model_refresh_required = (
+                        command_handler is None
+                        and isinstance(exc, UnclassifiedModelProviderError)
+                    )
         except asyncio.CancelledError as exc:
             run_end_reason = "cancelled"
             if not user_stop_cancelled(exc):

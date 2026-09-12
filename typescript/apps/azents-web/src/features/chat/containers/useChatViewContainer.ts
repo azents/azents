@@ -311,6 +311,7 @@ export interface ChatViewProps {
   onApplyInferenceProfile?: (
     profile: RequestedInferenceProfile,
   ) => Promise<boolean>;
+  onInferenceProfileChange?: (profile: RequestedInferenceProfile) => void;
   tokenUsage?: TokenUsageSummary | null;
   onSendInput: (
     message: string,
@@ -441,6 +442,7 @@ export function useChatViewContainer({
   lastEventReceivedAt,
   liveRun,
   onApplyInferenceProfile,
+  onInferenceProfileChange,
   tokenUsage = null,
   onSendInput,
   onDeletePendingInputBuffer,
@@ -1180,6 +1182,7 @@ export function useChatViewContainer({
     lastEventReceivedAt,
     liveRun,
     onApplyInferenceProfile,
+    onInferenceProfileChange,
     tokenUsage,
     onSendInput,
     onDeletePendingInputBuffer,

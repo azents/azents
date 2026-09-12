@@ -73,6 +73,7 @@ export interface AgentDraftChatContainerOutput {
   pendingFiles: PendingFile[];
   defaultInferenceProfile: RequestedInferenceProfile;
   subscriptionUsage: ComposerSubscriptionUsagePresentationProps | null;
+  onInferenceProfileChange: (profile: RequestedInferenceProfile) => void;
   selectedProjectPaths: string[];
   workspaceItems: NewSessionWorkspaceItemState[];
   activeWorktreeItemId: string | null;
@@ -620,16 +621,25 @@ export function useAgentDraftChatContainer(
     }),
     [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );
+  const [composerModelTargetLabel, setComposerModelTargetLabel] = useState(
+    defaultInferenceProfile.model_target_label,
+  );
+  useEffect(() => {
+    setComposerModelTargetLabel(defaultInferenceProfile.model_target_label);
+  }, [agent.id, defaultInferenceProfile.model_target_label]);
+  const onInferenceProfileChange = useCallback(
+    (profile: RequestedInferenceProfile): void => {
+      setComposerModelTargetLabel(profile.model_target_label);
+    },
+    [],
+  );
   const subscriptionSelection = useMemo(
     () =>
       resolveComposerSubscriptionSelection(
         agent.selectable_model_options,
-        defaultInferenceProfile.model_target_label,
+        composerModelTargetLabel,
       ),
-    [
-      agent.selectable_model_options,
-      defaultInferenceProfile.model_target_label,
-    ],
+    [agent.selectable_model_options, composerModelTargetLabel],
   );
   const subscriptionUsageContainer = useSubscriptionUsageContainer({
     enabled: subscriptionSelection !== null,
@@ -710,6 +720,7 @@ export function useAgentDraftChatContainer(
     pendingFiles,
     defaultInferenceProfile,
     subscriptionUsage,
+    onInferenceProfileChange,
     selectedProjectPaths,
     workspaceItems,
     activeWorktreeItemId: activeWorktreeItem?.id ?? null,

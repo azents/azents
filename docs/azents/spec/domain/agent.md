@@ -100,8 +100,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-10
-spec_version: 75
+last_verified_at: 2026-09-12
+spec_version: 76
 ---
 
 # Agent Domain Spec
@@ -556,7 +556,7 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 
 Preparation also validates enabled execution-option IDs against the implemented registry and selected saved model support. Unknown, duplicate, or unsupported explicit selections fail before provider invocation rather than silently dropping the preference. Composer draft model switching may intersect choices with the new model's support; that client normalization does not replace server validation. Implicit inherited choices on an explicitly changed subagent target retain only supported options, while same-target and full-history inheritance preserve the prepared choice. Auxiliary title and compaction calls do not inherit premium sampling options.
 
-Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, enabled execution options, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover; later Agent edits cannot change an already prepared turn. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
+Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, enabled execution options, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is immutable for the active model-call attempt. After an automatic model-call failure and retry backoff, the next attempt freshly resolves the current Session-applied profile against the current Agent option mapping and replaces that snapshot before provider invocation. Recovery performs the same refresh before resuming a persisted retry. A later prepared profile may also update the snapshot at an ordinary turn boundary within the same active `AgentRun`, forcing model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
 `spawn_agent` exposes only current Agent options whose `settings.subagent_enabled` is true. Each advertised entry contains the Agent-owned label, explicit effort levels, and optional bounded `subagent_guidance`, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Explicit target validation uses the same enabled-option set; missing and disabled labels fail with the same unavailable-override tool error before child creation. Omitted `model_target_label` preserves the exact concrete parent Session target even when that option is disabled, and an effort-only override retains that inherited target. If no option is enabled, inherited spawning remains available while no explicit target is advertised. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
@@ -623,6 +623,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-12** (spec_version 76) — Made automatic model-call retry attempts
+  freshly resolve current Session-applied inference intent after backoff while
+  preserving the failed attempt snapshot.
 - **2026-09-10** (spec_version 75) — Preserved complete per-tool config,
   represented maintained-default image generation by omitting `config.model`,
   validated explicit pins through current stored authority, and copied the full
