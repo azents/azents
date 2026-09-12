@@ -61,6 +61,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
     lastEventReceivedAt,
     liveRun,
     onApplyInferenceProfile,
+    onInferenceProfileChange,
     tokenUsage,
     onDeletePendingInputBuffer,
     onClearGoal,
@@ -504,6 +505,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
                 contextUsage={tokenUsage}
                 contextUsageActiveRun={liveRun}
                 onApplyInferenceProfile={onApplyInferenceProfile}
+                onInferenceProfileChange={onInferenceProfileChange}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={

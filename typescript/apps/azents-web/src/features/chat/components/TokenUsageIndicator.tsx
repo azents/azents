@@ -166,6 +166,16 @@ export const TokenUsageDetails = memo(function TokenUsageDetails({
       </Stack>
       <Stack gap={rem(4)}>
         <UsageRow
+          label={t("fast")}
+          value={
+            inferenceProfile === null
+              ? "—"
+              : inferenceProfile.enabled_execution_options.includes("fast")
+                ? t("fastEnabled")
+                : t("fastDisabled")
+          }
+        />
+        <UsageRow
           label={t("usedPercent")}
           value={
             percent === null ? "—" : t("percent", { value: percent / 100 })

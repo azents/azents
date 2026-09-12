@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-09-08
-spec_version: 39
+last_verified_at: 2026-09-12
+spec_version: 40
 ---
 
 # Context Compaction
@@ -48,7 +48,7 @@ larger than its current model maximum; the maximum still wins. Effective
 lightweight resolution uses the Agent's stored lightweight option model
 snapshot and settings. Workspace defaults are copied into the Agent only at create time and are not read
 by runtime compaction. Automatic compaction threshold is then computed by
-`compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for that prepared turn, automatic retry, and recovery. A later prepared profile may replace them at the next turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
+`compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for one model-call attempt. After an automatic retry backoff, the next model attempt freshly resolves the current Session-applied profile and may replace both values before execution; recovered retry state follows the same boundary. A later prepared profile may also replace them at the next ordinary turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
 model-visible token estimate for events appended after that marker. If no turn marker exists, it falls
 back to estimating the full selected transcript.
 
@@ -296,6 +296,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 40) — Allowed freshly resolved retry profiles to
+  replace effective context and compaction thresholds before the next model
+  attempt.
 - **2026-09-08** (spec_version 39) — Updated Goal and Toolkit State ownership
   paths after pure models moved to core and database handles and completed
   operations moved to repositories; compaction behavior is unchanged.

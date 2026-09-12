@@ -249,6 +249,7 @@ export const ExecutionOptionToggle = {
     ...baseArgs,
     sessionId: "option-confirm",
     onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+    onInferenceProfileChange: fn(),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
@@ -259,6 +260,11 @@ export const ExecutionOptionToggle = {
     });
     await userEvent.click(toggle);
     await expect(toggle).toBeChecked();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["fast"],
+    });
     await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
     await userEvent.click(

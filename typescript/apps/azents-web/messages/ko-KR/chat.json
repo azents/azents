@@ -562,7 +562,10 @@
     "cacheCreation": "캐시 쓰기",
     "reasoning": "추론",
     "modelIdentity": "{model} · {provider}",
-    "unknownProvenance": "아직 실행 출처 정보를 확인할 수 없습니다."
+    "unknownProvenance": "아직 실행 출처 정보를 확인할 수 없습니다.",
+    "fast": "Fast",
+    "fastEnabled": "켜짐",
+    "fastDisabled": "꺼짐"
   },
   "editMessage": "편집",
   "senderUnavailable": "보낸 사람을 확인할 수 없음",

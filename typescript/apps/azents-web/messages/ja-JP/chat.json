@@ -562,7 +562,10 @@
     "cacheCreation": "キャッシュ書き込み",
     "reasoning": "推論",
     "modelIdentity": "{model} · {provider}",
-    "unknownProvenance": "実行の出所情報はまだ利用できません。"
+    "unknownProvenance": "実行の出所情報はまだ利用できません。",
+    "fast": "Fast",
+    "fastEnabled": "オン",
+    "fastDisabled": "オフ"
   },
   "editMessage": "編集",
   "senderUnavailable": "送信者を確認できません",

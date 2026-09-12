@@ -562,7 +562,10 @@
     "cacheCreation": "Écriture du cache",
     "reasoning": "Raisonnement",
     "modelIdentity": "{model} · {provider}",
-    "unknownProvenance": "La provenance de l’exécution n’est pas encore disponible."
+    "unknownProvenance": "La provenance de l’exécution n’est pas encore disponible.",
+    "fast": "Fast",
+    "fastEnabled": "Activé",
+    "fastDisabled": "Désactivé"
   },
   "editMessage": "Modifier",
   "senderUnavailable": "Expéditeur indisponible",

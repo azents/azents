@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-08
-spec_version: 22
+last_verified_at: 2026-09-12
+spec_version: 23
 ---
 
 # ChatGPT OAuth Flow
@@ -241,13 +241,14 @@ Neither path changes the chosen model, effort, tool set, or authentication ident
 Auxiliary compaction and title calls retain their independent all-off behavior.
 
 Fast starts off and its composer explanation describes additional ChatGPT usage or
-credits rather than API billing or a fixed multiplier. Provider rejection uses the
-existing failure/retry contract with the same prepared settings; the application does
-not quietly remove Fast or substitute another model. Provider-side downgrades and
-entitlement limits remain provider behavior, not a latency guarantee. Cost estimation
-uses the returned actual tier and leaves unknown premium pricing unset instead of
-substituting standard prices; any displayed estimate is still an API-price estimate,
-not subscription credits or verified ChatGPT billing.
+credits rather than API billing or a fixed multiplier. A rejected attempt retains its
+prepared settings, while the next automatic retry attempt freshly resolves the current
+Session-applied model, effort, and Fast preference after backoff. The application does
+not quietly remove Fast or substitute a model outside that explicit Session intent.
+Provider-side downgrades and entitlement limits remain provider behavior, not a
+latency guarantee. Cost estimation uses the returned actual tier and leaves unknown
+premium pricing unset instead of substituting standard prices; any displayed estimate
+is still an API-price estimate, not subscription credits or verified ChatGPT billing.
 
 ## Subscription Usage
 
@@ -344,6 +345,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-12 | 23 | Refreshed current Session model, effort, and Fast intent before each automatic sampling retry attempt | Let users move a failed Turn retry away from an exhausted or undesired model without mutating the failed attempt |
 | 2026-09-08 | 22 | Moved runtime token-refresh reads and persistence behind completed repository operations | Keep OAuth HTTP calls outside database transactions without changing existing refresh outcomes |
 | 2026-09-05 | 21 | Lowered result-less failed image calls to semantic history before stateless provider-item ID omission | Preserve durable failure history without sending an invalid `image_generation_call` lacking both `id` and `result` |
 | 2026-09-05 | 20 | Adopted the provider's `99.99.99` full-catalog discovery sentinel | Avoid per-release client-version maintenance while exposing API-supported, picker-visible models such as `gpt-6-astra` without changing the runtime request dialect |

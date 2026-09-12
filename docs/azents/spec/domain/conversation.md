@@ -125,8 +125,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-10
-spec_version: 165
+last_verified_at: 2026-09-12
+spec_version: 166
 ---
 
 # Conversation & Events
@@ -386,7 +386,9 @@ Concrete-session composers place the context-window usage ring beside the compos
 it opens the desktop model popover or mobile model bottom sheet and automatically scrolls to the latest
 durable or active-run context-window details. Root-session pickers render model and reasoning-effort
 controls above those details. Read-only subagent pickers render only the context-window details, so the
-context ring remains inspectable without exposing an inference-profile mutation path.
+context ring remains inspectable without exposing an inference-profile mutation path. The details show
+whether Fast was on or off for the represented completed model turn from that turn marker's applied
+inference profile; they do not substitute the current composer preference.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
@@ -700,7 +702,7 @@ mailbox item, appends a deterministic `system_error`, preserves the previous Ses
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
-The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. On first activation, `AgentRun` stores only that selected requested label and nullable effort alongside lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore the resolved physical model selection or effective limits. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, copies the original run's requested intent, and re-resolves current Agent routing at activation. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving resolved model state from the parent or child run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary and automatic retry attempt. On first activation, `AgentRun` stores only that selected requested label and nullable effort alongside lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore the resolved physical model selection or effective limits. A profile change arriving during an active run is prepared for the next ordinary boundary. A model-call failure keeps the failed attempt's snapshot immutable, but after retry backoff the next attempt freshly resolves the current Session-applied profile and rebuilds the same run's physical request and effective limits. Manual retry creates a new pending run, preserves the original ordered input-event associations, copies the original run's requested intent, and re-resolves current Agent routing at activation. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving resolved model state from the parent or child run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
 
 Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
 `cancelled` is eligible for one queue-only terminal result to its direct parent. Terminal state,
@@ -1149,9 +1151,10 @@ only enabled options supported by the new model. Read-only composers do not expo
 Applied Session intent, mailbox-requested intent, original Run intent, and prepared inference state
 retain enabled IDs independently. Requested/applied provenance survives REST, live events, history,
 and reload. An explicit submitted option becoming unavailable before preparation fails validation;
-it is not silently removed. Retrying an already prepared call retains its original selection rather
-than reading a later composer preference. Historical missing option state is all-off, and non-empty
-persisted option intent requires a corresponding model target.
+it is not silently removed. A failed model-call attempt retains its original selection, while its next
+automatic retry attempt freshly resolves the latest Session-applied model, effort, and execution-option
+intent after backoff. Historical missing option state is all-off, and non-empty persisted option intent
+requires a corresponding model target.
 
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/retry-failed-run`, and command actions submitted through the
@@ -1333,6 +1336,10 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-12** — v166. Made composer subscription usage follow the currently
+  displayed model, exposed completed-turn Fast state in token usage details, and
+  refreshed current Session inference intent before automatic model-call retry
+  attempts.
 - **2026-09-08** — v164. Recorded repository-owned completed database operations
   for ExchangeFile authorization, retention-root reads, expiration, atomic
   source/preview persistence, and post-object-delete metadata authorization. The

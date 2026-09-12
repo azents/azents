@@ -306,6 +306,7 @@ const args: ChatSessionViewContainerOutput = {
   chatSession,
   currentWorkspaceProfile: { userId: "user_ada", name: "Ada Lovelace" },
   subscriptionUsage,
+  onInferenceProfileChange: noop,
   workspacePanel,
   subagentNavigation: null,
   terminal,
