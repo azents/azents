@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-12 | 76 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-12 | 167 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-12 | 78 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-13 | 78 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 24 |
@@ -25,24 +25,24 @@ Design documents are accumulated records and are not listed individually in this
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-12 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-12 | 114 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 16 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-12 | 82 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-13 | 16 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-13 | 82 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-12 | 176 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-12 | 79 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 176 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 79 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 48 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 48 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-12 | 26 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-12 | 62 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-12 | 49 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-13 | 49 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |

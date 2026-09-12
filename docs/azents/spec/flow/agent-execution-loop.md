@@ -28,6 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/services/terminal_finalization.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
@@ -84,6 +85,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/config.py
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/events/publisher.py
   - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
@@ -96,7 +98,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 176
 ---
 

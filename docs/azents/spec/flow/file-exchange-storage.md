@@ -58,7 +58,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-12
+last_verified_at: 2026-09-13
 spec_version: 49
 ---
 
@@ -365,8 +365,8 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
-- 2026-09-12: Isolate generated-file preparation and compensation by owner generation; keep object I/O outside metadata transactions.
-
+- **2026-09-12** — v49. Isolated generated-file preparation and compensation
+  by owner generation while keeping object I/O outside metadata transactions.
 - **2026-09-08** — v48. Moved Artifact, ExchangeFile, and ModelFile metadata,
   authorization, expiration, and final publication transactions into completed
   repository operations. S3 and Runtime-facing work remains outside database

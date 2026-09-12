@@ -68,6 +68,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/auth/**
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
+  - typescript/apps/azents-web/src/features/security/**
   - typescript/apps/azents-web/src/config/server.ts
   - typescript/apps/azents-web/src/shared/components/AppBar.tsx
   - typescript/apps/azents-web/src/shared/lib/admin-access.ts
@@ -87,7 +88,7 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-08
+last_verified_at: 2026-09-13
 spec_version: 16
 ---
 
