@@ -711,7 +711,7 @@ export const chatRouter = router({
     .input(
       z.object({
         sessionId: z.string().min(1),
-        limit: z.number().min(1).max(100).optional(),
+        limit: z.number().min(1).max(100).default(100),
         before: z.string().optional(),
         after: z.string().optional(),
       }),
