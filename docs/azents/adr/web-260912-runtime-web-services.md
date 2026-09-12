@@ -1,5 +1,5 @@
 ---
-title: "Temporary Runtime Web Services"
+title: "Runtime Web Services"
 created: 2026-09-12
 tags: [runtime, web, architecture, security, frontend, backend, infra]
 document_role: primary
@@ -7,7 +7,7 @@ document_type: adr
 snapshot_id: web-260912
 ---
 
-# Temporary Runtime Web Services
+# Runtime Web Services
 
 - Snapshot: `web-260912`
 - Document reference: `web-260912/ADR`

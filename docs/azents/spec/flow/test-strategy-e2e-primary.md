@@ -386,6 +386,18 @@ Always-on required CI does not depend on external credentials.
   Profile-backed Add Runtime confirmation, managed controls, aggregate-only destructive removal
   confirmation, and non-cancellable removal progress. The browser journey does not write directly
   to PostgreSQL or derive Runtime actions in test code.
+- Runtime Web Gateway E2E starts the real Docker Runtime and launches a bounded
+  loopback fixture application through the product Terminal API. It runs both
+  shared-cookie and separate-domain browser identity flows through a local TLS
+  wildcard edge, approves the exact pending request through Main Web, and verifies
+  stable secret-free URLs, current projection, replacement and close revision
+  fencing, HTTP POST, SSE, WebSocket, redirect non-following, and a streamed response
+  larger than 64 MiB. A second Runtime Control replica accepts the Gateway stream
+  after the Runner has registered with the first replica, forcing the PostgreSQL
+  owner-route and one-hop trusted relay path. Unsupported browser and unauthenticated
+  programmatic probes fail before application content. The fixture uses only
+  generated clients, UI, Runtime Terminal, and public/admin APIs; it never writes
+  product state directly to PostgreSQL.
 - The stable `ci-python-e2e` required gate aggregates support tests, the planner,
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
   filtering.

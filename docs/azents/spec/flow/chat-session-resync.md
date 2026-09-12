@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-09-13
-spec_version: 48
+spec_version: 49
 ---
 
 # Chat Session Resync
@@ -105,6 +105,15 @@ is not public. Internal provider deltas and Run/runtime lifecycle telemetry are 
 canonical live actions rather than broadcast directly. `history_event_appended` is append-only and
 idempotent by event ID. A duplicate delivery preserves the existing timeline item and its position.
 Run lifecycle or provenance changes do not republish an existing history event.
+
+Recognized Runtime Web tool-call history renders a dedicated request card only when
+its metadata contains the expected endpoint/request/cycle identifiers. The card and
+Services workspace panel load the current Runtime Web projection independently from
+the immutable Chat event. A historical card whose request is no longer the current
+pending request is explicitly stale and read-only; it cannot approve, reject, cancel,
+or close newer authority. Unknown or malformed metadata remains on the generic tool
+presentation path. Runtime Web secrets, URLs carrying secrets, application bodies,
+and transport diagnostics are not reconstructed from Chat history.
 
 ## 5. REST History Contract
 

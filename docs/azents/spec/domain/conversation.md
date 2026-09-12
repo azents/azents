@@ -61,6 +61,9 @@ code_paths:
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/services/runtime_web/**
+  - python/apps/azents/src/azents/rdb/models/runtime_web.py
+  - python/apps/azents/src/azents/repos/runtime_web/**
   - python/apps/azents/src/azents/runtime/terminal_coordination/**
   - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/services/agent_mailbox.py
@@ -75,6 +78,7 @@ code_paths:
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/api/public/terminal/**
+  - python/apps/azents/src/azents/api/public/runtime_web/**
   - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
@@ -83,6 +87,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
+  - typescript/apps/azents-web/src/features/runtime-web/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py
@@ -127,7 +132,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-13
-spec_version: 168
+spec_version: 169
 ---
 
 # Conversation & Events
@@ -164,6 +169,9 @@ erDiagram
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
     AgentSession ||--o{ SessionGitWorktree : "owned worktrees"
     AgentSession ||--o{ ActionExecution : "operation TurnAction executions"
+    AgentSession ||--o{ RuntimeWebEndpoint : "owns stable service endpoints"
+    RuntimeWebEndpoint ||--o{ RuntimeWebRequest : "receives exposure requests"
+    RuntimeWebRequest ||--o| RuntimeWebCycle : "may create approved cycle"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
 ```
 
@@ -177,6 +185,14 @@ Runtime-free Agents execute model and compatible server/remote work without crea
 Session execution control state is stored on `AgentSession`; detailed run phase/tool state is stored
 in `agent_runs`. Runtime lifecycle state must not be used as the authority for a session run,
 pending command, stop intent, or run heartbeat.
+
+Runtime Web endpoints, requests, and finite approval cycles are durable
+Session-scoped conversation resources, but application traffic is not conversation
+state. Chat events may retain only recognized content-free Runtime Web metadata such
+as endpoint, request, cycle, port, and label identifiers. They never retain browser
+identity, tickets, cookies, application paths, query strings, headers, request or
+response bodies, or live transport state. Current approval and availability always
+come from the Runtime Web projection rather than from an older Chat event.
 
 `SessionAgent` is the session-scoped participant tree used by subagents. It does not replace
 `AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns

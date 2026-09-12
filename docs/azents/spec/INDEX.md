@@ -12,8 +12,8 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-13 | 77 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-13 | 168 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-13 | 78 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-13 | 169 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-13 | 78 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
@@ -21,18 +21,18 @@ Details of all living specs. Synchronized from frontmatter.
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-12 | 12 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-10 | 5 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-13 | 116 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-13 | 16 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-13 | 117 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-13 | 17 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-13 | 83 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 177 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 79 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
-| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 48 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 178 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 80 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-12 | 35 |
+| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 49 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |

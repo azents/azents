@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
   - proto/azents/runtime_control/v1/**
+  - proto/azents/runtime_web/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
@@ -41,6 +42,11 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_runner_auth/**
   - python/apps/azents/src/azents/services/runtime_connection_registration/**
+  - python/apps/azents/src/azents/rdb/models/runtime_web.py
+  - python/apps/azents/src/azents/repos/runtime_web/**
+  - python/apps/azents/src/azents/services/runtime_web/**
+  - python/apps/azents/src/azents/api/public/runtime_web/**
+  - python/apps/azents/src/azents/runtime_web_gateway/**
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents/src/azents/worker/health.py
   - python/apps/azents/src/azents/utils/logging.py
@@ -62,13 +68,19 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
+  - typescript/apps/azents-web/src/features/runtime-web/**
+  - typescript/apps/azents-web/src/features/chat/components/RuntimeWeb*
+  - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeServicesPanel*
+  - typescript/apps/azents-web/src/app/(app)/runtime-web/**
+  - typescript/apps/azents-web/src/trpc/routers/runtime-web.ts
   - testenv/azents/e2e/src/support/runtime_profiles.py
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
+  - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-13
-spec_version: 79
+spec_version: 80
 ---
 
 # Agent Runtime Control
@@ -162,6 +174,60 @@ never command, output, environment, or working-directory content.
 The Redis implementation uses the `runtime-terminal:v2` namespace and stores accepted
 Runner connection generations as canonical fixed-width decimal strings. It does not
 read or migrate the retired volatile namespace.
+
+## Runtime Web Exposure
+
+Runtime Web gives one Session and numeric loopback port a stable opaque HTTPS
+endpoint. Preparing an endpoint, requesting exposure, approving a request, and
+closing an approved cycle are separate revision-fenced operations. Approval is a
+finite authority record in PostgreSQL and remains independent from application
+process or Runtime lifecycle. Closing exposure does not stop the application, and a
+Runtime restart or Runner replacement makes transport temporarily unavailable
+without changing the stable endpoint URL or implicitly extending approval.
+
+The Public API authorizes every projection and mutation through the concrete Agent
+Session. Team Session access follows current Workspace membership; User Session
+access remains owner-only. Agent tools resolve subagents to their same-root Session
+authority and return non-secret endpoint/request/cycle projections. Request creation
+is nonblocking. Human approval binds the exact pending request revision, displayed
+duration, and configuration revision. Repeated or stale decisions fail with conflict
+instead of mutating the newer projection.
+
+Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
+items, or audit history. Each admitted HTTP, SSE, or WebSocket exchange uses a
+dedicated bounded bidirectional stream between Gateway, Runtime Control, and the
+Runner. The Runner connects only to the requested numeric `127.0.0.1` port, uses an
+origin-form target, disables redirect following, and advertises
+`runtime-web-http.v1`. Headers, frames, queues, request size, connections, deadlines,
+and shared admission leases are bounded. Owner loss, route-lease loss, generation
+replacement, relay failure, or ambiguity terminates transport without replaying an
+unsafe request.
+
+Runtime Control owns a process-local tunnel registry and a PostgreSQL route lease
+that advertises its configured trusted address and random boot identity. A Gateway
+may connect to any Control replica. The accepting replica joins a local owner or
+relays exactly once over the isolated trusted Control service to the current owner;
+the Runner continues to use its established Control connection. Gateway-to-Control
+and Control-to-Control authentication uses the dedicated mTLS listener in deployed
+environments. Local E2E may explicitly use the isolated insecure trusted port.
+
+The independent Gateway synchronizes one monotonic Runtime Web configuration epoch,
+resolves the endpoint by opaque hostname, authenticates a browser identity, validates
+current approval and Runtime/Runner generations, acquires admission, and streams the
+exchange. It fails closed when configuration or database authority is unavailable.
+Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
+responses as applicable; safe browser navigation is redirected only to the exact
+configured Main Web authentication or confirmation route.
+
+Gateway browser policy admits only the configured Chromium version range with
+consistent client hints. It rejects Service Worker requests, cross-root origins,
+invalid Fetch Metadata, ambiguous hosts, non-origin-form targets, oversized headers
+or bodies, and unauthorized WebSocket upgrades before application content is
+returned. Upstream access-control headers are replaced by Gateway policy, hop-by-hop
+headers are removed, cookies are bounded and rewritten for the service host, and
+security responses are content-free. Logs and metrics retain identifiers, status
+classes, durations, and byte counts but never application bodies, query strings,
+cookies, authorization values, tickets, or identity secrets.
 
 ## Runtime File Transfer
 

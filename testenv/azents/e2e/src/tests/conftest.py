@@ -1823,6 +1823,12 @@ def azents_runtime_control_container(
     container = (
         container.with_env("AZ_RUNTIME_CONTROL_PORT", "8030")
         .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_TRANSPORT_ENABLED", "true")
+        .with_env("AZ_RUNTIME_CONTROL_TRUSTED_PORT", "8032")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS",
+            "runtime-control:8032",
+        )
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")
         .with_env("AZ_TESTENV_RUNTIME_CONTROL_HEARTBEAT_INTERVAL_SECONDS", "2")

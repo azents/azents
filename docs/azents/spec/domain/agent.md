@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -51,6 +52,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/api/public/terminal/**
+  - python/apps/azents/src/azents/api/public/runtime_web/**
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
@@ -72,6 +74,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/AgentAvatar.tsx
   - typescript/apps/azents-web/src/shared/agent-session/agentAvatarImageSource.ts
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
+  - typescript/apps/azents-web/src/features/runtime-web/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
@@ -87,6 +90,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
+  - /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services
   - /runtime-profile/v1/workspaces/{handle}/profiles
   - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
   - /runtime-profile/v1/workspaces/{handle}/default
@@ -101,12 +105,19 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-13
-spec_version: 77
+spec_version: 78
 ---
 
 # Agent Domain Spec
 
 Agent is central execution unit of azents. Within Workspace, it bundles an ordered selectable model option list, effective model selection snapshots, system prompt, model parameters, Toolkit access, and an optional managed Runtime capability; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
+
+The auto-bound Runtime Web Toolkit is available to root Agents and subagents even
+when the Agent is Runtime-free. It prepares stable Session-and-port endpoints,
+creates nonblocking exposure requests, lists current projections, and closes an
+approved cycle. A running application and human approval are separate concerns:
+Agent execution never grants browser access, and a Runtime lifecycle transition
+does not rewrite the durable endpoint or approval record.
 
 ## 1. Core Model
 

@@ -70,6 +70,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/features/security/**
   - typescript/apps/azents-web/src/config/server.ts
+  - typescript/apps/azents-web/src/app/(app)/runtime-web/auth/**
+  - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
+  - typescript/apps/azents-web/src/shared/lib/request-origin*
+  - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
+  - python/apps/azents/src/azents/services/runtime_web/gateway_auth*
+  - python/apps/azents/src/azents/services/runtime_web/gateway_auth_deps.py
+  - python/apps/azents/src/azents/api/public/runtime_web/v1/**
+  - python/apps/azents/src/azents/runtime_web_gateway/**
   - typescript/apps/azents-web/src/shared/components/AppBar.tsx
   - typescript/apps/azents-web/src/shared/lib/admin-access.ts
   - typescript/apps/azents-web/src/shared/lib/login-redirect.ts
@@ -82,6 +90,7 @@ code_paths:
   - infra/charts/azents/values.schema.json
 api_routes:
   - /auth/v1
+  - /runtime-web/v1/auth
   - /user/v1
   - /security/v1
   - /workspace/v1
@@ -89,7 +98,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-13
-spec_version: 16
+spec_version: 17
 ---
 
 # User & Authentication
@@ -352,13 +361,38 @@ cross-origin, out-of-base-path, and login-loop targets use the prefixed `/worksp
 fallback. Logout uses the same native prefixed navigation. A root public base keeps
 the ordinary Refine/SPA redirect contract instead.
 
-### 3.10 Workspace invitation integration
+### 3.10 Runtime Web browser identity
+
+Runtime Web never exposes the Main Web access token, refresh token, Gateway identity,
+broker binding, or one-time ticket to application JavaScript or a URL. Production
+Main Web access and refresh cookies use host-only `__Host-` names, `Secure`,
+`HttpOnly`, `Path=/`, and the existing SameSite policy. Local and test deployments
+retain their explicit legacy cookie names without providing a production fallback.
+
+Unsafe Main Web Runtime Web routes accept only the exact configured Main Web origin
+and fail closed when that origin is absent or mismatched. Before identity issuance,
+the browser proves that an ordinary Secure cookie is writable while a forged
+`__Http-` cookie cannot replace the server-set HTTP-only probe. The server also binds
+the identity to a normalized admitted Chromium profile. Logout revokes the opaque
+Runtime Web identity and clears its cookie without revealing the secret.
+
+Shared-cookie mode mints the identity through the authenticated Public API and writes
+it from a trusted Main Web response to the configured parent cookie domain.
+Separate-domain mode creates an opaque initiation ID plus a Main-origin-only binding,
+posts only the initiation ID to the broker, binds the broker callback to the current
+auth Session, issues a single-use 30-second ticket, and redeems that ticket only with
+the broker's HTTP-only binding cookie. The resulting service-domain identity cookie
+is `Secure`, `HttpOnly`, `SameSite=Strict`, path `/`, and scoped to the configured
+service suffix. Ticket replay, binding mismatch, expired exchange, browser-profile
+mismatch, or configuration-epoch change fails closed.
+
+### 3.11 Workspace invitation integration
 
 Workspace invitation remains email-bound membership intent. Invitation can be created for email without user, and after signup token redeem with same email and login, pending invitation API returns it.
 
 When sending invitation email, if target email is not yet registered as user email and email service is configured, invitation email includes signup token URL. If email service is not configured, invitation is created as-is and signup token is not created.
 
-### 3.11 Surface routing and deployment configuration
+### 3.12 Surface routing and deployment configuration
 
 Main Web, Admin Web, Public API, and Admin API use explicit public or internal URLs instead of deriving topology from hard-coded prefixes. Admin Web's public base URL may include a gateway path and controls redirects plus cookie path. Server-to-server calls use separately configured Public/Admin API internal URLs. Main Web receives only an optional public Admin Web URL.
 

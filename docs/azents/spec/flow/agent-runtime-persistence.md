@@ -7,11 +7,13 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
   - proto/azents/runtime_control/v1/**
+  - proto/azents/runtime_web/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/rdb/models/runtime_web.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -23,6 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
+  - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/terminal_policy/**
   - python/apps/azents/src/azents/services/agent_runtime_system_metrics/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
@@ -44,8 +47,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-10
-spec_version: 34
+last_verified_at: 2026-09-12
+spec_version: 35
 ---
 
 # Agent Runtime Persistence
@@ -84,6 +87,16 @@ raw logs, traces, or metric labels. Only content-free current/recent lifecycle
 summaries and aggregate byte counts may be projected while the bounded volatile record
 exists. Coordination loss ends the Terminal path without changing durable Runtime,
 Session, Project, or Agent Workspace state.
+
+Runtime Web persists stable Session-and-port endpoints, exposure requests, approved
+cycles, configuration epochs, browser-identity hashes, broker/ticket hashes, route
+leases, and shared admission leases only where those records own authority or bounded
+recovery. Plaintext browser secrets are returned once and never stored. Application
+HTTP, SSE, and WebSocket bytes, full paths and queries, headers, cookies, and upstream
+errors are never written to PostgreSQL, Redis, object storage, events, Chat history,
+or Runtime configuration history. A transport or coordination loss therefore ends
+only the active exchange; it does not replay application requests or change the
+stable endpoint and finite approval records.
 
 The logical Runtime persists durable Provider routing IDs and a monotonic
 `configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
