@@ -9,13 +9,16 @@ import pytest
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
 )
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.coordination.stream_ids import operation_reply_stream_id
 from azents.runtime.transfer.coordinator import (
     RuntimeTransferCoordinator,
+    dispatch_request_id,
     object_handle_for,
-    runner_reply_stream_id,
     runner_request_stream_id,
 )
 from azents.runtime.transfer.data import (
@@ -48,9 +51,12 @@ def test_runner_stream_ids_preserve_signed_bigint_generation() -> None:
     assert runner_request_stream_id("runtime-1", generation) == (
         "runner:runtime-1:generation:9223372036854775807:requests"
     )
-    assert runner_reply_stream_id("runtime-1", generation) == (
-        "runner:runtime-1:generation:9223372036854775807:replies"
-    )
+    assert operation_reply_stream_id(
+        target=RuntimeCoordinationTarget.RUNNER,
+        subject_id="runtime-1",
+        generation=generation,
+        request_id="request-1",
+    ) == ("runner:runtime-1:generation:9223372036854775807:replies:request-1")
 
 
 class _Clock:
@@ -129,6 +135,10 @@ async def test_dispatch_persists_metadata_only_intent_and_operation() -> None:
     assert operation is not None
     assert operation.target is RuntimeCoordinationTarget.RUNNER
     assert operation.body_stream_id is None
+    assert operation.reply_stream_id == (
+        f"runner:runtime-1:generation:0000000000000000001:"
+        f"replies:{dispatched.request_id}"
+    )
     claimed = await coordination.claim_next_request(
         dispatched.request_stream_id,
         consumer_group="runner-1",
@@ -140,6 +150,152 @@ async def test_dispatch_persists_metadata_only_intent_and_operation() -> None:
     assert claimed.envelope.body_stream_id is None
     assert "bytes" not in claimed.envelope.payload
     assert claimed.envelope.payload["expected_sha256"] == "a" * 64
+
+
+@pytest.mark.asyncio
+async def test_transfer_dispatches_use_request_scoped_reply_streams() -> None:
+    """Transfer attempts in one Runner generation never share reply history."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    await publish_next_test_connection(
+        coordination,
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="replica-1",
+        connected_at=datetime.now(UTC),
+        heartbeat_at=datetime.now(UTC),
+        ttl_seconds=60,
+        metadata={},
+    )
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    dispatches = []
+    for index in (1, 2):
+        admitted = await coordinator.admit(
+            replace(
+                _admission(),
+                transfer_id=f"transfer-{index}",
+                attempt_id=f"attempt-{index}",
+                operation_id=f"operation-{index}",
+                runtime_path=f"/workspace/file-{index}.txt",
+            ),
+            lease_id=f"lease-{index}",
+        )
+        assert admitted is not None
+        ready = await coordinator.mark_ready(
+            admitted,
+            expected_revision=admitted.revision,
+            object_handle=object_handle_for(admitted),
+            size=3,
+            sha256="a" * 64,
+        )
+        assert ready is not None
+        dispatches.append(
+            await coordinator.dispatch(
+                ready,
+                expected_revision=ready.revision,
+                dispatch_id=f"dispatch-{index}",
+            )
+        )
+
+    first, second = dispatches
+    assert first.reply_stream_id.endswith(f":replies:{first.request_id}")
+    assert second.reply_stream_id.endswith(f":replies:{second.request_id}")
+    assert first.reply_stream_id != second.reply_stream_id
+
+
+@pytest.mark.asyncio
+async def test_resume_dispatch_uses_recorded_generation_reply_stream() -> None:
+    """A persisted transfer dispatch keeps its recorded reply stream identity."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    await publish_next_test_connection(
+        coordination,
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="replica-1",
+        connected_at=datetime.now(UTC),
+        heartbeat_at=datetime.now(UTC),
+        ttl_seconds=60,
+        metadata={},
+    )
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    ready = await coordinator.mark_ready(
+        admitted,
+        expected_revision=admitted.revision,
+        object_handle=object_handle_for(admitted),
+        size=3,
+        sha256="a" * 64,
+    )
+    assert ready is not None
+    request_id = dispatch_request_id(ready, "dispatch-1")
+    bound = await state.bind_dispatch(
+        ready.admission.transfer_id,
+        attempt_id=ready.admission.attempt_id,
+        runtime_id=ready.admission.runtime_id,
+        desired_generation=ready.admission.desired_generation,
+        accepted_runner_generation=1,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch-1",
+        dispatch_request_id=request_id,
+    )
+    assert bound is not None
+    request_stream_id = runner_request_stream_id("runtime-1", 1)
+    recorded_reply_stream_id = "runner:runtime-1:generation:0000000000000000001:replies"
+    await coordination.put_operation(
+        RuntimeOperationMetadata(
+            operation_id=bound.admission.operation_id,
+            request_id=request_id,
+            runtime_id=bound.admission.runtime_id,
+            target=RuntimeCoordinationTarget.RUNNER,
+            target_subject_id=bound.admission.runtime_id,
+            generation=1,
+            operation_type="file.transfer.v1",
+            transfer_id=bound.admission.transfer_id,
+            transfer_attempt_id=bound.admission.attempt_id,
+            transfer_dispatch_id=bound.dispatch_id,
+            transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
+            request_stream_id=request_stream_id,
+            request_cursor=None,
+            reply_stream_id=recorded_reply_stream_id,
+            status=RuntimeOperationStatus.ACTIVE,
+            created_at=_NOW,
+            updated_at=_NOW,
+            deadline_at=bound.admission.deadline_at,
+            body_stream_id=None,
+            last_heartbeat_at=None,
+            last_event_at=None,
+            cancel_requested_at=None,
+            final_event_cursor=None,
+        ),
+        ttl_seconds=900,
+    )
+
+    resumed = await coordinator.resume_dispatch(bound)
+
+    assert resumed is not None
+    assert resumed.reply_stream_id == recorded_reply_stream_id
+    claimed = await coordination.claim_next_request(
+        request_stream_id,
+        consumer_group="runner-1",
+        consumer_id="consumer-1",
+        block_ms=0,
+    )
+    assert claimed is not None
+    assert claimed.envelope.reply_stream_id == recorded_reply_stream_id
 
 
 @pytest.mark.asyncio
@@ -433,6 +589,7 @@ async def test_active_cancellation_persists_reason_and_appends_typed_envelope() 
     )
     assert cancellation is not None
     assert cancellation.envelope.operation_type == "file.transfer.cancel.v1"
+    assert cancellation.envelope.reply_stream_id == operation.reply_stream_id
     assert cancellation.envelope.payload == {
         "transfer_id": "transfer-1",
         "attempt_id": "attempt-1",
