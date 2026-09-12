@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, TypeVar
+from typing import Annotated, NamedTuple, TypeVar
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -109,6 +109,13 @@ class _AuthorizedModelTarget:
 class _AuthorizationResult:
     target: _AuthorizedModelTarget | None
     rejection: ExternalModelRejected | None
+
+
+class _ExternalModelNoticeTarget(NamedTuple):
+    """Structured result returned by `_notice_target`."""
+
+    provider_conversation_id: str
+    provider_thread_id: str | None
 
 
 class ExternalModelSettingsRepository:
@@ -1202,14 +1209,17 @@ class ExternalModelSettingsRepository:
     @staticmethod
     def _notice_target(
         authorized: _AuthorizedModelTarget,
-    ) -> tuple[str, str | None]:
+    ) -> _ExternalModelNoticeTarget:
         labels = authorized.resource.labels or {}
         if authorized.connection.provider is ExternalChannelProvider.SLACK:
             channel_id = labels.get("channel_id")
             thread_id = labels.get("thread_ts")
             if not isinstance(channel_id, str) or not channel_id:
                 raise ValueError("Slack notice target is unavailable")
-            return channel_id, thread_id if isinstance(thread_id, str) else None
+            return _ExternalModelNoticeTarget(
+                provider_conversation_id=channel_id,
+                provider_thread_id=thread_id if isinstance(thread_id, str) else None,
+            )
         guild_id = labels.get("guild_id")
         scope = labels.get("conversation_scope")
         channel_id = (
@@ -1224,7 +1234,9 @@ class ExternalModelSettingsRepository:
             or not channel_id
         ):
             raise ValueError("Discord notice target is unavailable")
-        return guild_id, channel_id
+        return _ExternalModelNoticeTarget(
+            provider_conversation_id=guild_id, provider_thread_id=channel_id
+        )
 
     @staticmethod
     def _notice_plan(mutation: RDBExternalModelMutation) -> ExternalModelNoticePlan:

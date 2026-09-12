@@ -3,7 +3,7 @@
 import datetime
 import json
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -491,17 +491,28 @@ def _discord_actor_display_name(
     return "Discord user"
 
 
+class _DiscordChannelScope(NamedTuple):
+    """Structured result returned by `_channel_scope`."""
+
+    provider_parent_channel_id: str | None
+    provider_thread_id: str | None
+
+
 def _channel_scope(
     *,
     payload: dict[str, object],
     channel_id: str | None,
-) -> tuple[str | None, str | None]:
+) -> _DiscordChannelScope:
     """Project the parent and thread identities without retaining a raw channel body."""
     if channel_id is None:
-        return None, None
+        return _DiscordChannelScope(
+            provider_parent_channel_id=None, provider_thread_id=None
+        )
     channel = payload.get("channel")
     if channel is None:
-        return None, None
+        return _DiscordChannelScope(
+            provider_parent_channel_id=None, provider_thread_id=None
+        )
     if not is_external_channel_projection(channel):
         raise DiscordInteractionInvalidPayload(
             "Discord interaction channel is invalid."
@@ -517,13 +528,17 @@ def _channel_scope(
             "Discord interaction channel is invalid."
         )
     if channel_type not in _DISCORD_THREAD_CHANNEL_TYPES:
-        return channel_id, None
+        return _DiscordChannelScope(
+            provider_parent_channel_id=channel_id, provider_thread_id=None
+        )
     parent_id = channel.get("parent_id")
     if not isinstance(parent_id, str) or not parent_id or parent_id == channel_id:
         raise DiscordInteractionInvalidPayload(
             "Discord interaction thread scope is invalid."
         )
-    return parent_id, channel_id
+    return _DiscordChannelScope(
+        provider_parent_channel_id=parent_id, provider_thread_id=channel_id
+    )
 
 
 def _application_command(
@@ -619,14 +634,24 @@ def _message_command_source(
     return source_message
 
 
+class _DiscordComponent(NamedTuple):
+    """Structured result returned by `_component`."""
+
+    custom_id: str | None
+    selected_value: str | None
+    selected_values: tuple[str, ...]
+
+
 def _component(
     *,
     payload: dict[str, object],
     interaction_type: int,
-) -> tuple[str | None, str | None, tuple[str, ...]]:
+) -> _DiscordComponent:
     """Extract a compact component ID and bounded typed selection values."""
     if interaction_type != 3:
-        return None, None, ()
+        return _DiscordComponent(
+            custom_id=None, selected_value=None, selected_values=()
+        )
     data = payload.get("data")
     if not is_external_channel_projection(data):
         raise DiscordInteractionInvalidPayload("Discord component is invalid.")
@@ -635,7 +660,9 @@ def _component(
         raise DiscordInteractionInvalidPayload("Discord component ID is invalid.")
     values = data.get("values")
     if values is None:
-        return custom_id, None, ()
+        return _DiscordComponent(
+            custom_id=custom_id, selected_value=None, selected_values=()
+        )
     if not isinstance(values, list) or len(values) > 25:
         raise DiscordInteractionInvalidPayload("Discord component value is invalid.")
     selected_values: list[str] = []
@@ -648,7 +675,11 @@ def _component(
     if not custom_id.startswith("ms1:x:") and len(selected_values) > 1:
         raise DiscordInteractionInvalidPayload("Discord component value is invalid.")
     selected = selected_values[0] if len(selected_values) == 1 else None
-    return custom_id, selected, tuple(selected_values)
+    return _DiscordComponent(
+        custom_id=custom_id,
+        selected_value=selected,
+        selected_values=tuple(selected_values),
+    )
 
 
 def _modal_custom_id(

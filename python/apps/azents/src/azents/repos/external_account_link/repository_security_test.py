@@ -6,6 +6,7 @@ import datetime
 import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -473,11 +474,18 @@ async def _prove(
     return candidate.id
 
 
+class _UserFixture(NamedTuple):
+    """Structured result returned by `_add_user`."""
+
+    user_id: str
+    auth_session_id: str
+
+
 async def _add_user(
     manager: SessionManager[AsyncSession],
     *,
     workspace_id: str,
-) -> tuple[str, str]:
+) -> _UserFixture:
     suffix = uuid4().hex
     async with manager() as session:
         user = await UserRepository().create(
@@ -505,7 +513,7 @@ async def _add_user(
                 ip_address=None,
             ),
         )
-    return user.id, auth_session.id
+    return _UserFixture(user_id=user.id, auth_session_id=auth_session.id)
 
 
 def _manager(engine: AsyncEngine) -> SessionManager[AsyncSession]:

@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Any, Literal, Protocol, assert_never, cast
+from typing import Annotated, Literal, Protocol, assert_never
 
 from fastapi import Depends
 from pydantic import TypeAdapter
@@ -1055,7 +1055,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         owner_generation: int,
     ) -> LiveOwnerAdvance:
         """Advance the writer fence and atomically return removed projections."""
-        raw_result = await cast(Any, self.redis).eval(
+        raw_result = await self.redis.eval(
             _ADVANCE_OWNER_SCRIPT,
             1,
             _live_event_key(session_id),
@@ -1089,7 +1089,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         session_id: str,
         owner_generation: int,
     ) -> list[Event]:
-        raw_values = await cast(Any, self.redis).eval(
+        raw_values = await self.redis.eval(
             _OWNER_LIST_SCRIPT,
             1,
             _live_event_key(session_id),
@@ -1104,7 +1104,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         event: Event,
         owner_generation: int,
     ) -> bool:
-        result = await cast(Any, self.redis).eval(
+        result = await self.redis.eval(
             _OWNER_UPSERT_SCRIPT,
             1,
             _live_event_key(event.session_id),
@@ -1122,7 +1122,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         event_id: str,
         owner_generation: int,
     ) -> bool:
-        result = await cast(Any, self.redis).eval(
+        result = await self.redis.eval(
             _OWNER_REMOVE_SCRIPT,
             1,
             _live_event_key(session_id),
@@ -1138,7 +1138,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         session_id: str,
         owner_generation: int,
     ) -> bool:
-        result = await cast(Any, self.redis).eval(
+        result = await self.redis.eval(
             _OWNER_CLEAR_SCRIPT,
             1,
             _live_event_key(session_id),
@@ -1154,7 +1154,7 @@ class RedisLiveEventStore(BaseLiveEventStore):
         event_id: str,
         owner_generation: int,
     ) -> Event | None:
-        raw = await cast(Any, self.redis).eval(
+        raw = await self.redis.eval(
             _OWNER_GET_SCRIPT,
             1,
             _live_event_key(session_id),

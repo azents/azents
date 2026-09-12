@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from typing import Any, Protocol, cast
+from typing import Protocol
 
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -84,7 +84,7 @@ class WebSocketBroadcast:
         live_key = f"{_LIVE_EVENT_KEY_PREFIX}{session_id}{_LIVE_EVENT_KEY_SUFFIX}"
         data = json.dumps(event_json, ensure_ascii=False)
         try:
-            result = await cast(Any, self._redis).eval(
+            result = await self._redis.eval(
                 _PUBLISH_LIVE_PROJECTION_SCRIPT,
                 2,
                 live_key,

@@ -2,7 +2,15 @@
 
 import datetime
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, runtime_checkable
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    NamedTuple,
+    Protocol,
+    TypeAlias,
+    runtime_checkable,
+)
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +52,14 @@ class NativeRequestInspection(Protocol):
         ...
 
 
+class _ContinuationProperties(NamedTuple):
+    """Structured result returned by `continuation_properties`."""
+
+    model: object
+    tools: object
+    kwargs: object
+
+
 class NativeModelRequest(BaseModel):
     """LiteLLM adapter native model request."""
 
@@ -62,9 +78,11 @@ class NativeModelRequest(BaseModel):
         """Return the complete input sequence used for continuation comparison."""
         return self.input
 
-    def continuation_properties(self) -> object:
+    def continuation_properties(self) -> _ContinuationProperties:
         """Return every non-input property used for continuation comparison."""
-        return (self.model, self.tools, self.kwargs)
+        return _ContinuationProperties(
+            model=self.model, tools=self.tools, kwargs=self.kwargs
+        )
 
     def continuation_store_enabled(self) -> bool:
         """Return whether stored-response continuation is allowed."""

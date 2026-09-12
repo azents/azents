@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass, replace
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -108,6 +108,13 @@ class DiscordPrivatePresentations:
 
     account: DiscordAccountLinkPresentation
     model: DiscordModelSettingsPresentation
+
+
+class _DiscordAccountPresentationResult(NamedTuple):
+    """Structured result returned by `_account_presentation`."""
+
+    state: ExternalAccountNativeLinkState | None
+    presentation: DiscordAccountLinkPresentation
 
 
 @dataclass
@@ -664,19 +671,24 @@ class DiscordSettingsResponseService:
         origin_interaction_id: str,
         context: DiscordSettingsContext,
         now: datetime.datetime,
-    ) -> tuple[ExternalAccountNativeLinkState | None, DiscordAccountLinkPresentation]:
+    ) -> _DiscordAccountPresentationResult:
         try:
             state = await self.account_link_service.get_native_link_state(
                 actor=_account_actor(context),
                 now=now,
             )
         except ExternalAccountLinkError:
-            return None, discord_account_link_state_unavailable()
-        return state, discord_account_link_presentation(
+            return _DiscordAccountPresentationResult(
+                state=None, presentation=discord_account_link_state_unavailable()
+            )
+        return _DiscordAccountPresentationResult(
             state=state,
-            origin_interaction_id=origin_interaction_id,
-            secret=self.config.auth.jwt.secret_key,
-            web_url=self.config.web_url,
+            presentation=discord_account_link_presentation(
+                state=state,
+                origin_interaction_id=origin_interaction_id,
+                secret=self.config.auth.jwt.secret_key,
+                web_url=self.config.web_url,
+            ),
         )
 
     async def _private_presentations(

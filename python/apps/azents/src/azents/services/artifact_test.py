@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -361,7 +361,15 @@ def _make_workspace_user() -> WorkspaceUser:
     )
 
 
-def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Service]:
+class _ArtifactServiceFixture(NamedTuple):
+    """Structured result returned by `_make_service`."""
+
+    service: ArtifactService
+    repository: _FakeArtifactRepository
+    s3_service: _FakeS3Service
+
+
+def _make_service() -> _ArtifactServiceFixture:
     """Create ArtifactService for tests."""
     artifact_repo = _FakeArtifactRepository()
     session_boundary = _SessionBoundary()
@@ -380,13 +388,23 @@ def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Se
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
-    return service, artifact_repo, s3
+    return _ArtifactServiceFixture(
+        service=service, repository=artifact_repo, s3_service=s3
+    )
+
+
+class _AuthorityArtifactServiceFixture(NamedTuple):
+    """Structured result returned by `_make_authority_service`."""
+
+    service: _AuthorityArtifactService
+    repository: _FakeArtifactRepository
+    s3_service: _FakeS3Service
 
 
 def _make_authority_service(
     *,
     authority_results: list[bool],
-) -> tuple[_AuthorityArtifactService, _FakeArtifactRepository, _FakeS3Service]:
+) -> _AuthorityArtifactServiceFixture:
     """Create ArtifactService with authority checks injected for publication tests."""
     artifact_repo = _FakeArtifactRepository()
     session_boundary = _SessionBoundary()
@@ -424,7 +442,9 @@ def _make_authority_service(
         config=cast(Any, _Config()),
     )
     service.authority_results = authority_results
-    return service, artifact_repo, s3
+    return _AuthorityArtifactServiceFixture(
+        service=service, repository=artifact_repo, s3_service=s3
+    )
 
 
 @pytest.mark.asyncio

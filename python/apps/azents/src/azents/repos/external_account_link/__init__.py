@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Awaitable, Callable
-from typing import Annotated, TypeVar
+from typing import Annotated, NamedTuple, TypeVar
 from urllib.parse import quote
 
 import sqlalchemy as sa
@@ -68,6 +68,13 @@ _RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 _MAX_TRANSACTION_ATTEMPTS = 3
 _LOCK_TIMEOUT = "2s"
 _MANAGEMENT_PATH = "/account/external-accounts"
+
+
+class _ValidatedExternalAccountActor(NamedTuple):
+    """Structured result returned by `_validate_actor`."""
+
+    workspace_id: str
+    identity_scope: str
 
 
 class ExternalAccountLinkRepository:
@@ -704,7 +711,7 @@ class ExternalAccountLinkRepository:
         *,
         actor: VerifiedExternalAccountActor,
         lock: bool,
-    ) -> tuple[str, str]:
+    ) -> _ValidatedExternalAccountActor:
         connection_query = sa.select(RDBExternalChannelConnection).where(
             RDBExternalChannelConnection.id == actor.connection_id
         )
@@ -734,7 +741,9 @@ class ExternalAccountLinkRepository:
             or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
         ):
             raise ExternalAccountLinkActorMismatch
-        return connection.workspace_id, _identity_scope(actor)
+        return _ValidatedExternalAccountActor(
+            workspace_id=connection.workspace_id, identity_scope=_identity_scope(actor)
+        )
 
     async def _lock_active_user_session(
         self,

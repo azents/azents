@@ -8,7 +8,7 @@ import posixpath
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Protocol, assert_never
+from typing import Any, NamedTuple, Protocol, assert_never
 
 import frontmatter
 import yaml
@@ -1097,7 +1097,14 @@ def _loaded_skill_output(
     )
 
 
-def _managed_skill_uri_parts(uri: str) -> tuple[str, str] | None:
+class _ManagedSkillUriParts(NamedTuple):
+    """Structured result returned by `_managed_skill_uri_parts`."""
+
+    namespace: str
+    slug: str
+
+
+def _managed_skill_uri_parts(uri: str) -> _ManagedSkillUriParts | None:
     """Return namespace and slug for a canonical managed Skill entrypoint."""
     try:
         canonical_uri = canonicalize_vfs_uri(uri)
@@ -1110,7 +1117,7 @@ def _managed_skill_uri_parts(uri: str) -> tuple[str, str] | None:
     if len(segments) != 3 or segments[2] != SKILL_MARKDOWN_FILENAME:
         return None
     namespace, slug, _ = segments
-    return namespace, slug
+    return _ManagedSkillUriParts(namespace=namespace, slug=slug)
 
 
 def skill_action_id(skill_path: str) -> str:
