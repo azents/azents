@@ -59,6 +59,14 @@ durable PostgreSQL-backed recovery creates fresh work. Operators may still deplo
 Redis HA to reduce disruption, but no startup or recovery procedure may require old
 keys.
 
+An operator-owned Valkey deployment may disable both AOF and RDB snapshots
+(`--appendonly no --save ""`) and omit a persistent volume. Deploy the application
+version with durable Worker ownership fencing before removing retained storage.
+Keep PostgreSQL and object storage durable and unchanged. Removing a consumer-owned
+PVC is a separate operator action; this chart neither creates nor deletes it.
+In-flight volatile work can fail closed during replacement, while new work recovers
+from PostgreSQL without restoring Valkey data.
+
 ## Runtime Control Generation-Authority Cutover
 
 The PostgreSQL connection-generation activation is a one-time non-rolling Runtime

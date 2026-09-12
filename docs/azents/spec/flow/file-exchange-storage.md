@@ -58,8 +58,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-10
-spec_version: 48
+last_verified_at: 2026-09-12
+spec_version: 49
 ---
 
 # File Exchange Storage
@@ -245,8 +245,10 @@ database session, uploads the original, optional preview, and normalized ModelFi
 revalidates the same authority while admitting all metadata and the updated tool result in the owning
 output transaction. No authenticated actor is required for this internal output path. Partial
 materialization is failure. Failed admission compensation deletes only unowned prepared keys.
-Deterministic run/call/output identities make retry admission idempotent, reject identity collisions,
-and preserve objects already referenced by committed metadata.
+Deterministic run/owner-generation/call/output identities make retry admission idempotent within
+one execution generation, reject identity collisions, and preserve objects already referenced by
+committed metadata. An old owner's upload or compensation cannot overwrite or delete a new owner's
+generated objects. Existing committed file references retain their original identity.
 
 Compatible Responses replay of a provider-hosted call resolves the ModelFile and reconstructs provider-native Base64 only inside the outbound request, while a separate bounded item carries canonical Exchange URI context. Cross-adapter provider replay and later-model use of an xAI client result lower the FileOutputPart through normal rich-image input or the explicit unavailable-image placeholder and retain attachment URI metadata. Request-local bytes are never copied back into durable history.
 
@@ -362,6 +364,8 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- 2026-09-12: Isolate generated-file preparation and compensation by owner generation; keep object I/O outside metadata transactions.
 
 - **2026-09-08** — v48. Moved Artifact, ExchangeFile, and ModelFile metadata,
   authorization, expiration, and final publication transactions into completed

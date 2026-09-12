@@ -79,6 +79,15 @@ class _TerminalFinalizationCoordinator:
     def __init__(self) -> None:
         self.run_ids: list[str] = []
 
+    async def lock_run_finalization(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> None:
+        """Accept the caller's tree-ordered terminal admission."""
+        del session, run_id
+
     async def finalize_run_in_session(
         self,
         session: AsyncSession,

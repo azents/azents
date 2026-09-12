@@ -220,15 +220,23 @@ class _MemoryBroker:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
-    ) -> None:
+    ) -> bool:
         """Not used in tests."""
-        del session_id, run_id, phase
+        del session_id, owner_generation, run_id, phase
+        return True
 
-    async def clear_session_activity(self, session_id: str) -> None:
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
         """Not used in tests."""
-        del session_id
+        del session_id, owner_generation
+        return True
 
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:
         """Return current test activity state."""

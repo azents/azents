@@ -68,7 +68,12 @@ from azents.services.external_channel.slack_events import (
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_authority,
+    accepts_execution_owner,
+)
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _LOGGER = logging.getLogger(__name__)
@@ -288,7 +293,39 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self.session_id = session_id
         self.run_id = run_id
         self.runtime_context_store: RuntimeInstructionContextStore | None = None
+        self.execution_owner: SessionExecutionOwner | None = None
         self.resource_authority: SessionResourceAuthority | None = None
+
+    def bind_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> None:
+        """Bind Channel Work state before lifecycle hooks can access it."""
+        if accepts_execution_owner(
+            self.execution_owner,
+            owner,
+            session_id=self.session_id,
+        ):
+            self.service = self.service.for_execution_owner(owner)
+            scheduled = self.scheduled_channel_service
+            self.scheduled_channel_service = scheduled.for_execution(owner)
+            self.execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Bind direct Channel Work mutations to one immutable execution owner."""
+        if not accepts_execution_authority(
+            self.resource_authority,
+            authority,
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+        ):
+            return
+        self.bind_execution_owner(authority.execution_owner)
+        self.resource_authority = authority
+        self.run_id = authority.run_id
 
     def set_runtime_context_store(
         self,
@@ -299,8 +336,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Expose Channel Action only while an active binding exists."""
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         self.run_id = context.run_id
-        self.resource_authority = context.resource_authority
         enabled = await self.service.has_active_binding(
             session_id=self.session_id,
             agent_id=self.agent_id,
@@ -376,6 +414,11 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
     def _make_channel_action_tool(self) -> FunctionTool:
         async def channel_action(args: ChannelActionInput) -> str:
             """Commit Channel Work and explicitly publish to one external binding."""
+            authority = self.resource_authority
+            if authority is None:
+                raise FunctionToolError(
+                    "External Channel execution authority is unavailable."
+                )
             execution = get_client_tool_execution_context()
             value = args
             tasks = (
@@ -417,7 +460,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                             if runtime_context is None
                             else runtime_context.file_storage
                         ),
-                        authority=self.resource_authority,
+                        authority=authority,
                     )
                 file_storage = (
                     None if runtime_context is None else runtime_context.file_storage
@@ -443,7 +486,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     tasks=tasks,
                     files=manifests,
                     file_storage=file_storage,
-                    authority=self.resource_authority,
+                    authority=authority,
                     provider_delivery_service=provider_delivery_service,
                     resolve_runtime_target=resolve_runtime_target,
                 )
@@ -461,7 +504,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         tasks=tasks,
                         files=manifests,
                         file_storage=file_storage,
-                        authority=self.resource_authority,
+                        authority=authority,
                         provider_delivery_service=provider_delivery_service,
                         resolve_runtime_target=resolve_runtime_target,
                     )

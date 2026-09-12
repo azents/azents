@@ -17,14 +17,14 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-12 | 76 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-12 | 166 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-10 | 75 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-12 | 76 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 24 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
-| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-10 | 11 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-12 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-10 | 113 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-12 | 114 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 16 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-12 | 82 |
 
@@ -32,22 +32,22 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-12 | 175 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-12 | 176 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-12 | 79 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-08 | 46 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 48 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-08 | 60 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 61 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 44 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-10 | 61 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-10 | 48 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-12 | 49 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-10 | 18 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-12 | 34 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-12 | 35 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-12 | 21 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 58 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
@@ -468,6 +468,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Suppress Unread Indicators While Sessions Run Historical Requirements Reconstruction](requirements/unread-260721-unread-indicators-while-sessions.md) | unread-260721 | 2026-07-21 | - |
 | [Usage-based Auto Compaction and Removal of Tool Output Omit Historical Requirements Reconstruction](requirements/usage-260612-usage-auto-compaction.md) | usage-260612 | 2026-06-12 | - |
 | [Persist the Session Last-Used Inference Profile Historical Requirements Reconstruction](requirements/used-260710-used-inference-profile.md) | used-260710 | 2026-07-10 | - |
+| [PV-less Valkey Recovery Requirements](requirements/valkey-260912-pvless-recovery.md) | valkey-260912 | 2026-09-12 | 2026-09-12 |
 | [Fifteen-Minute Wait Timeout Requirements](requirements/wait-260726-fifteen-minute-timeout.md) | wait-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
@@ -894,6 +895,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Suppress Unread Indicators While Sessions Run](adr/unread-260721-unread-indicators-while-sessions.md)
 - [Usage-based Auto Compaction and Removal of Tool Output Omit](adr/usage-260612-usage-auto-compaction.md)
 - [Persist the Session Last-Used Inference Profile](adr/used-260710-used-inference-profile.md)
+- [PV-less Valkey Recovery Decisions](adr/valkey-260912-pvless-recovery.md)
 - [Fifteen-Minute Wait Timeout](adr/wait-260726-fifteen-minute-timeout.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)

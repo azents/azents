@@ -29,8 +29,9 @@ from azents.services.terminal_finalization import (
 class _AgentRunRepository:
     """AgentRunRepository test double."""
 
-    def __init__(self, run: AgentRunState) -> None:
+    def __init__(self, run: AgentRunState, lock_order: list[str]) -> None:
         self.run = run
+        self.lock_order = lock_order
 
     async def get_by_id(
         self,
@@ -47,6 +48,7 @@ class _AgentRunRepository:
         run_id: str,
     ) -> AgentRunState | None:
         """Return the configured Run under the simulated lock."""
+        self.lock_order.append("run")
         return await self.get_by_id(session, run_id)
 
     async def mark_stopped_for_user_stop(
@@ -97,9 +99,15 @@ class _AgentRunRepository:
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self, source: SessionAgent, parent: SessionAgent) -> None:
+    def __init__(
+        self,
+        source: SessionAgent,
+        parent: SessionAgent,
+        lock_order: list[str],
+    ) -> None:
         self.source = source
         self.parent = parent
+        self.lock_order = lock_order
 
     async def has_stop_request(
         self,
@@ -109,6 +117,17 @@ class _AgentSessionRepository:
         """Return a durable User Stop for the source Session."""
         del session
         return session_id == self.source.agent_session_id
+
+    async def lock_execution_by_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> object | None:
+        """Prelock the source and its parent tree for terminal admission."""
+        del session
+        assert session_id == self.source.agent_session_id
+        self.lock_order.append("execution")
+        return SimpleNamespace(status=AgentSessionStatus.ACTIVE)
 
     async def get_session_agent_by_session_id(
         self,
@@ -126,6 +145,7 @@ class _AgentSessionRepository:
     ) -> SessionAgent | None:
         """Return the locked parent/root SessionAgent."""
         del session
+        self.lock_order.append("session_agent")
         return self.parent if session_agent_id == self.parent.id else None
 
     async def lock_by_id(
@@ -216,6 +236,7 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
         parent_session_agent_id=parent.id,
     )
     now = datetime.now(UTC)
+    lock_order: list[str] = []
     run_repository = _AgentRunRepository(
         AgentRunState(
             id="11111111111111111111111111111111",
@@ -238,7 +259,8 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
             model_call_started_at=None,
             ended_at=now,
             updated_at=now,
-        )
+        ),
+        lock_order,
     )
     mailbox_service = _AgentMailboxService()
     coordinator = TerminalRunFinalizationCoordinator(
@@ -246,7 +268,7 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
         agent_run_repository=cast(AgentRunRepository, run_repository),
         agent_session_repository=cast(
             AgentSessionRepository,
-            _AgentSessionRepository(source, parent),
+            _AgentSessionRepository(source, parent, lock_order),
         ),
         agent_mailbox_service=cast(AgentMailboxService, mailbox_service),
     )
@@ -257,6 +279,7 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
     )
 
     assert outcome.disposition is TerminalDeliveryDisposition.ENQUEUED
+    assert lock_order[:3] == ["execution", "session_agent", "run"]
     assert mailbox_service.run is not None
     assert mailbox_service.run.status is AgentRunStatus.STOPPED
     assert mailbox_service.run.terminal_result_event_id is None

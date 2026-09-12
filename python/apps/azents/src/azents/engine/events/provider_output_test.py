@@ -1,9 +1,10 @@
 """Provider-generated image decoding and materialization tests."""
 
+import asyncio
 import base64
 import datetime
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import IO
 
@@ -76,7 +77,11 @@ class _Session(AsyncSession):
 class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
     """Return one no-op session."""
 
+    def __init__(self, manager: "_SessionManager") -> None:
+        self.manager = manager
+
     async def __aenter__(self) -> AsyncSession:
+        self.manager.active_sessions += 1
         return _Session()
 
     async def __aexit__(
@@ -86,13 +91,17 @@ class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
         traceback: object,
     ) -> None:
         del exc_type, exc_value, traceback
+        self.manager.active_sessions -= 1
 
 
 class _SessionManager:
     """Callable session manager test double."""
 
+    def __init__(self) -> None:
+        self.active_sessions = 0
+
     def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
-        return _SessionContext()
+        return _SessionContext(self)
 
 
 class _AgentSessionRepository(AgentSessionRepository):
@@ -287,6 +296,7 @@ class _S3Service(S3Service):
     """Record prepared object uploads and compensation deletes."""
 
     def __init__(self) -> None:
+        self.session_manager = _SessionManager()
         self.uploaded: dict[str, bytes] = {}
         self.upload_calls: list[str] = []
         self.deleted: list[str] = []
@@ -300,12 +310,14 @@ class _S3Service(S3Service):
         content_type: str | None = None,
     ) -> None:
         del bucket, content_type
+        assert self.session_manager.active_sessions == 0
         assert isinstance(body, bytes)
         self.upload_calls.append(key)
         self.uploaded[key] = body
 
     async def delete(self, bucket: str, key: str) -> None:
         del bucket
+        assert self.session_manager.active_sessions == 0
         self.deleted.append(key)
 
 
@@ -328,6 +340,26 @@ class _FailingS3Service(_S3Service):
             body,
             content_type=content_type,
         )
+
+
+class _CancelledS3Service(_S3Service):
+    """Lose the upload response after object storage accepted the bytes."""
+
+    async def upload(
+        self,
+        bucket: str,
+        key: str,
+        body: str | bytes | IO[str] | IO[bytes],
+        *,
+        content_type: str | None = None,
+    ) -> None:
+        await super().upload(
+            bucket,
+            key,
+            body,
+            content_type=content_type,
+        )
+        raise asyncio.CancelledError
 
 
 def _artifact() -> NativeArtifact:
@@ -401,7 +433,7 @@ def _materializer(
     session_repository = _AgentSessionRepository()
     workspace_user_repository = _WorkspaceUserRepository()
     s3_service = s3_service or _S3Service()
-    session_manager = _SessionManager()
+    session_manager = s3_service.session_manager
     config = Config.model_construct(
         workspace_s3=WorkspaceS3Config(bucket="test-bucket"),
         file_lifecycle=FileLifecycleConfig(),
@@ -556,7 +588,9 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
 
     prepared = await materializer.prepare(_normalized_output())
 
-    assert s3_service.uploaded == {}
+    assert len(s3_service.uploaded) == 3
+    assert exchange_repository.created == []
+    assert model_repository.created == []
     assert prepared.normalized.pending_provider_files == []
     payload = prepared.normalized.events[0].payload
     assert isinstance(payload, ProviderToolCallPayload)
@@ -569,7 +603,8 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert _PNG_BASE64 not in serialized
     assert "generated-image:" not in serialized
 
-    await prepared.persist(_Session())
+    async with s3_service.session_manager() as session:
+        await prepared.persist(session)
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -621,7 +656,8 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     serialized = prepared.result.model_dump_json()
     assert _PNG_BASE64 not in serialized
 
-    await prepared.persist(_Session())
+    async with s3_service.session_manager() as session:
+        await prepared.persist(session)
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -711,14 +747,30 @@ async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
     original_objects = dict(s3_service.uploaded)
     original_upload_calls = list(s3_service.upload_calls)
 
-    retry = await materializer.prepare(
-        _normalized_output(_png_base64(width=2, height=1))
-    )
     with pytest.raises(ModelCallError, match="identity collided"):
-        await retry.persist(_Session())
+        await materializer.prepare(_normalized_output(_png_base64(width=2, height=1)))
 
     assert s3_service.uploaded == original_objects
     assert s3_service.upload_calls == original_upload_calls
+
+
+async def test_cleanup_preserves_metadata_after_lost_commit_acknowledgement() -> None:
+    """Cleanup protects committed objects even before admitted is set locally."""
+    fixture = _materializer()
+    prepared = await fixture.materializer.prepare(_normalized_output())
+    async with fixture.s3_service.session_manager() as session:
+        await prepared.persist(session)
+
+    assert not prepared.admitted
+    assert len(prepared.uploaded_keys) == 3
+    await prepared.cleanup()
+
+    assert fixture.s3_service.deleted == []
+    retry = await fixture.materializer.prepare(_normalized_output())
+    assert retry.uploaded_keys == set()
+    await retry.cleanup()
+    assert len(fixture.s3_service.upload_calls) == 3
+    assert fixture.s3_service.deleted == []
 
 
 async def test_failed_admission_compensates_every_uploaded_object() -> None:
@@ -740,7 +792,7 @@ async def test_failed_admission_compensates_every_uploaded_object() -> None:
 
     await prepared.cleanup()
 
-    assert run_repository.lock_calls == 2
+    assert run_repository.lock_calls == 1
     assert sorted(s3_service.deleted) == sorted(s3_service.uploaded)
 
 
@@ -749,16 +801,15 @@ async def test_failed_upload_compensates_prepared_object_keys() -> None:
     s3_service = _FailingS3Service()
     materializer = _materializer(s3_service).materializer
 
-    prepared = await materializer.prepare(_normalized_output())
     with pytest.raises(OSError, match="object storage unavailable"):
-        await prepared.persist(_Session())
-    await prepared.cleanup()
+        await materializer.prepare(_normalized_output())
 
     assert len(s3_service.uploaded) == 1
-    assert s3_service.deleted == list(s3_service.uploaded)
+    assert len(s3_service.deleted) == 2
+    assert set(s3_service.uploaded).issubset(s3_service.deleted)
 
 
-async def test_allows_userless_provider_output_before_upload() -> None:
+async def test_allows_userless_provider_output_upload() -> None:
     """Prepare provider output without synthesizing Human provenance."""
     fixture = _materializer()
     materializer = fixture.materializer
@@ -767,11 +818,24 @@ async def test_allows_userless_provider_output_before_upload() -> None:
     prepared = await materializer.prepare(_normalized_output())
 
     assert prepared.generated_images[0].exchange_source.source_user_id is None
-    assert s3_service.uploaded == {}
+    assert len(s3_service.uploaded) == 3
+
+
+async def test_cancelled_upload_compensates_accepted_object_without_db_scope() -> None:
+    """Cancellation after S3 accepts bytes retains enough ownership for cleanup."""
+    s3_service = _CancelledS3Service()
+    materializer = _materializer(s3_service).materializer
+
+    with pytest.raises(asyncio.CancelledError):
+        await materializer.prepare(_normalized_output())
+
+    assert len(s3_service.uploaded) == 1
+    assert set(s3_service.deleted) == set(s3_service.uploaded)
+    assert s3_service.session_manager.active_sessions == 0
 
 
 async def test_rejects_provider_output_after_owner_generation_changes() -> None:
-    """A stale worker cannot upload provider output after Session takeover."""
+    """A stale worker cannot admit preuploaded output after Session takeover."""
     fixture = _materializer()
     materializer = fixture.materializer
     exchange_repository = fixture.exchange_repository
@@ -792,7 +856,44 @@ async def test_rejects_provider_output_after_owner_generation_changes() -> None:
 
     assert exchange_repository.created == []
     assert model_repository.created == []
-    assert s3_service.uploaded == {}
+    await prepared.cleanup()
+    assert sorted(s3_service.deleted) == sorted(s3_service.uploaded)
+
+
+async def test_stale_cleanup_preserves_new_generation_output() -> None:
+    """Takeover uses independent keys even for an identical run/call/output."""
+    fixture = _materializer()
+    old_owner = fixture.materializer
+    stale_output = await old_owner.prepare(_normalized_output())
+    stale_keys = set(fixture.s3_service.uploaded)
+    session_repository = (
+        old_owner.model_file_service.operation_repository.agent_session_repository
+    )
+    assert isinstance(session_repository, _AgentSessionRepository)
+    session_repository.owner_generation += 1
+    new_owner = replace(
+        old_owner,
+        authority=replace(
+            old_owner.authority,
+            owner_generation=session_repository.owner_generation,
+        ),
+    )
+    new_output = await new_owner.prepare(_normalized_output())
+    new_keys = set(fixture.s3_service.uploaded) - stale_keys
+    assert len(new_keys) == 3
+    async with fixture.s3_service.session_manager() as session:
+        await new_output.persist(session)
+    new_output.admitted = True
+
+    with pytest.raises(ModelCallError, match="scope is unavailable"):
+        async with fixture.s3_service.session_manager() as session:
+            await stale_output.persist(session)
+    await stale_output.cleanup()
+
+    assert set(fixture.s3_service.deleted) == stale_keys
+    assert not new_keys.intersection(fixture.s3_service.deleted)
+    assert len(fixture.exchange_repository.created) == 2
+    assert len(fixture.model_repository.created) == 1
 
 
 async def test_rejects_duplicate_call_identity_before_upload() -> None:

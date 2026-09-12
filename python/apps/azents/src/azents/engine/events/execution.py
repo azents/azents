@@ -58,6 +58,9 @@ from azents.repos.agent_execution import (
     EventTranscriptRepository,
 )
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 
 logger = logging.getLogger(__name__)
@@ -763,6 +766,8 @@ class AgentRunExecution[
                     await finish_turn("completed")
                 except asyncio.CancelledError:
                     raise
+                except CanonicalExecutionOwnerGenerationStaleError:
+                    raise
                 except Exception:
                     await finish_turn("error")
                     raise
@@ -1066,6 +1071,10 @@ class AgentRunExecution[
                     )
                 prepared.admitted = True
             except asyncio.CancelledError:
+                if prepared is not None:
+                    await prepared.cleanup()
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
                 if prepared is not None:
                     await prepared.cleanup()
                 raise
@@ -1373,6 +1382,8 @@ class AgentRunExecution[
             return await tool_executor.execute(call)
         except asyncio.CancelledError:
             raise
+        except CanonicalExecutionOwnerGenerationStaleError:
+            raise
         except Exception as exc:
             logger.exception(
                 "Client tool execution failed",
@@ -1477,6 +1488,11 @@ class AgentRunExecution[
         suppress_parent_result: bool = False,
     ) -> None:
         """Record run terminal state."""
+        if self.terminal_finalization_coordinator is not None:
+            await self.terminal_finalization_coordinator.lock_run_finalization(
+                session,
+                run_id=run_id,
+            )
         terminal_at = datetime.datetime.now(datetime.UTC)
         await self.run_repo.mark_terminal(
             session,

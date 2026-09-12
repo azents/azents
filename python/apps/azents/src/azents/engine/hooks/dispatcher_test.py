@@ -3,6 +3,7 @@
 import asyncio
 from typing import Never
 
+import pytest
 from pytest import MonkeyPatch
 
 from azents.engine.hooks import dispatcher as dispatcher_module
@@ -29,6 +30,9 @@ from azents.engine.hooks.types import (
     TurnInjectedPrompt,
     TurnStartHookContext,
     TurnStartResult,
+)
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
 )
 
 
@@ -259,6 +263,46 @@ async def test_observation_exception_fail_open_and_logs(
     assert "Runtime hook failed" in warning_messages
 
 
+async def test_observation_owner_stale_propagates() -> None:
+    """Observation hooks cannot conceal durable execution revocation."""
+    provider = DeterministicRuntimeHookProvider(
+        slug="stale",
+        actions={
+            "on_run_start": [
+                DeterministicHookAction(
+                    exception=CanonicalExecutionOwnerGenerationStaleError("stale owner")
+                )
+            ]
+        },
+    )
+    dispatcher = RuntimeHookDispatcher(trace_sink=InMemoryRuntimeHookTraceSink())
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await dispatcher.dispatch_observation(
+            [_provider_ref(provider)], "on_run_start", _run_start_context()
+        )
+
+
+async def test_turn_start_owner_stale_propagates() -> None:
+    """Turn-start hooks cannot convert ownership loss into an empty result."""
+    provider = DeterministicRuntimeHookProvider(
+        slug="stale",
+        actions={
+            "on_turn_start": [
+                DeterministicHookAction(
+                    exception=CanonicalExecutionOwnerGenerationStaleError("stale owner")
+                )
+            ]
+        },
+    )
+    dispatcher = RuntimeHookDispatcher(trace_sink=InMemoryRuntimeHookTraceSink())
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await dispatcher.dispatch_turn_start(
+            [_provider_ref(provider)], _turn_start_context()
+        )
+
+
 async def test_cancelled_error_propagates() -> None:
     """Hook cancellation propagates instead of fail-open."""
     sink = InMemoryRuntimeHookTraceSink()
@@ -341,6 +385,26 @@ async def test_before_tool_exception_normalizes_to_allow() -> None:
     )
 
     assert decision.kind == "allow"
+
+
+async def test_before_tool_owner_stale_propagates_instead_of_allowing() -> None:
+    """Durable ownership loss must never fail open to external tool execution."""
+    provider = DeterministicRuntimeHookProvider(
+        slug="stale",
+        actions={
+            "on_before_tool_call": [
+                DeterministicHookAction(
+                    exception=CanonicalExecutionOwnerGenerationStaleError("stale owner")
+                )
+            ]
+        },
+    )
+    dispatcher = RuntimeHookDispatcher(trace_sink=InMemoryRuntimeHookTraceSink())
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await dispatcher.dispatch_before_tool_call(
+            [_provider_ref(provider)], _before_context()
+        )
 
 
 async def test_after_tool_none_unchanged_and_replacement_pipeline() -> None:

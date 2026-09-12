@@ -18,6 +18,11 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.execution_context import get_client_tool_execution_context
 from azents.engine.tooling.make_tool import make_tool
 from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 
 
 class DynamicWorktreeToolkitConfig(BaseModel):
@@ -82,6 +87,28 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         self.session_id = session_id
         self.run_id: str | None = None
         self.turn_action_bridge_boundary: TurnActionBridgeBoundary | None = None
+        self.execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> None:
+        """Bind one immutable Session owner generation to tool admission."""
+        if accepts_execution_owner(
+            self.execution_owner,
+            owner,
+            session_id=self.session_id,
+        ):
+            self.execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Bind full resource authority through its narrow execution owner."""
+        if authority.agent_id != self.agent_id:
+            raise ValueError("Dynamic worktree authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def bind_run(
         self,
@@ -95,7 +122,8 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Project only currently eligible Agent-managed worktree operations."""
-        del context
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         tools: list[FunctionTool] = []
         if await self.service.agent_create_git_worktree_available(
             agent_id=self.agent_id,
@@ -117,7 +145,8 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
             """Durably request a managed worktree from an exact current Project."""
             run_id = self.run_id
             boundary = self.turn_action_bridge_boundary
-            if run_id is None or boundary is None:
+            owner = self.execution_owner
+            if run_id is None or boundary is None or owner is None:
                 raise FunctionToolError(
                     "Dynamic worktree authority is unavailable for this Run."
                 )
@@ -128,6 +157,7 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
                     session_id=self.session_id,
                     originating_run_id=run_id,
                     client_tool_call_id=execution.call_id,
+                    owner_generation=owner.owner_generation,
                     source_project_path=input.source_project_path,
                     starting_ref=input.starting_ref,
                     branch_name=input.branch_name,
@@ -164,7 +194,8 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
             """Durably request removal of an exact managed worktree Project."""
             run_id = self.run_id
             boundary = self.turn_action_bridge_boundary
-            if run_id is None or boundary is None:
+            owner = self.execution_owner
+            if run_id is None or boundary is None or owner is None:
                 raise FunctionToolError(
                     "Dynamic worktree authority is unavailable for this Run."
                 )
@@ -175,6 +206,7 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
                     session_id=self.session_id,
                     originating_run_id=run_id,
                     client_tool_call_id=execution.call_id,
+                    owner_generation=owner.owner_generation,
                     worktree_project_path=input.worktree_project_path,
                     force=input.force,
                 )

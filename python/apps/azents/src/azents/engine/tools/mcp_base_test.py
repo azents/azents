@@ -2,7 +2,7 @@
 
 import asyncio
 from typing import AsyncContextManager
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp.types import Tool as McpBaseTool
@@ -12,6 +12,9 @@ from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.testing.types import is_object_factory
 
 
@@ -182,6 +185,36 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
     assert [tool.spec.name for tool in state.tools] == ["alpha", "zeta"]
     assert (await toolkit.get_static_prompt(_context())) == ""
     list_tools.assert_not_called()
+
+
+async def test_background_refresh_stops_after_owner_rejection() -> None:
+    """A detached snapshot writer does not restart after ownership loss."""
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
+        session_manager=_session_manager,
+        agent_id="agent-1",
+        session_id="session-1",
+        state_name="tool_snapshot:test",
+    )
+    save = AsyncMock(
+        side_effect=CanonicalExecutionOwnerGenerationStaleError(
+            "Session owner generation is stale"
+        )
+    )
+    with (
+        patch.object(toolkit, "_save_tool_snapshot", save),
+        patch(
+            "azents.engine.tools.mcp_base.mcp_list_tools",
+            return_value=([_tool("alpha")], False),
+        ) as list_tools,
+    ):
+        async with toolkit:
+            await _wait_refresh(toolkit)
+            assert toolkit._owner_stale  # noqa: SLF001
+            toolkit._ensure_refresh_task()  # noqa: SLF001
+
+    assert list_tools.call_count == 1
+    save.assert_awaited_once()
 
 
 async def test_stored_snapshot_restores_model_tool_name() -> None:

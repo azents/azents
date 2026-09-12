@@ -62,6 +62,8 @@ class WorkerEventPublisher:
         self,
         session_id: str,
         event: PublishedEvent,
+        *,
+        owner_generation: int,
     ) -> None:
         """Project one runtime event and publish its canonical public frame.
 
@@ -73,28 +75,37 @@ class WorkerEventPublisher:
         :param event: Engine event
         """
         if isinstance(event, Event):
-            await self.live_event_projector.flush_session(session_id)
+            await self.live_event_projector.flush_session(
+                session_id,
+                owner_generation=owner_generation,
+            )
             await self._broadcast_history_event(session_id, event)
         elif isinstance(event, PUBLIC_CHAT_CONTROL_EVENT_TYPES):
-            await self._broadcast_control_event(session_id, event)
+            await self._broadcast_control_event(
+                session_id,
+                event,
+                owner_generation=owner_generation,
+            )
         await self._renew_session_ttl(session_id)
-        await self.live_event_projector.update(session_id, event)
+        await self.live_event_projector.update(
+            session_id,
+            event,
+            owner_generation=owner_generation,
+        )
 
     async def _broadcast_control_event(
         self,
         session_id: str,
         event: PublicChatControlEvent,
+        *,
+        owner_generation: int,
     ) -> None:
         """Deliver one canonical public control event best-effort."""
-        try:
-            await self.broadcast.publish(session_id, serialize_event(event))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to broadcast control event to WebSocket",
-                extra={"session_id": session_id},
-            )
+        await self.live_event_projector.publish_control_event(
+            session_id,
+            serialize_event(event),
+            owner_generation=owner_generation,
+        )
 
     async def _broadcast_history_event(
         self,

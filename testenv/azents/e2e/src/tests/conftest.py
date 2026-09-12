@@ -484,6 +484,7 @@ def core_prerequisites(
             "valkey/valkey:9-alpine",
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
+        .with_command(["valkey-server", "--appendonly", "no", "--save", ""])
         .with_exposed_ports(6379)
         .with_network(container_network)
         .with_network_aliases("valkey")

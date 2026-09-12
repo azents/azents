@@ -60,11 +60,19 @@ from azents.engine.tools.mcp_base import (
     build_mcp_artifact_sink,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import (
     ToolkitStateHandle,
     ToolkitStateStore,
 )
 from azents.services.artifact import ArtifactService
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +289,23 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
         self._entered = False
+        self._execution_owner: SessionExecutionOwner | None = None
+        self._owner_stale = False
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind snapshot state before starting background discovery."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            if self.session_manager is not None:
+                self.session_manager = OwnerBoundSessionManager(
+                    session_manager=self.session_manager,
+                    session_id=owner.session_id,
+                    owner_generation=owner.owner_generation,
+                )
+            self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
         """Return Artifact sink for current run."""
@@ -311,6 +336,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""
+        if self._owner_stale:
+            return
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
@@ -351,7 +378,11 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             return
 
         snapshot = _build_gcp_tool_snapshot(items=merged, project_id=self._project_id)
-        await self._save_tool_snapshot(snapshot)
+        try:
+            await self._save_tool_snapshot(snapshot)
+        except CanonicalExecutionOwnerGenerationStaleError:
+            self._owner_stale = True
+            return
         logger.info(
             "GCP MCP tool snapshot refreshed",
             extra={

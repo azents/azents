@@ -9,8 +9,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionProductMode,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
@@ -25,14 +27,25 @@ from azents.core.external_channel_provider import DiscordConnectionConfiguration
 from azents.core.external_channel_provider_effect import (
     ProviderEffectOutcome,
     ProviderEffectPlan,
+    ProviderMutationOutcome,
     ProviderOperationKey,
     ProviderTarget,
+)
+from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository_test import (
+    _create_agent,
+    _create_workspace,
 )
 from azents.repos.external_channel.work_data import (
     AwaitingInputSettlement,
     ChannelActionEffectPlan,
     ChannelActionResult,
     ChannelActionTransition,
+)
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -1644,3 +1657,193 @@ async def test_discord_thread_session_open_failure_is_an_unknown_outcome() -> No
 
     assert result.status == "unknown"
     assert result.error_kind == "provider_ambiguous"
+
+
+async def _create_execution_authority(
+    session_manager: SessionManager[AsyncSession],
+    *,
+    slug: str,
+) -> SessionResourceAuthority:
+    """Create one real Session owner for External Channel fencing tests."""
+    sessions = AgentSessionRepository()
+    async with session_manager() as session:
+        workspace_id = await _create_workspace(session, slug)
+        agent_id = await _create_agent(session, workspace_id, slug)
+        created = await sessions.create(
+            session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        generation = await sessions.claim_owner_generation(session, created.id)
+    return SessionResourceAuthority(
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        session_id=created.id,
+        root_session_id=created.id,
+        run_id=f"{slug}-run",
+        run_index=1,
+        owner_generation=generation,
+    )
+
+
+def _owned_effect(
+    authority: SessionResourceAuthority,
+) -> ChannelActionEffectPlan:
+    """Return one effect whose target matches the real execution identity."""
+    effect = _effect(ExternalChannelDeliveryOperation.REPLY)
+    target = replace(
+        effect.provider.target,
+        agent_id=authority.agent_id,
+        agent_session_id=authority.session_id,
+    )
+    return replace(
+        effect,
+        provider=replace(effect.provider, target=target),
+    )
+
+
+def _owned_service(
+    session_manager: SessionManager[AsyncSession],
+    repository: object,
+) -> ExternalChannelActionService:
+    """Create one concrete service with mocked non-database collaborators."""
+    return ExternalChannelActionService(
+        session_manager=session_manager,
+        repository=repository,  # ty: ignore[invalid-argument-type] — test double implements only exercised repository methods.
+        credentials_codec=MagicMock(),
+        slack_client=MagicMock(),
+        discord_client=MagicMock(),
+        exchange_file_service=MagicMock(),
+        config=MagicMock(),
+    )
+
+
+async def test_stale_execution_cannot_commit_direct_channel_work(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Takeover before direct Work admission rejects the old transaction."""
+    authority = await _create_execution_authority(
+        rdb_session_manager,
+        slug="channel-work-stale-admission",
+    )
+    repository = MagicMock()
+    repository.commit_direct_action = AsyncMock()
+    service = _owned_service(rdb_session_manager, repository).for_execution(authority)
+    async with rdb_session_manager() as session:
+        await AgentSessionRepository().claim_owner_generation(
+            session,
+            authority.session_id,
+        )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await service._execute_serialized(
+            session_id=authority.session_id,
+            agent_id=authority.agent_id,
+            run_id=authority.run_id,
+            client_tool_call_id="call-stale-admission",
+            binding_id="binding-stale-admission",
+            mode=ExternalChannelActionMode.CONTINUE,
+            message="Progress.",
+            title=None,
+            tasks=None,
+            files=(),
+            file_storage=None,
+            authority=authority,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+
+    repository.commit_direct_action.assert_not_awaited()
+
+
+async def test_stale_execution_cannot_start_direct_provider_effect(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Takeover before provider admission prevents external delivery."""
+    authority = await _create_execution_authority(
+        rdb_session_manager,
+        slug="channel-effect-stale-admission",
+    )
+    effect = _owned_effect(authority)
+    repository = MagicMock()
+    repository.revalidate_direct_effect = AsyncMock(return_value=effect.provider)
+    service = _owned_service(rdb_session_manager, repository).for_execution(authority)
+    deliver = AsyncMock()
+    service._deliver = deliver
+    async with rdb_session_manager() as session:
+        await AgentSessionRepository().claim_owner_generation(
+            session,
+            authority.session_id,
+        )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await service._execute_direct_effect(
+            effect,
+            file_storage=None,
+            agent_id=authority.agent_id,
+            session_id=authority.session_id,
+            authority=authority,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+
+    repository.revalidate_direct_effect.assert_not_awaited()
+    deliver.assert_not_awaited()
+
+
+async def test_takeover_after_provider_effect_rejects_old_settlement(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """An admitted provider effect cannot settle after its owner is replaced."""
+    authority = await _create_execution_authority(
+        rdb_session_manager,
+        slug="channel-effect-stale-settlement",
+    )
+    effect = _owned_effect(authority)
+    repository = MagicMock()
+    repository.revalidate_direct_effect = AsyncMock(return_value=effect.provider)
+    repository.apply_direct_effect_outcome = AsyncMock()
+    service = _owned_service(rdb_session_manager, repository).for_execution(authority)
+    delivery_started = asyncio.Event()
+    release_delivery = asyncio.Event()
+
+    async def deliver(*args: object, **kwargs: object) -> ProviderMutationOutcome:
+        del args, kwargs
+        delivery_started.set()
+        await release_delivery.wait()
+        return ProviderMutationOutcome(
+            status="delivered",
+            provider_message_key="provider-message-1",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    service._deliver = deliver  # ty: ignore[invalid-assignment] — deterministic provider barrier for takeover.
+    execution = asyncio.create_task(
+        service._execute_direct_effect(
+            effect,
+            file_storage=None,
+            agent_id=authority.agent_id,
+            session_id=authority.session_id,
+            authority=authority,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+    )
+    await delivery_started.wait()
+    async with rdb_session_manager() as session:
+        await AgentSessionRepository().claim_owner_generation(
+            session,
+            authority.session_id,
+        )
+    release_delivery.set()
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await execution
+
+    repository.apply_direct_effect_outcome.assert_not_awaited()

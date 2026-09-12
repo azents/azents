@@ -57,6 +57,7 @@ from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
+from azents.services.chat.live_events import LiveOwnerAdvance
 from azents.services.mailbox import (
     MailboxService,
     PendingInputInferenceProfile,
@@ -104,6 +105,18 @@ class _Broadcast:
         """Record delivered broadcast payloads in order."""
         self.events.append((session_id, event))
 
+    async def publish_live_projection(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Record an owner-gated projection payload."""
+        del owner_generation
+        self.events.append((session_id, event))
+        return True
+
 
 class _SessionRunnerEventPublisher:
     """Event publisher for SessionRunner tests."""
@@ -115,8 +128,11 @@ class _SessionRunnerEventPublisher:
         self,
         session_id: str,
         event: PublishedEvent,
+        *,
+        owner_generation: int,
     ) -> None:
         """Replace event publishing with Host dispatch records."""
+        del owner_generation
         await self.host.dispatch_event(session_id, event)
 
 
@@ -248,6 +264,18 @@ class _LiveEventStore:
         self.cleared_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
 
+    async def advance_owner(
+        self, session_id: str, owner_generation: int
+    ) -> LiveOwnerAdvance:
+        """Accept the current test projection owner."""
+        del session_id, owner_generation
+        return LiveOwnerAdvance(accepted=True, advanced=False, removed_events=())
+
+    def for_owner(self, session_id: str, owner_generation: int) -> "_LiveEventStore":
+        """Return the owner-scoped in-memory test store."""
+        del session_id, owner_generation
+        return self
+
     async def list_by_session_id(self, session_id: str) -> list[Event]:
         """Return snapshots before/after removal according to call order."""
         del session_id
@@ -327,6 +355,23 @@ class _LiveEventStore:
             ),
             created_at=datetime.now(timezone.utc),
         )
+
+
+class _CurrentOwnerRepository:
+    """Return the current owner for live projection tests."""
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> object:
+        """Return a minimal current-owner snapshot."""
+        del session, agent_session_id
+
+        class Owner:
+            owner_generation = 1
+
+        return Owner()
 
 
 class _AgentSessionRepository:
@@ -642,9 +687,42 @@ class _Host:
         self,
         session_id: str,
         error: str,
+        *,
+        owner_generation: int,
     ) -> Event:
         """This test does not store error messages."""
+        del owner_generation
         return make_system_error_event(session_id=session_id, content=error)
+
+    async def assert_current_owner_generation(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Keep the configured host owner current for normal-run tests."""
+        del session_id, owner_generation
+
+    async def release_owned_session_lock(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Store the session for a fenced lock release call."""
+        del owner_generation
+        self.released_session_ids.append(session_id)
+
+    async def clear_owned_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Store the session for a fenced activity deletion call."""
+        del owner_generation
+        self.cleared_session_ids.append(session_id)
+        self.lifecycle_events.append("clear_session_activity")
 
     async def release_session_lock(self, session_id: str) -> None:
         """Store session for lock release call."""
@@ -887,6 +965,7 @@ def _make_worker_event_publisher(
         broadcast=cast(WebSocketBroadcast, broadcast),
         session_manager=cast(Any, _SessionManager()),
         agent_run_repository=cast(Any, object()),
+        agent_session_repository=cast(Any, _CurrentOwnerRepository()),
     )
     return WorkerEventPublisher(
         broker=cast(SessionBroker, broker),
@@ -1197,7 +1276,7 @@ async def test_owner_generation_claim_failure_releases_session_lock() -> None:
 
 @pytest.mark.asyncio
 async def test_idle_owner_generation_takeover_requeues_session() -> None:
-    """A stale idle boundary releases ownership and wakes a fresh Worker."""
+    """A stale idle boundary preserves the new owner lock and wakes recovery."""
     host = _Host()
     host.idle_continuation_error = CanonicalExecutionOwnerGenerationStaleError(
         "Session owner generation is stale during idle continuation"
@@ -1210,7 +1289,7 @@ async def test_idle_owner_generation_takeover_requeues_session() -> None:
 
     assert host.finalize_unhandled_calls == []
     assert host.cleared_session_ids == []
-    assert host.released_session_ids == ["session-001"]
+    assert host.released_session_ids == []
     assert host.handover_messages == [message]
 
 
@@ -1512,6 +1591,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
         broadcast=cast(WebSocketBroadcast, broadcast),
         session_manager=cast(Any, _SessionManager()),
         agent_run_repository=cast(Any, object()),
+        agent_session_repository=cast(Any, _CurrentOwnerRepository()),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1526,6 +1606,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
         "session-1",
         [active_tool_call],
         removed_call_ids=set(),
+        owner_generation=1,
     )
 
     assert live_store.removed_events == []
@@ -1578,7 +1659,9 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
         created_at=datetime.now(timezone.utc),
     )
 
-    await event_publisher.dispatch_event("session-1", durable_result)
+    await event_publisher.dispatch_event(
+        "session-1", durable_result, owner_generation=1
+    )
 
     event_types = [
         event.get("kind") or event.get("type") for _, event in broadcast.events
@@ -1737,12 +1820,16 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
     await event_publisher.dispatch_event(
         "session-1",
         ContentDelta(delta="hel", content_index=0),
+        owner_generation=1,
     )
     await event_publisher.dispatch_event(
         "session-1",
         ContentDelta(delta="lo", content_index=0),
+        owner_generation=1,
     )
-    await event_publisher.dispatch_event("session-1", durable_result)
+    await event_publisher.dispatch_event(
+        "session-1", durable_result, owner_generation=1
+    )
 
     assert live_store.assistant_deltas == [("session-1", "hello", 0)]
     event_types = [
@@ -1793,6 +1880,7 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
             output_index=0,
             summary_index=0,
         ),
+        owner_generation=1,
     )
     await event_publisher.dispatch_event(
         "session-1",
@@ -1802,8 +1890,11 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
             output_index=0,
             summary_index=0,
         ),
+        owner_generation=1,
     )
-    await event_publisher.dispatch_event("session-1", durable_reasoning)
+    await event_publisher.dispatch_event(
+        "session-1", durable_reasoning, owner_generation=1
+    )
 
     assert live_store.reasoning_deltas == [("session-1", "thinking", "rs_1", 0, 0)]
     event_types = [

@@ -52,12 +52,17 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 
 _ADD_DESCRIPTION = "Create one Scheduled Task in the current Session."
 _LIST_DESCRIPTION = "List active Scheduled Tasks in the current Session."
@@ -166,6 +171,23 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         self.session_id = session_id
         self.turn_context: TurnContext | None = None
         self.runtime_context_store: RuntimeInstructionContextStore | None = None
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self.session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self.terminal_service = self.terminal_service.for_execution(owner)
+            self.channel_service = self.channel_service.for_execution(owner)
+            self._execution_owner = owner
 
     def set_runtime_context_store(
         self,

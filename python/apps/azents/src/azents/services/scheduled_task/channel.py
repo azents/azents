@@ -34,6 +34,7 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
@@ -52,7 +53,10 @@ from azents.services.scheduled_task.control import (
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,6 +83,23 @@ class ScheduledTaskChannelService:
         self.provider_repository = provider_repository
         self.action_service = action_service
         self.config = config
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ScheduledTaskChannelService":
+        """Bind Scheduled channel persistence to one durable Session owner."""
+        return ScheduledTaskChannelService(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+            progress_repository=self.progress_repository.for_execution(owner),
+            provider_repository=self.provider_repository,
+            action_service=self.action_service.for_execution_owner(owner),
+            config=self.config,
+        )
 
     async def execute_registration(
         self,

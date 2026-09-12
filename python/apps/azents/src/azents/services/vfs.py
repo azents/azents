@@ -12,6 +12,8 @@ from importlib import resources
 from importlib.resources.abc import Traversable
 from typing import Any, AsyncContextManager, Generic, Protocol, TypeVar
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import (
     AZENTS_VFS_SUPPORTED_MOUNTS,
@@ -25,6 +27,8 @@ from azents.core.vfs import (
     make_vfs_source_revision,
     make_vfs_uri,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.services.session_resource_authority import SessionExecutionOwner
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +238,20 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
     agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
     toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
     required_provider_sources: Mapping[str, ToolkitProvider[Any]]
+
+    def for_execution(
+        self: "VfsProjectionService[AsyncSession]",
+        owner: SessionExecutionOwner,
+    ) -> "VfsProjectionService[AsyncSession]":
+        """Return an execution-local service with owner-fenced DB scopes."""
+        return dataclasses.replace(
+            self,
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+        )
 
     async def build_preview(
         self,

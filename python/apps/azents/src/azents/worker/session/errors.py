@@ -1,9 +1,7 @@
 """SessionRunner error event storage and dispatch."""
 
-import asyncio
 import logging
 
-from azents.engine.events.builders import make_system_error_event
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.worker.events.publisher import WorkerEventPublisher
@@ -29,6 +27,8 @@ class SessionRunnerErrorReporter:
         self,
         session_id: str,
         exc: UserVisibleRuntimeError,
+        *,
+        owner_generation: int,
     ) -> None:
         """Store and propagate runtime error that can be shown to user."""
         logger.warning(
@@ -38,26 +38,17 @@ class SessionRunnerErrorReporter:
                 "error": exc.user_message,
             },
         )
+        error_event = await self.engine.save_error_message(
+            session_id,
+            exc.user_message,
+            owner_generation=owner_generation,
+        )
         try:
-            error_event = await self.engine.save_error_message(
+            await self.event_publisher.dispatch_event(
                 session_id,
-                exc.user_message,
+                error_event,
+                owner_generation=owner_generation,
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to save error message",
-                extra={"session_id": session_id},
-            )
-            error_event = make_system_error_event(
-                session_id=session_id,
-                content=exc.user_message,
-            )
-        try:
-            await self.event_publisher.dispatch_event(session_id, error_event)
-        except asyncio.CancelledError:
-            raise
         except Exception:
             logger.exception(
                 "Failed to dispatch error message",
@@ -68,6 +59,8 @@ class SessionRunnerErrorReporter:
         self,
         session_id: str,
         exc: Exception,
+        *,
+        owner_generation: int,
     ) -> None:
         """Store and propagate unexpected turn error as internal error event."""
         logger.exception(
@@ -77,26 +70,17 @@ class SessionRunnerErrorReporter:
                 "error_type": exc.__class__.__name__,
             },
         )
+        error_event = await self.engine.save_error_message(
+            session_id,
+            _INTERNAL_ERROR_MESSAGE,
+            owner_generation=owner_generation,
+        )
         try:
-            error_event = await self.engine.save_error_message(
+            await self.event_publisher.dispatch_event(
                 session_id,
-                _INTERNAL_ERROR_MESSAGE,
+                error_event,
+                owner_generation=owner_generation,
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to save error message",
-                extra={"session_id": session_id},
-            )
-            error_event = make_system_error_event(
-                session_id=session_id,
-                content=_INTERNAL_ERROR_MESSAGE,
-            )
-        try:
-            await self.event_publisher.dispatch_event(session_id, error_event)
-        except asyncio.CancelledError:
-            raise
         except Exception:
             logger.exception(
                 "Failed to publish error event",

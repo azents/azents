@@ -171,15 +171,19 @@ class RunRequest:
 
 
 class ToolAdmissionBarrier(Protocol):
-    """Serialize foreground tool admission against worker shutdown."""
+    """Serialize foreground tool admission against local execution revocation."""
 
     @property
     def closed(self) -> bool:
-        """Return whether TERM has closed foreground admission."""
+        """Return whether local execution has closed foreground admission."""
         ...
 
     async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
-        """Run one admission action unless shutdown already closed the barrier."""
+        """Run one admission action unless the barrier has already closed."""
+        ...
+
+    async def close(self) -> None:
+        """Close foreground admission after an active admission completes."""
         ...
 
 
@@ -212,8 +216,10 @@ class AgentEngineProtocol(Protocol):
         self,
         session_id: str,
         content: str,
+        *,
+        owner_generation: int,
     ) -> Event:
-        """Save error message to session."""
+        """Save an error message under the current Session owner generation."""
         ...
 
     def compact(self, request: RunRequest, context: RunContext) -> AsyncIterator[Emit]:

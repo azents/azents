@@ -69,19 +69,24 @@ class _Broker:
         """This test does not release broker locks."""
         del session_id
 
-    async def clear_session_activity(self, session_id: str) -> None:
+    async def clear_session_activity(
+        self, session_id: str, *, owner_generation: int
+    ) -> bool:
         """This test does not clear broker activity."""
-        del session_id
+        del session_id, owner_generation
+        return True
 
     async def set_session_activity(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
-    ) -> None:
+    ) -> bool:
         """This test does not set broker activity."""
-        del session_id, run_id, phase
+        del session_id, owner_generation, run_id, phase
+        return True
 
     async def renew_session_ttl(self, session_id: str) -> None:
         """Record active owner lease renewal."""
@@ -117,7 +122,7 @@ class _AgentSessionRepository:
         del session
         self.heartbeat_session_ids.append(session_id)
 
-    async def lock_by_id(
+    async def wait_for_execution_lock_by_id(
         self,
         session: AsyncSession,
         agent_session_id: str,

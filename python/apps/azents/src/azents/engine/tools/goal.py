@@ -29,6 +29,11 @@ from azents.repos.goal.store import (
     GoalNotActiveError,
     GoalStateStore,
 )
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 
 _GOAL_PROMPT = """### Goal
 
@@ -82,6 +87,29 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         self.store = store
         self._agent_id = agent_id
         self._session_id = session_id
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.store = self.store.for_execution(owner)
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -93,7 +121,8 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current goal prompt and goal tools."""
-        del context
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         if not self._session_id:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(

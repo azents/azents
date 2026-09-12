@@ -70,8 +70,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-10
-spec_version: 113
+last_verified_at: 2026-09-12
+spec_version: 114
 ---
 
 # Toolkit
@@ -90,6 +90,21 @@ This domain covers four feature groups.
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
 
 ### Team Session execution boundary
+
+Resolved Session Toolkits bind a narrow PostgreSQL execution owner
+(`session_id`, `owner_generation`) before Toolkit lifecycle entry. This covers
+lifecycle/background snapshot writes as well as direct Tool state mutations.
+Request-local full resource authority may change between Runs under the same owner,
+while the durable owner token remains fixed; reusing a Toolkit under another
+generation is rejected. Idle-continuation Toolkit preparation uses the same narrow
+binding before entry.
+
+Todo, Goal, Memory, Skill, Subagent, Scheduled Task, GitHub selection,
+MCP/AWS/GCP snapshots, Runtime instruction dedupe, and Claude Rules state commit
+through owner-bound database scopes. External discovery, Runtime/file reads,
+provider calls, and broker publication occur after those scopes close. A stale
+owner rejection terminates hook/tool processing instead of becoming an allowed
+hook result, failed Tool payload, or background refresh retry.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
@@ -977,6 +992,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 114) — Bound Session Toolkit lifecycle,
+  background snapshots, and state mutations to the durable execution owner before
+  Toolkit entry, while allowing Run-specific authority refresh within one owner.
 - **2026-09-08** (spec_version 113) — Added the App-scoped GitHub installation
   authority repository to the Toolkit implementation paths. The existing
   create, update, and connection-test contract still revalidates every selected

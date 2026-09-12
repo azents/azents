@@ -8,6 +8,8 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from azents.core.enums import AgentRunPhase
+
 from .redis import (
     RedisBroker,
     _decode_wake_up_response,
@@ -15,7 +17,12 @@ from .redis import (
     decode_session_wake_up,
     encode_session_wake_up,
 )
-from .types import SessionMailboxActivity, SessionStopSignal, SessionWakeUp
+from .types import (
+    SessionActivity,
+    SessionMailboxActivity,
+    SessionStopSignal,
+    SessionWakeUp,
+)
 
 
 @pytest_asyncio.fixture
@@ -121,6 +128,113 @@ class TestRedisBrokerSetup:
 
         groups = await redis.xinfo_groups("azents:incoming")
         assert len(groups) == 1
+
+
+async def test_session_activity_rejects_superseded_generation(
+    redis: Redis,
+) -> None:
+    """A newer transient projection generation fences old activity mutations."""
+    broker = RedisBroker(redis)
+
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=1,
+        run_id="run-old",
+        phase=AgentRunPhase.STREAMING_MODEL,
+    )
+    assert await broker.get_session_activity("session-1") == SessionActivity(
+        run_id="run-old",
+        phase=AgentRunPhase.STREAMING_MODEL,
+    )
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=2,
+        run_id="run-new",
+        phase=AgentRunPhase.EXECUTING_TOOLS,
+    )
+
+    assert not await broker.set_session_activity(
+        "session-1",
+        owner_generation=1,
+        run_id="run-stale",
+    )
+    assert not await broker.clear_session_activity(
+        "session-1",
+        owner_generation=1,
+    )
+    assert await broker.get_session_activity("session-1") == SessionActivity(
+        run_id="run-new",
+        phase=AgentRunPhase.EXECUTING_TOOLS,
+    )
+
+    assert await broker.clear_session_activity(
+        "session-1",
+        owner_generation=2,
+    )
+    assert await broker.get_session_activity("session-1") is None
+    assert not await broker.set_session_activity(
+        "session-1",
+        owner_generation=1,
+        run_id="run-stale",
+    )
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=2,
+        run_id="run-reseeded",
+    )
+    assert await broker.get_session_activity("session-1") == SessionActivity(
+        run_id="run-reseeded",
+    )
+
+
+async def test_session_activity_current_owner_seeds_empty_store(redis: Redis) -> None:
+    """An empty Redis store accepts the current PostgreSQL-derived generation."""
+    broker = RedisBroker(redis)
+
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=7,
+        run_id="run-current",
+    )
+
+    assert await broker.get_session_activity("session-1") == SessionActivity(
+        run_id="run-current",
+    )
+
+
+async def test_session_activity_replaces_legacy_string_with_generation_fence(
+    redis: Redis,
+) -> None:
+    """A rolling deployment replaces transient legacy activity atomically."""
+    broker = RedisBroker(redis)
+    key = "azents:session:session-1:activity"
+    await redis.set(key, '{"run_id":"legacy","phase":null}')
+
+    assert await broker.get_session_activity("session-1") is None
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=4,
+        run_id="run-current",
+    )
+    assert await broker.set_session_activity(
+        "session-1",
+        owner_generation=5,
+        run_id="run-current",
+        phase=AgentRunPhase.EXECUTING_TOOLS,
+    )
+    assert not await broker.set_session_activity(
+        "session-1",
+        owner_generation=4,
+        run_id="run-stale",
+    )
+    assert not await broker.clear_session_activity(
+        "session-1",
+        owner_generation=4,
+    )
+    assert await broker.get_session_activity("session-1") == SessionActivity(
+        run_id="run-current",
+        phase=AgentRunPhase.EXECUTING_TOOLS,
+    )
 
 
 async def test_purge_session_state_avoids_cross_slot_delete() -> None:

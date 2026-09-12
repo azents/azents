@@ -167,6 +167,7 @@ class IdleContinuationService:
                 await self.event_publisher.dispatch_event(
                     snapshot.session_id,
                     event,
+                    owner_generation=snapshot.owner_generation,
                 )
         if continuation_inputs:
             await self.broker.send_message(

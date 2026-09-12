@@ -133,6 +133,7 @@ from azents.engine.tools.run_tool_to_file import (
     LateBoundClientToolInvoker,
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
+from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
@@ -140,6 +141,9 @@ from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -172,6 +176,10 @@ class _OpenToolAdmissionBarrier:
         await action()
         return True
 
+    async def close(self) -> None:
+        """Close future foreground admissions."""
+        self.closed = True
+
 
 class _SessionContext:
     """AsyncSession context manager for tests."""
@@ -188,11 +196,40 @@ class _SessionContext:
         """No-op exit."""
 
 
+@pytest.fixture(autouse=True)
+def _fake_execution_owner_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep assembly tests in memory; real lock behavior has repository tests."""
+
+    async def lock_owner(
+        self: AgentSessionRepository,
+        session: AsyncSession,
+        session_id: str,
+    ) -> AgentSession | None:
+        del self, session_id
+        assert isinstance(session, _Session)
+        if session.owner_generation is None:
+            return None
+        return _agent_session().model_copy(
+            update={"owner_generation": session.owner_generation}
+        )
+
+    monkeypatch.setattr(
+        AgentSessionRepository, "wait_for_execution_lock_by_id", lock_owner
+    )
+
+
 class _Session(AsyncSession):
     """AsyncSession for tests."""
 
+    owner_generation: int | None = 1
+
     async def commit(self) -> None:
         """No-op commit."""
+
+    async def scalar(self, *args: object, **kwargs: object) -> int | None:
+        """Return durable owner generation for fenced test transactions."""
+        del args, kwargs
+        return self.owner_generation
 
 
 class _ToolWorkingSetStore(ToolWorkingSetStore):
@@ -200,6 +237,13 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
 
     def __init__(self) -> None:
         self.states: dict[tuple[str, str], ToolWorkingSetState] = {}
+
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> ToolWorkingSetStore:
+        """Keep in-memory state while assembling an owner-bound execution."""
+        del session_manager
+        return self
 
     async def load(self, agent_id: str, session_id: str) -> ToolWorkingSetState:
         """Return current in-memory state."""
@@ -485,6 +529,13 @@ class _Compactor:
         self.summary: str | None = None
         self.reason: str | None = None
 
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> "_Compactor":
+        """Return the in-memory compactor for assembly tests."""
+        del session_manager
+        return self
+
     async def compact(
         self,
         *,
@@ -533,6 +584,13 @@ class _Compactor:
 
 class _FailingCompactor:
     """Failing compactor for tests."""
+
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> "_FailingCompactor":
+        """Return the failing compactor for assembly tests."""
+        del session_manager
+        return self
 
     async def compact(
         self,
@@ -845,6 +903,46 @@ class _DenyHookToolkit(Toolkit[BaseModel]):
         return ToolCallDeny(message="denied")
 
 
+class _TakeoverBeforeToolToolkit(Toolkit[BaseModel]):
+    """Move durable ownership during the before-tool hook."""
+
+    def __init__(self, session: _Session) -> None:
+        self.session = session
+        self.handler_calls = 0
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Expose one externally executed probe."""
+        del context
+
+        async def handler(arguments: str) -> str:
+            del arguments
+            self.handler_calls += 1
+            return "unexpected"
+
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="probe",
+                        description="Probe stale tool admission.",
+                        input_schema={"type": "object", "properties": {}},
+                    ),
+                    handler=handler,
+                )
+            ],
+        )
+
+    def hooks(self) -> RuntimeHooks:
+        """Return the ownership-takeover barrier hook."""
+        return {"on_before_tool_call": self._take_over}
+
+    async def _take_over(self, context: BeforeToolCallHookContext) -> None:
+        """Supersede the prepared execution before its handler is invoked."""
+        del context
+        self.session.owner_generation = 2
+
+
 class _PromptHookToolkit(Toolkit[BaseModel]):
     """Toolkit for turn start prompt injection tests."""
 
@@ -1040,6 +1138,55 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
 
     assert result.status == "failed"
     assert state.tool_names == ["service__probe", "service__other"]
+
+
+async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
+    """Takeover in a before hook prevents the external handler invocation."""
+    session = _Session()
+    toolkit = _TakeoverBeforeToolToolkit(session)
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        session_manager=lambda: _SessionContext(session),
+        execution_factory=_capture_execution_factory(execution),
+    )
+    request = RunRequest(
+        enabled_execution_options=[],
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="takeover",
+                use_prefix=True,
+                toolkit_type="github",
+            )
+        ],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "test"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+    )
+
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+    assert execution.prepared_model_call is not None
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await execution.prepared_model_call.tool_executor.execute(
+            ClientToolCallPayload(
+                call_id="probe-1",
+                name="takeover__probe",
+                arguments="{}",
+                native_artifact=_artifact({"type": "function_call"}),
+                wire_dialect="json_function",
+            )
+        )
+
+    assert toolkit.handler_calls == 0
 
 
 async def test_event_engine_adapter_runs_execution() -> None:
@@ -2045,6 +2192,46 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
         for event in _events(emits)
     )
+
+
+async def test_save_error_message_fences_stale_owner_generation() -> None:
+    """A superseded worker cannot append a stale durable error Event."""
+    session = _Session()
+    session.owner_generation = 2
+    transcript_repo = _TranscriptRepo([])
+    adapter = _agent_engine_adapter(
+        session_manager=lambda: _SessionContext(session),
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await adapter.save_error_message(
+            "session-1",
+            "An internal error occurred.",
+            owner_generation=1,
+        )
+
+    assert transcript_repo._events == []
+
+
+async def test_save_error_message_appends_for_current_owner_generation() -> None:
+    """The current worker persists its error Event through the owner-bound scope."""
+    session = _Session()
+    session.owner_generation = 2
+    transcript_repo = _TranscriptRepo([])
+    adapter = _agent_engine_adapter(
+        session_manager=lambda: _SessionContext(session),
+        transcript_repo=transcript_repo,
+    )
+
+    event = await adapter.save_error_message(
+        "session-1",
+        "An internal error occurred.",
+        owner_generation=2,
+    )
+
+    assert event.kind is EventKind.SYSTEM_ERROR
+    assert transcript_repo._events == [event]
 
 
 async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:

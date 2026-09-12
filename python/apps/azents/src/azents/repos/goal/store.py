@@ -18,7 +18,9 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
+from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 class GoalAlreadyExistsError(ValueError):
@@ -68,6 +70,19 @@ class GoalStateStore:
     ) -> None:
         """Create Goal state store."""
         self.session_manager = session_manager
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "GoalStateStore":
+        """Bind Goal operations to one durable Session owner."""
+        return GoalStateStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        )
 
     async def load(self, agent_id: str, session_id: str) -> GoalState:
         """Fetch Session Goal state in a completed transaction."""

@@ -67,8 +67,11 @@ class _EventPublisher:
         self,
         session_id: str,
         event: PublishedEvent,
+        *,
+        owner_generation: int,
     ) -> None:
         """Record publish request."""
+        del owner_generation
         self.dispatched.append((session_id, event))
 
 
@@ -343,12 +346,16 @@ class _LiveEventProjector:
         self.removed_events: list[tuple[str, str]] = []
         self.removed_active_call_ids: list[set[str]] = []
 
-    async def flush_session(self, session_id: str) -> None:
+    async def flush_session(self, session_id: str, *, owner_generation: int) -> None:
         """Record flush request."""
+        del owner_generation
         self.flushed_session_ids.append(session_id)
 
-    async def remove_event(self, session_id: str, event_id: str) -> None:
+    async def remove_event(
+        self, session_id: str, event_id: str, *, owner_generation: int
+    ) -> None:
         """Record remove request."""
+        del owner_generation
         self.removed_events.append((session_id, event_id))
 
     async def replace_active_tool_calls(
@@ -357,9 +364,10 @@ class _LiveEventProjector:
         active_tool_calls: list[ActiveToolCall],
         *,
         removed_call_ids: set[str],
+        owner_generation: int,
     ) -> None:
         """Record deterministic active-call removals."""
-        del session_id
+        del session_id, owner_generation
         assert active_tool_calls == []
         self.removed_active_call_ids.append(removed_call_ids)
 

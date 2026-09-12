@@ -2,7 +2,7 @@
 
 import json
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azents_runtime_control.grpc_transfer_coordinator_client import (
@@ -55,6 +55,10 @@ from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.channel import (
     ScheduledTaskProgressExecution,
 )
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.testing.types import require_instance
 
 
@@ -99,6 +103,22 @@ class _ActionService(ExternalChannelActionService):
     ) -> list[ChannelWorkSnapshot]:
         del session_id, agent_id
         return self.snapshots
+
+    def for_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> ExternalChannelActionService:
+        """Retain the in-memory fake after observing owner binding."""
+        self.owner = owner
+        return self
+
+    def for_execution(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> ExternalChannelActionService:
+        """Retain the in-memory fake after observing execution binding."""
+        self.authority = authority
+        return self
 
     async def execute(self, **kwargs: object) -> ChannelActionResult:
         self.calls.append(kwargs)
@@ -179,6 +199,7 @@ def _toolkit(
 ) -> ExternalChannelToolkit:
     transfer = file_transfer_service or _FileTransferService()
     scheduled = AsyncMock()
+    scheduled.for_execution = MagicMock(return_value=scheduled)
     scheduled.execute_progress.return_value = ScheduledTaskProgressExecution(
         result=None
     )
@@ -218,6 +239,19 @@ async def _publish(event: PublishedEvent) -> None:
     del event
 
 
+def _authority() -> SessionResourceAuthority:
+    """Return the execution authority used by Toolkit tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-current",
+        run_index=1,
+        owner_generation=1,
+    )
+
+
 def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
     return TurnContext(
         workspace_id="workspace-1",
@@ -226,6 +260,7 @@ def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
         publish_event=_publish,
         session_id="session-1",
         tool_search_enabled=tool_search_enabled,
+        resource_authority=_authority(),
     )
 
 
@@ -279,7 +314,48 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     ]
     assert service.calls[0]["client_tool_call_id"] == "call-42"
     assert service.calls[0]["run_id"] == "run-current"
-    assert service.calls[0]["authority"] is None
+    assert service.calls[0]["authority"] == _authority()
+
+
+@pytest.mark.asyncio
+async def test_channel_action_requires_bound_execution_authority() -> None:
+    """Direct Channel Work cannot fall back to an unfenced service."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+    tool = toolkit._make_channel_action_tool()
+
+    with client_tool_execution_context(call_id="call-unbound", name="channel_action"):
+        with pytest.raises(FunctionToolError, match="authority is unavailable"):
+            await tool.handler(
+                json.dumps(
+                    {
+                        "mode": "continue",
+                        "binding": "binding-1",
+                        "message": "Progress.",
+                    }
+                )
+            )
+
+
+def test_execution_authority_binding_is_immutable() -> None:
+    """One resolved Toolkit cannot switch to another Session owner generation."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+    authority = _authority()
+
+    toolkit.bind_execution_authority(authority)
+    toolkit.bind_execution_authority(authority)
+
+    with pytest.raises(ValueError, match="already bound"):
+        toolkit.bind_execution_authority(
+            authority.__class__(
+                workspace_id=authority.workspace_id,
+                agent_id=authority.agent_id,
+                session_id=authority.session_id,
+                root_session_id=authority.root_session_id,
+                run_id=authority.run_id,
+                run_index=authority.run_index,
+                owner_generation=authority.owner_generation + 1,
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -547,13 +623,13 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
             "binding_id": "binding-1",
             "paths": ["/workspace/agent/report.csv"],
             "file_storage": file_storage,
-            "authority": None,
+            "authority": _authority(),
         }
     ]
     manifests = require_instance(service.calls[0]["files"], tuple)
     assert manifests[0].path == "/workspace/agent/report.csv"
     assert service.calls[0]["file_storage"] is file_storage
-    assert service.calls[0]["authority"] is None
+    assert service.calls[0]["authority"] == _authority()
 
 
 @pytest.mark.asyncio
@@ -587,7 +663,7 @@ async def test_channel_action_preflights_exchange_without_runtime_storage() -> N
             "binding_id": "binding-1",
             "paths": [uri],
             "file_storage": None,
-            "authority": None,
+            "authority": _authority(),
         }
     ]
     manifests = require_instance(service.calls[0]["files"], tuple)

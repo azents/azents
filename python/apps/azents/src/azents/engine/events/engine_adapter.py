@@ -199,6 +199,7 @@ from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -449,9 +450,20 @@ class AgentEngineAdapter:
             ),
         ).make_tool()
 
-    async def save_error_message(self, session_id: str, content: str) -> Event:
-        """Store Event system_error."""
-        async with self.session_manager() as session:
+    async def save_error_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        owner_generation: int,
+    ) -> Event:
+        """Store Event system_error under the current Session owner generation."""
+        owner_session_manager = OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
+        async with owner_session_manager() as session:
             return await self.transcript_repo.append(
                 session,
                 EventCreate(
@@ -472,8 +484,14 @@ class AgentEngineAdapter:
         self, request: RunRequest, context: RunContext
     ) -> AsyncIterator[Emit]:
         """Run manual event compaction in append-only style."""
+        owner_session_manager = OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=request.session_id,
+            owner_generation=context.owner_generation,
+        )
+        compactor = self.compactor.with_session_manager(owner_session_manager)
         yield ephemeral(CompactionStarted())
-        async with self.session_manager() as session:
+        async with owner_session_manager() as session:
             await _ensure_agent_session(
                 session,
                 request.session_id,
@@ -508,7 +526,7 @@ class AgentEngineAdapter:
                 request.session_id,
             )
 
-        await self.compactor.compact(
+        await compactor.compact(
             session_id=request.session_id,
             transcript=transcript,
             compaction_id=uuid7().hex,
@@ -538,7 +556,16 @@ class AgentEngineAdapter:
         check_stop: CheckStop | None = None,
     ) -> AsyncIterator[Emit]:
         """Run Event AgentRunExecution and yield terminal event."""
-        async with self.session_manager() as session:
+        owner_session_manager = OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=request.session_id,
+            owner_generation=context.owner_generation,
+        )
+        tool_working_set_store = self.tool_working_set_store.with_session_manager(
+            owner_session_manager
+        )
+        compactor = self.compactor.with_session_manager(owner_session_manager)
+        async with owner_session_manager() as session:
             await _ensure_agent_session(
                 session,
                 request.session_id,
@@ -575,6 +602,7 @@ class AgentEngineAdapter:
             transcript: Sequence[Event],
             model: str,
         ) -> PreparedModelCall[NativeModelRequest | OpenAIResponsesRequest]:
+            await owner_session_manager.assert_current()
             model_selection = (
                 request.inference_state.model_selection
                 if request.inference_state is not None
@@ -768,7 +796,7 @@ class AgentEngineAdapter:
                         )
                     search_tool = make_tool_search_tool(
                         index=search_index,
-                        store=self.tool_working_set_store,
+                        store=tool_working_set_store,
                         agent_id=request.agent_id,
                         session_id=request.session_id,
                         activation_capacity=activation_capacity,
@@ -778,7 +806,7 @@ class AgentEngineAdapter:
                         [search_tool],
                     )
 
-                working_set = await self.tool_working_set_store.load(
+                working_set = await tool_working_set_store.load(
                     request.agent_id,
                     request.session_id,
                 )
@@ -877,6 +905,10 @@ class AgentEngineAdapter:
             shared_tool_invoker: ClientToolInvoker = ToolCatalogClientToolInvoker(
                 catalog
             )
+            shared_tool_invoker = _OwnerBoundClientToolInvoker(
+                inner=shared_tool_invoker,
+                owner=owner_session_manager,
+            )
             shared_tool_invoker = _HookedClientToolInvoker(
                 inner=shared_tool_invoker,
                 dispatcher=hook_dispatcher,
@@ -890,7 +922,7 @@ class AgentEngineAdapter:
                 shared_tool_invoker = _WorkingSetClientToolInvoker(
                     inner=shared_tool_invoker,
                     deferred_tool_names=deferred_tool_names,
-                    store=self.tool_working_set_store,
+                    store=tool_working_set_store,
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                 )
@@ -915,6 +947,7 @@ class AgentEngineAdapter:
             )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
+                await owner_session_manager.assert_current()
                 await hook_dispatcher.dispatch_observation(
                     hook_providers,
                     "on_turn_end",
@@ -976,7 +1009,7 @@ class AgentEngineAdapter:
         )
         auto_compaction_filter = EventAutoCompactionFilter(
             session_id=request.session_id,
-            compactor=self.compactor,
+            compactor=compactor,
             summarize=_event_summary_generator(
                 request,
                 summarize=self.summary_model_call,
@@ -1049,7 +1082,7 @@ class AgentEngineAdapter:
             else None
         )
         execution = self.execution_factory(
-            session_manager=self.session_manager,
+            session_manager=owner_session_manager,
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(
@@ -1104,7 +1137,7 @@ class AgentEngineAdapter:
                 check_stop=check_stop,
                 poll_input_events=_make_input_poller(
                     poll_messages,
-                    session_manager=self.session_manager,
+                    session_manager=owner_session_manager,
                     transcript_repo=self.transcript_repo,
                 ),
             )
@@ -1247,6 +1280,27 @@ class _PreparedToolAllowlistInvoker:
                 pending_generated_files=(),
                 terminal_run=False,
             )
+        return await self.inner.invoke(call)
+
+
+class _OwnerBoundClientToolInvoker:
+    """Admit external tool work only after a database-only owner check."""
+
+    def __init__(
+        self, *, inner: ClientToolInvoker, owner: OwnerBoundSessionManager
+    ) -> None:
+        self.inner = inner
+        self.owner = owner
+
+    def request_cancel(self, call: PreparedClientToolInvocation) -> None:
+        """Forward best-effort cancellation for an already admitted effect."""
+        self.inner.request_cancel(call)
+
+    async def invoke(
+        self, call: PreparedClientToolInvocation
+    ) -> UnboundedClientToolResult:
+        """Release the authority transaction before executing the handler."""
+        await self.owner.assert_current()
         return await self.inner.invoke(call)
 
 

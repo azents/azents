@@ -50,11 +50,16 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotState, wrap_mcp_tool
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import (
     ToolkitStateStore,
 )
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+)
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
 )
 
 logger = logging.getLogger(__name__)
@@ -207,6 +212,21 @@ class GitHubSelectedInstallationStore:
         self.session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "GitHubSelectedInstallationStore":
+        """Bind selection state to one durable Session owner."""
+        return GitHubSelectedInstallationStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+        )
 
     async def load(self) -> str | None:
         """Load selected installation ID."""
@@ -419,6 +439,47 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         self._installation_bindings = installation_bindings or []
         self._installation_token_cache: dict[str, tuple[str, float]] = {}
         self.selected_installation_store = selected_installation_store
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind session-scoped GitHub and MCP state before lifecycle entry."""
+        session_id = (
+            self._installation_bindings[0].session_id
+            if self._installation_bindings
+            else (
+                self.selected_installation_store._session_id
+                if isinstance(
+                    self.selected_installation_store,
+                    GitHubSelectedInstallationStore,
+                )
+                else owner.session_id
+            )
+        )
+        if not accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=session_id,
+        ):
+            return
+        if isinstance(
+            self.selected_installation_store,
+            GitHubSelectedInstallationStore,
+        ):
+            self.selected_installation_store = (
+                self.selected_installation_store.for_execution(owner)
+            )
+        if self._mcp is not None:
+            self._mcp.bind_execution_owner(owner)
+        for binding in self._installation_bindings:
+            if binding.session_manager is not None:
+                binding.session_manager = OwnerBoundSessionManager(
+                    session_manager=binding.session_manager,
+                    session_id=owner.session_id,
+                    owner_generation=owner.owner_generation,
+                )
+            if binding.mcp_toolkit is not None:
+                binding.mcp_toolkit.bind_execution_owner(owner)
+        self._execution_owner = owner
 
     async def expose_env(self) -> dict[str, str]:
         """Inject GH_TOKEN / GITHUB_TOKEN as Runtime environment variables.

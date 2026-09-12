@@ -214,6 +214,15 @@ class ToolWorkingSetStore:
         self.session_manager = session_manager
         self.repository = repository
 
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> "ToolWorkingSetStore":
+        """Bind working-set mutations to one execution's database authority."""
+        return ToolWorkingSetStore(
+            session_manager=session_manager,
+            repository=self.repository,
+        )
+
     async def load(self, agent_id: str, session_id: str) -> ToolWorkingSetState:
         """Load the current session working set."""
         async with self.session_manager() as session:

@@ -74,8 +74,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-10
-spec_version: 75
+last_verified_at: 2026-09-12
+spec_version: 76
 ---
 
 # External Channel
@@ -99,6 +99,14 @@ or more Agent routes. One Agent may appear in several Apps, and one AgentSession
 contain multiple independent bindings.
 
 ## Ownership and Security Boundaries
+
+Direct Agent Channel Work transitions are also bound to the executing Session's
+PostgreSQL owner generation. Initial Work commit, effect admission, awaiting-input
+settlement, provider outcome settlement, and provisioned Discord thread recording
+all reject a superseded Worker. Provider and file I/O remain outside database
+transactions. An effect admitted before takeover may finish externally, but the old
+owner cannot settle that result or change the newer Work revision, and ambiguous
+effects are not replayed.
 
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
@@ -565,6 +573,9 @@ history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 76) — Fenced direct Channel Work commit,
+  provider admission, awaiting-input and effect settlement, and Discord delivery
+  recording by the executing Session owner generation.
 - **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
   Workspace-scoped configuration reads, and generation-fenced health persistence to
   completed repository operations while preserving provider validation outside database

@@ -14,6 +14,7 @@ from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ActionExecutionEventKind,
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
     AgentSessionKind,
@@ -76,10 +77,16 @@ from azents.repos.mailbox.data import (
 )
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
+)
+from azents.repos.session_working_folder_binding.data import (
+    SessionWorkingFolderAuthority,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
@@ -664,13 +671,16 @@ class _CatalogRefreshService(AgentProjectCatalogService):
     def __init__(self, status: AgentProjectCatalogStatus) -> None:
         self.status = status
 
-    async def refresh_project_status(
+    async def refresh_project_status_for_execution(
         self,
         *,
         agent_id: str,
+        session_id: str,
+        owner_generation: int,
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Return the configured status without touching the runner."""
+        del session_id, owner_generation
         now = datetime.datetime.now(datetime.UTC)
         status_detail = (
             None if self.status is AgentProjectCatalogStatus.AVAILABLE else "Not ready."
@@ -1201,6 +1211,7 @@ class _AgentCreateSessionFixture:
     runner: _RunnerOperations
     agent_id: str
     session_id: str
+    owner_generation: int
     source_project_path: str
 
 
@@ -1290,6 +1301,7 @@ async def _create_agent_worktree_session(
         runner=runner,
         agent_id=agent_id,
         session_id=session_id,
+        owner_generation=result.value.agent_session.owner_generation,
         source_project_path=source_project_path,
     )
 
@@ -1308,6 +1320,7 @@ async def _admit_and_promote_agent_create(
         session_id=fixture.session_id,
         originating_run_id="originating-run-001",
         client_tool_call_id=client_tool_call_id,
+        owner_generation=fixture.owner_generation,
         source_project_path=fixture.source_project_path,
         starting_ref=starting_ref,
         branch_name=branch_name,
@@ -1389,6 +1402,7 @@ async def _admit_and_promote_agent_remove(
         session_id=fixture.session_id,
         originating_run_id="originating-remove-run-001",
         client_tool_call_id=client_tool_call_id,
+        owner_generation=fixture.owner_generation,
         worktree_project_path=worktree_path,
         force=force,
     )
@@ -1424,6 +1438,7 @@ class TestSessionGitWorktreeService:
             session_id=fixture.session_id,
             originating_run_id="originating-run-001",
             client_tool_call_id="call-001",
+            owner_generation=fixture.owner_generation,
             source_project_path=f" {fixture.source_project_path} ",
             starting_ref=" main ",
             branch_name=" feature/test ",
@@ -1433,6 +1448,7 @@ class TestSessionGitWorktreeService:
             session_id=fixture.session_id,
             originating_run_id="originating-run-001",
             client_tool_call_id="call-001",
+            owner_generation=fixture.owner_generation,
             source_project_path=fixture.source_project_path,
             starting_ref="main",
             branch_name="feature/test",
@@ -1448,6 +1464,7 @@ class TestSessionGitWorktreeService:
                 session_id=fixture.session_id,
                 originating_run_id="originating-run-001",
                 client_tool_call_id="call-001",
+                owner_generation=fixture.owner_generation,
                 source_project_path=fixture.source_project_path,
                 starting_ref="main",
                 branch_name="feature/other",
@@ -1471,6 +1488,71 @@ class TestSessionGitWorktreeService:
         assert admitted_action.starting_ref == "main"
         assert admitted_action.branch_name == "feature/test"
 
+    async def test_agent_create_admission_rejects_takeover_after_external_preparation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A takeover before the admission transaction cannot enqueue an action."""
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-admission-takeover",
+            runner=_RunnerOperations(),
+        )
+        binding_service = fixture.service.session_working_folder_binding_service
+        resolve_authority = binding_service.resolve_authority_for_target
+
+        async def resolve_then_take_over(
+            *,
+            agent_id: str,
+            session_id: str,
+            runtime_target: RuntimeOperationTarget,
+        ) -> SessionWorkingFolderAuthority:
+            authority = await resolve_authority(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime_target,
+            )
+            async with rdb_session_manager() as session:
+                await AgentSessionRepository().claim_owner_generation(
+                    session,
+                    session_id,
+                )
+            return authority
+
+        monkeypatch.setattr(
+            binding_service,
+            "resolve_authority_for_target",
+            resolve_then_take_over,
+        )
+
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+            await fixture.service.admit_agent_create_git_worktree(
+                agent_id=fixture.agent_id,
+                session_id=fixture.session_id,
+                originating_run_id="originating-run-001",
+                client_tool_call_id="call-stale-admission",
+                owner_generation=fixture.owner_generation,
+                source_project_path=fixture.source_project_path,
+                starting_ref=None,
+                branch_name=None,
+            )
+
+        async with rdb_session_manager() as session:
+            assert (
+                await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                == []
+            )
+            current = await AgentSessionRepository().get_by_id(
+                session,
+                fixture.session_id,
+            )
+        assert current is not None
+        assert current.run_state is AgentSessionRunState.IDLE
+
     async def test_agent_remove_admission_rejects_ordinary_project(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -1488,6 +1570,7 @@ class TestSessionGitWorktreeService:
                 session_id=fixture.session_id,
                 originating_run_id="originating-remove-run-001",
                 client_tool_call_id="call-remove-ordinary",
+                owner_generation=fixture.owner_generation,
                 worktree_project_path=fixture.source_project_path,
                 force=False,
             )
@@ -1522,6 +1605,7 @@ class TestSessionGitWorktreeService:
             session_id=fixture.session_id,
             originating_run_id="originating-remove-run-001",
             client_tool_call_id="call-remove-admission",
+            owner_generation=fixture.owner_generation,
             worktree_project_path=f" {allocation_create.worktree_path} ",
             force=False,
         )
@@ -1530,6 +1614,7 @@ class TestSessionGitWorktreeService:
             session_id=fixture.session_id,
             originating_run_id="originating-remove-run-001",
             client_tool_call_id="call-remove-admission",
+            owner_generation=fixture.owner_generation,
             worktree_project_path=allocation_create.worktree_path,
             force=False,
         )
@@ -1541,6 +1626,7 @@ class TestSessionGitWorktreeService:
                 session_id=fixture.session_id,
                 originating_run_id="originating-remove-run-001",
                 client_tool_call_id="call-remove-admission",
+                owner_generation=fixture.owner_generation,
                 worktree_project_path=allocation_create.worktree_path,
                 force=True,
             )
@@ -2106,6 +2192,7 @@ class TestSessionGitWorktreeService:
                 session_id=fixture.session_id,
                 originating_run_id="originating-run-001",
                 client_tool_call_id="call-missing",
+                owner_generation=fixture.owner_generation,
                 source_project_path="/workspace/agent/missing",
                 starting_ref=None,
                 branch_name=None,
@@ -2684,19 +2771,21 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         service = _service(rdb_session_manager, _RunnerOperations())
 
         first = await service.cancel_action_execution(
             execution=execution,
+            owner_generation=0,
             reason="Operation cancelled during Session ownership handover.",
             on_history_event_appended=None,
             predecessor_run_id=predecessor_run_id,
         )
         replay = await service.cancel_action_execution(
             execution=execution,
+            owner_generation=0,
             reason="Operation cancelled during Session ownership handover.",
             on_history_event_appended=None,
             predecessor_run_id=predecessor_run_id,
@@ -2745,6 +2834,97 @@ class TestSessionGitWorktreeService:
             "Operation cancelled during Session ownership handover."
         )
 
+    async def test_action_owner_fence_rejects_stale_logs_and_allows_recovery(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A new owner may conservatively cancel old work, but old writes stop."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "action-owner-fence",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            old_generation = await AgentSessionRepository().claim_owner_generation(
+                session,
+                agent_session.id,
+            )
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000012",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=old_generation,
+                ),
+            )
+            new_generation = await AgentSessionRepository().claim_owner_generation(
+                session,
+                agent_session.id,
+            )
+        service = _service(rdb_session_manager, _RunnerOperations())
+
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+            await service._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.STEP_STARTED,
+                step_key=None,
+                command_argv=None,
+                content="stale progress",
+                exit_code=None,
+                on_projection_updated=None,
+            )
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+            await service.cancel_action_execution(
+                execution=execution,
+                owner_generation=old_generation,
+                reason="stale owner",
+                on_history_event_appended=None,
+                predecessor_run_id=None,
+            )
+
+        recovered = await service.cancel_action_execution(
+            execution=execution,
+            owner_generation=new_generation,
+            reason="Operation cancelled during Session ownership handover.",
+            on_history_event_appended=None,
+            predecessor_run_id=None,
+        )
+
+        assert recovered.kind is EventKind.ACTION_EXECUTION_RESULT
+        async with rdb_session_manager() as session:
+            assert (
+                await ActionExecutionRepository().get_by_id(
+                    session,
+                    action_execution_id=execution.id,
+                )
+                is None
+            )
+            assert (
+                await ActionExecutionRepository().list_events(
+                    session,
+                    action_execution_id=execution.id,
+                )
+                == []
+            )
+
     async def test_create_session_working_folder_uses_stored_path(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -2776,7 +2956,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations()
@@ -2854,7 +3034,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations(folder_setup_failures=["mkdir failed"])
@@ -2923,7 +3103,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations(folder_setup_canceled=True)
@@ -3002,7 +3182,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations()
@@ -3085,7 +3265,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations()
@@ -3161,7 +3341,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations()
@@ -3258,7 +3438,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations(failures=["branch_exists: branch exists"])
@@ -3457,7 +3637,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         interrupted_runner = _RunnerOperations()
@@ -3502,6 +3682,7 @@ class TestSessionGitWorktreeService:
             recovery_runner,
         ).cancel_live_action_executions(
             session_id=agent_session.id,
+            owner_generation=0,
             reason="Operation cancelled during Session ownership handover.",
             on_history_event_appended=None,
             on_action_execution_removed=None,
@@ -3579,7 +3760,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
-                    owner_generation=1,
+                    owner_generation=0,
                 ),
             )
         runner = _RunnerOperations()

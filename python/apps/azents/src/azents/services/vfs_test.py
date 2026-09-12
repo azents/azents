@@ -1,12 +1,15 @@
 """Tests for release-backed Azents VFS projection services."""
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import AgentSessionProductMode
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -15,13 +18,26 @@ from azents.core.tools import (
 )
 from azents.core.vfs import (
     VfsProjection,
+    VfsSourceSpec,
     make_vfs_projection,
     make_vfs_source_revision,
 )
+from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution.data import AgentRunCreate
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import EffectiveToolkitSlugConflict
+from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.vfs import (
     GLOBAL_RELEASE_SOURCE,
     ReleaseVfsCatalog,
+    VfsCatalogSnapshot,
     VfsEffectiveToolkitConfig,
     VfsFileResolutionError,
     VfsProjectionService,
@@ -278,6 +294,24 @@ class _ScheduledReleaseProvider(ToolkitProvider[Any]):
         raise AssertionError("Scheduled Toolkit resolution is not used by VFS tests.")
 
 
+class _BlockingReleaseVfsCatalog(ReleaseVfsCatalog):
+    """Pause projection construction outside its owner-bound DB scopes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def snapshot(
+        self,
+        specs: Sequence[VfsSourceSpec],
+    ) -> VfsCatalogSnapshot:
+        """Wait until a competing owner claim completes."""
+        self.started.set()
+        await self.release.wait()
+        return await super().snapshot(specs)
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[_Session]:
     yield _Session(agent_id="", workspace_id="")
@@ -440,6 +474,101 @@ async def test_run_projection_scopes_required_source_to_root_execution(
 
     entry = projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
     assert (entry is not None) is included
+
+
+async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A stale builder cannot fix its projection on a Run recovered by a new owner."""
+    session_repository = AgentSessionRepository()
+    run_repository = AgentRunRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "vfs-owner")
+        agent_id = await _create_agent(session, workspace_id, "vfs-owner")
+        agent_session = await session_repository.create(
+            session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        owner_generation = await session_repository.claim_owner_generation(
+            session,
+            agent_session.id,
+        )
+        run = await run_repository.create(
+            session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
+                parent_agent_run_id=None,
+            ),
+        )
+
+    catalog = _BlockingReleaseVfsCatalog()
+    service = VfsProjectionService(
+        session_manager=rdb_session_manager,
+        toolkit_registry={},
+        catalog=catalog,
+        agent_run_repository=run_repository,
+        agent_session_repository=session_repository,
+        toolkit_repository=ToolkitRepository(),
+        required_provider_sources={},
+    )
+    old_owner = service.for_execution(
+        SessionExecutionOwner(
+            session_id=agent_session.id,
+            owner_generation=owner_generation,
+        )
+    )
+    stale_task = asyncio.create_task(
+        old_owner.ensure_run_projection(
+            run_id=run.id,
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            workspace_id=workspace_id,
+            execution_mode=ToolkitExecutionMode.ROOT,
+        )
+    )
+    try:
+        async with asyncio.timeout(10):
+            await catalog.started.wait()
+        async with rdb_session_manager() as session:
+            new_generation = await session_repository.claim_owner_generation(
+                session,
+                agent_session.id,
+            )
+        catalog.release.set()
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+            await stale_task
+    finally:
+        catalog.release.set()
+        if not stale_task.done():
+            stale_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await stale_task
+
+    async with rdb_session_manager() as session:
+        stale_run = await run_repository.get_by_id(session, run.id)
+    assert stale_run is not None
+    assert stale_run.vfs_projection is None
+
+    current = await service.for_execution(
+        SessionExecutionOwner(
+            session_id=agent_session.id,
+            owner_generation=new_generation,
+        )
+    ).ensure_run_projection(
+        run_id=run.id,
+        agent_id=agent_id,
+        session_id=agent_session.id,
+        workspace_id=workspace_id,
+        execution_mode=ToolkitExecutionMode.ROOT,
+    )
+    assert current.find("azents://skills/azents/skill-creator/SKILL.md") is not None
 
 
 async def test_resolve_file_returns_projection_provenance_and_verified_entry() -> None:

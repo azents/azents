@@ -184,7 +184,11 @@ from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionExecutionOwnerBindable,
+    SessionResourceAuthority,
+)
 from azents.services.session_title import SessionTitleService
 from azents.services.vfs import VfsProjectionService
 from azents.transport.chat import (
@@ -238,6 +242,7 @@ _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
+_OWNERSHIP_LOSS_CANCEL_MESSAGE = "Session ownership was revoked."
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.RUN_MARKER,
     EventKind.TURN_MARKER,
@@ -354,6 +359,17 @@ def _bind_dynamic_worktree_toolkits(
                 run_id=run_id,
                 turn_action_bridge_boundary=turn_action_bridge_boundary,
             )
+
+
+def _bind_execution_toolkits(
+    toolkits: Sequence[ToolkitBinding],
+    *,
+    owner: SessionExecutionOwner,
+) -> None:
+    """Bind execution-owned Toolkit state before lifecycle hooks can mutate it."""
+    for binding in toolkits:
+        if isinstance(binding.toolkit, SessionExecutionOwnerBindable):
+            binding.toolkit.bind_execution_owner(owner)
 
 
 @dataclasses.dataclass
@@ -494,6 +510,7 @@ class RunExecutor:
             predecessor_run_id = active_run.id if active_run is not None else None
         await self.session_git_worktree_service.cancel_live_action_executions(
             session_id=session_id,
+            owner_generation=owner_generation,
             reason=reason,
             on_history_event_appended=publish_history_event,
             on_action_execution_removed=publish_removal,
@@ -529,7 +546,10 @@ class RunExecutor:
             if previous_retry_state is None
             else previous_retry_state.failed_attempt_count + 1
         )
-        await self.live_event_projector.discard_failed_attempt(session_id)
+        await self.live_event_projector.discard_failed_attempt(
+            session_id,
+            owner_generation=owner_generation,
+        )
         retry_state = await self._record_failed_run_attempt(
             session_id=session_id,
             run_id=active_run.id,
@@ -670,6 +690,13 @@ class RunExecutor:
             memory_enabled=agent.memory_enabled if agent is not None else True,
             runtime_capability_resolver=runtime_capability_resolver,
         )
+        _bind_execution_toolkits(
+            toolkits,
+            owner=SessionExecutionOwner(
+                session_id=snapshot.session_id,
+                owner_generation=snapshot.owner_generation,
+            ),
+        )
         prepared = await prepare_toolkits(toolkits)
         _refresh_runtime_peer_toolkits(prepared)
         return prepared
@@ -708,6 +735,10 @@ class RunExecutor:
                 ),
             )
         except asyncio.CancelledError as exc:
+            if exc.args and exc.args[0] == _OWNERSHIP_LOSS_CANCEL_MESSAGE:
+                raise CanonicalExecutionOwnerGenerationStaleError(
+                    "Session owner generation is stale"
+                ) from exc
             await asyncio.shield(
                 self._cancel_leftover_action_executions(
                     snapshot.session_id,
@@ -716,6 +747,9 @@ class RunExecutor:
                     predecessor_run_id=None,
                 )
             )
+            raise
+        except CanonicalExecutionOwnerGenerationStaleError:
+            await tool_admission_barrier.close()
             raise
 
     async def _execute(
@@ -934,13 +968,26 @@ class RunExecutor:
             scheduled_admission is not None
             and agent_run.scheduled_task_cycle_id is not None
         ):
-            channel_service = self.scheduled_toolkit_provider.channel_service
+            channel_service = (
+                self.scheduled_toolkit_provider.channel_service.for_execution(
+                    SessionExecutionOwner(
+                        session_id=snapshot.session_id,
+                        owner_generation=owner_generation,
+                    )
+                )
+            )
             await channel_service.create_initial_tracker(
                 agent_id=snapshot.agent_id,
                 session_id=snapshot.session_id,
                 cycle_id=agent_run.scheduled_task_cycle_id,
             )
-        await self.vfs_projection_service.ensure_run_projection(
+        execution_vfs_projection_service = self.vfs_projection_service.for_execution(
+            SessionExecutionOwner(
+                session_id=snapshot.session_id,
+                owner_generation=owner_generation,
+            )
+        )
+        await execution_vfs_projection_service.ensure_run_projection(
             run_id=run_id,
             agent_id=snapshot.agent_id,
             session_id=snapshot.session_id,
@@ -1390,6 +1437,12 @@ class RunExecutor:
         boundary_started_at = now
 
         run_request = dataclasses.replace(run_request, toolkits=toolkits)
+        if run_context.resource_authority is None:
+            raise RuntimeError("Run resource authority is required")
+        _bind_execution_toolkits(
+            run_request.toolkits,
+            owner=run_context.resource_authority.execution_owner,
+        )
 
         if prepare_toolkits is not None:
             logger.info(
@@ -1537,6 +1590,7 @@ class RunExecutor:
                     ),
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
+                owner_generation=owner_generation,
             )
 
         def apply_fresh_main_model_turn(
@@ -1593,6 +1647,7 @@ class RunExecutor:
             """Publish the current run phase and active tool calls to the broker."""
             await self.session_lifecycle.set_session_activity(
                 snapshot.session_id,
+                owner_generation=owner_generation,
                 run_id=run_id,
                 phase=active_phase,
             )
@@ -1607,6 +1662,7 @@ class RunExecutor:
             snapshot.session_id,
             active_tool_calls,
             removed_call_ids=set(),
+            owner_generation=owner_generation,
         )
         await publish_session_tree_changed()
         now = loop.time()
@@ -1751,18 +1807,49 @@ class RunExecutor:
                     snapshot.session_id,
                     active_tool_calls,
                     removed_call_ids=removed_call_ids,
+                    owner_generation=owner_generation,
                 )
             await handle_engine_event(
                 item,
                 publish=lambda ev: dispatch_event(snapshot.session_id, ev),
             )
 
+        execution_task = asyncio.current_task()
+        if execution_task is None:
+            raise RuntimeError("Run execution must run inside an asyncio task")
         heartbeat_task = asyncio.create_task(
             self._run_session_heartbeat_loop(
                 snapshot.session_id,
                 owner_generation=owner_generation,
             )
         )
+
+        def supervise_heartbeat(
+            completed_heartbeat: asyncio.Task[None],
+        ) -> None:
+            """Cancel this execution after durable ownership revocation."""
+            if completed_heartbeat.cancelled():
+                return
+            try:
+                completed_heartbeat.result()
+            except CanonicalExecutionOwnerGenerationStaleError:
+
+                async def revoke_execution() -> None:
+                    await tool_admission_barrier.close()
+                    if not execution_task.done():
+                        execution_task.cancel(_OWNERSHIP_LOSS_CANCEL_MESSAGE)
+
+                asyncio.create_task(
+                    revoke_execution(),
+                    name=f"session_owner_revocation_{snapshot.session_id}",
+                )
+            except Exception:
+                logger.exception(
+                    "Unexpected session heartbeat task failure",
+                    extra={"session_id": snapshot.session_id},
+                )
+
+        heartbeat_task.add_done_callback(supervise_heartbeat)
         failed_attempt_source: FailedRunAttemptSource = (
             "command" if command_handler is not None else "model"
         )
@@ -1872,9 +1959,13 @@ class RunExecutor:
                         run_end_reason = "completed"
                         terminal_run_status = AgentRunStatus.COMPLETED
                     break
+                except CanonicalExecutionOwnerGenerationStaleError:
+                    await tool_admission_barrier.close()
+                    raise
                 except UserVisibleRuntimeError as exc:
                     await self.live_event_projector.discard_failed_attempt(
-                        snapshot.session_id
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                     )
                     if await record_user_stop_if_requested():
                         break
@@ -1930,7 +2021,8 @@ class RunExecutor:
                     )
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
-                        snapshot.session_id
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                     )
                     if await record_user_stop_if_requested():
                         break
@@ -2042,7 +2134,14 @@ class RunExecutor:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            await self.live_event_projector.flush_session(snapshot.session_id)
+            await self.session_lifecycle.assert_current_owner_generation(
+                snapshot.session_id,
+                owner_generation=owner_generation,
+            )
+            await self.live_event_projector.flush_session(
+                snapshot.session_id,
+                owner_generation=owner_generation,
+            )
             terminal_event_observed = observed_terminal_run_event(
                 run_completed=run_completed,
                 terminal_run_status=terminal_run_status,
@@ -2082,6 +2181,7 @@ class RunExecutor:
                 await self.live_event_projector.publish_live_run_cleared(
                     snapshot.session_id,
                     run_id=run_id,
+                    owner_generation=owner_generation,
                 )
                 await publish_session_tree_changed()
             if command is not None:
@@ -2190,6 +2290,7 @@ class RunExecutor:
         provider_failure = attempt.provider_failure
         await self.session_lifecycle.set_session_activity(
             session_id,
+            owner_generation=owner_generation,
             run_id=run_id,
             phase=(
                 AgentRunPhase.COMPACTING
@@ -2298,6 +2399,12 @@ class RunExecutor:
                     owner_generation=owner_generation,
                 )
             except asyncio.CancelledError:
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
+                logger.info(
+                    "Session ownership revoked during active run heartbeat",
+                    extra={"session_id": session_id},
+                )
                 raise
             except Exception:
                 logger.warning(
@@ -2846,6 +2953,10 @@ class RunExecutor:
         async def publish_projection(
             projection: ActionExecutionProjection,
         ) -> None:
+            await self.session_lifecycle.assert_current_owner_generation(
+                session_id,
+                owner_generation=owner_generation,
+            )
             try:
                 await self.broadcast.publish(
                     session_id,
@@ -2861,6 +2972,10 @@ class RunExecutor:
                 )
 
         async def publish_history_event(event: Event) -> None:
+            await self.session_lifecycle.assert_current_owner_generation(
+                session_id,
+                owner_generation=owner_generation,
+            )
             try:
                 await self.broadcast.publish(
                     session_id,
@@ -2888,6 +3003,7 @@ class RunExecutor:
         if execution.owner_generation != owner_generation:
             await self.session_git_worktree_service.cancel_action_execution(
                 execution=execution,
+                owner_generation=owner_generation,
                 reason="Operation cancelled during Session ownership handover.",
                 on_history_event_appended=publish_history_event,
                 predecessor_run_id=None,
@@ -2899,12 +3015,17 @@ class RunExecutor:
             )
 
         async def admit_operation() -> None:
-            """Fence operation admission against worker shutdown."""
+            """Fence operation admission against durable ownership and shutdown."""
+            await self.session_lifecycle.assert_current_owner_generation(
+                session_id,
+                owner_generation=owner_generation,
+            )
 
         admitted = await tool_admission_barrier.run_if_open(admit_operation)
         if not admitted:
             await self.session_git_worktree_service.cancel_action_execution(
                 execution=execution,
+                owner_generation=owner_generation,
                 reason="Operation cancelled before worker shutdown.",
                 on_history_event_appended=publish_history_event,
                 predecessor_run_id=None,

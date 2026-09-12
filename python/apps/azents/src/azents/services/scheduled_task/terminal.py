@@ -13,6 +13,8 @@ from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTrackerProjectionPart
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.services.session_resource_authority import SessionExecutionOwner
 
 ScheduledTaskTerminalStatus = Literal["finished", "failed"]
 
@@ -59,6 +61,23 @@ class ScheduledTaskTerminalService:
         self.event_repository = event_repository
         self.task_repository = task_repository
         self.cycle_repository = cycle_repository
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ScheduledTaskTerminalService":
+        """Bind terminal persistence to one durable Session owner."""
+        return ScheduledTaskTerminalService(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+            run_repository=self.run_repository,
+            event_repository=self.event_repository,
+            task_repository=self.task_repository,
+            cycle_repository=self.cycle_repository,
+        )
 
     async def submit(
         self,

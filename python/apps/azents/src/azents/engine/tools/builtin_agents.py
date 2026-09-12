@@ -26,12 +26,14 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.toolkit_state.store import (
     ToolkitStateHandle,
     ToolkitStateStore,
 )
 from azents.services.file_storage import FileStorage
+from azents.services.session_resource_authority import SessionExecutionOwner
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,19 @@ class ToolkitAgentsAppendixDedupeStateStore:
     ) -> None:
         """Create AGENTS.md appendix dedupe store."""
         self.session_manager = session_manager
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ToolkitAgentsAppendixDedupeStateStore":
+        """Bind dedupe state to one durable Session owner."""
+        return ToolkitAgentsAppendixDedupeStateStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        )
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str

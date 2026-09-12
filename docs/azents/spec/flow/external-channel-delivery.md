@@ -46,8 +46,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-08
-spec_version: 60
+last_verified_at: 2026-09-12
+spec_version: 61
 ---
 
 # External Channel Delivery and Channel Work
@@ -158,6 +158,13 @@ before provider I/O and returns an ordered tuple of process-local effect plans. 
 revalidates the current Agent, Session, binding, resource, route, connection,
 credentials, capability, and effect-specific authority before attempting each effect
 without an open database transaction.
+
+For an Agent execution, the initial transition and every effect admission or
+settlement transaction additionally lock and validate the exact PostgreSQL Session
+owner generation. A stale Worker cannot commit Work progress, finish or request
+input, start a not-yet-admitted provider effect, or settle an already-started effect.
+Scheduled presentation uses the same execution-bound action service. The binding's
+process-local serialization lock is shared by execution-bound service clones.
 
 The Tool result contains one identifier-free outcome for each ordered effect:
 
@@ -579,6 +586,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 61) — Fenced Agent-owned Channel Work and
+  provider effect admission/settlement by Session owner generation while retaining
+  transaction-free provider I/O and no ambiguous replay.
 - **2026-09-08** (spec_version 60) — Moved pure provider contracts and
   Discord presentation lowering below service orchestration without changing
   provider payloads, serialization, operation keys, or delivery behavior.

@@ -44,6 +44,7 @@ from azents.services.chat.data import (
 )
 
 from .live_events import (
+    BaseLiveEventStore,
     InMemoryLiveEventStore,
     LiveEventStore,
     RedisLiveEventStore,
@@ -725,6 +726,79 @@ async def test_in_memory_live_event_store_contract() -> None:
 async def test_redis_live_event_store_contract(redis: Redis) -> None:
     """Redis live event store contract."""
     await _assert_live_store_contract(RedisLiveEventStore(redis))
+
+
+async def _assert_owner_generation_fence(store: BaseLiveEventStore) -> None:
+    """Verify old projection writers cannot modify a replacement owner's state."""
+    session_id = "session-owner-fence"
+    first_advance = await store.advance_owner(session_id, 1)
+    assert first_advance.accepted
+    assert first_advance.removed_events == ()
+    old_owner = store.for_owner(session_id, 1)
+    old = await old_owner.append_assistant_delta(
+        session_id,
+        delta="old",
+        content_index=0,
+    )
+
+    takeover = await store.advance_owner(session_id, 2)
+    assert takeover.accepted
+    assert takeover.removed_events == (old,)
+    new_owner = store.for_owner(session_id, 2)
+    fresh = await new_owner.append_assistant_delta(
+        session_id,
+        delta="fresh",
+        content_index=0,
+    )
+
+    await old_owner.clear_session(session_id)
+    await old_owner.append_assistant_delta(
+        session_id,
+        delta=" stale",
+        content_index=0,
+    )
+    assert not (await store.advance_owner(session_id, 1)).accepted
+    assert await store.list_by_session_id(session_id) == [fresh]
+
+    await new_owner.clear_session(session_id)
+    await new_owner.append_assistant_delta(
+        session_id,
+        delta="after clear",
+        content_index=0,
+    )
+    events = await store.list_by_session_id(session_id)
+    assert len(events) == 1
+    assert isinstance(events[0].payload, AssistantMessagePayload)
+    assert events[0].payload.content == "after clear"
+
+    await store.clear_session(session_id)
+    await new_owner.append_assistant_delta(
+        session_id,
+        delta="missing fence",
+        content_index=0,
+    )
+    assert await store.list_by_session_id(session_id) == []
+    reseed = await store.advance_owner(session_id, 2)
+    assert reseed.accepted
+    assert reseed.removed_events == ()
+    await new_owner.append_assistant_delta(
+        session_id,
+        delta="reseeded",
+        content_index=0,
+    )
+    assert len(await store.list_by_session_id(session_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_in_memory_live_event_owner_generation_fence() -> None:
+    """In-memory projections enforce the PostgreSQL-derived writer generation."""
+    await _assert_owner_generation_fence(InMemoryLiveEventStore())
+
+
+@pytest.mark.asyncio
+async def test_redis_live_event_owner_generation_fence(redis: Redis) -> None:
+    """Redis projections enforce the PostgreSQL-derived writer generation."""
+    await _assert_owner_generation_fence(RedisLiveEventStore(redis))
 
 
 def test_active_tool_call_projection_has_stable_live_shape() -> None:

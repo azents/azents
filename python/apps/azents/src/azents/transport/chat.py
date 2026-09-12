@@ -144,6 +144,14 @@ def chat_live_event_removed_dump(session_id: str, event_id: str) -> dict[str, ob
     }
 
 
+def chat_live_projection_reset_dump(session_id: str) -> dict[str, object]:
+    """Convert a live projection generation reset to a chat WS action."""
+    return {
+        "type": "live_projection_reset",
+        "session_id": session_id,
+    }
+
+
 def chat_live_run_updated_dump(
     session_id: str,
     run: "ChatLiveRunState",

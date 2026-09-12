@@ -1,9 +1,10 @@
 """Event chat live event projection store."""
 
+import dataclasses
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Literal, Protocol, assert_never
+from typing import Annotated, Any, Literal, Protocol, assert_never, cast
 
 from fastapi import Depends
 from pydantic import TypeAdapter
@@ -61,6 +62,7 @@ from azents.services.chat.data import (
 from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
+_OWNER_GENERATION_FIELD = "__owner_generation__"
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(PersistedChatAction)
 _agent_message_adapter = TypeAdapter(AgentMessagePayload)
@@ -87,6 +89,95 @@ def _agent_mailbox_source_path(value: object) -> str:
 
 def _live_event_key(session_id: str) -> str:
     return f"azents:chat:{session_id}:live_events"
+
+
+_ADVANCE_OWNER_SCRIPT = """
+local current = redis.call("HGET", KEYS[1], ARGV[1])
+local requested = tonumber(ARGV[2])
+if current and tonumber(current) > requested then
+  return {0, 0}
+end
+local result = {1, 0}
+if not current or tonumber(current) < requested then
+  result[2] = 1
+  local entries = redis.call("HGETALL", KEYS[1])
+  for index = 1, #entries, 2 do
+    if entries[index] ~= ARGV[1] then
+      table.insert(result, entries[index + 1])
+    end
+  end
+  redis.call("DEL", KEYS[1])
+  redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+end
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+return result
+"""
+
+_OWNER_LIST_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return {}
+end
+local entries = redis.call("HGETALL", KEYS[1])
+local values = {}
+for index = 1, #entries, 2 do
+  if entries[index] ~= ARGV[1] then
+    table.insert(values, entries[index + 1])
+  end
+end
+return values
+"""
+
+_OWNER_GET_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return nil
+end
+return redis.call("HGET", KEYS[1], ARGV[3])
+"""
+
+_OWNER_UPSERT_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return 0
+end
+redis.call("HSET", KEYS[1], ARGV[3], ARGV[4])
+redis.call("EXPIRE", KEYS[1], ARGV[5])
+return 1
+"""
+
+_OWNER_REMOVE_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return 0
+end
+redis.call("HDEL", KEYS[1], ARGV[3])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+return 1
+"""
+
+_OWNER_CLEAR_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return 0
+end
+local fields = redis.call("HKEYS", KEYS[1])
+for _, field in ipairs(fields) do
+  if field ~= ARGV[1] then
+    redis.call("HDEL", KEYS[1], field)
+  end
+end
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+return 1
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class LiveOwnerAdvance:
+    """Atomic result of advancing the ephemeral live projection owner."""
+
+    accepted: bool
+    advanced: bool
+    removed_events: tuple[Event, ...]
+
+    def __bool__(self) -> bool:
+        """Preserve concise accepted-result checks at call sites."""
+        return self.accepted
 
 
 def _stable_live_id(session_id: str, *parts: object) -> str:
@@ -675,6 +766,68 @@ class BaseLiveEventStore:
     async def _get(self, session_id: str, event_id: str) -> Event | None:
         raise NotImplementedError
 
+    async def advance_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> LiveOwnerAdvance:
+        """Advance the ephemeral projection writer generation monotonically."""
+        raise NotImplementedError
+
+    async def _list_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> list[Event]:
+        """Return projections only while the requested writer still owns them."""
+        raise NotImplementedError
+
+    async def _upsert_for_owner(
+        self,
+        event: Event,
+        owner_generation: int,
+    ) -> bool:
+        """Upsert only while the requested generation owns the projection."""
+        raise NotImplementedError
+
+    async def _remove_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> bool:
+        """Remove only while the requested generation owns the projection."""
+        raise NotImplementedError
+
+    async def _clear_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        """Clear projections while retaining the requested generation fence."""
+        raise NotImplementedError
+
+    async def _get_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> Event | None:
+        """Return one projection only while the requested generation owns it."""
+        raise NotImplementedError
+
+    def for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> "_OwnerBoundLiveEventStore":
+        """Bind live mutations to one validated PostgreSQL owner generation."""
+        return _OwnerBoundLiveEventStore(
+            store=self,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
+
     async def append_assistant_delta(
         self,
         session_id: str,
@@ -867,7 +1020,12 @@ class RedisLiveEventStore(BaseLiveEventStore):
 
     async def list_by_session_id(self, session_id: str) -> list[Event]:
         """Fetch event live event projection list of session."""
-        values = await self.redis.hvals(_live_event_key(session_id))
+        entries = await self.redis.hgetall(_live_event_key(session_id))
+        values = [
+            value
+            for field, value in entries.items()
+            if field not in {_OWNER_GENERATION_FIELD, _OWNER_GENERATION_FIELD.encode()}
+        ]
         events = [_live_event_adapter.validate_json(value) for value in values]
         return sorted(events, key=lambda event: (event.created_at, event.id))
 
@@ -891,12 +1049,130 @@ class RedisLiveEventStore(BaseLiveEventStore):
             return None
         return _live_event_adapter.validate_json(raw)
 
+    async def advance_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> LiveOwnerAdvance:
+        """Advance the writer fence and atomically return removed projections."""
+        raw_result = await cast(Any, self.redis).eval(
+            _ADVANCE_OWNER_SCRIPT,
+            1,
+            _live_event_key(session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+            self.ttl_seconds,
+        )
+        accepted = bool(raw_result) and raw_result[0] == 1
+        advanced = accepted and raw_result[1] == 1
+        removed_events = (
+            tuple(
+                sorted(
+                    (
+                        _live_event_adapter.validate_json(value)
+                        for value in raw_result[2:]
+                    ),
+                    key=lambda event: (event.created_at, event.id),
+                )
+            )
+            if accepted
+            else ()
+        )
+        return LiveOwnerAdvance(
+            accepted=accepted,
+            advanced=advanced,
+            removed_events=removed_events,
+        )
+
+    async def _list_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> list[Event]:
+        raw_values = await cast(Any, self.redis).eval(
+            _OWNER_LIST_SCRIPT,
+            1,
+            _live_event_key(session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+        )
+        events = [_live_event_adapter.validate_json(value) for value in raw_values]
+        return sorted(events, key=lambda event: (event.created_at, event.id))
+
+    async def _upsert_for_owner(
+        self,
+        event: Event,
+        owner_generation: int,
+    ) -> bool:
+        result = await cast(Any, self.redis).eval(
+            _OWNER_UPSERT_SCRIPT,
+            1,
+            _live_event_key(event.session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+            event.id,
+            _live_event_adapter.dump_json(event),
+            self.ttl_seconds,
+        )
+        return result == 1
+
+    async def _remove_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> bool:
+        result = await cast(Any, self.redis).eval(
+            _OWNER_REMOVE_SCRIPT,
+            1,
+            _live_event_key(session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+            event_id,
+            self.ttl_seconds,
+        )
+        return result == 1
+
+    async def _clear_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        result = await cast(Any, self.redis).eval(
+            _OWNER_CLEAR_SCRIPT,
+            1,
+            _live_event_key(session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+            self.ttl_seconds,
+        )
+        return result == 1
+
+    async def _get_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> Event | None:
+        raw = await cast(Any, self.redis).eval(
+            _OWNER_GET_SCRIPT,
+            1,
+            _live_event_key(session_id),
+            _OWNER_GENERATION_FIELD,
+            owner_generation,
+            event_id,
+        )
+        if raw is None:
+            return None
+        return _live_event_adapter.validate_json(raw)
+
 
 class InMemoryLiveEventStore(BaseLiveEventStore):
     """In-memory event live event projection store for tests/local adapters."""
 
     def __init__(self) -> None:
         self._events: dict[str, dict[str, Event]] = {}
+        self._owner_generations: dict[str, int] = {}
 
     async def list_by_session_id(self, session_id: str) -> list[Event]:
         """Fetch event live event projection list of session."""
@@ -916,9 +1192,180 @@ class InMemoryLiveEventStore(BaseLiveEventStore):
     async def clear_session(self, session_id: str) -> None:
         """Remove all event live event projections of session."""
         self._events.pop(session_id, None)
+        self._owner_generations.pop(session_id, None)
 
     async def _get(self, session_id: str, event_id: str) -> Event | None:
         return self._events.get(session_id, {}).get(event_id)
+
+    async def advance_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> LiveOwnerAdvance:
+        """Advance the writer fence and atomically return removed projections."""
+        current = self._owner_generations.get(session_id)
+        if current is not None and current > owner_generation:
+            return LiveOwnerAdvance(
+                accepted=False,
+                advanced=False,
+                removed_events=(),
+            )
+        removed_events: tuple[Event, ...] = ()
+        if current is None or current < owner_generation:
+            removed_events = tuple(
+                sorted(
+                    self._events.get(session_id, {}).values(),
+                    key=lambda event: (event.created_at, event.id),
+                )
+            )
+            self._events.pop(session_id, None)
+            self._owner_generations[session_id] = owner_generation
+        return LiveOwnerAdvance(
+            accepted=True,
+            advanced=current is None or current < owner_generation,
+            removed_events=removed_events,
+        )
+
+    async def _list_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> list[Event]:
+        if self._owner_generations.get(session_id) != owner_generation:
+            return []
+        return await self.list_by_session_id(session_id)
+
+    async def _upsert_for_owner(
+        self,
+        event: Event,
+        owner_generation: int,
+    ) -> bool:
+        if self._owner_generations.get(event.session_id) != owner_generation:
+            return False
+        await self.upsert(event)
+        return True
+
+    async def _remove_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> bool:
+        if self._owner_generations.get(session_id) != owner_generation:
+            return False
+        await self.remove(session_id, event_id)
+        return True
+
+    async def _clear_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        if self._owner_generations.get(session_id) != owner_generation:
+            return False
+        self._events.pop(session_id, None)
+        return True
+
+    async def _get_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> Event | None:
+        if self._owner_generations.get(session_id) != owner_generation:
+            return None
+        return await self._get(session_id, event_id)
+
+
+class _OwnerBoundLiveEventStore(BaseLiveEventStore):
+    """Expose ordinary live operations through one ephemeral writer fence."""
+
+    def __init__(
+        self,
+        *,
+        store: BaseLiveEventStore,
+        session_id: str,
+        owner_generation: int,
+    ) -> None:
+        self.store = store
+        self.session_id = session_id
+        self.owner_generation = owner_generation
+
+    def _assert_session(self, session_id: str) -> None:
+        if session_id != self.session_id:
+            raise ValueError("Owner-bound live store cannot cross Sessions")
+
+    async def list_by_session_id(self, session_id: str) -> list[Event]:
+        self._assert_session(session_id)
+        return await self.store._list_for_owner(session_id, self.owner_generation)
+
+    async def upsert(self, event: Event) -> None:
+        self._assert_session(event.session_id)
+        await self.store._upsert_for_owner(event, self.owner_generation)
+
+    async def remove(self, session_id: str, event_id: str) -> None:
+        self._assert_session(session_id)
+        await self.store._remove_for_owner(
+            session_id,
+            event_id,
+            self.owner_generation,
+        )
+
+    async def clear_session(self, session_id: str) -> None:
+        self._assert_session(session_id)
+        await self.store._clear_for_owner(session_id, self.owner_generation)
+
+    async def _get(self, session_id: str, event_id: str) -> Event | None:
+        self._assert_session(session_id)
+        return await self.store._get_for_owner(
+            session_id,
+            event_id,
+            self.owner_generation,
+        )
+
+    async def advance_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> LiveOwnerAdvance:
+        raise RuntimeError("An owner-bound live store cannot change authority")
+
+    async def _list_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> list[Event]:
+        raise RuntimeError("Nested live-store ownership is not supported")
+
+    async def _upsert_for_owner(
+        self,
+        event: Event,
+        owner_generation: int,
+    ) -> bool:
+        raise RuntimeError("Nested live-store ownership is not supported")
+
+    async def _remove_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> bool:
+        raise RuntimeError("Nested live-store ownership is not supported")
+
+    async def _clear_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        raise RuntimeError("Nested live-store ownership is not supported")
+
+    async def _get_for_owner(
+        self,
+        session_id: str,
+        event_id: str,
+        owner_generation: int,
+    ) -> Event | None:
+        raise RuntimeError("Nested live-store ownership is not supported")
 
 
 async def get_live_event_store(

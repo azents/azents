@@ -4,6 +4,7 @@ import {
   emptyPendingMailboxState,
   pendingMailboxCorrelation,
   pendingMailboxReducer,
+  pendingMailboxWaitsForModel,
   selectPendingMailboxEntries,
 } from "./pendingMailboxState.ts";
 
@@ -55,4 +56,13 @@ void test("pending mailbox state suppresses durable promotion and delayed upsert
     envelope: envelope("a", ["1"]),
   });
   assert.equal(selectPendingMailboxEntries(state).length, 0);
+});
+
+void test("projection reset keeps response pending for visible mailbox input", () => {
+  const state = pendingMailboxReducer(emptyPendingMailboxState(), {
+    type: "UPSERTED",
+    envelope: envelope("a", ["1"]),
+  });
+
+  assert.equal(pendingMailboxWaitsForModel(state), true);
 });

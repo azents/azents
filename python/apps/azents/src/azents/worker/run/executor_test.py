@@ -137,6 +137,7 @@ from azents.services.mailbox import (
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
 )
+from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.turn_action import TurnActionCapabilityRegistry
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -258,6 +259,14 @@ class _VfsProjectionService:
         self.order = order
         self.calls: list[tuple[str, str, str, str]] = []
 
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "_VfsProjectionService":
+        """Record that execution projection work uses the current owner."""
+        del owner
+        return self
+
     async def ensure_run_projection(
         self,
         *,
@@ -325,6 +334,7 @@ class _SessionLifecycle:
         self.agent_run_repository = AgentRunRepository()
         self.heartbeat_session_ids: list[str] = []
         self.second_heartbeat = asyncio.Event()
+        self.heartbeat_error_after: int | None = None
         self.retry_states: list[FailedRunRetryState | None] = []
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
@@ -345,15 +355,29 @@ class _SessionLifecycle:
         self.cancelled_pending_run_ids: list[str] = []
         self.completed_bridge_predecessors: list[str] = []
         self.cleared_commands: list[tuple[str, str]] = []
+        self.owner_generation_error: Exception | None = None
+
+    async def assert_current_owner_generation(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Reject external work when the test has revoked this owner."""
+        del session_id, owner_generation
+        if self.owner_generation_error is not None:
+            raise self.owner_generation_error
 
     async def set_session_activity(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: object,
     ) -> None:
         """Record session activity updates."""
+        del owner_generation
         self.activities.append((session_id, run_id, phase))
 
     async def clear_session_activity(self, session_id: str) -> None:
@@ -424,6 +448,13 @@ class _SessionLifecycle:
         self.heartbeat_session_ids.append(session_id)
         if len(self.heartbeat_session_ids) == 2:
             self.second_heartbeat.set()
+        if (
+            self.heartbeat_error_after is not None
+            and len(self.heartbeat_session_ids) >= self.heartbeat_error_after
+        ):
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
 
     async def get_running_agent_run(
         self,
@@ -890,8 +921,11 @@ class _LiveEventProjector:
         self,
         session_id: str,
         run: ChatLiveRunState,
+        *,
+        owner_generation: int,
     ) -> None:
         """Record live run update broadcasts."""
+        del owner_generation
         self.live_run_updates.append((session_id, run))
         if run.retry is not None:
             self.projection_operations.append("retry_update")
@@ -901,8 +935,10 @@ class _LiveEventProjector:
         session_id: str,
         *,
         run_id: str,
+        owner_generation: int,
     ) -> None:
         """Record live run clear broadcasts."""
+        del owner_generation
         self.live_run_clears.append((session_id, run_id))
 
     async def replace_active_tool_calls(
@@ -911,27 +947,57 @@ class _LiveEventProjector:
         active_tool_calls: object,
         *,
         removed_call_ids: set[str],
+        owner_generation: int,
     ) -> None:
         """Record active tool call projection replacements."""
-        del removed_call_ids
+        del removed_call_ids, owner_generation
         self.active_tool_calls.append((session_id, active_tool_calls))
 
-    async def flush_session(self, session_id: str) -> None:
+    async def flush_session(self, session_id: str, *, owner_generation: int) -> None:
         """Record flushed sessions."""
+        del owner_generation
         self.flushed_session_ids.append(session_id)
 
-    async def discard_failed_attempt(self, session_id: str) -> None:
+    async def discard_failed_attempt(
+        self, session_id: str, *, owner_generation: int
+    ) -> None:
         """Record failed-attempt model partial discard."""
+        del owner_generation
         self.discarded_session_ids.append(session_id)
         self.projection_operations.append("discard")
+
+
+class _ScheduledChannelService:
+    """Scheduled channel service test double with owner-bound cloning."""
+
+    def for_execution(self, owner: SessionExecutionOwner) -> "_ScheduledChannelService":
+        """Return this in-memory service for the requested owner."""
+        del owner
+        return self
+
+    async def create_initial_tracker(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        cycle_id: str,
+    ) -> None:
+        """Accept initial Scheduled progress tracking."""
+        del agent_id, session_id, cycle_id
 
 
 class _Engine:
     """AgentEngineProtocol test double."""
 
-    async def save_error_message(self, session_id: str, content: str) -> Event:
+    async def save_error_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        owner_generation: int,
+    ) -> Event:
         """This test engine should not save errors."""
-        del session_id, content
+        del session_id, content, owner_generation
         raise AssertionError("save_error_message should not be called")
 
     def compact(self, request: RunRequest, context: object) -> AsyncIterator[Emit]:
@@ -953,6 +1019,36 @@ class _Engine:
 
         async def iterator() -> AsyncIterator[Emit]:
             yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
+class _BlockingEngine(_Engine):
+    """Engine that remains active until execution cancellation."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: PollMessages | None = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Block the active model turn until the Worker cancels it."""
+        del request, context, poll_messages, check_stop
+
+        async def iterator() -> AsyncIterator[Emit]:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+            yield ephemeral(RunComplete(run_id="unreachable"))  # pragma: no cover
 
         return iterator()
 
@@ -1282,6 +1378,7 @@ class _SessionGitWorktreeService:
         self,
         *,
         session_id: str,
+        owner_generation: int,
         reason: str,
         on_history_event_appended: object,
         on_action_execution_removed: object,
@@ -1289,6 +1386,7 @@ class _SessionGitWorktreeService:
     ) -> list[Event]:
         """Record stale-operation reconciliation."""
         del (
+            owner_generation,
             reason,
             on_history_event_appended,
             on_action_execution_removed,
@@ -1301,12 +1399,13 @@ class _SessionGitWorktreeService:
         self,
         *,
         execution: ActionExecution,
+        owner_generation: int,
         reason: str,
         on_history_event_appended: object,
         predecessor_run_id: str | None,
     ) -> None:
         """Record one operation cancellation."""
-        del reason, on_history_event_appended, predecessor_run_id
+        del owner_generation, reason, on_history_event_appended, predecessor_run_id
         self.cancelled_execution_ids.append(execution.id)
 
     async def run_git_worktree_action(
@@ -1558,9 +1657,7 @@ def _executor(
         todo_toolkit_provider=object(),
         goal_toolkit_provider=object(),
         scheduled_toolkit_provider=SimpleNamespace(
-            channel_service=SimpleNamespace(
-                create_initial_tracker=AsyncMock(return_value=None)
-            )
+            channel_service=_ScheduledChannelService()
         ),
         external_channel_toolkit_provider=object(),
         skill_toolkit_provider=object(),
@@ -1925,6 +2022,7 @@ async def test_boundary_cancellation_waits_for_live_action_handoff(
     async def cancel_live_action_executions(
         *,
         session_id: str,
+        owner_generation: int,
         reason: str,
         on_history_event_appended: object,
         on_action_execution_removed: object,
@@ -1932,6 +2030,7 @@ async def test_boundary_cancellation_waits_for_live_action_handoff(
     ) -> list[Event]:
         del (
             session_id,
+            owner_generation,
             on_history_event_appended,
             on_action_execution_removed,
             predecessor_run_id,
@@ -3628,6 +3727,36 @@ async def test_operation_admission_closed_by_shutdown_is_cancelled() -> None:
     assert result.context_invalidated is False
     assert service.cancelled_execution_ids == [execution.id]
     assert service.executed_execution_ids == []
+
+
+@pytest.mark.asyncio
+async def test_operation_admission_rejects_stale_owner_before_side_effect() -> None:
+    """A takeover prevents the operation handler from starting."""
+    lifecycle = _SessionLifecycle()
+    lifecycle.owner_generation_error = CanonicalExecutionOwnerGenerationStaleError(
+        "Session owner generation is stale"
+    )
+    service = _SessionGitWorktreeService()
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        session_git_worktree_service=service,
+    )
+    execution = _action_execution()
+    action = CreateGitWorktreeAction.model_validate(execution.action)
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await executor._process_operation_action(
+            agent_id="agent-001",
+            session_id="session-001",
+            active_run_id=None,
+            execution=execution,
+            action=action,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+        )
+
+    assert service.executed_execution_ids == []
+    assert service.cancelled_execution_ids == []
 
 
 @pytest.mark.asyncio
@@ -5378,6 +5507,81 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
             await task
 
     assert lifecycle.heartbeat_session_ids[:2] == ["session-001", "session-001"]
+
+
+@pytest.mark.asyncio
+async def test_active_heartbeat_owner_loss_cancels_execution_without_retry_or_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Durable owner loss stops an active model turn without stale side effects."""
+    lifecycle = _SessionLifecycle()
+    lifecycle.heartbeat_error_after = 2
+    engine = _BlockingEngine()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        engine=engine,
+        session_lifecycle=lifecycle,
+        live_event_projector=live_event_projector,
+    )
+    barrier = ToolAdmissionBarrier()
+    monkeypatch.setattr(run_executor_module, "_RUN_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return await _resolve_success()
+
+    async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_success,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_agent_tools",
+        resolve_agent_tools_success,
+    )
+
+    task = asyncio.create_task(
+        executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=_noop_dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=barrier,
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+        )
+    )
+    await asyncio.wait_for(engine.started.wait(), timeout=1)
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert engine.cancelled.is_set()
+    assert barrier.closed is True
+    assert lifecycle.retry_states == []
+    assert lifecycle.terminal_runs == []
+    assert live_event_projector.flushed_session_ids == []
+    assert live_event_projector.live_run_clears == []
 
 
 def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None:
