@@ -536,7 +536,10 @@ def _runtime_web_stack(
                         ).json()
                         if status.get("value", {}).get("ready") is True:
                             break
-                    except requests.RequestException, ValueError:
+                    except (
+                        requests.RequestException,
+                        ValueError,
+                    ):
                         pass
                     time.sleep(0.5)
                 else:
