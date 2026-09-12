@@ -12,7 +12,7 @@ import inspect
 import json
 import logging
 import time
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -352,8 +352,7 @@ class RedisBroker:
     async def notify_mailbox_activity(self, session_id: str) -> None:
         """Publish activity only to a live owner, dropping when idle."""
         assert self._worker_id is not None, "worker_id is required"
-        redis_any = cast(Any, self._redis)
-        owner = await redis_any.eval(
+        owner = await self._redis.eval(
             _ROUTE_WAKE_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -371,8 +370,7 @@ class RedisBroker:
 
     async def _publish_wake_up(self, session_id: str) -> None:
         """Wake the owner stream when there is a live owner."""
-        redis_any = cast(Any, self._redis)
-        owner = await redis_any.eval(
+        owner = await self._redis.eval(
             _ROUTE_WAKE_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -501,8 +499,7 @@ class RedisBroker:
     async def _acquire_or_find_owner(self, session_id: str) -> _Ownership:
         """Acquire session ownership or return the live owner."""
         assert self._worker_id is not None, "worker_id is required"
-        redis_any = cast(Any, self._redis)
-        result = await redis_any.eval(
+        result = await self._redis.eval(
             _ACQUIRE_LOCK_SCRIPT,
             3,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -540,8 +537,7 @@ class RedisBroker:
             return
         lock_key = _session_lock_key(self._SESSION_PREFIX, session_id)
         heartbeat_key = _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id)
-        redis_any = cast(Any, self._redis)
-        await redis_any.eval(
+        await self._redis.eval(
             _RENEW_LEASE_SCRIPT,
             2,
             lock_key,
@@ -560,8 +556,7 @@ class RedisBroker:
         """
         if self._worker_id is None:
             return
-        redis_any = cast(Any, self._redis)
-        await redis_any.eval(
+        await self._redis.eval(
             _RENEW_HEARTBEAT_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -580,8 +575,7 @@ class RedisBroker:
         if self._worker_id is None:
             await self._redis.delete(lock_key, heartbeat_key)
             return
-        redis_any = cast(Any, self._redis)
-        await redis_any.eval(
+        await self._redis.eval(
             _RELEASE_LOCK_SCRIPT,
             2,
             lock_key,
@@ -709,9 +703,8 @@ class RedisBroker:
         token: str,
     ) -> None:
         """Release only the barrier acquired by this replay process."""
-        redis_any = cast(Any, self._redis)
         for session_id in session_ids:
-            await redis_any.eval(
+            await self._redis.eval(
                 _RELEASE_CUTOVER_BARRIER_SCRIPT,
                 1,
                 _session_cutover_replay_barrier_key(
@@ -727,9 +720,8 @@ class RedisBroker:
         token: str,
     ) -> bool:
         """Renew every exact barrier token without adopting another replay."""
-        redis_any = cast(Any, self._redis)
         for session_id in session_ids:
-            renewed = await redis_any.eval(
+            renewed = await self._redis.eval(
                 _RENEW_CUTOVER_BARRIER_SCRIPT,
                 1,
                 _session_cutover_replay_barrier_key(
