@@ -45,11 +45,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Resolve changed-scope base
+        id: change_base
+        run: |
+          base="$GITHUB_REF"
+          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ]; then
+            base="$(git rev-parse "$GITHUB_SHA^")"
+          fi
+          printf 'base=%s\n' "$base" >> "$GITHUB_OUTPUT"
       - name: Compute changed scopes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
-          base: ${{ github.ref }}
+          base: ${{ steps.change_base.outputs.base }}
           filters: |
             python:
               - '.github/workflows/**'

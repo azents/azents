@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-12
-spec_version: 58
+spec_version: 59
 ---
 
 # E2E Primary Test Strategy
@@ -210,11 +210,14 @@ Always-on required CI does not depend on external credentials.
   zstd-compressed layers to reduce transfer volume for isolated branch measurements.
   Main-ref publication and any downstream-dispatched publication retain the default
   gzip-compatible registry output.
-- CI workflow dispatch keeps automatic image-change detection by default. Its
-  opt-in `force_current_snapshots: true` diagnostic treats all required images as
-  changed so an already-published exact-current-SHA set and the unchanged local
-  fallback can be measured repeatedly without altering pull request or `main` push
-  behavior.
+- CI workflow dispatch keeps automatic image-change detection by default. The
+  changed-scope filter compares the checked-out commit with its first parent, so
+  Server, Runtime Runner, and Docker Runtime Provider changes cannot reuse an
+  incompatible predecessor snapshot merely because the dispatch ref names the
+  checked-out branch. Its opt-in `force_current_snapshots: true` diagnostic treats
+  all required images as changed so an already-published exact-current-SHA set and
+  the unchanged local fallback can be measured repeatedly without altering pull
+  request or `main` push behavior.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
@@ -450,6 +453,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-12** (spec_version 59) — Made manual CI dispatch classify required
+  image changes against the checked-out commit's first parent, preventing stale
+  predecessor snapshots from running newer E2E tests.
 - **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
   cache saves unique per workflow attempt while retaining SHA-scoped pull request
   history and rolling `main` restore fallback.
