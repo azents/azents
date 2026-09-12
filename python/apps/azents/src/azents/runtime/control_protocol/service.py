@@ -37,6 +37,7 @@ from azents.runtime.coordination.data import (
     RuntimeSystemMetricsSample,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.coordination.stream_ids import operation_reply_stream_id
 
 _DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 20
 _DEFAULT_CONNECTION_TTL_SECONDS = 60
@@ -231,9 +232,11 @@ class RuntimeControlProtocolService:
             command.provider_id,
             command.provider_generation,
         )
-        reply_stream_id = _provider_reply_stream_id(
-            command.provider_id,
-            command.provider_generation,
+        reply_stream_id = operation_reply_stream_id(
+            target=RuntimeCoordinationTarget.PROVIDER,
+            subject_id=command.provider_id,
+            generation=command.provider_generation,
+            request_id=request_id,
         )
         payload: dict[str, JsonValue] = {
             "provider_id": command.provider_id,
@@ -301,9 +304,11 @@ class RuntimeControlProtocolService:
             operation.runtime_id,
             operation.runner_generation,
         )
-        reply_stream_id = _runner_reply_stream_id(
-            operation.runtime_id,
-            operation.runner_generation,
+        reply_stream_id = operation_reply_stream_id(
+            target=RuntimeCoordinationTarget.RUNNER,
+            subject_id=operation.runtime_id,
+            generation=operation.runner_generation,
+            request_id=request_id,
         )
         payload: dict[str, JsonValue] = {
             "operation_type": operation.operation_type,
@@ -760,16 +765,6 @@ def _provider_request_stream_id(provider_id: str, generation: int) -> str:
 def _runner_request_stream_id(runtime_id: str, generation: int) -> str:
     value = runtime_connection_generation_to_redis(generation)
     return f"runner:{runtime_id}:generation:{value}:requests"
-
-
-def _provider_reply_stream_id(provider_id: str, generation: int) -> str:
-    value = runtime_connection_generation_to_redis(generation)
-    return f"provider:{provider_id}:generation:{value}:replies"
-
-
-def _runner_reply_stream_id(runtime_id: str, generation: int) -> str:
-    value = runtime_connection_generation_to_redis(generation)
-    return f"runner:{runtime_id}:generation:{value}:replies"
 
 
 def _generation_group(subject_id: str, generation: int) -> str:

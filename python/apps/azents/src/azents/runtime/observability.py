@@ -87,7 +87,7 @@ class RuntimeReplyDeliveryMetrics:
             )
 
     def record_replies(self, *, examined: int, filtered: int) -> None:
-        """Record bounded shared-stream reply filtering counts."""
+        """Record bounded reply observation and identity filtering counts."""
         with self._lock:
             self._examined_reply_count += max(0, examined)
             self._filtered_reply_count += max(0, filtered)

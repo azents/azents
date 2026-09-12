@@ -67,8 +67,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_terminal.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-10
-spec_version: 78
+last_verified_at: 2026-09-12
+spec_version: 79
 ---
 
 # Agent Runtime Control
@@ -335,8 +335,9 @@ The store owns:
 
 - provider and runner connection registry
 - one-shot unpublished connection candidates and atomic candidate promotion
-- provider generation-scoped request/reply streams
-- runner generation-scoped operation request/reply streams and operation body streams
+- provider generation-scoped request streams and request-scoped reply streams
+- runner generation-scoped operation request streams, request-scoped reply streams,
+  and operation body streams
 - operation metadata, heartbeat/progress/final events
 - volatile current-connection fencing used to reject stale provider/runner messages
 - request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
@@ -378,14 +379,17 @@ dispatch is idempotent, while a replaced connection cannot create request-less
 metadata, append a cancellation, start work, or finalize an operation.
 
 Foreground reply observation uses an opaque cursor and a separate bounded wait
-contract. Redis first replays rows already present after the cursor, waits with an
-ordinary non-consuming `XREAD` for at most one second when no row exists, and then
-rereads the authoritative range. In-memory coordination provides the same
-check-before-wait behavior with a per-stream condition whose append and notification
-share the store lock. Every waiter advances across all generation-stream rows and
-filters its own request, so interleaved operation ordering and independent
-observation remain unchanged. Wait timeout only triggers deadline and cancellation
-reconciliation; it is not a reply or completion result.
+contract. Each newly dispatched Provider command, ordinary Runner operation, and
+Runtime Transfer receives its own request-scoped reply stream, so a new operation
+never scans reply events retained for earlier operations in the same connection
+generation. An existing operation continues to use the exact reply stream recorded
+in its metadata; request-identity filtering therefore remains active for rolling
+deployment continuity and mismatched-event evidence. Redis first replays rows already
+present after the cursor, waits with an ordinary non-consuming `XREAD` for at most
+one second when no row exists, and then rereads the authoritative range. In-memory
+coordination provides the same check-before-wait behavior with a per-stream condition
+whose append and notification share the store lock. Wait timeout only triggers
+deadline and cancellation reconciliation; it is not a reply or completion result.
 
 Reply reads and waits do not refresh Redis retention. Reply append remains the
 liveness write and refreshes the bounded stream TTL through every fenced and
@@ -394,7 +398,7 @@ unchanged.
 
 Each process records bounded aggregate reply-delivery observations: active and
 maximum waiters, fixed wait-duration and append-to-observation buckets, bounded wait
-outcomes, shared-stream examined/filtered rows, and Worker event-loop timer drift.
+outcomes, examined/filtered reply rows, and Worker event-loop timer drift.
 The Worker periodically emits one structured aggregate snapshot. Metrics contain no
 request, operation, Runtime, Session, Agent, cursor, or payload dimensions, while
 request-scoped structured logs may retain correlation identifiers. Health and

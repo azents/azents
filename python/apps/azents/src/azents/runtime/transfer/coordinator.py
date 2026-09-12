@@ -24,6 +24,7 @@ from azents.runtime.coordination.data import (
     RuntimeRequestEnvelope,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.coordination.stream_ids import operation_reply_stream_id
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
@@ -786,9 +787,16 @@ class RuntimeTransferCoordinator:
             record.admission.runtime_id,
             connection.generation,
         )
-        reply_stream_id = runner_reply_stream_id(
-            record.admission.runtime_id,
-            connection.generation,
+        existing_operation = await self._correlated_operation(record)
+        reply_stream_id = (
+            existing_operation.reply_stream_id
+            if existing_operation is not None
+            else operation_reply_stream_id(
+                target=RuntimeCoordinationTarget.RUNNER,
+                subject_id=record.admission.runtime_id,
+                generation=connection.generation,
+                request_id=record.dispatch_request_id,
+            )
         )
         metadata = RuntimeOperationMetadata(
             operation_id=record.admission.operation_id,
@@ -1110,12 +1118,6 @@ def runner_request_stream_id(runtime_id: str, generation: int) -> str:
     """Return the current generation-specific Runner request stream identifier."""
     value = runtime_connection_generation_to_redis(generation)
     return f"runner:{runtime_id}:generation:{value}:requests"
-
-
-def runner_reply_stream_id(runtime_id: str, generation: int) -> str:
-    """Return the current generation-specific Runner reply stream identifier."""
-    value = runtime_connection_generation_to_redis(generation)
-    return f"runner:{runtime_id}:generation:{value}:replies"
 
 
 def _intent_envelope(
