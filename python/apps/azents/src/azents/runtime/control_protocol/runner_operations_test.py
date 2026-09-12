@@ -111,8 +111,8 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
-    """Skip events for other operations from shared reply stream."""
+async def test_run_bash_isolates_concurrent_operation_reply_streams() -> None:
+    """Concurrent operations observe only their request-scoped replies."""
     harness = await _make_harness()
     first_task = asyncio.create_task(
         harness.client.run_bash(
@@ -165,9 +165,111 @@ async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
     first = await asyncio.wait_for(first_task, timeout=1)
     second = await asyncio.wait_for(second_task, timeout=1)
     assert first.stdout == "first"
-    assert first.final_cursor == "4"
+    assert first.final_cursor == "2"
     assert second.stdout == "second"
     assert second.final_cursor == "2"
+    assert harness.metrics.snapshot().filtered_reply_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history_size", [0, 1000])
+async def test_new_operation_observation_ignores_retained_history(
+    history_size: int,
+) -> None:
+    """Reply observation work stays constant as unrelated retained history grows."""
+    harness = await _make_harness()
+    for index in range(history_size):
+        await harness.store.append_reply(
+            "runner:runtime-1:generation:0000000000000000001:replies",
+            _event(
+                request_id=f"previous-{index}",
+                generation=harness.runner_generation,
+                event_type=RuntimeReplyEventType.STDOUT,
+                payload={"text": "previous output"},
+            ),
+        )
+    task = asyncio.create_task(
+        harness.client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command="echo current",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    request = await harness.claim()
+    await harness.reply(
+        request.request_id, RuntimeReplyEventType.STDOUT, {"text": "current"}
+    )
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"exit_code": 0},
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    snapshot = harness.metrics.snapshot()
+    assert result.stdout == "current"
+    assert snapshot.examined_reply_count == 2
+    assert snapshot.filtered_reply_count == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_bash_filters_recorded_shared_reply_stream() -> None:
+    """A recorded pre-cutover stream still filters another request's replies."""
+    harness = await _make_harness()
+    reply_stream_id = "runner:runtime-1:generation:0000000000000000001:replies"
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-other",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.STDOUT,
+            payload={"text": "other"},
+        ),
+        reply_stream_id=reply_stream_id,
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-target",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.STDOUT,
+            payload={"text": "target"},
+        ),
+        reply_stream_id=reply_stream_id,
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-target",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.FINAL_SUCCESS,
+            payload={"exit_code": 0},
+            final=True,
+        ),
+        reply_stream_id=reply_stream_id,
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+
+    result = await harness.client.resume_bash(
+        reply_stream_id=reply_stream_id,
+        after_cursor=None,
+        request_id="req-target",
+        deadline_at=_now() + timedelta(seconds=30),
+    )
+
+    assert result.stdout == "target"
+    assert result.final_cursor == "3"
+    assert harness.metrics.snapshot().filtered_reply_count == 1
 
 
 @pytest.mark.asyncio
@@ -188,7 +290,9 @@ async def test_run_bash_cancel_check_records_cancelled_final() -> None:
         )
 
     replies = await harness.control.read_replies(
-        reply_stream_id=("runner:runtime-1:generation:0000000000000000001:replies"),
+        reply_stream_id=(
+            "runner:runtime-1:generation:0000000000000000001:replies:req-1"
+        ),
         after_cursor=None,
         limit=10,
     )
@@ -307,7 +411,9 @@ async def test_read_file_deadline_records_final_error_when_runner_drops_reply() 
         )
 
     replies = await harness.control.read_replies(
-        reply_stream_id=("runner:runtime-1:generation:0000000000000000001:replies"),
+        reply_stream_id=(
+            "runner:runtime-1:generation:0000000000000000001:replies:req-1"
+        ),
         after_cursor=None,
         limit=10,
     )

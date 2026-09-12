@@ -33,7 +33,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-12 | 175 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-10 | 78 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-12 | 79 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 47 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-08 | 22 |
@@ -356,6 +356,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | 2026-08-24 |
 | [Clear and Reliable Runtime Lifecycle Requirements](requirements/runtime-260825-reliable-lifecycle.md) | runtime-260825 | 2026-08-25 | 2026-08-25 |
 | [Responsive Runtime Operation Delivery Requirements](requirements/runtime-260910-responsive-operation-delivery.md) | runtime-260910 | 2026-09-10 | 2026-09-10 |
+| [Isolated Runtime Operation Reply Streams Requirements](requirements/runtime-260912-isolated-operation-reply-streams.md) | runtime-260912 | 2026-09-12 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -781,6 +782,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Runtime System Metrics Overview](adr/runtime-260824-system-metrics-overview.md)
 - [Clear and Reliable Runtime Lifecycle](adr/runtime-260825-reliable-lifecycle.md)
 - [Responsive Runtime Operation Delivery](adr/runtime-260910-responsive-operation-delivery.md)
+- [Isolated Runtime Operation Reply Streams](adr/runtime-260912-isolated-operation-reply-streams.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)

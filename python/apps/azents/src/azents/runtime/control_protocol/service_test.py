@@ -325,7 +325,7 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
         "provider:provider-1:generation:0000000000000000001:requests"
     )
     assert result.reply_stream_id == (
-        "provider:provider-1:generation:0000000000000000001:replies"
+        "provider:provider-1:generation:0000000000000000001:replies:req-1"
     )
     assert claimed is not None
     assert claimed.cursor is not None
@@ -347,6 +347,48 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_provider_commands_use_request_scoped_reply_streams() -> None:
+    """Provider commands never share retained reply history."""
+    store = InMemoryRuntimeCoordinationStore()
+    request_ids = iter(("req-1", "req-2"))
+    service = FakeRuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    now = _now()
+    provider = await service.register_provider(
+        _provider_registration(),
+        registered_at=now,
+    )
+
+    commands = [
+        await service.dispatch_provider_command(
+            RuntimeProviderCommand(
+                provider_id="provider-1",
+                provider_generation=provider.generation,
+                runtime_id=f"runtime-{index}",
+                desired_generation=index,
+                command_type=RuntimeProviderCommandType.START,
+                reset_final_desired_state=None,
+                payload={"reason": "reconcile"},
+                deadline_at=now + timedelta(seconds=30),
+                runtime_configuration=_runtime_configuration(),
+            ),
+            created_at=now,
+        )
+        for index in (1, 2)
+    ]
+
+    assert all(isinstance(command, RuntimeDispatchResult) for command in commands)
+    first, second = commands
+    assert isinstance(first, RuntimeDispatchResult)
+    assert isinstance(second, RuntimeDispatchResult)
+    assert first.reply_stream_id.endswith(":replies:req-1")
+    assert second.reply_stream_id.endswith(":replies:req-2")
+    assert first.reply_stream_id != second.reply_stream_id
 
 
 @pytest.mark.asyncio
@@ -517,8 +559,8 @@ async def test_dispatch_runner_operation_supports_resume_after_reply_cursor() ->
 
 
 @pytest.mark.asyncio
-async def test_runner_operations_share_generation_reply_stream() -> None:
-    """Runner operation replies share a generation-scoped stream."""
+async def test_runner_operations_use_request_scoped_reply_streams() -> None:
+    """Runner operations never replay replies from another request."""
     store = InMemoryRuntimeCoordinationStore()
     request_ids = iter(("req-1", "req-2"))
     service = FakeRuntimeControlProtocolService(
@@ -540,9 +582,57 @@ async def test_runner_operations_share_generation_reply_stream() -> None:
     assert isinstance(first, RuntimeDispatchResult)
     assert isinstance(second, RuntimeDispatchResult)
     assert first.reply_stream_id == (
-        "runner:runtime-1:generation:0000000000000000001:replies"
+        "runner:runtime-1:generation:0000000000000000001:replies:req-1"
     )
-    assert second.reply_stream_id == first.reply_stream_id
+    assert second.reply_stream_id == (
+        "runner:runtime-1:generation:0000000000000000001:replies:req-2"
+    )
+    assert second.reply_stream_id != first.reply_stream_id
+
+
+@pytest.mark.asyncio
+async def test_recorded_generation_reply_stream_remains_authoritative() -> None:
+    """An already-admitted operation keeps using its recorded reply stream."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = FakeRuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-existing",
+    )
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    dispatched = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation, now=now),
+        created_at=now,
+    )
+    assert isinstance(dispatched, RuntimeDispatchResult)
+    metadata = await store.get_operation(dispatched.operation_id)
+    assert metadata is not None
+    recorded_reply_stream_id = "runner:runtime-1:generation:0000000000000000001:replies"
+    await store.put_operation(
+        dataclasses.replace(metadata, reply_stream_id=recorded_reply_stream_id),
+        ttl_seconds=60,
+    )
+
+    appended = await service.append_reply_event(
+        _reply(
+            dispatched.request_id,
+            runner.generation,
+            RuntimeReplyEventType.FINAL_SUCCESS,
+            final=True,
+        ),
+        reply_stream_id=recorded_reply_stream_id,
+        operation_id=dispatched.operation_id,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+
+    assert isinstance(appended, RuntimeReplyAppendResult)
+    replies = await service.read_replies(
+        reply_stream_id=recorded_reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+    assert [record.event.request_id for record in replies] == [dispatched.request_id]
 
 
 @pytest.mark.asyncio
@@ -571,6 +661,7 @@ async def test_runner_cancel_marks_metadata_and_appends_ordered_command() -> Non
     )
 
     assert isinstance(cancellation, RuntimeDispatchResult)
+    assert cancellation.reply_stream_id == operation.reply_stream_id
     metadata = await store.get_operation(operation.operation_id)
     assert metadata is not None
     assert metadata.status is RuntimeOperationStatus.CANCEL_REQUESTED
