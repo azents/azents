@@ -183,6 +183,24 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
     )
     composer.clear()
     driver.set_window_size(1440, 1000)
+    visible_metrics = [
+        item
+        for item in driver.find_elements(
+            By.CSS_SELECTOR, "[role='tab'][aria-label='Metrics']"
+        )
+        if item.is_displayed()
+    ]
+    if not visible_metrics:
+        _wait(driver).until(
+            lambda current: next(
+                (
+                    item
+                    for item in current.find_elements(*toggle)
+                    if item.is_displayed()
+                ),
+                False,
+            )
+        ).click()
     _wait(driver).until(
         ec.element_to_be_clickable(
             (By.XPATH, "//*[@role='tab' and @aria-label='Metrics']")
