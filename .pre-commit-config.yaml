@@ -49,7 +49,7 @@ repos:
         types_or: [python, pyi, jupyter]
   # az-common
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.9
+    rev: 0.12.10
     hooks:
       - id: uv-lock
         files: \/pyproject\.toml$
@@ -67,7 +67,7 @@ repos:
           )$
   # azents-runtime-control
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.9
+    rev: 0.12.10
     hooks:
       - id: uv-lock
         files: \/pyproject\.toml$
@@ -105,7 +105,7 @@ repos:
         files: ^python/apps/azents/.*
         fail_fast: true
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.9
+    rev: 0.12.10
     hooks:
       - id: uv-lock
         files: \/pyproject\.toml$
@@ -124,7 +124,7 @@ repos:
           )$
   # azents testenv
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.9
+    rev: 0.12.10
     hooks:
       - id: uv-lock
         files: \/pyproject\.toml$
@@ -138,7 +138,7 @@ repos:
         files: ^testenv/azents/(?!e2e/)
   # azents testenv e2e
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.9
+    rev: 0.12.10
     hooks:
       - id: uv-lock
         files: \/pyproject\.toml$
