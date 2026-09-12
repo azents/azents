@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 // --- Enums ---
 const NodeEnvSchema = z.enum(["development", "production", "test"]);
 const RuntimeWebAuthModeSchema = z.enum(["shared_cookie", "separate_domain"]);
+const AuthCookiePolicyModeSchema = z.enum(["default", "testenv_legacy"]);
 
 // --- Server Config (server-only) ---
 const ServerConfigSchema = z.object({
@@ -14,6 +15,7 @@ const ServerConfigSchema = z.object({
   internalApiUrl: z.string(),
   /** Optional external Admin Web URL shown only to system administrators. */
   adminWebUrl: z.string().url().nullable(),
+  authCookiePolicyMode: AuthCookiePolicyModeSchema,
   runtimeWebGatewayEnabled: z.boolean(),
   runtimeWebGatewayAuthMode: RuntimeWebAuthModeSchema,
   runtimeWebGatewayMainWebOrigin: z.string().url().nullable(),
@@ -32,6 +34,8 @@ function loadServerConfig(): ServerConfig {
     publicApiUrl,
     internalApiUrl: process.env.INTERNAL_API_URL || publicApiUrl,
     adminWebUrl: process.env.ADMIN_WEB_URL || null,
+    authCookiePolicyMode:
+      process.env.AZ_TESTENV_AUTH_COOKIE_POLICY_MODE || "default",
     runtimeWebGatewayEnabled:
       process.env.RUNTIME_WEB_GATEWAY_ENABLED === "true",
     runtimeWebGatewayAuthMode:

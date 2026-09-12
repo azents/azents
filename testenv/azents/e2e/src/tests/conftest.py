@@ -2489,6 +2489,7 @@ def azents_main_web_container(
         .with_name(f"azents-web-{random_secret(4)}")
         .with_network(container_network)
         .with_network_aliases("azents-web")
+        .with_env("AZ_TESTENV_AUTH_COOKIE_POLICY_MODE", "testenv_legacy")
         .with_env("PUBLIC_API_URL", _MAIN_WEB_BROWSER_URL)
         .with_env("INTERNAL_API_URL", "http://azents-public-server:8010")
         .with_env("ADMIN_WEB_URL", _ADMIN_WEB_GATEWAY_URL)

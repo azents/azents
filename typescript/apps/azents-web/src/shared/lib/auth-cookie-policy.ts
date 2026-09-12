@@ -10,6 +10,8 @@ export interface AuthCookiePolicy {
   sameSite: "lax" | "none";
 }
 
+export type AuthCookiePolicyMode = "default" | "testenv_legacy";
+
 const LOCAL_COOKIE_NAMES: AuthCookieNames = {
   ACCESS_TOKEN: "az-token",
   REFRESH_TOKEN: "az-refresh",
@@ -24,7 +26,15 @@ const PRODUCTION_COOKIE_NAMES: AuthCookieNames = {
 
 export function authCookiePolicy(
   nodeEnv: "development" | "production" | "test",
+  mode: AuthCookiePolicyMode = "default",
 ): AuthCookiePolicy {
+  if (mode === "testenv_legacy") {
+    return {
+      names: LOCAL_COOKIE_NAMES,
+      secure: true,
+      sameSite: "lax",
+    };
+  }
   return nodeEnv === "production"
     ? {
         names: PRODUCTION_COOKIE_NAMES,

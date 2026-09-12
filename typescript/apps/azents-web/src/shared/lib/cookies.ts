@@ -15,7 +15,8 @@ import type { AuthCookieNames } from "./auth-cookie-policy";
 export type { AuthCookieNames } from "./auth-cookie-policy";
 
 export function getAuthCookieNames(): AuthCookieNames {
-  return authCookiePolicy(getServerConfig().nodeEnv).names;
+  const config = getServerConfig();
+  return authCookiePolicy(config.nodeEnv, config.authCookiePolicyMode).names;
 }
 
 /** Access token information read from cookie */
@@ -115,7 +116,8 @@ export function setAuthCookiesToHeaders(
   resHeaders: Headers,
   tokens: AuthTokens,
 ): void {
-  const policy = authCookiePolicy(getServerConfig().nodeEnv);
+  const config = getServerConfig();
+  const policy = authCookiePolicy(config.nodeEnv, config.authCookiePolicyMode);
   const names = policy.names;
   const expiresAt = Date.now() + tokens.expiresInSeconds * 1000;
 
@@ -152,7 +154,8 @@ export function setAuthCookiesToHeaders(
  * Delete authentication cookies through Response Headers.
  */
 export function clearAuthCookiesToHeaders(resHeaders: Headers): void {
-  const policy = authCookiePolicy(getServerConfig().nodeEnv);
+  const config = getServerConfig();
+  const policy = authCookiePolicy(config.nodeEnv, config.authCookiePolicyMode);
   const names = policy.names;
 
   const clearOptions = {

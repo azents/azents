@@ -1,6 +1,9 @@
 import "server-only";
 import { getServerConfig } from "@/config/server";
-import { hasExactRequestOrigin } from "./request-origin-policy";
+import {
+  externalRequestOrigin,
+  hasExactRequestOrigin,
+} from "./request-origin-policy";
 
 export { hasExactRequestOrigin } from "./request-origin-policy";
 
@@ -13,7 +16,7 @@ export function mainWebOrigin(request: Request): string {
   if (config.runtimeWebGatewayEnabled) {
     throw new Error("Runtime Web Main Web origin is not configured.");
   }
-  return new URL(request.url).origin;
+  return externalRequestOrigin(request);
 }
 
 export function rejectUntrustedMainWebOrigin(

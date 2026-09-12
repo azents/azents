@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasExactRequestOrigin } from "./request-origin-policy.ts";
+import {
+  externalRequestOrigin,
+  hasExactRequestOrigin,
+} from "./request-origin-policy.ts";
 
 void test("accepts only the exact configured origin", () => {
   const request = new Request("https://app.example.com/api/trpc", {
@@ -45,4 +48,29 @@ void test("rejects missing, sibling, path-bearing, and port-mismatched origins",
     hasExactRequestOrigin(exact, "https://app.example.com/control"),
     false,
   );
+});
+
+void test("resolves the externally visible origin behind a reverse proxy", () => {
+  const request = new Request("http://azents-web:3000/api/trpc", {
+    method: "POST",
+    headers: {
+      Host: "azents-web:3000",
+      "X-Forwarded-Host": "app.example.com:8443",
+      "X-Forwarded-Proto": "https",
+    },
+  });
+
+  assert.equal(externalRequestOrigin(request), "https://app.example.com:8443");
+});
+
+void test("falls back to the request URL for ambiguous forwarded origins", () => {
+  const request = new Request("http://azents-web:3000/api/trpc", {
+    method: "POST",
+    headers: {
+      "X-Forwarded-Host": "app.example.com, proxy.internal",
+      "X-Forwarded-Proto": "https",
+    },
+  });
+
+  assert.equal(externalRequestOrigin(request), "http://azents-web:3000");
 });
