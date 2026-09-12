@@ -95,6 +95,7 @@ class _RuntimeWebStack:
     """Function-scoped Runtime Web browser topology."""
 
     main_origin: str
+    public_api_url: str
     edge_ip: str
     edge_host_url: str
     selenium_url: str
@@ -276,6 +277,64 @@ def _runtime_web_gateway_container(
     )
 
 
+def _runtime_web_public_api_container(
+    *,
+    image: str,
+    network: Network,
+    postgres: PostgresContainer,
+    credential_encryption_key: str,
+    auth_jwt_secret_key: str,
+    system_bootstrap_setup_token: str,
+    mode: str,
+    configuration_revision: int,
+) -> DockerContainer:
+    """Create the Public API process with the matching Gateway configuration."""
+    cookie_domain = (
+        _SHARED_COOKIE_DOMAIN if mode == "shared_cookie" else _SEPARATE_COOKIE_DOMAIN
+    )
+    base = (
+        DockerContainer(image=image)
+        .with_name(f"azents-runtime-web-public-{mode}-{unique()}")
+        .with_network_aliases("runtime-web-public-server")
+        .with_command(
+            [
+                "uvicorn",
+                "apiserver:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8010",
+                "--ws",
+                "websockets-sansio",
+            ]
+        )
+        .with_exposed_ports(8010)
+    )
+    return (
+        _configure_server_database(
+            base,
+            network=network,
+            postgres=postgres,
+            credential_encryption_key=credential_encryption_key,
+        )
+        .with_env("AZ_AUTH_JWT_SECRET_KEY", auth_jwt_secret_key)
+        .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
+        .with_env("AZ_WEB_URL", _MAIN_ORIGIN)
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_ENABLED", "true")
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE", mode)
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION",
+            str(configuration_revision),
+        )
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN", _MAIN_ORIGIN)
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN", _BROKER_ORIGIN)
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX", _SERVICE_SUFFIX)
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN", cookie_domain)
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION", "152")
+        .with_env("AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION", "152")
+    )
+
+
 def _runtime_web_main_container(
     *,
     image: str,
@@ -292,7 +351,7 @@ def _runtime_web_main_container(
         .with_network(network)
         .with_network_aliases("runtime-web-main")
         .with_env("PUBLIC_API_URL", _MAIN_ORIGIN)
-        .with_env("INTERNAL_API_URL", "http://azents-public-server:8010")
+        .with_env("INTERNAL_API_URL", "http://runtime-web-public-server:8010")
         .with_env("RUNTIME_WEB_GATEWAY_ENABLED", "true")
         .with_env("RUNTIME_WEB_GATEWAY_AUTH_MODE", mode)
         .with_env("RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN", _MAIN_ORIGIN)
@@ -431,6 +490,8 @@ def _runtime_web_stack(
     web_image: str,
     runner_image: str,
     credential_encryption_key: str,
+    auth_jwt_secret_key: str,
+    system_bootstrap_setup_token: str,
     s3_bucket_name: str,
     s3_access_key: str,
     s3_secret_key: str,
@@ -459,6 +520,16 @@ def _runtime_web_stack(
             mode=mode,
             configuration_revision=configuration_revision,
         )
+        public_api = _runtime_web_public_api_container(
+            image=server_image,
+            network=network,
+            postgres=postgres,
+            credential_encryption_key=credential_encryption_key,
+            auth_jwt_secret_key=auth_jwt_secret_key,
+            system_bootstrap_setup_token=system_bootstrap_setup_token,
+            mode=mode,
+            configuration_revision=configuration_revision,
+        )
         main_web = _runtime_web_main_container(
             image=web_image,
             network=network,
@@ -471,7 +542,7 @@ def _runtime_web_stack(
             config_path=config_path,
         )
         selenium = _runtime_web_selenium_container(network=network)
-        containers = [relay, gateway, main_web, edge, selenium]
+        containers = [relay, gateway, public_api, main_web, edge, selenium]
         with ExitStack() as stack:
             stack.enter_context(relay)
             _wait_for_log(
@@ -485,6 +556,13 @@ def _runtime_web_stack(
                 port=8040,
                 path="/__azents/ready",
                 name="Runtime Web Gateway",
+            )
+            stack.enter_context(public_api)
+            _wait_for_http(
+                public_api,
+                port=8010,
+                path="/healthz",
+                name="Runtime Web Public API",
             )
             stack.enter_context(main_web)
             _wait_for_http(
@@ -549,6 +627,10 @@ def _runtime_web_stack(
                     )
                 yield _RuntimeWebStack(
                     main_origin=_MAIN_ORIGIN,
+                    public_api_url=(
+                        f"http://{public_api.get_container_host_ip()}:"
+                        f"{public_api.get_exposed_port(8010)}"
+                    ),
                     edge_ip=edge_ip,
                     edge_host_url=f"https://{edge_host}:{edge_port}",
                     selenium_url=selenium_url,
@@ -840,6 +922,8 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
     azents_web_image: str,
     azents_runtime_runner_image: str,
     credential_encryption_key: str,
+    auth_jwt_secret_key: str,
+    system_bootstrap_setup_token: str,
     s3_bucket_name: str,
     rustfs_access_key: str,
     rustfs_secret_key: str,
@@ -865,11 +949,16 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         web_image=azents_web_image,
         runner_image=azents_runtime_runner_image,
         credential_encryption_key=credential_encryption_key,
+        auth_jwt_secret_key=auth_jwt_secret_key,
+        system_bootstrap_setup_token=system_bootstrap_setup_token,
         s3_bucket_name=s3_bucket_name,
         s3_access_key=rustfs_access_key,
         s3_secret_key=rustfs_secret_key,
     ) as stack:
-        api = RuntimeWebV1Api(public_api_client)
+        runtime_web_api_client = azentspublicclient.ApiClient(
+            configuration=azentspublicclient.Configuration(host=stack.public_api_url)
+        )
+        api = RuntimeWebV1Api(runtime_web_api_client)
         requested = api.runtime_web_v1_request_runtime_web_exposure(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
