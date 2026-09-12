@@ -11,11 +11,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import {
-  IconArrowDown,
-  IconGripVertical,
-  IconMessageOff,
-} from "@tabler/icons-react";
+import { IconArrowDown, IconMessageOff } from "@tabler/icons-react";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { isCompactionInProgressMarker } from "../compactionPresentation";
 import {
@@ -23,7 +19,6 @@ import {
   isBoundaryMessage,
   useChatViewContainer,
 } from "../containers/useChatViewContainer";
-import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import {
   chatScrollOverscrollBehavior,
@@ -76,17 +71,13 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
     onStopRequest,
     inputActions,
     onAuthorizationComplete,
-    workspacePanel,
     goal,
     todo,
     currentWorkspaceProfile,
     readOnlyNotice,
-    splitContainerRef,
     scrollAreaRef,
     viewportRef,
     contentRef,
-    chatRatio,
-    handleWorkspaceResizeStart,
     hasTimelineItems,
     chatPresentationItems,
     activeActivitySource,
@@ -149,7 +140,6 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
   // chat view
   return (
     <Group
-      ref={splitContainerRef}
       h="100%"
       mih={0}
       w="100%"
@@ -168,7 +158,6 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           backgroundColor: "var(--mantine-color-body)",
           position: "relative",
           overflow: "hidden",
-          flexBasis: `${chatRatio * 100}%`,
         }}
       >
         {/* message area */}
@@ -554,33 +543,6 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           </Box>
         </Box>
       </Stack>
-      <Box
-        visibleFrom="lg"
-        role="separator"
-        aria-orientation="vertical"
-        onPointerDown={handleWorkspaceResizeStart}
-        h="100%"
-        w={rem(10)}
-        style={{
-          cursor: "col-resize",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderLeft: `${rem(1)} solid var(--mantine-color-default-border)`,
-        }}
-      >
-        <IconGripVertical size="1rem" color="var(--mantine-color-dimmed)" />
-      </Box>
-      <Box
-        visibleFrom="lg"
-        h="100%"
-        style={{
-          flex: `0 0 ${(1 - chatRatio) * 100}%`,
-          minWidth: rem(320),
-        }}
-      >
-        <WorkspacePanelContainer {...workspacePanel} />
-      </Box>
     </Group>
   );
 }

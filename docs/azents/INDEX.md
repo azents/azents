@@ -26,7 +26,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-10 | 113 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-08 | 16 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-10 | 81 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-12 | 82 |
 
 ## Living Specs — Flow
 
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-10 | 18 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-12 | 34 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-10 | 20 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-12 | 21 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 58 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
@@ -301,6 +301,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Subagent Model Override Policy Historical Requirements Reconstruction](requirements/override-260717-subagent-override-policy.md) | override-260717 | 2026-07-17 | 2026-07-17 |
 | [Remove AgentSession Runtime Ownership Historical Requirements Reconstruction](requirements/ownership-260625-ownership-removal.md) | ownership-260625 | 2026-06-25 | - |
 | [User-Managed Runtime Tools Requirements](requirements/packages-260901-user-managed-runtime-tools.md) | packages-260901 | 2026-09-01 | 2026-09-01 |
+| [Session Workspace Navigation Requirements](requirements/panel-260912-session-workspace.md) | panel-260912 | 2026-09-12 | 2026-09-12 |
 | [GitHub Per-User PAT Authentication Historical Requirements Reconstruction](requirements/pat-260321-pat.md) | pat-260321 | 2026-03-21 | 2026-03-21 |
 | [Select Provider-Specific Tool Dialects for Apply-Patch Historical Requirements Reconstruction](requirements/patch-260721-patch-dialects.md) | patch-260721 | 2026-07-21 | - |
 | [Keep Pending Buffer Deletion State-Neutral Historical Requirements Reconstruction](requirements/pending-260712-pending-buffer-deletion-neutral.md) | pending-260712 | 2026-07-12 | - |
@@ -726,6 +727,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Subagent Model Override Policy Historical Decision Reconstruction](adr/override-260717-subagent-override-policy.md)
 - [Remove AgentSession Runtime Ownership](adr/ownership-260625-ownership-removal.md)
 - [User-Managed Runtime Tools](adr/packages-260901-user-managed-runtime-tools.md)
+- [Session Workspace Navigation Decisions](adr/panel-260912-session-workspace.md)
 - [GitHub Per-User PAT Authentication Historical Decision Reconstruction](adr/pat-260321-pat.md)
 - [Select Provider-Specific Tool Dialects for Apply-Patch](adr/patch-260721-patch-dialects.md)
 - [Keep Pending Buffer Deletion State-Neutral](adr/pending-260712-pending-buffer-deletion-neutral.md)

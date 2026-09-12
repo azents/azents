@@ -1,9 +1,11 @@
-import { Box, rem } from "@mantine/core";
-import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { Box } from "@mantine/core";
+import { useRef, useState } from "react";
 import { createChatMessage } from "../story-fixtures";
+import { workspacePanelStoryFixture } from "../workspace-story-fixture";
 import { ChatSessionView } from "./ChatSessionView";
 import type { ChatSessionContainerOutput } from "../containers/useChatSessionContainer";
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
+import type { SessionPanelView } from "../session-panel/sessionPanel";
 import type { SubagentNavigationLinks } from "../subagentNavigation";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
@@ -127,7 +129,7 @@ const subscriptionUsage: ComposerSubscriptionUsagePresentationProps = {
 };
 
 const workspacePanel: WorkspacePanelContainerOutput = {
-  state: { type: "LOADING" },
+  state: workspacePanelStoryFixture.state,
   metricsState: { type: "LOADING" },
   activeTab: "workspace",
   restartConfirmOpen: false,
@@ -311,21 +313,61 @@ const args: ChatSessionViewContainerOutput = {
   subagentNavigation: null,
   terminal,
   terminalMobile: false,
-  runtimeDrawerOpened: false,
+  supportingContent: null,
+  panel: {
+    activeView: "files",
+    opened: true,
+    onSelect: noop,
+    onOpen: noop,
+    onClose: noop,
+    containerRef: { current: null },
+    chatRatio: 0.55,
+    onResizeStart: noop,
+    onResizeBy: noop,
+    initialTaskId: null,
+    openInitialTaskForEdit: false,
+  },
   onSessionTitleChange: noop,
-  onOpenRuntime: noop,
-  onCloseRuntime: noop,
 };
+
+function InteractiveSession(
+  props: ChatSessionViewContainerOutput,
+): React.ReactElement {
+  const [activeView, setActiveView] = useState<SessionPanelView>(
+    props.panel.activeView,
+  );
+  const [opened, setOpened] = useState(props.panel.opened);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chatRatio, setChatRatio] = useState(props.panel.chatRatio);
+  return (
+    <ChatSessionView
+      {...props}
+      panel={{
+        ...props.panel,
+        activeView,
+        opened,
+        containerRef,
+        chatRatio,
+        onSelect: setActiveView,
+        onOpen: () => setOpened(true),
+        onClose: () => setOpened(false),
+        onResizeBy: (delta) =>
+          setChatRatio((value) =>
+            Math.min(0.75, Math.max(0.35, value + delta)),
+          ),
+      }}
+    />
+  );
+}
 
 const meta = {
   component: ChatSessionView,
+  render: (props) => <InteractiveSession {...props} />,
   decorators: [
     (Story) => (
-      <StorybookCanvas maxWidth={rem(1440)}>
-        <Box h="100dvh">
-          <Story />
-        </Box>
-      </StorybookCanvas>
+      <Box h="100dvh" miw={0} style={{ overflow: "hidden" }}>
+        <Story />
+      </Box>
     ),
   ],
   args,
@@ -336,6 +378,27 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Conversation = {} satisfies Story;
+
+export const MobilePanel = {
+  args: { terminalMobile: true },
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+} satisfies Story;
+
+export const MobileChat = {
+  args: { terminalMobile: true, panel: { ...args.panel, opened: false } },
+} satisfies Story;
+
+export const RuntimePanel = {
+  args: { panel: { ...args.panel, activeView: "runtime" } },
+} satisfies Story;
+
+export const TerminalPanel = {
+  args: {
+    terminalMobile: true,
+    panel: { ...args.panel, activeView: "terminal" },
+    terminal: { ...terminal, presentation: "focused" },
+  },
+} satisfies Story;
 
 export const LoadingHistory = {
   args: {

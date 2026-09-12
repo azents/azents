@@ -1,13 +1,8 @@
 "use client";
 
-import {
-  useLocalStorage,
-  useSessionStorage,
-  useWindowEvent,
-} from "@mantine/hooks";
+import { useSessionStorage, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import {
-  type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -48,7 +43,6 @@ import type {
   TodoStateSnapshot,
   TokenUsageSummary,
 } from "../types";
-import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type {
   AgentResponse,
   ChatEventResponse,
@@ -60,10 +54,6 @@ const PROGRAMMATIC_SCROLL_GUARD_MS = 350;
 const LOAD_MORE_COOLDOWN_MS = 800;
 const CHAT_SCROLL_STATE_STORAGE_PREFIX = "azents.chat.scrollState.";
 const KEYBOARD_RESIZE_SETTLE_MS = 250;
-const WORKSPACE_RATIO_STORAGE_KEY = "azents.chat.workspaceRatio";
-const DEFAULT_CHAT_RATIO = 0.55;
-const MIN_CHAT_RATIO = 0.35;
-const MAX_CHAT_RATIO = 0.75;
 function scrollDistanceFromBottom(viewport: HTMLDivElement): number {
   const { scrollTop, scrollHeight, clientHeight } = viewport;
   return Math.max(0, scrollHeight - scrollTop - clientHeight);
@@ -355,7 +345,6 @@ export interface ChatViewProps {
   authorizationRequests: AuthorizationRequest[];
   onAuthorizationComplete: (toolkitId: string) => void;
   actionExecutions: ActionExecutionProjection[];
-  workspacePanel: WorkspacePanelContainerOutput;
   goal: GoalStateSnapshot;
   todo: TodoStateSnapshot;
   currentWorkspaceProfile?: CurrentWorkspaceProfile | null;
@@ -392,7 +381,6 @@ export type ChatViewContainerOutput = RequiredChatViewProps & {
   scrollAreaRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLDivElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
-  splitContainerRef: RefObject<HTMLDivElement | null>;
   pendingFiles: PendingFile[];
   addFiles: (files: FileList | File[]) => void;
   removeFile: (id: string) => void;
@@ -401,7 +389,6 @@ export type ChatViewContainerOutput = RequiredChatViewProps & {
   uploadAll: (agentId: string) => Promise<UploadedFile[]>;
   isUploading: boolean;
   showNewMessageChip: boolean;
-  chatRatio: number;
   editingMessage: EditingMessageState | null;
   isMobile: boolean;
   latestCompactionIndex: number;
@@ -433,9 +420,6 @@ export type ChatViewContainerOutput = RequiredChatViewProps & {
     inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
-  handleWorkspaceResizeStart: (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => void;
   scrollToBottom: () => void;
   handleInputFocus: () => void;
   handleAfterSend: () => void;
@@ -482,7 +466,6 @@ export function useChatViewContainer({
   authorizationRequests,
   onAuthorizationComplete,
   actionExecutions,
-  workspacePanel,
   goal,
   todo,
   currentWorkspaceProfile = null,
@@ -507,18 +490,6 @@ export function useChatViewContainer({
   const prevMessageIdsRef = useRef<Set<string>>(new Set());
   const isReadyForPaginationRef = useRef(false);
 
-  const [chatRatio, setChatRatio] = useLocalStorage<number>({
-    key: WORKSPACE_RATIO_STORAGE_KEY,
-    defaultValue: DEFAULT_CHAT_RATIO,
-    deserialize: (value?: string): number => {
-      const parsed = Number.parseFloat(value ?? "");
-      if (!Number.isFinite(parsed)) {
-        return DEFAULT_CHAT_RATIO;
-      }
-      return Math.min(MAX_CHAT_RATIO, Math.max(MIN_CHAT_RATIO, parsed));
-    },
-    serialize: (value: number): string => value.toString(),
-  });
   const scrollStorageKey = `${CHAT_SCROLL_STATE_STORAGE_PREFIX}${sessionId ?? "__disabled"}`;
   const [storedScrollState, setStoredScrollState] =
     useSessionStorage<StoredChatScrollState | null>({
@@ -531,7 +502,6 @@ export function useChatViewContainer({
     });
   const [editingMessage, setEditingMessage] =
     useState<EditingMessageState | null>(null);
-  const splitContainerRef = useRef<HTMLDivElement>(null);
   const programmaticScrollUntilRef = useRef(0);
   const detachedScrollRestoreUntilRef = useRef(0);
   const userScrollIntentGenerationRef = useRef(0);
@@ -768,36 +738,6 @@ export function useChatViewContainer({
       }
     });
   }, [pinToBottom]);
-
-  const handleWorkspaceResizeStart = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>): void => {
-      const container = splitContainerRef.current;
-      if (!container) {
-        return;
-      }
-      event.preventDefault();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      const rect = container.getBoundingClientRect();
-      const updateRatio = (clientX: number): void => {
-        const rawRatio = (clientX - rect.left) / rect.width;
-        const nextRatio = Math.min(
-          MAX_CHAT_RATIO,
-          Math.max(MIN_CHAT_RATIO, rawRatio),
-        );
-        setChatRatio(nextRatio);
-      };
-      const handlePointerMove = (moveEvent: PointerEvent): void => {
-        updateRatio(moveEvent.clientX);
-      };
-      const handlePointerUp = (): void => {
-        window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", handlePointerUp);
-      };
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", handlePointerUp, { once: true });
-    },
-    [setChatRatio],
-  );
 
   useEffect(() => {
     if (isLoadingMore && !isLoadingMoreRef.current) {
@@ -1266,7 +1206,6 @@ export function useChatViewContainer({
     authorizationRequests,
     onAuthorizationComplete,
     actionExecutions,
-    workspacePanel,
     goal,
     todo,
     currentWorkspaceProfile,
@@ -1275,7 +1214,6 @@ export function useChatViewContainer({
     scrollAreaRef,
     viewportRef,
     contentRef,
-    splitContainerRef,
     pendingFiles,
     addFiles,
     removeFile,
@@ -1284,7 +1222,6 @@ export function useChatViewContainer({
     uploadAll,
     isUploading,
     showNewMessageChip,
-    chatRatio,
     editingMessage,
     isMobile,
     latestCompactionIndex,
@@ -1307,7 +1244,6 @@ export function useChatViewContainer({
     handleStartEdit,
     handleCancelEdit,
     handleSubmitInput,
-    handleWorkspaceResizeStart,
     scrollToBottom,
     handleInputFocus,
     handleAfterSend,

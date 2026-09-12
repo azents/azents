@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-10
-spec_version: 20
+last_verified_at: 2026-09-12
+spec_version: 21
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -31,7 +31,15 @@ code_paths:
 
 ## Current Behavior
 
-Concrete Agent session screens provide `Chat` and `Context` header tabs. Project management is part of the Workspace surface, not a separate session header tab. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These tabs are session-scoped and are not rendered on the independent Agent settings page. These query-param routes preserve the same page layout as the former dedicated Context pages: session header, tab navigation, and a scrollable inspector content area. Unknown or legacy page values, including `?page=projects`, render the normal chat/session surface.
+Concrete Agent session screens keep Chat mounted as the main surface and expose
+Context in a unified supporting panel. `?page=context`, `?page=system-prompt`,
+and `?page=raw-events` select the existing inspector contents for the same
+AgentSession without replacing Chat. The session header contains a panel toggle
+rather than page-wide tabs. Desktop panel navigation is vertical; mobile
+navigation is a horizontally scrollable tab row above full-width content, with
+directional fades and scroll buttons. Existing inspector contents and detail
+links remain unchanged. Unknown or absent page values render the normal session
+surface; `?page=projects` redirects to that surface.
 
 ## Backend API
 
@@ -115,7 +123,7 @@ Raw events are exposed only to workspace members. Endpoint applies event limit t
 
 ## Frontend
 
-`/w/{handle}/agents/{agentId}/sessions/{sessionId}?page=context` renders these states in the Context page layout:
+`/w/{handle}/agents/{agentId}/sessions/{sessionId}?page=context` renders these states in the session supporting panel:
 
 - loading
 - error
@@ -129,7 +137,8 @@ Ready state includes this UI:
 - event stats cards
 - links to `?page=system-prompt` and `?page=raw-events` detail views
 
-`?page=system-prompt` renders system prompt fragments. `?page=raw-events` renders raw event JSON accordion. Unknown, legacy, or absent `page` values render the normal chat view.
+`?page=system-prompt` renders system prompt fragments. `?page=raw-events` renders
+the raw event JSON accordion. Both retain the same Chat mount and session.
 
 ## Verification
 
@@ -146,6 +155,9 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 ```
 
 ## Changelog
+
+- **2026-09-12** — v21. Embedded the unchanged Context inspector in the unified
+  session panel while keeping Chat mounted.
 
 - **2026-09-06** — v20. Distinguished absent or invalid public-pricing estimates
   from unexpected calculator defects that remain visible to monitoring.

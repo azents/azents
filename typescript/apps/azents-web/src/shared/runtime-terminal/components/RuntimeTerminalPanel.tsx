@@ -31,6 +31,7 @@ interface RuntimeTerminalPanelProps {
   terminal: RuntimeTerminalContainerOutput;
   mobile: boolean;
   onStartRuntime: () => void;
+  embedded?: boolean;
 }
 
 const softwareKeys = [
@@ -46,6 +47,7 @@ export function RuntimeTerminalPanel({
   terminal,
   mobile,
   onStartRuntime,
+  embedded = false,
 }: RuntimeTerminalPanelProps): React.ReactElement | null {
   const t = useTranslations("chat.terminal");
   const projection = terminal.projection;
@@ -60,8 +62,8 @@ export function RuntimeTerminalPanel({
     return null;
   }
 
-  const focused = terminal.presentation === "focused";
-  const collapsed = terminal.presentation === "collapsed";
+  const focused = embedded || terminal.presentation === "focused";
+  const collapsed = !embedded && terminal.presentation === "collapsed";
   const canTerminate =
     projection?.state === "active" ||
     terminal.connection.type === "connecting" ||
@@ -81,8 +83,8 @@ export function RuntimeTerminalPanel({
         flexShrink: 0,
         ...(focused
           ? {
-              position: mobile ? "fixed" : "relative",
-              ...(mobile
+              position: mobile && !embedded ? "fixed" : "relative",
+              ...(mobile && !embedded
                 ? { height: "100dvh", inset: 0, zIndex: 300 }
                 : { flex: 1, minHeight: 0 }),
             }
@@ -137,7 +139,7 @@ export function RuntimeTerminalPanel({
               </Button>
             ) : (
               <>
-                {!mobile && !focused ? (
+                {!embedded && !mobile && !focused ? (
                   <Tooltip label={t("focus")}>
                     <ActionIcon
                       aria-label={t("focus")}
@@ -148,7 +150,7 @@ export function RuntimeTerminalPanel({
                     </ActionIcon>
                   </Tooltip>
                 ) : null}
-                {focused && !mobile ? (
+                {focused && !mobile && !embedded ? (
                   <Tooltip label={t("returnToDock")}>
                     <ActionIcon
                       aria-label={t("returnToDock")}
@@ -169,19 +171,21 @@ export function RuntimeTerminalPanel({
                     {t("terminate")}
                   </Button>
                 ) : null}
-                <Tooltip
-                  label={focused && mobile ? t("backToChat") : t("collapse")}
-                >
-                  <ActionIcon
-                    aria-label={
-                      focused && mobile ? t("backToChat") : t("collapse")
-                    }
-                    variant="subtle"
-                    onClick={terminal.onCollapse}
+                {!embedded && (
+                  <Tooltip
+                    label={focused && mobile ? t("backToChat") : t("collapse")}
                   >
-                    <IconX size={rem(17)} />
-                  </ActionIcon>
-                </Tooltip>
+                    <ActionIcon
+                      aria-label={
+                        focused && mobile ? t("backToChat") : t("collapse")
+                      }
+                      variant="subtle"
+                      onClick={terminal.onCollapse}
+                    >
+                      <IconX size={rem(17)} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
               </>
             )}
           </Group>
@@ -239,7 +243,7 @@ export function RuntimeTerminalPanel({
           </Alert>
         ) : null}
 
-        {!mobile && terminal.presentation === "docked" ? (
+        {!embedded && !mobile && terminal.presentation === "docked" ? (
           <Box
             aria-label={t("resizeDock")}
             aria-orientation="horizontal"

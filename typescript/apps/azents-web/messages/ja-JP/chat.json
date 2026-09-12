@@ -1,4 +1,15 @@
 {
+  "sessionPanel": {
+    "title": "セッションパネル",
+    "toggle": "セッションパネルを開く・閉じる",
+    "close": "セッションパネルを閉じる",
+    "files": "ファイル",
+    "runtime": "ランタイム",
+    "terminal": "ターミナル",
+    "previousTabs": "前のタブへスクロール",
+    "nextTabs": "次のタブへスクロール",
+    "resize": "セッションパネルのサイズを変更"
+  },
   "inheritModelProvider": "継承",
   "newMessage": "新着メッセージ",
   "selectAgent": "エージェントを選択して\n新しいチャットを始めましょう",

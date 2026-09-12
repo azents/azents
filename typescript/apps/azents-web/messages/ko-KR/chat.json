@@ -1,4 +1,15 @@
 {
+  "sessionPanel": {
+    "title": "세션 패널",
+    "toggle": "세션 패널 열기/닫기",
+    "close": "세션 패널 닫기",
+    "files": "파일",
+    "runtime": "런타임",
+    "terminal": "터미널",
+    "previousTabs": "이전 탭으로 스크롤",
+    "nextTabs": "다음 탭으로 스크롤",
+    "resize": "세션 패널 크기 조절"
+  },
   "inheritModelProvider": "상속",
   "newMessage": "새 메시지",
   "selectAgent": "에이전트를 선택하여\n새 채팅을 시작하세요",
