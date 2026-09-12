@@ -1,0 +1,128 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--mantine-color-body);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 8.25rem minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.body[data-mobile="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 2.75rem minmax(0, 1fr);
+}
+
+.strip {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-right: 0.0625rem solid var(--mantine-color-default-border);
+}
+
+.body[data-mobile="true"] .strip {
+  border-right: 0;
+  border-bottom: 0.0625rem solid var(--mantine-color-default-border);
+}
+
+.tabs {
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  padding: var(--mantine-spacing-xs);
+}
+
+.body[data-mobile="true"] .tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.body[data-mobile="true"] .tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem;
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+
+.tab svg {
+  flex-shrink: 0;
+}
+.tab:hover {
+  background: var(--mantine-color-default-hover);
+}
+.tab[aria-selected="true"] {
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-text);
+  font-weight: 600;
+}
+.body[data-mobile="true"] .tab {
+  flex-shrink: 0;
+  width: auto;
+  height: 100%;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+  border-radius: 0;
+}
+.body[data-mobile="true"] .tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0.75rem;
+  right: 0.75rem;
+  height: 0.125rem;
+  background: var(--mantine-primary-color-filled);
+}
+.nudge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2.75rem;
+  display: flex;
+  align-items: center;
+  z-index: 1;
+}
+.previous {
+  left: 0;
+  padding-left: 0.25rem;
+  background: linear-gradient(
+    to left,
+    transparent,
+    var(--mantine-color-body) 45%
+  );
+}
+.next {
+  right: 0;
+  padding-right: 0.25rem;
+  justify-content: flex-end;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--mantine-color-body) 45%
+  );
+}
+.content {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}

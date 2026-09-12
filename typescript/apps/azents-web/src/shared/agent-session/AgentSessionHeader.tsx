@@ -1,10 +1,7 @@
 "use client";
 
 /**
- * Agent session header + tab navigation.
- *
- * The Chat/Context tabs are session-scoped controls, so this header is rendered
- * only from concrete Agent session routes.
+ * Session title and controls above the persistent conversation workspace.
  */
 
 import {
@@ -15,62 +12,24 @@ import {
   Modal,
   rem,
   Stack,
-  Tabs,
   Text,
   TextInput,
 } from "@mantine/core";
 import { useDocumentTitle } from "@mantine/hooks";
 import {
-  IconCalendarClock,
-  IconChartBar,
-  IconFolderOpen,
+  IconLayoutSidebarRight,
   IconMenu2,
-  IconMessageCircle,
   IconPencil,
-  IconPlugConnected,
-  IconRobot,
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useRouter, useSearchParams } from "next/navigation";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShellMobileNav";
-import classes from "./AgentSessionHeader.module.css";
 import type {
   AgentResponse,
   AgentSessionResponse,
 } from "@azents/public-client";
-
-function isContextPage(value: string | null): boolean {
-  return (
-    value === "context" || value === "system-prompt" || value === "raw-events"
-  );
-}
-
-function resolveActiveTab(
-  page: string | null,
-): "chat" | "context" | "subagents" | "channels" | "scheduled-tasks" {
-  if (isContextPage(page)) {
-    return "context";
-  }
-  if (page === "subagents") {
-    return "subagents";
-  }
-  if (page === "channels") {
-    return "channels";
-  }
-  if (page === "scheduled-tasks") {
-    return "scheduled-tasks";
-  }
-  return "chat";
-}
 
 function getSessionDisplayTitle(
   session: AgentSessionResponse,
@@ -87,29 +46,26 @@ function getSessionDisplayTitle(
 }
 
 interface AgentSessionHeaderProps {
-  handle: string;
   agent: AgentResponse;
-  sessionId: string;
   session: AgentSessionResponse;
   onUpdateTitle: (title: string | null) => Promise<AgentSessionResponse>;
   onSessionTitleChange?: (session: AgentSessionResponse) => void;
-  onOpenRuntime?: () => void;
+  onTogglePanel: () => void;
+  panelOpened: boolean;
   chatControls?: ReactNode;
 }
 
 export function AgentSessionHeader({
-  handle,
   agent,
-  sessionId,
   session: initialSession,
   onUpdateTitle,
   onSessionTitleChange,
-  onOpenRuntime,
+  onTogglePanel,
+  panelOpened,
   chatControls,
 }: AgentSessionHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const tPanel = useTranslations("chat.sessionPanel");
   const mobileNav = useAgentFocusedShellMobileNav();
   const [session, setSession] = useState(initialSession);
   const [renameBusy, setRenameBusy] = useState(false);
@@ -120,11 +76,6 @@ export function AgentSessionHeader({
   useDocumentTitle(`${sessionTitle} - Azents`);
   const [editingOpened, setEditingOpened] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
-  const basePath = `/w/${handle}/agents/${agent.id}`;
-  const activeTab = useMemo(
-    () => resolveActiveTab(searchParams.get("page")),
-    [searchParams],
-  );
 
   const handleOpenRename = useCallback((): void => {
     setEditingTitle(session.title ?? "");
@@ -162,23 +113,6 @@ export function AgentSessionHeader({
   const handleClearTitle = useCallback(async (): Promise<void> => {
     await updateSessionTitle(null);
   }, [updateSessionTitle]);
-
-  const handleTabChange = useCallback(
-    (value: string | null): void => {
-      if (value === "chat") {
-        router.push(`${basePath}/sessions/${sessionId}`);
-      } else if (value === "context") {
-        router.push(`${basePath}/sessions/${sessionId}?page=context`);
-      } else if (value === "subagents") {
-        router.push(`${basePath}/sessions/${sessionId}?page=subagents`);
-      } else if (value === "channels") {
-        router.push(`${basePath}/sessions/${sessionId}?page=channels`);
-      } else if (value === "scheduled-tasks") {
-        router.push(`${basePath}/sessions/${sessionId}?page=scheduled-tasks`);
-      }
-    },
-    [router, basePath, sessionId],
-  );
 
   return (
     <>
@@ -256,9 +190,18 @@ export function AgentSessionHeader({
               <IconPencil size={rem(14)} />
             </ActionIcon>
           </Group>
-          {activeTab === "chat" && chatControls ? (
+          {chatControls ? (
             <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
           ) : null}
+          <ActionIcon
+            ml="xs"
+            variant={panelOpened ? "light" : "subtle"}
+            onClick={onTogglePanel}
+            aria-label={tPanel("toggle")}
+            aria-expanded={panelOpened}
+          >
+            <IconLayoutSidebarRight size={rem(18)} />
+          </ActionIcon>
         </Group>
         <Group
           hiddenFrom="lg"
@@ -295,69 +238,17 @@ export function AgentSessionHeader({
             </ActionIcon>
           </Group>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            {activeTab === "chat" ? chatControls : null}
-            {activeTab === "chat" && onOpenRuntime && (
-              <ActionIcon
-                variant="subtle"
-                onClick={onOpenRuntime}
-                aria-label="Open agent runtime"
-              >
-                <IconFolderOpen size="1rem" />
-              </ActionIcon>
-            )}
+            {chatControls}
+            <ActionIcon
+              variant={panelOpened ? "light" : "subtle"}
+              onClick={onTogglePanel}
+              aria-label={tPanel("toggle")}
+              aria-expanded={panelOpened}
+            >
+              <IconLayoutSidebarRight size={rem(18)} />
+            </ActionIcon>
           </Group>
         </Group>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          variant="default"
-          px="sm"
-        >
-          <Tabs.List
-            className={classes.scrollableTabs}
-            style={{
-              flexWrap: "nowrap",
-              overflowX: "auto",
-              overflowY: "hidden",
-            }}
-          >
-            <Tabs.Tab
-              value="chat"
-              leftSection={<IconMessageCircle size={14} />}
-              style={{ flexShrink: 0 }}
-            >
-              {t("tabs.chat")}
-            </Tabs.Tab>
-            <Tabs.Tab
-              value="context"
-              leftSection={<IconChartBar size={14} />}
-              style={{ flexShrink: 0 }}
-            >
-              {t("tabs.context")}
-            </Tabs.Tab>
-            <Tabs.Tab
-              value="subagents"
-              leftSection={<IconRobot size={14} />}
-              style={{ flexShrink: 0 }}
-            >
-              {t("subagents.title")}
-            </Tabs.Tab>
-            <Tabs.Tab
-              value="channels"
-              leftSection={<IconPlugConnected size={rem(14)} />}
-              style={{ flexShrink: 0 }}
-            >
-              {t("tabs.channels")}
-            </Tabs.Tab>
-            <Tabs.Tab
-              value="scheduled-tasks"
-              leftSection={<IconCalendarClock size={rem(14)} />}
-              style={{ flexShrink: 0 }}
-            >
-              {t("tabs.scheduledTasks")}
-            </Tabs.Tab>
-          </Tabs.List>
-        </Tabs>
       </Box>
     </>
   );

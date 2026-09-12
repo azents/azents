@@ -1,8 +1,0 @@
-.scrollableTabs {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.scrollableTabs::-webkit-scrollbar {
-  display: none;
-}
