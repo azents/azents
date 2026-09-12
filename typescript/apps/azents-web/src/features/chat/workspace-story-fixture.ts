@@ -1,0 +1,186 @@
+import type { ProjectDirectoryPickerState } from "./workspace/components/WorkspaceDirectoryPickerModal";
+import type { WorkspacePanelContainerOutput } from "./workspace/containers/useWorkspacePanelContainer";
+import type {
+  WorkspacePanelState,
+  WorkspaceProjectPanelState,
+} from "./workspace/types";
+const noop = (): void => {};
+const noopPath = (): void => {};
+const closedProjectPickerState: ProjectDirectoryPickerState = {
+  type: "CLOSED",
+};
+const readyWorkspaceState: WorkspacePanelState = {
+  type: "SERVER",
+  server: {
+    lifecycle: {
+      target: "running",
+      convergence: "stable",
+      provider: { connection: "connected", resource: "running" },
+      runner: { state: "ready" },
+      availability: "ready",
+      reason_code: null,
+      desired_generation: 3,
+    },
+    runtime: {
+      type: "RUNNING",
+      runtime_id: "runtime-1",
+      detail: null,
+    },
+    workspace: {
+      type: "READY",
+      manifest: {
+        root: "/workspace/agent",
+        cwd: "/workspace/agent/project",
+        entries: [],
+        git: null,
+      },
+    },
+    actions: {
+      start: null,
+      stop: {
+        type: "STOP_RUNTIME",
+        method: "POST",
+        path: "",
+      },
+      restart: null,
+      reset: {
+        type: "RESET_RUNTIME",
+        method: "POST",
+        path: "",
+      },
+    },
+  },
+  runtimeConfiguration: {
+    type: "LOADED",
+    configuration: {
+      status: "applied",
+      desired: null,
+      applied: null,
+    },
+  },
+  manifest: {
+    root: "/workspace/agent",
+    cwd: "/workspace/agent/project",
+    entries: [
+      {
+        name: "src",
+        path: "/workspace/agent/project/src",
+        kind: "directory",
+        size: null,
+        mediaType: null,
+        modifiedAt: null,
+      },
+      {
+        name: "README.md",
+        path: "/workspace/agent/project/README.md",
+        kind: "file",
+        size: 2048,
+        mediaType: "text/markdown",
+        modifiedAt: "2026-05-01T10:00:00.000Z",
+      },
+    ],
+  },
+  directory: {
+    path: "/workspace/agent/project",
+    entries: [
+      {
+        name: "src",
+        path: "/workspace/agent/project/src",
+        kind: "directory",
+        size: null,
+        mediaType: null,
+        modifiedAt: null,
+      },
+      {
+        name: "README.md",
+        path: "/workspace/agent/project/README.md",
+        kind: "file",
+        size: 2048,
+        mediaType: "text/markdown",
+        modifiedAt: "2026-05-01T10:00:00.000Z",
+      },
+    ],
+  },
+  directoryEntriesByPath: {
+    "/workspace/agent/project": [
+      {
+        name: "src",
+        path: "/workspace/agent/project/src",
+        kind: "directory",
+        size: null,
+        mediaType: null,
+        modifiedAt: null,
+      },
+      {
+        name: "README.md",
+        path: "/workspace/agent/project/README.md",
+        kind: "file",
+        size: 2048,
+        mediaType: "text/markdown",
+        modifiedAt: "2026-05-01T10:00:00.000Z",
+      },
+    ],
+  },
+  directoryLoadStatesByPath: {},
+  fileState: { type: "IDLE" },
+  workspaceView: "browser",
+  selectedFilePath: null,
+  selectedPaths: [],
+  selectedEntry: null,
+  inspectorState: { type: "IDLE" },
+  isRefreshing: false,
+  isMutating: false,
+  isStarting: false,
+  isStopping: false,
+  isResetting: false,
+};
+
+export const workspacePanelStoryFixture: WorkspacePanelContainerOutput = {
+  state: readyWorkspaceState,
+  metricsState: { type: "LOADING" },
+  runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
+  projectState: {
+    type: "READY",
+    projects: [],
+    registrationDialog: { type: "CLOSED" },
+    isRegisteringProject: false,
+    isCreatingWorktree: false,
+    registerProjectError: null,
+    pendingDeleteProjectId: null,
+  } satisfies WorkspaceProjectPanelState,
+  onStartRuntime: noop,
+  onStopRuntime: noop,
+  onRestartRuntime: noop,
+  onResetRuntime: noop,
+  onOpenDirectory: noop,
+  onOpenFile: noop,
+  onShowInfo: noop,
+  onBackToBrowser: noop,
+  onToggleSelectedPath: noop,
+  onClearSelection: noop,
+  onRefresh: noop,
+  onCreateDirectory: noop,
+  onRenamePath: noop,
+  onMovePath: noop,
+  onDeletePath: noop,
+  onBulkMovePaths: noop,
+  onBulkDeletePaths: noop,
+  getDownloadHref: (path: string): string => `/download?path=${path}`,
+  projectPickerState: closedProjectPickerState,
+  isProjectPickerOpen: false,
+  onOpenProjectPicker: noop,
+  onCloseProjectPicker: noop,
+  onOpenProjectPickerDirectory: noopPath,
+  onSelectProjectPickerDirectory: noop,
+  onRefreshProjectPicker: noop,
+  onStartRuntimeForProjectPicker: noop,
+  onRestartRuntimeForProjectPicker: noop,
+  onCloseProjectRegistration: noop,
+  onSetProjectRegistrationMode: noop,
+  onSetProjectRegistrationStartingRef: noop,
+  onSubmitProjectRegistration: noop,
+  onDeleteProject: noop,
+  onRemoveProjectEntry: noop,
+  onDeleteWorktreeProjectEntry: noop,
+  onSetBrowserMode: noop,
+};

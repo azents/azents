@@ -1,4 +1,15 @@
 {
+  "sessionPanel": {
+    "title": "Session panel",
+    "toggle": "Toggle session panel",
+    "close": "Close session panel",
+    "files": "Files",
+    "runtime": "Runtime",
+    "terminal": "Terminal",
+    "previousTabs": "Scroll to previous tabs",
+    "nextTabs": "Scroll to more tabs",
+    "resize": "Resize session panel"
+  },
   "inheritModelProvider": "Inherits",
   "newMessage": "New message",
   "selectAgent": "Select an agent to\nstart a new chat",
