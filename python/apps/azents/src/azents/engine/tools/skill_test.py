@@ -10,7 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRuntimeCapability, AgentSessionRunState
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentSessionProductMode,
+    AgentSessionRunState,
+)
 from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
@@ -36,6 +40,7 @@ from azents.engine.tools.runtime_io import (
 from azents.engine.tools.skill import (
     SkillProjectionService,
     SkillRuntimeFileReader,
+    SkillStateStore,
     SkillToolkit,
     load_skill_projection_for_actions,
     make_load_skill_tool,
@@ -44,10 +49,21 @@ from azents.engine.tools.skill import (
     skill_actions_from_snapshot,
     skill_items_from_vfs_projection,
 )
+from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
+)
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
 )
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
@@ -212,6 +228,52 @@ class _SkillScanRunner:
             truncated=character_offset + len(chunk) < len(text),
             final_cursor="cursor-read",
         )
+
+
+class _OwnershipTakingSkillScanRunner(_SkillScanRunner):
+    """Advance durable Session ownership after external file discovery."""
+
+    def __init__(
+        self,
+        *,
+        entries_by_root: dict[str, tuple[str, ...]],
+        files: dict[str, bytes],
+        session_manager: SessionManager[AsyncSession],
+        session_id: str,
+    ) -> None:
+        super().__init__(entries_by_root=entries_by_root, files=files)
+        self.session_manager = session_manager
+        self.session_id = session_id
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        character_offset: int,
+        max_characters: int,
+        encoding: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Finish the external read, then supersede the executing owner."""
+        result = await super().read_text_file(
+            runtime_id=runtime_id,
+            runner_generation=runner_generation,
+            owner_session_id=owner_session_id,
+            path=path,
+            character_offset=character_offset,
+            max_characters=max_characters,
+            encoding=encoding,
+            deadline_at=deadline_at,
+        )
+        async with self.session_manager() as session:
+            await AgentSessionRepository().claim_owner_generation(
+                session,
+                self.session_id,
+            )
+        return result
 
 
 class _TestableSkillProjectionService(SkillProjectionService):
@@ -392,6 +454,15 @@ class _SkillStore:
 
     def __init__(self, state: SkillProjectionState) -> None:
         self.state = state
+        self.bound_owners: list[SessionExecutionOwner] = []
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "_SkillStore":
+        """Record the execution binding while preserving in-memory state."""
+        self.bound_owners.append(owner)
+        return self
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Return configured state."""
@@ -482,6 +553,83 @@ class TestManagedSkillProjection:
 
 class TestSkillToolkit:
     """Skill Toolkit managed VFS authorization behavior."""
+
+    def test_execution_authority_binds_store_and_projection_service(self) -> None:
+        """A resolved Toolkit uses execution-local state collaborators."""
+        store = _SkillStore(SkillProjectionState())
+        projection_service = SkillProjectionService(
+            store=store,
+            project_reader=_ProjectReader([]),
+            runtime_target_resolver=_RuntimeTargetResolver(),
+            session_working_folder_binding_service=AsyncMock(),
+        )
+        toolkit = SkillToolkit(
+            store=store,
+            projection_service=projection_service,
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        authority = SessionResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=2,
+        )
+
+        toolkit.bind_execution_authority(authority)
+        toolkit.bind_execution_authority(authority)
+
+        assert store.bound_owners == [authority.execution_owner]
+        assert toolkit.store is store
+        assert toolkit.projection_service is not projection_service
+        assert toolkit.projection_service is not None
+        assert toolkit.projection_service.store is store
+
+    def test_execution_authority_rejects_another_session(self) -> None:
+        """A resolved Toolkit cannot be rebound across Session boundaries."""
+        toolkit = SkillToolkit(
+            store=_SkillStore(SkillProjectionState()),
+            projection_service=None,
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        authority = SessionResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-2",
+            root_session_id="session-2",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+
+        with pytest.raises(ValueError, match="Session does not match"):
+            toolkit.bind_execution_authority(authority)
+
+    def test_narrow_execution_owner_binds_before_lifecycle_hooks(self) -> None:
+        """Idle continuation can bind Skill state without full Run authority."""
+        store = _SkillStore(SkillProjectionState())
+        toolkit = SkillToolkit(
+            store=store,
+            projection_service=None,
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        owner = SessionExecutionOwner(
+            session_id="session-1",
+            owner_generation=3,
+        )
+
+        toolkit.bind_execution_owner(owner)
+        toolkit.bind_execution_owner(owner)
+
+        assert store.bound_owners == [owner]
 
     @pytest.mark.asyncio
     async def test_turn_workspace_authorizes_managed_skill_reads(self) -> None:
@@ -822,6 +970,77 @@ class TestSkillProjectionService:
                 {"type": "input_actions_updated", "session_id": "session-1"},
             )
         ]
+
+    async def test_takeover_after_runtime_scan_rejects_skill_state_commit(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Runtime discovery cannot commit after its Session owner is superseded."""
+        sessions = AgentSessionRepository()
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "skill-owner-fence")
+            agent_id = await _create_agent(session, workspace_id, "skill-owner-fence")
+            created = await sessions.create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            owner_generation = await sessions.claim_owner_generation(
+                session,
+                created.id,
+            )
+        authority = SessionResourceAuthority(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=created.id,
+            root_session_id=created.id,
+            run_id="1" * 32,
+            run_index=1,
+            owner_generation=owner_generation,
+        )
+        store = SkillStateStore(session_manager=rdb_session_manager).for_execution(
+            authority.execution_owner
+        )
+        project_path = "/workspace/agent/project"
+        skill_dir = f"{project_path}/.agents/skills/review"
+        skill_path = f"{skill_dir}/SKILL.md"
+        runner = _OwnershipTakingSkillScanRunner(
+            entries_by_root={
+                f"{project_path}/.agents/skills": (skill_dir,),
+            },
+            files={
+                skill_path: b"---\nname: review\ndescription: Review code.\n---\nBody"
+            },
+            session_manager=rdb_session_manager,
+            session_id=created.id,
+        )
+        service = SkillProjectionService(
+            store=store,
+            project_reader=_ProjectReader(
+                [_project(project_path).model_copy(update={"session_id": created.id})]
+            ),
+            runtime_target_resolver=_RuntimeTargetResolver(),
+            session_working_folder_binding_service=AsyncMock(),
+            runner_operations=runner,
+        )
+
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+            await service.sync_latest(
+                agent_id=agent_id,
+                session_id=created.id,
+                reason="run_end",
+            )
+
+        state = await SkillStateStore(session_manager=rdb_session_manager).load(
+            agent_id, created.id
+        )
+        assert state.latest.items == []
+        assert state.active.items == []
 
 
 class TestSkillAction:

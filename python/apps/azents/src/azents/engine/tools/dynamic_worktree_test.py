@@ -15,6 +15,7 @@ from azents.services.session_git_worktree import (
     AgentRemoveGitWorktreeAdmission,
     SessionGitWorktreeService,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .dynamic_worktree import DynamicWorktreeToolkit
 
@@ -32,6 +33,15 @@ def _turn_context() -> TurnContext:
         run_id="run-1",
         publish_event=_noop_publish,
         session_id="session-1",
+        resource_authority=SessionResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=7,
+        ),
     )
 
 
@@ -80,6 +90,7 @@ class _Service:
         session_id: str,
         originating_run_id: str,
         client_tool_call_id: str,
+        owner_generation: int,
         source_project_path: str,
         starting_ref: str | None,
         branch_name: str | None,
@@ -93,6 +104,7 @@ class _Service:
                 "session_id": session_id,
                 "originating_run_id": originating_run_id,
                 "client_tool_call_id": client_tool_call_id,
+                "owner_generation": owner_generation,
                 "source_project_path": source_project_path,
                 "starting_ref": starting_ref,
                 "branch_name": branch_name,
@@ -110,6 +122,7 @@ class _Service:
         session_id: str,
         originating_run_id: str,
         client_tool_call_id: str,
+        owner_generation: int,
         worktree_project_path: str,
         force: bool,
     ) -> AgentRemoveGitWorktreeAdmission:
@@ -122,6 +135,7 @@ class _Service:
                 "session_id": session_id,
                 "originating_run_id": originating_run_id,
                 "client_tool_call_id": client_tool_call_id,
+                "owner_generation": owner_generation,
                 "worktree_project_path": worktree_project_path,
                 "force": force,
             }
@@ -224,6 +238,7 @@ async def test_create_admits_authoritative_call_and_marks_run_boundary() -> None
             "session_id": "session-1",
             "originating_run_id": "run-42",
             "client_tool_call_id": "call-42",
+            "owner_generation": 7,
             "source_project_path": "/workspace/agent/linked",
             "starting_ref": " refs/tags/v1 ",
             "branch_name": " feature/test ",
@@ -314,6 +329,7 @@ async def test_remove_defaults_nonforce_and_marks_run_boundary() -> None:
             "session_id": "session-1",
             "originating_run_id": "run-43",
             "client_tool_call_id": "call-43",
+            "owner_generation": 7,
             "worktree_project_path": "/workspace/agent/worktree",
             "force": False,
         }

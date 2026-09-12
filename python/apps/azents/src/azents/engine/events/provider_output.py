@@ -103,7 +103,7 @@ class _PreparedGeneratedImage:
 
 @dataclasses.dataclass
 class PreparedProviderOutput:
-    """Prepared provider output awaiting transactional upload and admission."""
+    """Uploaded provider output awaiting database-only metadata admission."""
 
     normalized: NormalizedAdapterOutput
     materializer: "ProviderOutputMaterializer"
@@ -116,7 +116,6 @@ class PreparedProviderOutput:
         await self.materializer.persist(
             session,
             self.generated_images,
-            uploaded_keys=self.uploaded_keys,
         )
 
     async def cleanup(self) -> None:
@@ -145,7 +144,6 @@ class PreparedClientToolOutput:
         await self.materializer.persist(
             session,
             self.generated_images,
-            uploaded_keys=self.uploaded_keys,
         )
 
     async def cleanup(self) -> None:
@@ -217,11 +215,22 @@ class ProviderOutputMaterializer:
             for file in pending
         )
         self._validate_unique_outputs(generated_images)
-        return PreparedProviderOutput(
+        prepared = PreparedProviderOutput(
             normalized=self._attach_resources(normalized, generated_images),
             materializer=self,
             generated_images=generated_images,
         )
+        complete = False
+        try:
+            await self._prepare_uploads(
+                generated_images,
+                uploaded_keys=prepared.uploaded_keys,
+            )
+            complete = True
+            return prepared
+        finally:
+            if not complete:
+                await prepared.cleanup()
 
     async def prepare_client_result(
         self,
@@ -249,20 +258,48 @@ class ProviderOutputMaterializer:
             for file in pending
         )
         self._validate_unique_outputs(generated_images)
-        return PreparedClientToolOutput(
+        prepared = PreparedClientToolOutput(
             result=self._attach_client_resources(result, generated_images),
             materializer=self,
             generated_images=generated_images,
+        )
+        complete = False
+        try:
+            await self._prepare_uploads(
+                generated_images,
+                uploaded_keys=prepared.uploaded_keys,
+            )
+            complete = True
+            return prepared
+        finally:
+            if not complete:
+                await prepared.cleanup()
+
+    async def _prepare_uploads(
+        self,
+        generated_images: tuple[_PreparedGeneratedImage, ...],
+        *,
+        uploaded_keys: set[str],
+    ) -> None:
+        """Read retry ownership before uploading outside database transactions."""
+        async with self.model_file_service.session_manager() as session:
+            await self._validate_scope_in_session(session)
+            existing_keys = await self._validated_persisted_object_keys_in_session(
+                session,
+                generated_images,
+            )
+        await self._upload(
+            generated_images,
+            skip_keys=existing_keys,
+            uploaded_keys=uploaded_keys,
         )
 
     async def persist(
         self,
         session: AsyncSession,
         generated_images: tuple[_PreparedGeneratedImage, ...],
-        *,
-        uploaded_keys: set[str],
     ) -> None:
-        """Serialize admission, upload new objects, and persist file metadata."""
+        """Revalidate authority and admit file metadata with database work only."""
         if not generated_images:
             return
         retention_root_session_id = await self._validate_scope_in_session(
@@ -274,14 +311,9 @@ class ProviderOutputMaterializer:
             for image in generated_images
         ):
             raise ModelCallError("Generated image output scope changed.")
-        existing_keys = await self._validated_persisted_object_keys_in_session(
+        await self._validated_persisted_object_keys_in_session(
             session,
             generated_images,
-        )
-        await self._upload(
-            generated_images,
-            skip_keys=existing_keys,
-            uploaded_keys=uploaded_keys,
         )
         exchange_repository = self.exchange_file_service.exchange_file_repository
         model_repository = self.model_file_service.model_file_repository
@@ -347,9 +379,9 @@ class ProviderOutputMaterializer:
         *,
         uploaded_keys: set[str],
     ) -> None:
-        """Serialize compensation and preserve any newly committed retry output."""
+        """Preserve admitted retry output and delete generation-scoped orphans."""
         async with self.model_file_service.session_manager() as session:
-            run = await self.model_file_service.agent_run_repository.lock_by_id(
+            run = await self.model_file_service.agent_run_repository.get_by_id(
                 session,
                 self.run_id,
             )
@@ -361,11 +393,11 @@ class ProviderOutputMaterializer:
                 if run is not None and run.session_id == self.session_id
                 else set()
             )
-            for key in sorted(uploaded_keys - protected_keys):
-                await self.model_file_service.s3_service.delete(
-                    bucket=self.model_file_service.config.workspace_s3.bucket,
-                    key=key,
-                )
+        for key in sorted(uploaded_keys - protected_keys):
+            await self.model_file_service.s3_service.delete(
+                bucket=self.model_file_service.config.workspace_s3.bucket,
+                key=key,
+            )
 
     async def _validated_persisted_object_keys_in_session(
         self,
@@ -505,7 +537,10 @@ class ProviderOutputMaterializer:
             now=now,
             config=self.exchange_file_service.config,
         )
-        identity = f"{self.run_id}:{pending.call_id}:{pending.output_index}"
+        identity = (
+            f"{self.run_id}:{self.authority.owner_generation}:"
+            f"{pending.call_id}:{pending.output_index}"
+        )
         exchange_id = _deterministic_id(identity, "exchange")
         preview_id = _deterministic_id(identity, "preview")
         model_file_id = _deterministic_id(identity, "model-file")
@@ -733,13 +768,15 @@ class ProviderOutputMaterializer:
             for upload in image.uploads:
                 if upload.key in skip_keys:
                     continue
+                # An unsuccessful response may still leave an uploaded object.
+                # Its generation-scoped key belongs to this compensation.
+                uploaded_keys.add(upload.key)
                 await self.model_file_service.s3_service.upload(
                     bucket=self.model_file_service.config.workspace_s3.bucket,
                     key=upload.key,
                     body=upload.body,
                     content_type=upload.media_type,
                 )
-                uploaded_keys.add(upload.key)
 
     @staticmethod
     def _validate_unique_outputs(

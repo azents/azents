@@ -22,6 +22,8 @@ from azents.engine.events.engine_events import (
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
+    AssistantMessagePayload,
+    Event,
     ProviderToolCallPayload,
     ReasoningPayload,
 )
@@ -67,29 +69,55 @@ class _AgentRunRepository:
         return self.current
 
 
-class _LiveEventStore:
+class _AgentSessionRepository:
+    """Expose the durable owner generation used for projection admission."""
+
+    def __init__(self, owner_generation: int = 1) -> None:
+        self.owner_generation = owner_generation
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> object:
+        del session, session_id
+        return type(
+            "_Session",
+            (),
+            {"owner_generation": self.owner_generation},
+        )()
+
+
+class _LiveEventStore(InMemoryLiveEventStore):
     """Live event store test double."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.clear_count = 0
 
-    async def list_by_session_id(self, session_id: str) -> list[object]:
-        """Return no partial events."""
-        del session_id
-        return []
-
-    async def clear_session(self, session_id: str) -> None:
+    async def _clear_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
         """Record a session clear."""
-        del session_id
+        cleared = await super()._clear_for_owner(session_id, owner_generation)
+        if not cleared:
+            return False
         self.clear_count += 1
+        return True
 
 
 class _FailingDiscardStore(_LiveEventStore):
     """Fail model-partial lookup during best-effort discard."""
 
-    async def list_by_session_id(self, session_id: str) -> list[object]:
+    async def _list_for_owner(
+        self,
+        session_id: str,
+        owner_generation: int,
+    ) -> list[Event]:
         """Simulate a live-store read failure."""
-        del session_id
+        del session_id, owner_generation
         raise RuntimeError("live store unavailable")
 
 
@@ -105,6 +133,18 @@ class _Broadcast:
         if self.fail:
             raise WebSocketBroadcastPublishError
         self.events.append((session_id, event))
+
+    async def publish_live_projection(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Record a generation-gated projection event."""
+        del owner_generation
+        await self.publish(session_id, event)
+        return True
 
 
 def _running_run(run_id: str) -> AgentRunState:
@@ -140,6 +180,8 @@ def _projector(
     broadcast: _Broadcast,
     *,
     current_run: AgentRunState | None = None,
+    owner_generation: int = 1,
+    session_repository: _AgentSessionRepository | None = None,
 ) -> LiveEventProjector:
     """Create a projector with durable correlation doubles."""
     return LiveEventProjector(
@@ -147,6 +189,10 @@ def _projector(
         broadcast=cast(WebSocketBroadcast, broadcast),
         session_manager=_SessionManager(),
         agent_run_repository=cast(Any, _AgentRunRepository(current_run)),
+        agent_session_repository=cast(
+            Any,
+            session_repository or _AgentSessionRepository(owner_generation),
+        ),
     )
 
 
@@ -171,10 +217,15 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
             model_call_started_at=datetime.datetime(2026, 7, 14, tzinfo=datetime.UTC),
             retry=None,
         ),
+        owner_generation=1,
     )
 
-    await projector.update("session-001", RunComplete(run_id="run-a"))
-    await projector.publish_live_run_cleared("session-001", run_id="run-a")
+    await projector.update(
+        "session-001", RunComplete(run_id="run-a"), owner_generation=1
+    )
+    await projector.publish_live_run_cleared(
+        "session-001", run_id="run-a", owner_generation=1
+    )
 
     assert store.clear_count == 0
     assert [event[1]["type"] for event in broadcast.events] == ["live_run_updated"]
@@ -182,7 +233,9 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
     assert is_string_object_dict(live_run)
     assert live_run["model_call_started_at"] == "2026-07-14T00:00:00+00:00"
 
-    await projector.publish_live_run_cleared("session-001", run_id="run-b")
+    await projector.publish_live_run_cleared(
+        "session-001", run_id="run-b", owner_generation=1
+    )
 
     assert broadcast.events[-1][1] == {
         "type": "live_run_cleared",
@@ -205,10 +258,12 @@ async def test_stale_terminal_after_restart_uses_durable_current_run() -> None:
     await projector.update(
         "session-001",
         RunComplete(run_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        owner_generation=1,
     )
     await projector.publish_live_run_cleared(
         "session-001",
         run_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        owner_generation=1,
     )
 
     assert store.clear_count == 0
@@ -234,12 +289,14 @@ async def test_active_tool_calls_broadcast_without_redis_storage() -> None:
         "session-001",
         [active_call],
         removed_call_ids=set(),
+        owner_generation=1,
     )
     restarted_projector = _projector(store, broadcast)
     await restarted_projector.replace_active_tool_calls(
         "session-001",
         [],
         removed_call_ids={"call-1"},
+        owner_generation=1,
     )
 
     assert [event[1]["type"] for event in broadcast.events] == [
@@ -274,8 +331,11 @@ async def test_live_run_broadcast_failure_is_non_fatal() -> None:
             model_call_started_at=datetime.datetime(2026, 7, 14, tzinfo=datetime.UTC),
             retry=None,
         ),
+        owner_generation=1,
     )
-    await projector.publish_live_run_cleared("session-001", run_id="run-a")
+    await projector.publish_live_run_cleared(
+        "session-001", run_id="run-a", owner_generation=1
+    )
 
 
 @pytest.mark.asyncio
@@ -293,6 +353,7 @@ async def test_provider_tool_activity_upserts_and_discards_with_model_attempt() 
             status="running",
             arguments=None,
         ),
+        owner_generation=1,
     )
     running_events = await store.list_by_session_id("session-001")
     assert len(running_events) == 1
@@ -308,6 +369,7 @@ async def test_provider_tool_activity_upserts_and_discards_with_model_attempt() 
             status="completed",
             arguments='{"query":"azents"}',
         ),
+        owner_generation=1,
     )
     completed_events = await store.list_by_session_id("session-001")
     assert len(completed_events) == 1
@@ -318,7 +380,7 @@ async def test_provider_tool_activity_upserts_and_discards_with_model_attempt() 
     assert completed.payload.status == "completed"
     assert completed.payload.arguments == '{"query":"azents"}'
 
-    await projector.discard_failed_attempt("session-001")
+    await projector.discard_failed_attempt("session-001", owner_generation=1)
 
     assert await store.list_by_session_id("session-001") == []
     assert [event[1]["type"] for event in broadcast.events] == [
@@ -355,8 +417,8 @@ async def test_reasoning_stream_preserves_item_and_summary_boundaries() -> None:
             summary_index=0,
         ),
     ):
-        await projector.update("session-001", event)
-    await projector.flush_session("session-001")
+        await projector.update("session-001", event, owner_generation=1)
+    await projector.flush_session("session-001", owner_generation=1)
 
     reasoning_events = await store.list_by_session_id("session-001")
     assert len(reasoning_events) == 2
@@ -387,6 +449,7 @@ async def test_reasoning_identity_promotion_broadcasts_previous_id_removal() -> 
             output_index=0,
             summary_index=0,
         ),
+        owner_generation=1,
     )
     await projector.update(
         "session-001",
@@ -396,8 +459,9 @@ async def test_reasoning_identity_promotion_broadcasts_previous_id_removal() -> 
             output_index=0,
             summary_index=0,
         ),
+        owner_generation=1,
     )
-    await projector.flush_session("session-001")
+    await projector.flush_session("session-001", owner_generation=1)
 
     reasoning_events = await store.list_by_session_id("session-001")
     assert len(reasoning_events) == 1
@@ -415,7 +479,7 @@ async def test_failed_attempt_discard_store_failure_is_non_fatal() -> None:
     """Live-store cleanup failure does not block durable retry handling."""
     projector = _projector(_FailingDiscardStore(), _Broadcast())
 
-    await projector.discard_failed_attempt("session-001")
+    await projector.discard_failed_attempt("session-001", owner_generation=1)
 
 
 @pytest.mark.asyncio
@@ -428,6 +492,7 @@ async def test_failed_attempt_discards_published_model_partials() -> None:
     await projector.update(
         "session-001",
         ContentDelta(delta="failed prefix", content_index=0),
+        owner_generation=1,
     )
     await projector.update(
         "session-001",
@@ -437,12 +502,13 @@ async def test_failed_attempt_discards_published_model_partials() -> None:
             output_index=1,
             summary_index=0,
         ),
+        owner_generation=1,
     )
-    await projector.flush_session("session-001")
+    await projector.flush_session("session-001", owner_generation=1)
 
     assert len(await store.list_by_session_id("session-001")) == 2
 
-    await projector.discard_failed_attempt("session-001")
+    await projector.discard_failed_attempt("session-001", owner_generation=1)
 
     assert await store.list_by_session_id("session-001") == []
     assert [event[1]["type"] for event in broadcast.events] == [
@@ -451,3 +517,95 @@ async def test_failed_attempt_discards_published_model_partials() -> None:
         "live_event_removed",
         "live_event_removed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_takeover_rejects_old_buffer_flush_and_clear() -> None:
+    """A new durable generation makes buffered old live cleanup a no-op."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    sessions = _AgentSessionRepository(owner_generation=1)
+    projector = _projector(
+        store,
+        broadcast,
+        session_repository=sessions,
+    )
+
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="stale partial", content_index=0),
+        owner_generation=1,
+    )
+    sessions.owner_generation = 2
+    await projector.publish_live_run_updated(
+        "session-001",
+        ChatLiveRunState(
+            run_id="run-a",
+            phase=AgentRunPhase.WAITING_FOR_MODEL,
+            status=AgentRunStatus.RUNNING,
+            inference_profile=AppliedInferenceProfile(
+                model_target_label="main",
+                model_display_name="Test model",
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            ),
+            model_call_started_at=None,
+            retry=None,
+        ),
+        owner_generation=2,
+    )
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="fresh partial", content_index=0),
+        owner_generation=2,
+    )
+    await projector.flush_session("session-001", owner_generation=2)
+
+    await projector.flush_session("session-001", owner_generation=1)
+    await projector.clear_session("session-001", owner_generation=1)
+
+    events = await store.list_by_session_id("session-001")
+    assert len(events) == 1
+    assert isinstance(events[0].payload, AssistantMessagePayload)
+    assert events[0].payload.content == "fresh partial"
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_run_updated",
+        "live_event_upserted",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_control_event_reseeds_empty_store_and_rejects_stale_owner() -> None:
+    """Current controls seed an empty fence while stale controls stay private."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    sessions = _AgentSessionRepository(owner_generation=2)
+    projector = _projector(
+        store,
+        broadcast,
+        session_repository=sessions,
+    )
+    event: dict[str, object] = {
+        "type": "todo_state_changed",
+        "todo": {"items": []},
+    }
+
+    await projector.publish_control_event(
+        "session-001",
+        event,
+        owner_generation=2,
+    )
+    await projector.publish_control_event(
+        "session-001",
+        {"type": "runtime_error", "message": "stale"},
+        owner_generation=1,
+    )
+
+    assert broadcast.events == [("session-001", event)]
+    current_store = store.for_owner("session-001", 2)
+    await current_store.append_assistant_delta(
+        "session-001",
+        delta="current",
+        content_index=0,
+    )
+    assert len(await store.list_by_session_id("session-001")) == 1

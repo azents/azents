@@ -32,8 +32,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-09-10
-spec_version: 11
+last_verified_at: 2026-09-12
+spec_version: 12
 ---
 
 # Scheduled Task Domain Spec
@@ -81,6 +81,13 @@ schedule, and `scheduled_for` values that were admitted. Mutable state records
 items, and current provider Tracker projection parts.
 
 ## Authority and Management
+
+Scheduled cycle progress, initial channel tracking, terminal settlement, and
+provider presentation are bound to the Session execution owner that admitted the
+cycle. Owner validation is repeated at durable commit boundaries; provider
+registration or delivery runs without an open database transaction. A replacement
+Worker may recover the durable cycle under its newer generation, while the
+superseded Worker cannot append progress or terminal state.
 
 All management paths validate the current Workspace, Agent, root Session, and
 optional Binding authority. Binding IDs are opaque exact identifiers; there is no
@@ -312,6 +319,9 @@ and result text.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 12) — Bound Scheduled progress, initial
+  channel tracking, terminal state, and provider settlement to the current Session
+  execution owner.
 - **2026-09-08** (spec_version 11) — Split Scheduled progress into
   repository-owned preparation and admission, transaction-free provider/Runtime
   effects, and fresh fenced Tracker settlement while retaining one-attempt

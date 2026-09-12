@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import functools
 import logging
 from collections.abc import Sequence
 from typing import assert_never
@@ -130,6 +131,7 @@ class SessionRunner:
         self.run_active = False
         self.handover_wake_up: SessionWakeUp | None = None
         self.handover_required = False
+        self.ownership_lost = False
         self.mailbox_activity_observer: MailboxActivityObserver | None = None
 
     @property
@@ -239,6 +241,10 @@ class SessionRunner:
                 await self.stop_controller.tool_admission_barrier.close()
                 return True
 
+            await self.session_lifecycle.assert_current_owner_generation(
+                session_id,
+                owner_generation=self._required_owner_generation(),
+            )
             return False
 
         return check_stop
@@ -276,7 +282,10 @@ class SessionRunner:
     ) -> None:
         """Clean only live activity after processing failure."""
         try:
-            await self.session_lifecycle.clear_session_activity(session_id)
+            await self.session_lifecycle.clear_owned_session_activity(
+                session_id,
+                owner_generation=self._required_owner_generation(),
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -324,7 +333,10 @@ class SessionRunner:
         )
         if not marked_idle:
             return False
-        await self.session_lifecycle.clear_session_activity(session_id)
+        await self.session_lifecycle.clear_owned_session_activity(
+            session_id,
+            owner_generation=self.owner_generation,
+        )
         return True
 
     async def _mark_idle_after_boundary(
@@ -349,8 +361,9 @@ class SessionRunner:
             )
             if not consumed:
                 return False
-            await self.session_lifecycle.clear_session_activity(
-                boundary.message.session_id
+            await self.session_lifecycle.clear_owned_session_activity(
+                boundary.message.session_id,
+                owner_generation=boundary.snapshot.owner_generation,
             )
             return True
 
@@ -360,7 +373,10 @@ class SessionRunner:
         )
         if not marked_idle:
             return False
-        await self.session_lifecycle.clear_session_activity(boundary.message.session_id)
+        await self.session_lifecycle.clear_owned_session_activity(
+            boundary.message.session_id,
+            owner_generation=boundary.snapshot.owner_generation,
+        )
         logger.info(
             "Skipped idle continuation because terminal run did not complete",
             extra={
@@ -379,11 +395,21 @@ class SessionRunner:
 
         wake_up = self.handover_wake_up
         if wake_up is None:
-            await self.session_lifecycle.release_session_lock(session_id)
+            if self.owner_generation is None:
+                await self.session_lifecycle.release_session_lock(session_id)
+            else:
+                await self.session_lifecycle.release_owned_session_lock(
+                    session_id,
+                    owner_generation=self.owner_generation,
+                )
             return
 
         if self.handover_required:
-            await self.session_lifecycle.release_session_lock(session_id)
+            if not self.ownership_lost:
+                await self.session_lifecycle.release_owned_session_lock(
+                    session_id,
+                    owner_generation=self._required_owner_generation(),
+                )
             await self.session_lifecycle.send_session_wake_up(wake_up)
             return
 
@@ -394,14 +420,20 @@ class SessionRunner:
             )
 
         if not should_handover:
-            await self.session_lifecycle.release_session_lock(session_id)
+            await self.session_lifecycle.release_owned_session_lock(
+                session_id,
+                owner_generation=self._required_owner_generation(),
+            )
             return
 
         logger.info(
             "Session runner stopped during active run, handing over session",
             extra={"session_id": session_id},
         )
-        await self.session_lifecycle.release_session_lock(session_id)
+        await self.session_lifecycle.release_owned_session_lock(
+            session_id,
+            owner_generation=self._required_owner_generation(),
+        )
         try:
             await self.session_lifecycle.send_session_wake_up(wake_up)
         except asyncio.CancelledError:
@@ -429,7 +461,7 @@ class SessionRunner:
                     session_id = self.running_session_id
                     if session_id is None:
                         raise
-                    self._handle_canonical_execution_error(
+                    await self._handle_canonical_execution_error(
                         SessionWakeUp(session_id=session_id),
                         exc,
                     )
@@ -487,6 +519,7 @@ class SessionRunner:
                 self.stop_controller.clear_for_next_run()
                 self.handover_wake_up = None
                 self.handover_required = False
+                self.ownership_lost = False
                 message_started_at = self._monotonic_time()
                 L = bind_extra(
                     logger,
@@ -542,7 +575,10 @@ class SessionRunner:
                                 snapshot,
                                 run_id=pending_run_id,
                                 prepare_toolkits=self.prepare_toolkits,
-                                dispatch_event=self.event_publisher.dispatch_event,
+                                dispatch_event=functools.partial(
+                                    self.event_publisher.dispatch_event,
+                                    owner_generation=self._required_owner_generation(),
+                                ),
                             )
                         )
                         boundary = _PendingIdleBoundary(
@@ -596,7 +632,7 @@ class SessionRunner:
         except asyncio.CancelledError:
             raise
         except CanonicalExecutionSnapshotError as exc:
-            return self._handle_canonical_execution_error(message, exc)
+            return await self._handle_canonical_execution_error(message, exc)
         except UserVisibleRuntimeError as exc:
             try:
                 finalized_run_id = (
@@ -604,11 +640,14 @@ class SessionRunner:
                         message.session_id,
                         exc,
                         owner_generation=self._required_owner_generation(),
-                        dispatch_event=self.event_publisher.dispatch_event,
+                        dispatch_event=functools.partial(
+                            self.event_publisher.dispatch_event,
+                            owner_generation=self._required_owner_generation(),
+                        ),
                     )
                 )
             except CanonicalExecutionOwnerGenerationStaleError as stale:
-                return self._handle_canonical_execution_error(message, stale)
+                return await self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:
                 return RunExecutionResult(
                     toolkits=[],
@@ -617,7 +656,11 @@ class SessionRunner:
                     run_id=finalized_run_id,
                     terminal_run_status=AgentRunStatus.FAILED,
                 )
-            await self.error_reporter.report_user_visible(message.session_id, exc)
+            await self.error_reporter.report_user_visible(
+                message.session_id,
+                exc,
+                owner_generation=self._required_owner_generation(),
+            )
             await self._clear_activity_after_failed_message(
                 message.session_id,
                 reason="user_visible_error",
@@ -634,11 +677,14 @@ class SessionRunner:
                         message.session_id,
                         exc,
                         owner_generation=self._required_owner_generation(),
-                        dispatch_event=self.event_publisher.dispatch_event,
+                        dispatch_event=functools.partial(
+                            self.event_publisher.dispatch_event,
+                            owner_generation=self._required_owner_generation(),
+                        ),
                     )
                 )
             except CanonicalExecutionOwnerGenerationStaleError as stale:
-                return self._handle_canonical_execution_error(message, stale)
+                return await self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:
                 return RunExecutionResult(
                     toolkits=[],
@@ -647,7 +693,11 @@ class SessionRunner:
                     run_id=finalized_run_id,
                     terminal_run_status=AgentRunStatus.FAILED,
                 )
-            await self.error_reporter.report_unhandled(message.session_id, exc)
+            await self.error_reporter.report_unhandled(
+                message.session_id,
+                exc,
+                owner_generation=self._required_owner_generation(),
+            )
             await self._clear_activity_after_failed_message(
                 message.session_id,
                 reason="unhandled_error",
@@ -664,7 +714,7 @@ class SessionRunner:
             raise RuntimeError("Session ownership generation was not claimed")
         return self.owner_generation
 
-    def _handle_canonical_execution_error(
+    async def _handle_canonical_execution_error(
         self,
         message: BrokerMessage,
         exc: CanonicalExecutionSnapshotError,
@@ -685,6 +735,11 @@ class SessionRunner:
         )
         self.runner_shutdown.set()
         if reload_required:
+            await self.stop_controller.tool_admission_barrier.close()
+            self.ownership_lost = isinstance(
+                exc,
+                CanonicalExecutionOwnerGenerationStaleError,
+            )
             self.handover_wake_up = SessionWakeUp(session_id=message.session_id)
             self.handover_required = True
         return RunExecutionResult(

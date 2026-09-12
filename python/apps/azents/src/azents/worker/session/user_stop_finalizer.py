@@ -82,7 +82,10 @@ class UserStopFinalizer:
         effective_tool_calls = (
             list(running_run.active_tool_calls) if running_run is not None else []
         )
-        await self.live_event_projector.flush_session(session_id)
+        await self.live_event_projector.flush_session(
+            session_id,
+            owner_generation=owner_generation,
+        )
         await self._persist_live_events_for_user_stop(
             session_id,
             owner_generation=owner_generation,
@@ -93,6 +96,7 @@ class UserStopFinalizer:
             session_id,
             [],
             removed_call_ids={call.call_id for call in effective_tool_calls},
+            owner_generation=owner_generation,
         )
         if effective_run_id is None:
             transitioned_run_ids = (
@@ -121,14 +125,17 @@ class UserStopFinalizer:
             await self.event_publisher.dispatch_event(
                 session_id,
                 durable_events.interrupted,
+                owner_generation=owner_generation,
             )
             await self.event_publisher.dispatch_event(
                 session_id,
                 durable_events.run_marker,
+                owner_generation=owner_generation,
             )
             await self.event_publisher.dispatch_event(
                 session_id,
                 RunStopped(run_id=effective_run_id),
+                owner_generation=owner_generation,
             )
         await self._clear_stop_request(
             session_id,
@@ -156,14 +163,17 @@ class UserStopFinalizer:
         await self.event_publisher.dispatch_event(
             session_id,
             durable_events.interrupted,
+            owner_generation=owner_generation,
         )
         await self.event_publisher.dispatch_event(
             session_id,
             durable_events.run_marker,
+            owner_generation=owner_generation,
         )
         await self.event_publisher.dispatch_event(
             session_id,
             RunStopped(run_id=run_id),
+            owner_generation=owner_generation,
         )
         await self._clear_stop_request(
             session_id,
@@ -191,7 +201,11 @@ class UserStopFinalizer:
             run_id=run_id,
             active_tool_calls=active_tool_calls,
         )
-        await self._remove_persisted_stop_live_events(session_id, live_events)
+        await self._remove_persisted_stop_live_events(
+            session_id,
+            live_events,
+            owner_generation=owner_generation,
+        )
 
     async def _append_live_partial_events(
         self,
@@ -365,14 +379,24 @@ class UserStopFinalizer:
         self,
         session_id: str,
         live_events: Sequence[Event],
+        *,
+        owner_generation: int,
     ) -> None:
         """Remove stop-related live projections converged to History."""
         for event in live_events:
             if isinstance(event.payload, AssistantMessagePayload | ReasoningPayload):
-                await self.live_event_projector.remove_event(session_id, event.id)
+                await self.live_event_projector.remove_event(
+                    session_id,
+                    event.id,
+                    owner_generation=owner_generation,
+                )
                 continue
             if isinstance(event.payload, ClientToolCallPayload):
-                await self.live_event_projector.remove_event(session_id, event.id)
+                await self.live_event_projector.remove_event(
+                    session_id,
+                    event.id,
+                    owner_generation=owner_generation,
+                )
 
     async def _mark_session_agent_runs_terminal(
         self,

@@ -8,6 +8,7 @@ import pytest
 from redis.asyncio import Redis
 
 from azents.broker.broadcast import WebSocketBroadcast
+from azents.services.chat.live_events import RedisLiveEventStore
 
 
 class _PubSub:
@@ -85,3 +86,45 @@ async def test_subscribe_context_waits_for_redis_confirmation() -> None:
 
     assert entered.is_set()
     assert pubsub.closed
+
+
+@pytest.mark.asyncio
+async def test_live_projection_publish_requires_current_generation(
+    redis_url: str,
+) -> None:
+    """Projection broadcast follows the ephemeral PostgreSQL-derived fence."""
+    redis = Redis.from_url(redis_url)
+    await redis.flushall()
+    try:
+        broadcast = WebSocketBroadcast(redis)
+        store = RedisLiveEventStore(redis)
+        event: dict[str, object] = {
+            "type": "live_run_cleared",
+            "run_id": "run-1",
+        }
+
+        assert (
+            await broadcast.publish_live_projection(
+                "session-1",
+                event,
+                owner_generation=1,
+            )
+            is False
+        )
+        assert await store.advance_owner("session-1", 1)
+        assert await broadcast.publish_live_projection(
+            "session-1",
+            event,
+            owner_generation=1,
+        )
+        assert await store.advance_owner("session-1", 2)
+        assert (
+            await broadcast.publish_live_projection(
+                "session-1",
+                event,
+                owner_generation=1,
+            )
+            is False
+        )
+    finally:
+        await redis.aclose()

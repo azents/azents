@@ -96,8 +96,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-10
-spec_version: 174
+last_verified_at: 2026-09-12
+spec_version: 175
 ---
 
 # Agent Execution Loop
@@ -1268,6 +1268,20 @@ Primary checks:
 
 ## Database session boundaries
 
+Execution-local database scopes lock and validate the exact Session owner generation
+before durable operations. Model output, tool results, compaction, tool-search
+working sets, phase changes, and terminal transitions share that authority. Shared
+adapter dependencies remain immutable; per-execution compactor and working-set
+bindings carry the owner scope. Tool handlers run after the admission transaction
+closes, and completed results are fenced again. A stale generation propagates as
+ownership loss rather than a failed tool result or model error.
+
+The existing root SessionAgent lifecycle gate precedes Agent and Session locks;
+root, parent, and executing Sessions are acquired before Run finalization. Contended
+non-blocking acquisition rolls back its savepoint, and only clean admission scopes
+retry, so a caller holding other locks cannot retry indefinitely inside the same
+transaction.
+
 Run execution uses short database sessions around one durable read or state transition. Model
 preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
 OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
@@ -1438,6 +1452,8 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- 2026-09-12: Bind engine persistence, compaction, and tool admission to durable execution ownership with tree-safe database locking.
 
 - **2026-09-10** (spec_version 174) — Added pre-dispatch image-generation
   catalog/generation revalidation, typed profile failures, maintained-default model

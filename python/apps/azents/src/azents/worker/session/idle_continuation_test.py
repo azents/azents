@@ -237,8 +237,15 @@ class _EventPublisher:
     def __init__(self) -> None:
         self.dispatched: list[tuple[str, Event]] = []
 
-    async def dispatch_event(self, session_id: str, event: Event) -> None:
+    async def dispatch_event(
+        self,
+        session_id: str,
+        event: Event,
+        *,
+        owner_generation: int,
+    ) -> None:
         """Record publish request."""
+        del owner_generation
         self.dispatched.append((session_id, event))
 
 

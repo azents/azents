@@ -64,10 +64,17 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.skill_state import SkillStateRepository
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_authority,
+    accepts_execution_owner,
+)
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
@@ -157,6 +164,21 @@ class SkillRuntimeStateStore(SkillStateReader, Protocol):
         session_id: str,
     ) -> SkillProjectionState:
         """Adopt the latest Skill projection as active."""
+        ...
+
+
+class SkillExecutionStateStore(
+    SkillProjectionStateStore,
+    SkillRuntimeStateStore,
+    Protocol,
+):
+    """Skill state operations that can bind to one execution authority."""
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "SkillExecutionStateStore":
+        """Return an execution-local owner-fenced store."""
         ...
 
 
@@ -273,7 +295,21 @@ class SkillStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create Skill state store."""
+        self.session_manager = session_manager
         self.repository = SkillStateRepository(session_manager=session_manager)
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "SkillStateStore":
+        """Bind state reads and writes to one durable Session owner."""
+        return SkillStateStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        )
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Fetch Skill projection state."""
@@ -342,6 +378,22 @@ class SkillProjectionService:
         )
         self.runner_operations = runner_operations
         self.broadcast = broadcast
+
+    def with_store(
+        self,
+        store: SkillProjectionStateStore,
+    ) -> "SkillProjectionService":
+        """Return an execution-local projection service using the bound store."""
+        return SkillProjectionService(
+            store=store,
+            project_reader=self.project_reader,
+            runtime_target_resolver=self.runtime_target_resolver,
+            session_working_folder_binding_service=(
+                self.session_working_folder_binding_service
+            ),
+            runner_operations=self.runner_operations,
+            broadcast=self.broadcast,
+        )
 
     async def sync_latest(
         self,
@@ -558,7 +610,7 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     def __init__(
         self,
         *,
-        store: SkillRuntimeStateStore,
+        store: SkillExecutionStateStore,
         projection_service: SkillProjectionService | None,
         vfs_projection_service: SkillVfsProjectionReader | None,
         agent_id: str,
@@ -572,7 +624,41 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         self._session_id = session_id
         self._adopted_run_ids: set[str] = set()
         self._adopt_latest_on_next_turn = False
+        self._execution_owner: SessionExecutionOwner | None = None
+        self._execution_authority: SessionResourceAuthority | None = None
         self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
+
+    def bind_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> None:
+        """Bind state operations before lifecycle hooks mutate projections."""
+        if not accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            return
+        bound_store = self.store.for_execution(owner)
+        self.store = bound_store
+        if self.projection_service is not None:
+            self.projection_service = self.projection_service.with_store(bound_store)
+        self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Bind this resolved Toolkit instance to one immutable execution owner."""
+        if not accepts_execution_authority(
+            self._execution_authority,
+            authority,
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+        ):
+            return
+        self.bind_execution_owner(authority.execution_owner)
+        self._execution_authority = authority
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -601,6 +687,8 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
 
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Render the combined active Skill index for the current run."""
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         state = await self._active_state_for_context(context)
         managed = await self._managed_items(context.run_id, context.workspace_id)
         filesystem_skills_allowed = await self._filesystem_skills_allowed()
@@ -610,6 +698,8 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return load_skill when either Skill projection contains items."""
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         state = await self._active_state_for_context(context)
         managed = await self._managed_items(context.run_id, context.workspace_id)
         filesystem_skills_allowed = await self._filesystem_skills_allowed()
@@ -731,7 +821,7 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
     def __init__(
         self,
         *,
-        store: SkillRuntimeStateStore,
+        store: SkillExecutionStateStore,
         projection_service: SkillProjectionService | None,
         vfs_projection_service: SkillVfsProjectionReader | None,
     ) -> None:

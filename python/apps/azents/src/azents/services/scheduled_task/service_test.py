@@ -363,13 +363,21 @@ class _Broker:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
-    ) -> None:
-        del session_id, run_id, phase
+    ) -> bool:
+        del session_id, owner_generation, run_id, phase
+        return True
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        del session_id
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
+        del session_id, owner_generation
+        return True
 
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:
         del session_id

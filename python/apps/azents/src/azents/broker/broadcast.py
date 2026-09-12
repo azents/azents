@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -18,7 +18,18 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 logger = logging.getLogger(__name__)
 
 _CHANNEL_PREFIX = "azents:ws:"
+_LIVE_EVENT_KEY_PREFIX = "azents:chat:"
+_LIVE_EVENT_KEY_SUFFIX = ":live_events"
+_LIVE_OWNER_GENERATION_FIELD = "__owner_generation__"
 _SUBSCRIPTION_CONFIRMATION_TIMEOUT_SECONDS = 5.0
+
+_PUBLISH_LIVE_PROJECTION_SCRIPT = """
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return 0
+end
+redis.call("PUBLISH", KEYS[2], ARGV[3])
+return 1
+"""
 
 
 class WebSocketBroadcastPublishError(Exception):
@@ -60,6 +71,31 @@ class WebSocketBroadcast:
             await self._redis.publish(channel, data)
         except (RedisConnectionError, OSError) as exc:
             raise WebSocketBroadcastPublishError from exc
+
+    async def publish_live_projection(
+        self,
+        session_id: str,
+        event_json: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Publish only while the PostgreSQL-derived live writer fence matches."""
+        channel = f"{_CHANNEL_PREFIX}{session_id}"
+        live_key = f"{_LIVE_EVENT_KEY_PREFIX}{session_id}{_LIVE_EVENT_KEY_SUFFIX}"
+        data = json.dumps(event_json, ensure_ascii=False)
+        try:
+            result = await cast(Any, self._redis).eval(
+                _PUBLISH_LIVE_PROJECTION_SCRIPT,
+                2,
+                live_key,
+                channel,
+                _LIVE_OWNER_GENERATION_FIELD,
+                owner_generation,
+                data,
+            )
+        except (RedisConnectionError, OSError) as exc:
+            raise WebSocketBroadcastPublishError from exc
+        return result == 1
 
     @asynccontextmanager
     async def subscribe(

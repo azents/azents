@@ -57,12 +57,20 @@ from azents.engine.run.types import (
     FunctionToolSpec,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import (
     ToolkitStateHandle,
     ToolkitStateStore,
 )
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -595,6 +603,23 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._bg_error = None
         self._artifact_sink = None
         self._entered = False
+        self._execution_owner: SessionExecutionOwner | None = None
+        self._owner_stale = False
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind snapshot state before starting background discovery."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            if self.session_manager is not None:
+                self.session_manager = OwnerBoundSessionManager(
+                    session_manager=self.session_manager,
+                    session_id=owner.session_id,
+                    owner_generation=owner.owner_generation,
+                )
+            self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent ID for Toolkit State identity."""
@@ -651,6 +676,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""
+        if self._owner_stale:
+            return
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._connect_and_list_tools())
@@ -689,7 +716,11 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             mcp_tools=mcp_tools,
             use_streamable_http=use_streamable_http,
         )
-        await self._save_tool_snapshot(snapshot)
+        try:
+            await self._save_tool_snapshot(snapshot)
+        except CanonicalExecutionOwnerGenerationStaleError:
+            self._owner_stale = True
+            return
 
         logger.info(
             "MCP tool snapshot refreshed",

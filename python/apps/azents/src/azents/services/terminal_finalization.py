@@ -67,7 +67,8 @@ class TerminalRunFinalizationCoordinator:
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
-        """Finalize one terminal Run in the caller's transaction."""
+        """Finalize one terminal Run in the caller's prelocked transaction."""
+        await self.lock_run_finalization(session, run_id=run_id)
         candidate = await self.agent_run_repository.get_by_id(session, run_id)
         if candidate is None:
             return TerminalFinalizationOutcome(
@@ -167,6 +168,24 @@ class TerminalRunFinalizationCoordinator:
             disposition=TerminalDeliveryDisposition.ENQUEUED,
             mailbox_item_id=mailbox_item.id,
         )
+
+    async def lock_run_finalization(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> None:
+        """Prelock tree and Session authority before the caller mutates a Run.
+
+        This single attempt never retries while the caller may retain locks.
+        Execution admission normally owns these same locks already.
+        """
+        candidate = await self.agent_run_repository.get_by_id(session, run_id)
+        if candidate is not None:
+            await self.agent_session_repository.lock_execution_by_id(
+                session,
+                candidate.session_id,
+            )
 
     async def finalize_runs_in_session(
         self,

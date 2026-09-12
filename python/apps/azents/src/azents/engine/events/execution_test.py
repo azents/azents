@@ -120,13 +120,17 @@ class _OpenToolAdmissionBarrier:
         await action()
         return True
 
+    async def close(self) -> None:
+        """Close future foreground admissions."""
+        self.closed = True
+
 
 class _MutableToolAdmissionBarrier(_OpenToolAdmissionBarrier):
     """Admission barrier that tests can close after a committed call."""
 
     closed = False
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close future admissions and mark TERM as observed."""
         self.closed = True
 
@@ -140,6 +144,9 @@ class _ClosedToolAdmissionBarrier:
         """Reject admission without invoking its transaction."""
         del action
         return False
+
+    async def close(self) -> None:
+        """Keep foreground admission closed."""
 
 
 class _RunRepo:
@@ -2415,7 +2422,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
         )
     )
     await asyncio.wait_for(tool_executor.blocked_started.wait(), timeout=1)
-    barrier.close()
+    await barrier.close()
     tool_executor.release_blocked.set()
 
     assert await run_task == AgentRunStatus.RUNNING

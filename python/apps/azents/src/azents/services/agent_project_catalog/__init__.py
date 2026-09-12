@@ -16,6 +16,7 @@ from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogEntry,
     AgentProjectCatalogStatusPatch,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -199,6 +200,47 @@ class AgentProjectCatalogService:
             normalized,
         )
         async with self.session_manager() as session:
+            entry = await self.catalog_repository.update_status(
+                session,
+                agent_id=agent_id,
+                path=normalized,
+                patch=patch,
+            )
+            await session.commit()
+            return Success(entry)
+
+    async def refresh_project_status_for_execution(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        owner_generation: int,
+        path: str,
+    ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
+        """Refresh one status while fencing its final execution-owned write."""
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as error:
+            return Failure(InvalidProjectPath(path=path, reason=str(error)))
+        try:
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized = normalize_session_workspace_path(
+                path,
+                workspace_root=workspace_root,
+            )
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path=path, reason=str(exc)))
+        patch = await self._status_patch(runtime, normalized)
+        owner_session_manager = OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
+        async with owner_session_manager() as session:
             entry = await self.catalog_repository.update_status(
                 session,
                 agent_id=agent_id,

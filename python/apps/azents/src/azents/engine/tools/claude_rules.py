@@ -49,6 +49,7 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.toolkit_state.store import (
     ToolkitStateHandle,
@@ -56,6 +57,10 @@ from azents.repos.toolkit_state.store import (
 )
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +109,19 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
     ) -> None:
         """Create Claude rules appendix dedupe store."""
         self.session_manager = session_manager
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ToolkitClaudeRulesAppendixDedupeStateStore":
+        """Bind dedupe state to one durable Session owner."""
+        return ToolkitClaudeRulesAppendixDedupeStateStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        )
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str
@@ -246,6 +264,19 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self._rule_path_cache: dict[str, _ClaudeRulePathCacheEntry] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
         self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind dedupe persistence before lifecycle hooks can run."""
+        if not accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            return
+        if isinstance(self.store, ToolkitClaudeRulesAppendixDedupeStateStore):
+            self.store = self.store.for_execution(owner)
+        self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""

@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from dataclasses import replace as dataclass_replace
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, NotRequired, TypedDict, assert_never
 from urllib.parse import urlparse
@@ -61,6 +62,7 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
@@ -125,10 +127,38 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_controls,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 
 logger = logging.getLogger(__name__)
 RuntimeTargetResolver = Callable[[], Awaitable[ServerToRuntimeTarget]]
+
+
+def _validate_provider_authority(
+    target: ProviderTarget,
+    *,
+    authority: SessionResourceAuthority | None,
+    agent_id: str | None,
+    session_id: str | None,
+) -> None:
+    """Reject a provider effect whose execution identity changed."""
+    if authority is None:
+        return
+    if (
+        agent_id is not None
+        and agent_id != authority.agent_id
+        or session_id is not None
+        and session_id != authority.session_id
+        or target.agent_id is not None
+        and target.agent_id != authority.agent_id
+        or target.agent_session_id is not None
+        and target.agent_session_id != authority.session_id
+    ):
+        raise ValueError(
+            "External Channel execution authority does not match provider effect"
+        )
 
 
 async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -241,6 +271,52 @@ class ExternalChannelActionService:
         repr=False,
     )
 
+    def for_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ExternalChannelActionService":
+        """Return a request-local service bound to one durable execution owner."""
+        bound = dataclass_replace(
+            self,
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+        )
+        bound.binding_locks = self.binding_locks
+        return bound
+
+    def for_execution(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> "ExternalChannelActionService":
+        """Bind direct Channel Work operations to complete execution authority."""
+        return self.for_execution_owner(authority.execution_owner)
+
+    def _session_manager_for_authority(
+        self,
+        authority: SessionResourceAuthority | None,
+    ) -> SessionManager[AsyncSession]:
+        """Resolve an owner-bound DB scope when execution authority is available."""
+        if authority is None:
+            return self.session_manager
+        owner = authority.execution_owner
+        if isinstance(self.session_manager, OwnerBoundSessionManager):
+            if (
+                self.session_manager.session_id != owner.session_id
+                or self.session_manager.owner_generation != owner.owner_generation
+            ):
+                raise ValueError(
+                    "External Channel execution authority does not match service"
+                )
+            return self.session_manager
+        return OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=owner.session_id,
+            owner_generation=owner.owner_generation,
+        )
+
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         """Return whether the tool should be exposed for this root Session."""
         async with self.session_manager() as session:
@@ -283,6 +359,14 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Serialize canonical Action and provider effects for one binding."""
+        if authority is not None and (
+            authority.session_id != session_id
+            or authority.agent_id != agent_id
+            or authority.run_id != run_id
+        ):
+            raise ValueError(
+                "External Channel execution authority does not match action"
+            )
         lock = self.binding_locks.setdefault(binding_id, asyncio.Lock())
         async with lock:
             return await self._execute_serialized(
@@ -321,7 +405,12 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Commit canonical state, then execute ordered provider effects once."""
-        async with self.session_manager() as session:
+        session_manager = (
+            self.session_manager
+            if authority is None
+            else self._session_manager_for_authority(authority)
+        )
+        async with session_manager() as session:
             transition = await self.repository.commit_direct_action(
                 session,
                 session_id=session_id,
@@ -398,7 +487,7 @@ class ExternalChannelActionService:
             and reply_requested
             and reply_delivered
         ):
-            async with self.session_manager() as session:
+            async with session_manager() as session:
                 settlement = await self.repository.settle_awaiting_input(
                     session,
                     session_id=session_id,
@@ -453,7 +542,18 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> ProviderEffectOutcome:
         """Execute one effect and return its public outcome."""
-        async with self.session_manager() as session:
+        _validate_provider_authority(
+            effect.provider.target,
+            authority=authority,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        session_manager = (
+            self.session_manager
+            if authority is None
+            else self._session_manager_for_authority(authority)
+        )
+        async with session_manager() as session:
             current = await self.repository.revalidate_direct_effect(
                 session,
                 effect=effect,
@@ -475,7 +575,7 @@ class ExternalChannelActionService:
             provider_delivery_service=provider_delivery_service,
             resolve_runtime_target=resolve_runtime_target,
         )
-        async with self.session_manager() as session:
+        async with session_manager() as session:
             await self.repository.apply_direct_effect_outcome(
                 session,
                 effect=effect,
@@ -562,7 +662,18 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ProviderMutationOutcome | None:
         """Revalidate and execute one process-local exact-Binding effect."""
-        async with self.session_manager() as session:
+        _validate_provider_authority(
+            plan.target,
+            authority=authority,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        session_manager = (
+            self.session_manager
+            if authority is None
+            else self._session_manager_for_authority(authority)
+        )
+        async with session_manager() as session:
             current = await self.repository.revalidate_binding_effect(
                 session,
                 plan=plan,
@@ -790,6 +901,7 @@ class ExternalChannelActionService:
                     resource_id=target.resource_id,
                     delivery_channel_id=resolved_thread_id,
                     initial_thread_title=thread.created_thread_name,
+                    authority=authority,
                 )
         elif conversation_scope not in {None, "thread"}:
             return _discord_invalid_payload()
@@ -1159,9 +1271,15 @@ class ExternalChannelActionService:
         resource_id: str,
         delivery_channel_id: str,
         initial_thread_title: str | None,
+        authority: SessionResourceAuthority | None,
     ) -> None:
         """Persist a provisioned Discord thread outside the provider mutation."""
-        async with self.session_manager() as session:
+        session_manager = (
+            self.session_manager
+            if authority is None
+            else self._session_manager_for_authority(authority)
+        )
+        async with session_manager() as session:
             await self.repository.record_discord_delivery_channel(
                 session,
                 resource_id=resource_id,

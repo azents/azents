@@ -21,8 +21,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-08
-spec_version: 46
+last_verified_at: 2026-09-12
+spec_version: 47
 ---
 
 # Chat Session Resync
@@ -137,6 +137,19 @@ each provider tool call uses its own `call_id`. Client call/result pairs may mer
 boundaries; provider calls require no result counterpart.
 
 ## 5.1 REST Live Contract
+
+Live event storage contains an ephemeral writer-generation sentinel derived only
+after PostgreSQL validates the Session owner generation. Advancing to a newer
+generation atomically removes the previous live projection. Upsert, remove, clear,
+and live WebSocket publication are accepted only for the matching generation; a
+clear preserves the sentinel. The sentinel is excluded from REST event results and
+is never execution or recovery authority.
+
+After empty Valkey replacement, ordinary mutation fails closed until the current
+PostgreSQL owner reseeds the live generation. Partial buffers and process-local
+active Run/tool maps are separated by `(session_id, owner_generation)`, so an old
+Worker cannot flush or clear projections produced by the replacement owner even
+when both are recovering the same durable Run.
 
 `GET /chat/v1/sessions/{session_id}/live` returns live state snapshot of current session, not durable history. Live state separates partial history and other live state.
 
@@ -479,6 +492,10 @@ presentation-only and does not change canonical content or model lowering.
 Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
+
+- **2026-09-12** — v47. Added PostgreSQL-derived generation fencing for live
+  projection storage, buffered flushes, clears, and WebSocket projection frames,
+  including empty-Valkey reseeding by the current owner.
 
 - **2026-09-05** — v44. Removed transcript copy and pending-delete controls
   from pending External Channel message projections.

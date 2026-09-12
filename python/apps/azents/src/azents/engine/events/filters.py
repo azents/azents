@@ -363,6 +363,12 @@ class EventCompactor:
     session_repo: Annotated[SessionHeadMoveRepository, Depends(AgentSessionRepository)]
     summary_context_window_tokens: int | None = None
 
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> "EventCompactor":
+        """Return an execution-local compactor without changing shared state."""
+        return dataclasses.replace(self, session_manager=session_manager)
+
     async def compact(
         self,
         *,

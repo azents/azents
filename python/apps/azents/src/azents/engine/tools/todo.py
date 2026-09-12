@@ -27,9 +27,15 @@ from azents.engine.hooks.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.session import SessionManager
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import (
     ToolkitStateHandle,
     ToolkitStateStore,
+)
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
 )
 
 TODO_TOOLKIT_NAMESPACE = "todo"
@@ -97,6 +103,19 @@ class TodoStateStore:
     ) -> None:
         """Create todo state store."""
         self.session_manager = session_manager
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "TodoStateStore":
+        """Bind state operations to one durable Session owner."""
+        return TodoStateStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        )
 
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch session todo state."""
@@ -172,6 +191,29 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         self.store = store
         self._agent_id = agent_id
         self._session_id = session_id
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.store = self.store.for_execution(owner)
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -202,6 +244,8 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current todo prompt and update_todo tool."""
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
         if not self._session_id:
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,

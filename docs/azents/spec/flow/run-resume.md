@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-09-08
-spec_version: 33
+last_verified_at: 2026-09-12
+spec_version: 34
 ---
 
 # Run Resume
@@ -37,6 +37,35 @@ spec_version: 33
 Run resume handles worker shutdown, process crash, stale running state, and interrupted tool calls.
 The event runtime resumes from durable transcript and `agent_runs`, not SDK serialized
 `RunState`.
+
+### Durable owner revocation
+
+PostgreSQL Session `owner_generation` fences every execution-owned database
+transaction, including model output, tool results, phase/retry/terminal changes,
+input consumption, compaction, and tool-search state. Empty Redis/Valkey replacement
+may cause another Worker to claim a new generation; retained keys do not authorize
+the old execution to finish.
+
+The active heartbeat treats a stale generation as ownership revocation: it closes
+foreground tool admission and cancels active execution. Revocation propagates
+separately from a model retry, transport heartbeat failure, or user stop. The old
+Worker does not append a system error or flush, clear, or finalize the new owner's
+live execution. Error-event persistence also requires the caller's generation.
+If that durable append fails, the Worker does not manufacture a non-durable
+history Event as a fallback.
+
+Redis SessionActivity uses a PostgreSQL-derived writer generation. Set accepts
+only the newest observed generation, and clear removes only the matching
+generation's payload while retaining its fence. This prevents a previous Worker
+from overwriting or deleting the replacement owner's phase even when both recover
+the same Run. Rolling deployment replaces the old transient string value with the
+generation hash on the first current-owner write; no retained activity is required.
+
+Tools and operation actions pass a database-only admission check before external
+execution, then revalidate at durable completion. Already admitted external effects
+cannot be undone; uncertain results are not automatically replayed. Recovery
+cancellation is authorized by the new actor's generation, distinct from the
+generation recorded on the abandoned action.
 
 ## Resume Sources
 
@@ -337,6 +366,8 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- 2026-09-12: Fence execution persistence and operation recovery by durable owner generation; supervise ownership loss without stale cleanup.
 
 - **2026-09-08** (spec_version 33) — Documented repository-owned Runtime
   lifecycle dispatch admission/outcome boundaries and preserved

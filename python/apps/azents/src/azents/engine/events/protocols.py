@@ -24,6 +24,7 @@ from azents.engine.model_stream import (
     ModelStreamWatchdog,
 )
 from azents.engine.run.failure import FailedRunRetryState
+from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import (
     AgentRunCreate,
     EventCreate,
@@ -503,6 +504,12 @@ CompactionCommitAction: TypeAlias = Callable[[AsyncSession], Awaitable[None]]
 
 class ManualCompactor(Protocol):
     """Manual event compaction protocol."""
+
+    def with_session_manager(
+        self, session_manager: SessionManager[AsyncSession]
+    ) -> "ManualCompactor":
+        """Bind compaction database operations to one execution authority."""
+        ...
 
     async def compact(
         self,

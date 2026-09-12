@@ -100,6 +100,45 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+_ACTIVITY_OWNER_FIELD = "owner_generation"
+_ACTIVITY_PAYLOAD_FIELD = "payload"
+_SET_ACTIVITY_SCRIPT = """
+local key_type = redis.call("TYPE", KEYS[1])["ok"]
+if key_type ~= "none" and key_type ~= "hash" then
+  redis.call("DEL", KEYS[1])
+end
+local current = redis.call("HGET", KEYS[1], ARGV[1])
+local requested = tonumber(ARGV[2])
+if current and tonumber(current) > requested then
+  return 0
+end
+if not current or tonumber(current) < requested then
+  redis.call("DEL", KEYS[1])
+  redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+end
+redis.call("HSET", KEYS[1], ARGV[3], ARGV[4])
+redis.call("EXPIRE", KEYS[1], ARGV[5])
+return 1
+"""
+_CLEAR_ACTIVITY_SCRIPT = """
+local key_type = redis.call("TYPE", KEYS[1])["ok"]
+if key_type ~= "none" and key_type ~= "hash" then
+  redis.call("DEL", KEYS[1])
+  return 1
+end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then
+  return 0
+end
+redis.call("HDEL", KEYS[1], ARGV[3])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+return 1
+"""
+_GET_ACTIVITY_SCRIPT = """
+if redis.call("TYPE", KEYS[1])["ok"] ~= "hash" then
+  return false
+end
+return redis.call("HGET", KEYS[1], ARGV[1])
+"""
 
 _session_wake_up_adapter = TypeAdapter[SessionWakeUp](SessionWakeUp)
 _session_mailbox_activity_adapter = TypeAdapter[SessionMailboxActivity](
@@ -556,12 +595,14 @@ class RedisBroker:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
-    ) -> None:
-        """Record that a session is being processed.
+    ) -> bool:
+        """Record activity for the newest PostgreSQL-derived owner generation.
 
         :param session_id: Session ID
+        :param owner_generation: Durable Session execution generation
         :param run_id: Run ID
         :param phase: Current agent run phase
         """
@@ -572,15 +613,40 @@ class RedisBroker:
                 phase=phase,
             )
         )
-        await self._redis.set(key, value, ex=self._ACTIVITY_TTL)
+        result = await cast(Any, self._redis).eval(
+            _SET_ACTIVITY_SCRIPT,
+            1,
+            key,
+            _ACTIVITY_OWNER_FIELD,
+            owner_generation,
+            _ACTIVITY_PAYLOAD_FIELD,
+            value,
+            self._ACTIVITY_TTL,
+        )
+        return result == 1
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        """Remove session activity.
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Remove activity only while its execution generation still owns it.
 
         :param session_id: Session ID
+        :param owner_generation: Durable Session execution generation
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        await self._redis.delete(key)
+        result = await cast(Any, self._redis).eval(
+            _CLEAR_ACTIVITY_SCRIPT,
+            1,
+            key,
+            _ACTIVITY_OWNER_FIELD,
+            owner_generation,
+            _ACTIVITY_PAYLOAD_FIELD,
+            self._ACTIVITY_TTL,
+        )
+        return result == 1
 
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:
         """Get current execution state for a session.
@@ -589,7 +655,12 @@ class RedisBroker:
         :return: SessionActivity when running, otherwise None
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        raw = await self._redis.get(key)
+        raw = await cast(Any, self._redis).eval(
+            _GET_ACTIVITY_SCRIPT,
+            1,
+            key,
+            _ACTIVITY_PAYLOAD_FIELD,
+        )
         if raw is None:
             return None
         return _session_activity_adapter.validate_json(raw)

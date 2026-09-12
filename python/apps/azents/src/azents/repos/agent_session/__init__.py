@@ -1200,6 +1200,86 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
+    async def wait_for_execution_lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Acquire execution admission before the caller takes other row locks.
+
+        A failed attempt releases its root gate and FK locks before retrying.
+        Call only at the beginning of a transaction; callers with existing
+        mutations must use the single-attempt ``lock_execution_by_id`` instead.
+        """
+        while True:
+            try:
+                return await self.lock_execution_by_id(session, agent_session_id)
+            except OperationalError as exc:
+                if not isinstance(exc.orig, LockNotAvailable):
+                    raise
+                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
+
+    async def lock_execution_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Acquire one tree-ordered execution lock attempt without lock waits.
+
+        Lock the existing root tree gate before Agent, Session, and Run work.
+        Source, root, and direct-parent Sessions are acquired together so later
+        terminal parent delivery cannot wait on an inverse Session-to-root path.
+        NOWAIT and the savepoint release all locks from a failed attempt.
+        """
+        async with session.begin_nested():
+            source = await self.get_session_agent_by_session_id(
+                session,
+                agent_session_id,
+            )
+            if source is None:
+                return None
+            root = await session.scalar(
+                sa.select(RDBSessionAgent)
+                .where(RDBSessionAgent.id == source.root_session_agent_id)
+                .with_for_update(nowait=True)
+            )
+            if root is None:
+                return None
+            session_ids = {agent_session_id, root.agent_session_id}
+            if source.parent_session_agent_id is not None:
+                parent = await self.get_session_agent_by_id(
+                    session,
+                    source.parent_session_agent_id,
+                )
+                if parent is not None:
+                    session_ids.add(parent.agent_session_id)
+            agent_ids = (
+                await session.scalars(
+                    sa.select(RDBAgentSession.agent_id)
+                    .where(RDBAgentSession.id.in_(session_ids))
+                    .distinct()
+                )
+            ).all()
+            await session.execute(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id.in_(agent_ids))
+                .order_by(RDBAgent.id)
+                .with_for_update(read=True, key_share=True, nowait=True)
+            )
+            locked_sessions = (
+                await session.scalars(
+                    sa.select(RDBAgentSession)
+                    .where(RDBAgentSession.id.in_(session_ids))
+                    .order_by(RDBAgentSession.id)
+                    .with_for_update(key_share=True, nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+            for locked_session in locked_sessions:
+                if locked_session.id == agent_session_id:
+                    return self._build(locked_session)
+            return None
+
     async def lock_agent_parent_for_session(
         self,
         session: AsyncSession,

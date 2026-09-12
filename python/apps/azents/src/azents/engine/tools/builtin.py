@@ -65,6 +65,7 @@ from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeStateStore,
     AgentsAppendixMixin,
+    ToolkitAgentsAppendixDedupeStateStore,
 )
 from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
@@ -113,6 +114,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
@@ -138,6 +140,11 @@ from azents.services.file_storage import (
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
+)
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
 )
 from azents.services.session_storage import guess_media_type
 from azents.services.session_working_folder_binding import (
@@ -441,6 +448,30 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         self._session_id = ""
         self.session_manager = session_manager
         self.memory_repo = memory_repo
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -521,6 +552,30 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         self._session_id = ""
         self.session_manager = session_manager
         self.memory_repo = memory_repo
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -590,6 +645,30 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         self._session_id = ""
         self.session_manager = session_manager
         self.memory_repo = memory_repo
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -757,6 +836,35 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
         self._expected_runtime_authority: RuntimeOperationAuthority | None = None
         self._run_tool_to_file_context: RunToolToFileRuntimeContext | None = None
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind execution-owned Runtime Toolkit state to one Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            if isinstance(
+                self.agents_store,
+                ToolkitAgentsAppendixDedupeStateStore,
+            ):
+                self.agents_store = self.agents_store.for_execution(owner)
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Validate full resource identity and bind its durable owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
 
     def set_instruction_context_store(
         self, store: RuntimeInstructionContextStore

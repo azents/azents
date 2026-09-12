@@ -85,14 +85,20 @@ class SessionBroker(Protocol):
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
-    ) -> None:
-        """Record that a session is being processed with automatic TTL refresh."""
+    ) -> bool:
+        """Record activity only for the newest observed execution generation."""
         ...
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        """Remove activity when session processing completes or errors."""
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Remove activity only for its exact execution generation."""
         ...
 
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:

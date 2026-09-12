@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import functools
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -145,7 +146,10 @@ class RunTaskSupervisor:
                 check_stop=check_stop,
                 prepare_toolkits=prepare_toolkits,
                 shutdown_event=self.shutdown_event,
-                dispatch_event=self.event_publisher.dispatch_event,
+                dispatch_event=functools.partial(
+                    self.event_publisher.dispatch_event,
+                    owner_generation=snapshot.owner_generation,
+                ),
                 owner_generation=snapshot.owner_generation,
                 tool_admission_barrier=self.stop_controller.tool_admission_barrier,
                 model_transport_state=model_transport_state,

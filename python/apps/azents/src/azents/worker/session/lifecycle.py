@@ -72,9 +72,51 @@ class SessionLifecycleService:
         """Release session lock."""
         await self.broker.release_session_lock(session_id)
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        """Remove session activity."""
-        await self.broker.clear_session_activity(session_id)
+    async def assert_current_owner_generation(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Check durable ownership before an external execution side effect."""
+
+        async def assert_current(db_session: AsyncSession) -> None:
+            await self._lock_owned_session(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+
+        await self.run_short_db(assert_current)
+
+    async def release_owned_session_lock(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Release the broker lock only while this Worker is still current."""
+        await self.assert_current_owner_generation(
+            session_id,
+            owner_generation=owner_generation,
+        )
+        await self.broker.release_session_lock(session_id)
+
+    async def clear_owned_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Clear live activity only while this Worker is still current."""
+        await self.assert_current_owner_generation(
+            session_id,
+            owner_generation=owner_generation,
+        )
+        await self.broker.clear_session_activity(
+            session_id,
+            owner_generation=owner_generation,
+        )
 
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Send wake-up through the existing session broker path."""
@@ -111,12 +153,18 @@ class SessionLifecycleService:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         phase: AgentRunPhase | None = None,
     ) -> None:
         """Record session activity and refresh TTL."""
+        await self.assert_current_owner_generation(
+            session_id,
+            owner_generation=owner_generation,
+        )
         await self.broker.set_session_activity(
             session_id,
+            owner_generation=owner_generation,
             run_id=run_id,
             phase=phase,
         )
@@ -203,10 +251,12 @@ class SessionLifecycleService:
         session_id: str,
         owner_generation: int,
     ) -> AgentSession:
-        """Lock the Session row and reject a superseded Worker generation."""
-        agent_session = await self.agent_session_repository.lock_by_id(
-            db_session,
-            session_id,
+        """Acquire tree-ordered admission and reject a superseded generation."""
+        agent_session = (
+            await self.agent_session_repository.wait_for_execution_lock_by_id(
+                db_session,
+                session_id,
+            )
         )
         if agent_session is None:
             raise ValueError("AgentSession not found")

@@ -57,11 +57,16 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxService
+from azents.services.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 from azents.services.subagent_coordination import SubagentCoordinationService
 
 logger = logging.getLogger(__name__)
@@ -218,6 +223,24 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.subagent_settings = subagent_settings
         self.session_id: str | None = None
         self.publish_event: PublishEventFn | None = None
+        self._execution_owner: SessionExecutionOwner | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind this resolved Toolkit to one immutable Session owner."""
+        session_id = self.session_id
+        if session_id is None:
+            raise ValueError("Subagent Toolkit Session was not initialized")
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self._execution_owner = owner
 
     def set_session_id(self, session_id: str) -> None:
         """Inject current AgentSession ID."""

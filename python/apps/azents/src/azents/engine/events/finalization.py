@@ -51,6 +51,10 @@ class FailedRunEventStore:
         action_hint: str | None = None,
     ) -> FailedRunEventStoreResult:
         """Append final failed-run events and close the AgentRun."""
+        await self.terminal_finalization_coordinator.lock_run_finalization(
+            session,
+            run_id=run_id,
+        )
         metadata = FailedRunFailureMetadata.from_retry_state(
             retry_state,
             finalization_reason=reason,

@@ -39,6 +39,9 @@ from azents.engine.hooks.types import (
     normalize_session_idle_result,
     normalize_turn_start_result,
 )
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,8 @@ class RuntimeHookDispatcher:
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
                 raise
+            except CanonicalExecutionOwnerGenerationStaleError:
+                raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
                 self.logger.warning(
@@ -142,6 +147,8 @@ class RuntimeHookDispatcher:
                 result = normalize_turn_start_result(await hook(context))
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
                 raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
@@ -190,6 +197,8 @@ class RuntimeHookDispatcher:
                 result = normalize_session_idle_result(await hook(context))
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
                 raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
@@ -242,6 +251,8 @@ class RuntimeHookDispatcher:
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
                 raise
+            except CanonicalExecutionOwnerGenerationStaleError:
+                raise
             except Exception as exc:
                 decision = CompactionSummaryUnchanged()
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
@@ -282,6 +293,8 @@ class RuntimeHookDispatcher:
                 decision = normalize_before_tool_call_result(await hook(context))
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
                 raise
             except Exception as exc:
                 decision = ToolCallAllow()
@@ -329,6 +342,8 @@ class RuntimeHookDispatcher:
                 )
             except asyncio.CancelledError:
                 await self._record_cancelled(provider.slug, lifecycle, started_at)
+                raise
+            except CanonicalExecutionOwnerGenerationStaleError:
                 raise
             except Exception as exc:
                 decision = ToolOutputUnchanged()
@@ -406,6 +421,8 @@ class RuntimeHookDispatcher:
         try:
             hooks: RuntimeHooks = provider.toolkit.hooks()
         except asyncio.CancelledError:
+            raise
+        except CanonicalExecutionOwnerGenerationStaleError:
             raise
         except Exception as exc:
             await self._record_event(

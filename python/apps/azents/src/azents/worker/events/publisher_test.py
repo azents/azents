@@ -47,13 +47,26 @@ class _Projector:
     def __init__(self) -> None:
         self.events: list[tuple[str, object]] = []
 
-    async def flush_session(self, session_id: str) -> None:
+    async def flush_session(self, session_id: str, *, owner_generation: int) -> None:
         """Accept durable handoff flush."""
-        del session_id
+        del session_id, owner_generation
 
-    async def update(self, session_id: str, event: object) -> None:
+    async def update(
+        self, session_id: str, event: object, *, owner_generation: int
+    ) -> None:
         """Record projection attempts."""
+        del owner_generation
         self.events.append((session_id, event))
+
+    async def publish_control_event(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Accept a control projection attempt."""
+        del session_id, event, owner_generation
 
 
 @pytest.mark.asyncio
@@ -67,7 +80,7 @@ async def test_projection_transport_failures_do_not_interrupt_dispatch() -> None
     )
     event = make_system_error_event(session_id="session-1", content="failed")
 
-    await publisher.dispatch_event("session-1", event)
+    await publisher.dispatch_event("session-1", event, owner_generation=1)
 
     assert projector.events == [("session-1", event)]
 
@@ -81,6 +94,18 @@ class _TrackingBroadcast:
     async def publish(self, session_id: str, event: dict[str, object]) -> None:
         """Record one published frame."""
         self.calls.append(("publish", session_id, event))
+
+    async def publish_live_projection(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Record one owner-gated public control frame."""
+        del owner_generation
+        self.calls.append(("publish", session_id, event))
+        return True
 
 
 class _TrackingBroker:
@@ -100,13 +125,28 @@ class _TrackingProjector:
     def __init__(self, calls: list[object]) -> None:
         self.calls = calls
 
-    async def flush_session(self, session_id: str) -> None:
+    async def flush_session(self, session_id: str, *, owner_generation: int) -> None:
         """Record pre-handoff partial flush."""
+        del owner_generation
         self.calls.append(("flush", session_id))
 
-    async def update(self, session_id: str, event: object) -> None:
+    async def update(
+        self, session_id: str, event: object, *, owner_generation: int
+    ) -> None:
         """Record post-history counterpart removal."""
+        del owner_generation
         self.calls.append(("update", session_id, event))
+
+    async def publish_control_event(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Record one owner-admitted control frame."""
+        del owner_generation
+        self.calls.append(("control", session_id, event))
 
 
 @pytest.mark.asyncio
@@ -140,10 +180,10 @@ async def test_public_control_event_retains_direct_wire_delivery(
         live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
     )
 
-    await publisher.dispatch_event("session-1", event)
+    await publisher.dispatch_event("session-1", event, owner_generation=1)
 
     assert calls == [
-        ("publish", "session-1", serialize_event(event)),
+        ("control", "session-1", serialize_event(event)),
         ("ttl", "session-1"),
         ("update", "session-1", event),
     ]
@@ -160,7 +200,7 @@ async def test_internal_runtime_event_is_not_publicly_broadcast() -> None:
     )
     event = RunStarted(run_id="run-1", phase=None)
 
-    await publisher.dispatch_event("session-1", event)
+    await publisher.dispatch_event("session-1", event, owner_generation=1)
 
     assert not any(isinstance(call, tuple) and call[0] == "publish" for call in calls)
     assert calls == [
@@ -180,7 +220,7 @@ async def test_durable_event_uses_one_canonical_history_frame_after_flush() -> N
     )
     event = make_system_error_event(session_id="session-1", content="failed")
 
-    await publisher.dispatch_event("session-1", event)
+    await publisher.dispatch_event("session-1", event, owner_generation=1)
 
     assert calls[0] == ("flush", "session-1")
     published = [

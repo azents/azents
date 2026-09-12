@@ -36,6 +36,8 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
 )
+from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,6 +63,20 @@ class ScheduledTaskProgressRepository:
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository.create),
     ]
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwner,
+    ) -> "ScheduledTaskProgressRepository":
+        """Bind progress persistence to one durable Session owner."""
+        return dataclasses.replace(
+            self,
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+        )
 
     async def prepare_initial_tracker(
         self,
