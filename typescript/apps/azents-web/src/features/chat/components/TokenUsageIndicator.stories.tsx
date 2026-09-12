@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { TokenUsageDetails } from "./TokenUsageIndicator";
 import type { ChatLiveRunState } from "../types";
@@ -12,7 +13,7 @@ const activeRun = {
     model_target_label: "quality",
     model_display_name: "GPT 5.5",
     reasoning_effort: "high",
-    enabled_execution_options: [],
+    enabled_execution_options: ["fast"],
   },
   modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
   retry: null,
@@ -48,7 +49,13 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const ActiveRun = {} satisfies Story;
+export const ActiveRun = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Fast")).toBeInTheDocument();
+    await expect(canvas.getByText("On")).toBeInTheDocument();
+  },
+} satisfies Story;
 
 export const HistoricalRunWithDurableProvenance = {
   args: {

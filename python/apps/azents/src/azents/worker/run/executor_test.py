@@ -98,6 +98,7 @@ from azents.engine.run.input import AgentNotFound, InvokeInput
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    UnclassifiedModelProviderError,
     model_provider_failure,
 )
 from azents.engine.run.resolve import (
@@ -1114,6 +1115,7 @@ class _FlakyEngine(_Engine):
     def __init__(self, error: ModelCallError | None = None) -> None:
         self.calls = 0
         self.error = error or ModelCallError("model temporarily unavailable")
+        self.requests: list[RunRequest] = []
 
     def run(
         self,
@@ -1124,8 +1126,9 @@ class _FlakyEngine(_Engine):
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt and complete the second."""
-        del request, poll_messages, check_stop
+        del poll_messages, check_stop
         assert isinstance(context, RunContext)
+        self.requests.append(request)
 
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
@@ -2846,6 +2849,129 @@ async def test_execute_recovers_durable_retry_budget(
     assert result.terminal_run_status == AgentRunStatus.FAILED
     assert len(finalizer.inputs) == 1
     assert finalizer.inputs[0].retry_state.failed_attempt_count == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_recovers_unclassified_provider_retry_with_current_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery refreshes an unclassified provider retry from Session intent."""
+    now = datetime.datetime.now(datetime.UTC)
+    retry_state = FailedRunRetryState(
+        failed_attempt_count=1,
+        max_retries=2,
+        last_user_message="temporary provider failure",
+        last_error_type=UnclassifiedModelProviderError.__name__,
+        last_source="engine",
+        last_failed_at=now - datetime.timedelta(seconds=2),
+        backoff_seconds=1,
+        next_retry_at=now - datetime.timedelta(seconds=1),
+    )
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        resolved_model_selection=make_test_model_selection(),
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        retry_state=retry_state,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    initial_state = SessionInferenceState(
+        model_target_label="default",
+        model_selection=make_test_model_selection(),
+        model_settings=make_test_model_settings(),
+        reasoning_effort=None,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=now,
+        enabled_execution_options=[],
+    )
+    session_repository = _AgentSessionRepository(inference_state=initial_state)
+    session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+        model_target_label="planning",
+        reasoning_effort=None,
+        enabled_execution_options=[],
+    )
+    engine = _RecordingEngine([])
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=engine,
+        agent_session_repository=session_repository,
+    )
+    resolved_profiles: list[RequestedInferenceProfile] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    async def resolve_profile(*args: object, **kwargs: object) -> object:
+        del args
+        requested_profile = kwargs["requested_profile"]
+        assert isinstance(requested_profile, RequestedInferenceProfile)
+        resolved_profiles.append(requested_profile)
+        selection = make_test_model_selection()
+        return Success(
+            ResolvedInvokeInputProfile(
+                run_request=RunRequest(
+                    enabled_execution_options=(
+                        requested_profile.enabled_execution_options
+                    ),
+                    session_id="session-001",
+                    user_messages=[],
+                    agent_prompt=None,
+                    toolkits=[],
+                    model=requested_profile.model_target_label,
+                    credential_kwargs={},
+                    workspace_id="workspace-001",
+                    agent_id="agent-001",
+                    tool_search_enabled=False,
+                    auto_compaction_threshold_tokens=None,
+                    compaction_provider_integration_id=None,
+                    inference_state=None,
+                ),
+                model_selection=selection,
+                model_settings=make_test_model_settings(),
+                reasoning_effort=requested_profile.reasoning_effort,
+            )
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        _resolve_existing_success,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_profile,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    result = await executor.execute(
+        _message(recoverable_run=recoverable),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert [profile.model_target_label for profile in resolved_profiles] == ["planning"]
+    assert [request.model for request in engine.requests] == ["planning"]
+    assert engine.requests[0].inference_state is not None
+    assert engine.requests[0].inference_state.model_target_label == "planning"
 
 
 @pytest.mark.asyncio
@@ -5655,6 +5781,115 @@ async def test_execute_retries_failed_run_without_durable_error(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
         for event in dispatched
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_refreshes_session_profile_before_model_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry attempt rebuilds its request from current Session model intent."""
+    session_repository = _AgentSessionRepository()
+    session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+        enabled_execution_options=[],
+    )
+    engine = _FlakyEngine(_SyntheticTransientModelCallError("temporary failure"))
+    executor = _executor(
+        session_lifecycle=_SessionLifecycle(),
+        engine=engine,
+        agent_session_repository=session_repository,
+    )
+    resolved_profiles: list[RequestedInferenceProfile] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    async def resolve_profile(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        del args
+        requested_profile = kwargs["requested_profile"]
+        assert isinstance(requested_profile, RequestedInferenceProfile)
+        resolved_profiles.append(requested_profile)
+        selection = make_test_model_selection()
+        return Success(
+            ResolvedInvokeInputProfile(
+                run_request=RunRequest(
+                    enabled_execution_options=(
+                        requested_profile.enabled_execution_options
+                    ),
+                    session_id="session-001",
+                    user_messages=[],
+                    agent_prompt=None,
+                    toolkits=[],
+                    model=requested_profile.model_target_label,
+                    credential_kwargs={},
+                    workspace_id="workspace-001",
+                    agent_id="agent-001",
+                    tool_search_enabled=False,
+                    auto_compaction_threshold_tokens=None,
+                    compaction_provider_integration_id=None,
+                    inference_state=None,
+                ),
+                model_selection=selection,
+                model_settings=make_test_model_settings(),
+                reasoning_effort=requested_profile.reasoning_effort,
+            )
+        )
+
+    async def wait_for_retry(**kwargs: object) -> bool:
+        del kwargs
+        session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+            model_target_label="planning",
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        )
+        return False
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "_wait_for_failed_run_retry",
+        wait_for_retry,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_profile,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert [profile.model_target_label for profile in resolved_profiles] == [
+        "default",
+        "planning",
+    ]
+    assert [request.model for request in engine.requests] == ["default", "planning"]
+    assert engine.requests[1].inference_state is not None
+    assert engine.requests[1].inference_state.model_target_label == "planning"
 
 
 @pytest.mark.asyncio

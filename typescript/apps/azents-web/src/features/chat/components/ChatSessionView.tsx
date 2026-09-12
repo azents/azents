@@ -59,6 +59,7 @@ export function ChatSessionView({
   chatSession,
   currentWorkspaceProfile,
   subscriptionUsage,
+  onInferenceProfileChange,
   workspacePanel,
   subagentNavigation,
   terminal,
@@ -279,6 +280,7 @@ export function ChatSessionView({
             liveRun={chatSession.liveRun}
             tokenUsage={chatSession.tokenUsage}
             onApplyInferenceProfile={chatSession.onApplyInferenceProfile}
+            onInferenceProfileChange={onInferenceProfileChange}
             defaultInferenceProfile={chatSession.defaultInferenceProfile}
             onSendInput={chatSession.onSendInput}
             onDeletePendingInputBuffer={chatSession.onDeletePendingInputBuffer}

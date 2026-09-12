@@ -97,7 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-12
-spec_version: 175
+spec_version: 176
 ---
 
 # Agent Execution Loop
@@ -471,9 +471,15 @@ model/runtime errors that stop a run attempt propagate out of `AgentRunExecution
 durable `system_error`, without appending a failed `run_marker`, and without marking the run
 terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`, persists
 `agent_runs.retry_state`, waits until `next_retry_at` while observing stop/shutdown, and retries the
-same model turn and `run_id`. This keeps the run `running` and prevents durable failed history until
-retry is finalized. `max_retries` counts retries after the initial attempt, so a budget of three
-permits four total attempts and terminal attempt numbers remain one-based within each model turn.
+same model turn and `run_id`. The failed attempt retains its immutable prepared snapshot. After
+backoff and immediately before the next attempt, `RunExecutor` freshly resolves the current
+Session-applied profile against the current Agent option mapping, replaces the Session inference
+snapshot, rebuilds the model request, and publishes the refreshed live profile. Recovered persisted
+retry state follows the same refresh boundary after its remaining backoff. Commands keep their
+existing request because this refresh applies only to model execution. This keeps the run `running`
+and prevents durable failed history until retry is finalized. `max_retries` counts retries after the
+initial attempt, so a budget of three permits four total attempts and terminal attempt numbers remain
+one-based within each model turn.
 
 Before a non-Stop model failure is recorded or its retry state is published, `RunExecutor` asks the
 live projector to discard that attempt's assistant, reasoning, and provider-tool projections. The
@@ -1453,8 +1459,12 @@ icon.
 
 ## Changelog
 
-- 2026-09-12: Bind engine persistence, compaction, and tool admission to durable execution ownership with tree-safe database locking.
-
+- **2026-09-12** (spec_version 176) — Bound engine persistence,
+  compaction, and tool admission to durable execution ownership with tree-safe
+  database locking.
+- **2026-09-12** (spec_version 175) — Rebuilt each automatic model-call retry
+  attempt from current Session-applied inference intent after backoff, including
+  recovered persisted retry state.
 - **2026-09-10** (spec_version 174) — Added pre-dispatch image-generation
   catalog/generation revalidation, typed profile failures, maintained-default model
   omission, and exact explicit hosted-tool model forwarding.
