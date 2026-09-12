@@ -694,11 +694,14 @@ def _runtime_web_stack(
                     ("Runtime Web Main Web", main_web),
                     ("Runtime Web TLS edge", edge),
                 ):
+                    container_logs = _container_logs(container)
                     logger.warning(
-                        "Runtime Web E2E container logs",
+                        "Runtime Web E2E container logs for %s:\n%s",
+                        name,
+                        container_logs,
                         extra={
                             "container_name": name,
-                            "container_logs": _container_logs(container),
+                            "container_logs": container_logs,
                         },
                     )
                 raise
