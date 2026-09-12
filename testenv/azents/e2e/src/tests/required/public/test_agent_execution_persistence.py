@@ -68,6 +68,7 @@ _CANONICAL_WS_ACTION_TYPES = frozenset(
         "input_actions_updated",
         "live_event_removed",
         "live_event_upserted",
+        "live_projection_reset",
         "live_run_cleared",
         "live_run_updated",
         "subagent_tree_changed",
