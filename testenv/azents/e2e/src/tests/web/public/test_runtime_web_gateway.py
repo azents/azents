@@ -998,6 +998,15 @@ def _approve_in_browser(driver: WebDriver, *, endpoint_url: str) -> None:
             (By.XPATH, "//*[contains(normalize-space(), 'currently exposed')]")
         )
     )
+
+
+def _open_application_in_browser(
+    driver: WebDriver,
+    *,
+    endpoint_url: str,
+) -> None:
+    """Open the application after authoritative approval synchronization."""
+    wait = WebDriverWait(driver, 60)
     driver.get(endpoint_url)
     try:
         wait.until(
@@ -1115,8 +1124,10 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             )
             assert active.active
             assert active.current_cycle is not None
+            assert active.current_request is None
             assert active.endpoint.id == stable_endpoint_id
             assert active.endpoint.url == endpoint_url
+            _open_application_in_browser(driver, endpoint_url=endpoint_url)
 
             evidence = _browser_transport_evidence(driver)
             assert "error" not in evidence, evidence
