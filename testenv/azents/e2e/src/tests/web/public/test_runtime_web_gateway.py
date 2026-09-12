@@ -44,6 +44,9 @@ from azentspublicclient.models.runtime_web_exposure_request import (
     RuntimeWebExposureRequest,
 )
 from azentspublicclient.models.runtime_web_request_state import RuntimeWebRequestState
+from azentspublicclient.models.runtime_web_service_response import (
+    RuntimeWebServiceResponse,
+)
 from azentspublicclient.models.secrets import Secrets
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -884,13 +887,14 @@ web.run_app(application, host='127.0.0.1', port=8765, handle_signals=False)
 """.strip()
 
 
-def _start_runtime_application(
+@contextmanager
+def _runtime_application(
     *,
     public_api_client: azentspublicclient.ApiClient,
     workspace: _RuntimeWebWorkspace,
     server_url: str,
-) -> None:
-    """Launch the fixture app through the supported Runtime Terminal product API."""
+) -> Generator[None, None, None]:
+    """Keep the fixture app's Runtime Terminal attached through transport checks."""
     terminal_workspace = _TerminalWorkspace(
         token=workspace.token,
         handle=workspace.handle,
@@ -937,6 +941,7 @@ while True:
             f"APP_PROBE_DONE_{unique()}",
         )
         assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+        yield
     finally:
         terminal.close()
 
@@ -1001,6 +1006,37 @@ def _approve_in_browser(driver: WebDriver, *, endpoint_url: str) -> None:
             (By.XPATH, "//*[contains(normalize-space(), 'currently exposed')]")
         )
     )
+
+
+def _wait_for_active_service(
+    *,
+    api: RuntimeWebV1Api,
+    workspace: _RuntimeWebWorkspace,
+) -> RuntimeWebServiceResponse:
+    """Poll the authoritative Public API until the approval transaction is visible."""
+    deadline = time.monotonic() + 30
+    while True:
+        service = api.runtime_web_v1_get_runtime_web_service_projection(
+            handle=workspace.handle,
+            agent_id=workspace.agent_id,
+            session_id=workspace.session_id,
+            port=_RUNTIME_WEB_PORT,
+            _headers=_headers(workspace.token),
+        )
+        if (
+            service.active
+            and service.current_cycle is not None
+            and service.current_request is None
+        ):
+            return service
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                "Runtime Web approval did not reach authoritative active state: "
+                f"active={service.active!r}, "
+                f"request_state={getattr(service.current_request, 'state', None)!r}, "
+                f"cycle_present={service.current_cycle is not None!r}"
+            )
+        time.sleep(0.1)
 
 
 def _open_application_in_browser(
@@ -1080,13 +1116,14 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         admin_api_client=admin_api_client,
         server_url=azents_public_server_url,
     )
-    _start_runtime_application(
-        public_api_client=public_api_client,
-        workspace=workspace,
-        server_url=azents_public_server_url,
-    )
-
-    with runtime_web_stack_factory.start(auth_mode) as stack:
+    with (
+        _runtime_application(
+            public_api_client=public_api_client,
+            workspace=workspace,
+            server_url=azents_public_server_url,
+        ),
+        runtime_web_stack_factory.start(auth_mode) as stack,
+    ):
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -1118,13 +1155,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         try:
             _login(driver, email=workspace.email)
             _approve_in_browser(driver, endpoint_url=endpoint_url)
-            active = api.runtime_web_v1_get_runtime_web_service_projection(
-                handle=workspace.handle,
-                agent_id=workspace.agent_id,
-                session_id=workspace.session_id,
-                port=_RUNTIME_WEB_PORT,
-                _headers=_headers(workspace.token),
-            )
+            active = _wait_for_active_service(api=api, workspace=workspace)
             assert active.active
             assert active.current_cycle is not None
             assert active.current_request is None
