@@ -1179,6 +1179,247 @@
             },
             "pdb": {
               "type": "object"
+            },
+            "webTransport": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "trustedPort",
+                "routeLeaseSeconds",
+                "maxActiveConnections",
+                "gatewayPeerIdentities",
+                "controlPeerIdentities"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "trustedPort": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "routeLeaseSeconds": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "maxActiveConnections": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 512
+                },
+                "gatewayPeerIdentities": {
+                  "type": "string"
+                },
+                "controlPeerIdentities": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "runtimeWebGateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "replicas",
+            "port",
+            "authMode",
+            "authConfigurationVersion",
+            "mainWebOrigin",
+            "brokerOrigin",
+            "serviceSuffix",
+            "cookieDomain",
+            "identityCookieName",
+            "identityLifetimeSeconds",
+            "activeDurationSeconds",
+            "chromium",
+            "request",
+            "connectionLimits",
+            "permissionsPolicy",
+            "controlTls",
+            "ingress",
+            "resources",
+            "autoscaling",
+            "pdb"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "replicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "authMode": {
+              "type": "string",
+              "enum": [
+                "shared_cookie",
+                "separate_domain"
+              ]
+            },
+            "authConfigurationVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "mainWebOrigin": {
+              "type": "string"
+            },
+            "brokerOrigin": {
+              "type": "string"
+            },
+            "serviceSuffix": {
+              "type": "string"
+            },
+            "cookieDomain": {
+              "type": "string"
+            },
+            "identityCookieName": {
+              "type": "string",
+              "const": "__Http-Azents-Runtime-Web"
+            },
+            "identityLifetimeSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 3600
+            },
+            "activeDurationSeconds": {
+              "type": "integer",
+              "minimum": 300,
+              "maximum": 28800
+            },
+            "chromium": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "minVersion",
+                "maxVersion"
+              ],
+              "properties": {
+                "minVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "request": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "headerBytes",
+                "bodyBytes",
+                "frameBytes"
+              ],
+              "properties": {
+                "headerBytes": {
+                  "type": "integer",
+                  "minimum": 4096,
+                  "maximum": 131072
+                },
+                "bodyBytes": {
+                  "type": "integer",
+                  "minimum": 65536,
+                  "maximum": 1073741824
+                },
+                "frameBytes": {
+                  "type": "integer",
+                  "minimum": 4096,
+                  "maximum": 65536
+                }
+              }
+            },
+            "connectionLimits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "http",
+                "websocket"
+              ],
+              "properties": {
+                "http": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "endpoint",
+                    "user",
+                    "agent"
+                  ],
+                  "properties": {
+                    "endpoint": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 128
+                    },
+                    "user": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 256
+                    },
+                    "agent": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 512
+                    }
+                  }
+                },
+                "websocket": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "endpoint",
+                    "user",
+                    "agent"
+                  ],
+                  "properties": {
+                    "endpoint": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 16
+                    },
+                    "user": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 32
+                    },
+                    "agent": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 64
+                    }
+                  }
+                }
+              }
+            },
+            "permissionsPolicy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "controlTls": {
+              "$ref": "#/definitions/runtimeControlTls"
+            },
+            "ingress": {
+              "$ref": "#/definitions/componentIngress"
+            },
+            "resources": {
+              "type": "object"
+            },
+            "autoscaling": {
+              "type": "object"
+            },
+            "pdb": {
+              "type": "object"
             }
           }
         }

@@ -226,3 +226,61 @@ class RuntimeWebActionErrorResponse(_ClosedModel):
     """FastAPI envelope for a bounded Runtime Web control error."""
 
     detail: RuntimeWebActionErrorDetail
+
+
+class RuntimeWebBrowserProfileRequest(_ClosedModel):
+    """Trusted Main Web proof for the admitted browser profile."""
+
+    browser_profile: str = Field(
+        pattern=r"^chromium-[0-9]+$",
+        min_length=10,
+        max_length=32,
+    )
+
+
+class RuntimeWebIdentitySecretResponse(_ClosedModel):
+    """Opaque identity secret for a trusted cookie-setting response."""
+
+    secret: str = Field(min_length=32, max_length=128)
+    expires_at: datetime
+
+
+class RuntimeWebIdentityRevokeRequest(_ClosedModel):
+    """Exact identity secret revoked during trusted logout."""
+
+    secret: str = Field(min_length=32, max_length=128)
+
+
+class RuntimeWebIdentityRevokeResponse(_ClosedModel):
+    """Identity revocation outcome."""
+
+    revoked: bool
+
+
+class RuntimeWebSeparateInitiateRequest(_ClosedModel):
+    """Start one browser-bound separate-domain exchange."""
+
+    endpoint_id: str = Field(min_length=32, max_length=32)
+
+
+class RuntimeWebSeparateInitiateResponse(_ClosedModel):
+    """Main-origin binding state returned without URL credentials."""
+
+    initiation_id: str = Field(min_length=32, max_length=32)
+    main_binding_secret: str = Field(min_length=32, max_length=128)
+    expires_at: datetime
+
+
+class RuntimeWebSeparateBoundRequest(_ClosedModel):
+    """Prove the exact Main binding after the broker callback."""
+
+    initiation_id: str = Field(min_length=32, max_length=32)
+    main_binding_secret: str = Field(min_length=32, max_length=128)
+
+
+class RuntimeWebSeparateTicketResponse(_ClosedModel):
+    """One-use POST-body ticket for the exact endpoint."""
+
+    ticket_secret: str = Field(min_length=32, max_length=128)
+    endpoint_id: str = Field(min_length=32, max_length=32)
+    expires_at: datetime

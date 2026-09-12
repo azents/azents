@@ -1,13 +1,20 @@
 """Runtime Web service control v1 Public API."""
 
+from datetime import UTC, datetime
 from textwrap import dedent
 from typing import Annotated, Any, NoReturn, assert_never
 
 from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
-from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.core.auth.deps import (
+    CurrentUser,
+    WorkspaceMember,
+    get_current_user,
+    get_workspace_member,
+)
 from azents.rdb.models.runtime_web import RuntimeWebRequesterKind
+from azents.repos.runtime_web.repository import RuntimeWebRepositoryConflict
 from azents.services.runtime_web.data import (
     RuntimeWebAccessDenied,
     RuntimeWebActor,
@@ -18,6 +25,10 @@ from azents.services.runtime_web.data import (
     RuntimeWebOperation,
     RuntimeWebQuotaExceeded,
 )
+from azents.services.runtime_web.gateway_auth import RuntimeWebGatewayAuthService
+from azents.services.runtime_web.gateway_auth_deps import (
+    get_runtime_web_gateway_auth_service,
+)
 from azents.services.runtime_web.service import (
     RuntimeWebService,
     get_runtime_web_service,
@@ -27,11 +38,19 @@ from azents.utils.fastapi.route import RouteMounter
 from .data import (
     RuntimeWebActionErrorResponse,
     RuntimeWebApprovalRequest,
+    RuntimeWebBrowserProfileRequest,
     RuntimeWebCloseRequest,
     RuntimeWebDirectCreateRequest,
     RuntimeWebExpectedRevisionRequest,
     RuntimeWebExposureRequest,
+    RuntimeWebIdentityRevokeRequest,
+    RuntimeWebIdentityRevokeResponse,
+    RuntimeWebIdentitySecretResponse,
     RuntimeWebPrepareRequest,
+    RuntimeWebSeparateBoundRequest,
+    RuntimeWebSeparateInitiateRequest,
+    RuntimeWebSeparateInitiateResponse,
+    RuntimeWebSeparateTicketResponse,
     RuntimeWebServiceListResponse,
     RuntimeWebServiceResponse,
 )
@@ -56,6 +75,13 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": RuntimeWebActionErrorResponse,
         "description": "A logical Runtime Web service quota is exhausted.",
     },
+}
+
+_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status.HTTP_409_CONFLICT: {
+        "model": RuntimeWebActionErrorResponse,
+        "description": "The authentication exchange or installation changed.",
+    }
 }
 
 
@@ -101,6 +127,152 @@ def _raise_runtime_web_error(error: RuntimeWebError) -> NoReturn:
             )
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _raise_auth_conflict() -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "conflict", "scope": None},
+    )
+
+
+@router.post(
+    "/auth/shared-identity",
+    response_model=RuntimeWebIdentitySecretResponse,
+    responses=_AUTH_ERROR_RESPONSES,
+)
+async def issue_runtime_web_shared_identity(
+    request_body: RuntimeWebBrowserProfileRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[
+        RuntimeWebGatewayAuthService,
+        Depends(get_runtime_web_gateway_auth_service),
+    ],
+) -> RuntimeWebIdentitySecretResponse:
+    """Mint one opaque Gateway identity for a trusted Main Web response."""
+    try:
+        issued = await service.issue_shared_identity(
+            user_id=current_user.user_id,
+            auth_session_id=current_user.session_id,
+            browser_profile=request_body.browser_profile,
+            now=datetime.now(UTC),
+        )
+    except RuntimeWebRepositoryConflict:
+        _raise_auth_conflict()
+    return RuntimeWebIdentitySecretResponse(
+        secret=issued.secret,
+        expires_at=issued.expires_at,
+    )
+
+
+@router.post(
+    "/auth/revoke-identity",
+    response_model=RuntimeWebIdentityRevokeResponse,
+)
+async def revoke_runtime_web_identity(
+    request_body: RuntimeWebIdentityRevokeRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[
+        RuntimeWebGatewayAuthService,
+        Depends(get_runtime_web_gateway_auth_service),
+    ],
+) -> RuntimeWebIdentityRevokeResponse:
+    """Revoke a Gateway identity during trusted logout."""
+    return RuntimeWebIdentityRevokeResponse(
+        revoked=await service.revoke(
+            secret=request_body.secret,
+            user_id=current_user.user_id,
+            auth_session_id=current_user.session_id,
+            now=datetime.now(UTC),
+        )
+    )
+
+
+@router.post(
+    "/auth/separate/initiate",
+    response_model=RuntimeWebSeparateInitiateResponse,
+    responses=_AUTH_ERROR_RESPONSES,
+)
+async def initiate_runtime_web_separate_identity(
+    request_body: RuntimeWebSeparateInitiateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[
+        RuntimeWebGatewayAuthService,
+        Depends(get_runtime_web_gateway_auth_service),
+    ],
+) -> RuntimeWebSeparateInitiateResponse:
+    """Create one Main-origin binding without a URL-carried secret."""
+    try:
+        issued = await service.initiate_separate_domain(
+            user_id=current_user.user_id,
+            auth_session_id=current_user.session_id,
+            endpoint_id=request_body.endpoint_id,
+            now=datetime.now(UTC),
+        )
+    except RuntimeWebRepositoryConflict:
+        _raise_auth_conflict()
+    return RuntimeWebSeparateInitiateResponse(
+        initiation_id=issued.binding.initiation_id,
+        main_binding_secret=issued.main_binding_secret,
+        expires_at=issued.binding.expires_at,
+    )
+
+
+@router.post(
+    "/auth/separate/bound",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=_AUTH_ERROR_RESPONSES,
+)
+async def mark_runtime_web_separate_identity_bound(
+    request_body: RuntimeWebSeparateBoundRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[
+        RuntimeWebGatewayAuthService,
+        Depends(get_runtime_web_gateway_auth_service),
+    ],
+) -> None:
+    """Record the exact broker callback under the current auth Session."""
+    try:
+        await service.mark_broker_bound(
+            initiation_id=request_body.initiation_id,
+            main_binding_secret=request_body.main_binding_secret,
+            user_id=current_user.user_id,
+            auth_session_id=current_user.session_id,
+            now=datetime.now(UTC),
+        )
+    except RuntimeWebRepositoryConflict:
+        _raise_auth_conflict()
+
+
+@router.post(
+    "/auth/separate/ticket",
+    response_model=RuntimeWebSeparateTicketResponse,
+    responses=_AUTH_ERROR_RESPONSES,
+)
+async def issue_runtime_web_separate_ticket(
+    request_body: RuntimeWebSeparateBoundRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[
+        RuntimeWebGatewayAuthService,
+        Depends(get_runtime_web_gateway_auth_service),
+    ],
+) -> RuntimeWebSeparateTicketResponse:
+    """Issue one thirty-second ticket after the broker callback."""
+    try:
+        issued = await service.issue_ticket(
+            initiation_id=request_body.initiation_id,
+            main_binding_secret=request_body.main_binding_secret,
+            user_id=current_user.user_id,
+            auth_session_id=current_user.session_id,
+            now=datetime.now(UTC),
+        )
+    except RuntimeWebRepositoryConflict:
+        _raise_auth_conflict()
+    return RuntimeWebSeparateTicketResponse(
+        ticket_secret=issued.ticket_secret,
+        endpoint_id=issued.endpoint_id,
+        expires_at=issued.expires_at,
+    )
 
 
 @router.put(

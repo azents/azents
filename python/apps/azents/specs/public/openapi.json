@@ -11614,6 +11614,274 @@
         }
       }
     },
+    "/runtime-web/v1/auth/shared-identity": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Issue Runtime Web Shared Identity",
+        "description": "Mint one opaque Gateway identity for a trusted Main Web response.",
+        "operationId": "runtime_web_v1_issue_runtime_web_shared_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebBrowserProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebIdentitySecretResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The authentication exchange or installation changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runtime-web/v1/auth/revoke-identity": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Revoke Runtime Web Identity",
+        "description": "Revoke a Gateway identity during trusted logout.",
+        "operationId": "runtime_web_v1_revoke_runtime_web_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebIdentityRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebIdentityRevokeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runtime-web/v1/auth/separate/initiate": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Initiate Runtime Web Separate Identity",
+        "description": "Create one Main-origin binding without a URL-carried secret.",
+        "operationId": "runtime_web_v1_initiate_runtime_web_separate_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebSeparateInitiateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebSeparateInitiateResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The authentication exchange or installation changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runtime-web/v1/auth/separate/bound": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Mark Runtime Web Separate Identity Bound",
+        "description": "Record the exact broker callback under the current auth Session.",
+        "operationId": "runtime_web_v1_mark_runtime_web_separate_identity_bound",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebSeparateBoundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "The authentication exchange or installation changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runtime-web/v1/auth/separate/ticket": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Issue Runtime Web Separate Ticket",
+        "description": "Issue one thirty-second ticket after the broker callback.",
+        "operationId": "runtime_web_v1_issue_runtime_web_separate_ticket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebSeparateBoundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebSeparateTicketResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The authentication exchange or installation changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/endpoint": {
       "put": {
         "tags": [
@@ -31370,6 +31638,24 @@
         "title": "RuntimeWebApprovalRequest",
         "description": "Revision- and displayed-duration-bound approval mutation."
       },
+      "RuntimeWebBrowserProfileRequest": {
+        "properties": {
+          "browser_profile": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 10,
+            "pattern": "^chromium-[0-9]+$",
+            "title": "Browser Profile"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "browser_profile"
+        ],
+        "title": "RuntimeWebBrowserProfileRequest",
+        "description": "Trusted Main Web proof for the admitted browser profile."
+      },
       "RuntimeWebCloseRequest": {
         "properties": {
           "expected_endpoint_revision": {
@@ -31654,6 +31940,61 @@
         "title": "RuntimeWebExposureRequest",
         "description": "Idempotent asynchronous exposure request."
       },
+      "RuntimeWebIdentityRevokeRequest": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Secret"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "secret"
+        ],
+        "title": "RuntimeWebIdentityRevokeRequest",
+        "description": "Exact identity secret revoked during trusted logout."
+      },
+      "RuntimeWebIdentityRevokeResponse": {
+        "properties": {
+          "revoked": {
+            "type": "boolean",
+            "title": "Revoked"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "title": "RuntimeWebIdentityRevokeResponse",
+        "description": "Identity revocation outcome."
+      },
+      "RuntimeWebIdentitySecretResponse": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Secret"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "secret",
+          "expires_at"
+        ],
+        "title": "RuntimeWebIdentitySecretResponse",
+        "description": "Opaque identity secret for a trusted cookie-setting response."
+      },
       "RuntimeWebPrepareRequest": {
         "properties": {
           "label": {
@@ -31781,6 +32122,107 @@
         ],
         "title": "RuntimeWebRequesterKind",
         "description": "Principal kind that created a Runtime Web request."
+      },
+      "RuntimeWebSeparateBoundRequest": {
+        "properties": {
+          "initiation_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Initiation Id"
+          },
+          "main_binding_secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Main Binding Secret"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "initiation_id",
+          "main_binding_secret"
+        ],
+        "title": "RuntimeWebSeparateBoundRequest",
+        "description": "Prove the exact Main binding after the broker callback."
+      },
+      "RuntimeWebSeparateInitiateRequest": {
+        "properties": {
+          "endpoint_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Endpoint Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "endpoint_id"
+        ],
+        "title": "RuntimeWebSeparateInitiateRequest",
+        "description": "Start one browser-bound separate-domain exchange."
+      },
+      "RuntimeWebSeparateInitiateResponse": {
+        "properties": {
+          "initiation_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Initiation Id"
+          },
+          "main_binding_secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Main Binding Secret"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "initiation_id",
+          "main_binding_secret",
+          "expires_at"
+        ],
+        "title": "RuntimeWebSeparateInitiateResponse",
+        "description": "Main-origin binding state returned without URL credentials."
+      },
+      "RuntimeWebSeparateTicketResponse": {
+        "properties": {
+          "ticket_secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Ticket Secret"
+          },
+          "endpoint_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Endpoint Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ticket_secret",
+          "endpoint_id",
+          "expires_at"
+        ],
+        "title": "RuntimeWebSeparateTicketResponse",
+        "description": "One-use POST-body ticket for the exact endpoint."
       },
       "RuntimeWebServiceListResponse": {
         "properties": {

@@ -10,6 +10,7 @@ from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthTicket,
     RDBRuntimeWebCycle,
     RDBRuntimeWebEndpoint,
+    RDBRuntimeWebGatewayAdmissionLease,
     RDBRuntimeWebGatewayIdentity,
     RDBRuntimeWebOperationReceipt,
     RDBRuntimeWebQuotaScope,
@@ -47,6 +48,7 @@ def test_runtime_web_authority_tables_are_durable_metadata_only() -> None:
         RDBRuntimeWebAuthTicket.__table__,
         RDBRuntimeWebTunnelRoute.__table__,
         RDBRuntimeWebAdmissionLease.__table__,
+        RDBRuntimeWebGatewayAdmissionLease.__table__,
     ]
     forbidden = {"body", "request_body", "response_body", "headers", "cookie"}
 

@@ -102,10 +102,67 @@ server:
       certificateKey: tls.crt
       privateKeyKey: tls.key
       caKey: ca.crt
+    webTransport:
+      enabled: false
+      trustedPort: 8032
+      routeLeaseSeconds: 10
+      maxActiveConnections: 128
+      gatewayPeerIdentities: ""
+      controlPeerIdentities: ""
     runnerImage:
       repository: ""
       tag: ""
       digest: ""
+    resources: {}
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+  runtimeWebGateway:
+    enabled: false
+    replicas: 2
+    port: 8040
+    authMode: shared_cookie
+    authConfigurationVersion: 1
+    mainWebOrigin: ""
+    brokerOrigin: ""
+    serviceSuffix: ""
+    cookieDomain: ""
+    identityCookieName: __Http-Azents-Runtime-Web
+    identityLifetimeSeconds: 1800
+    activeDurationSeconds: 3600
+    chromium:
+      minVersion: 152
+      maxVersion: 152
+    request:
+      headerBytes: 32768
+      bodyBytes: 67108864
+      frameBytes: 65536
+    connectionLimits:
+      http:
+        endpoint: 32
+        user: 64
+        agent: 128
+      websocket:
+        endpoint: 4
+        user: 8
+        agent: 16
+    permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    controlTls:
+      existingSecret: ""
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+      caKey: ca.crt
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts: []
+      tls: []
     resources: {}
     autoscaling:
       enabled: true
