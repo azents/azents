@@ -207,7 +207,20 @@ class RunnerWebTransportManager:
                 client,
                 RunnerWebStreamErrorCode.DEADLINE_EXCEEDED,
             )
-        except aiohttp.ClientError, OSError:
+        except (aiohttp.ClientError, OSError) as error:
+            error_number = getattr(error, "errno", None)
+            if error_number is None:
+                error_number = getattr(getattr(error, "os_error", None), "errno", None)
+            _LOGGER.warning(
+                "Runtime Web loopback application unavailable",
+                extra={
+                    "runtime_id": tunnel.identity.runtime_id,
+                    "tunnel_id": tunnel.identity.tunnel_id,
+                    "port": tunnel.identity.port,
+                    "error_type": type(error).__name__,
+                    "error_number": error_number,
+                },
+            )
             await self._finish_error(
                 client,
                 RunnerWebStreamErrorCode.APPLICATION_UNAVAILABLE,

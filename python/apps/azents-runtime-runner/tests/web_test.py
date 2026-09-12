@@ -2,9 +2,11 @@
 
 import asyncio
 import gzip
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from azents_runtime_control.runner_web import (
@@ -20,6 +22,8 @@ from azents_runtime_control.runner_web import (
     RunnerWebSocketFrame,
     RunnerWebSocketOpcode,
     RunnerWebStreamEnd,
+    RunnerWebStreamError,
+    RunnerWebStreamErrorCode,
 )
 
 from azents_runtime_runner.web import RunnerWebTransportManager
@@ -118,6 +122,51 @@ async def test_http_transport_streams_request_and_response_without_redirects() -
         sum(isinstance(frame, RunnerWebBodyChunk) for frame in client.sent)
     )
     assert client.closed
+
+
+async def test_application_unavailable_logs_safe_failure_classification(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Loopback failures emit bounded diagnostics without request target data."""
+    identity = _identity(1)
+    client = _Client(
+        [
+            RunnerWebRequestHead(
+                identity=identity,
+                protocol=RunnerWebProtocol.HTTP,
+                method=b"GET",
+                target=b"/private?ticket=do-not-log",
+                headers=(),
+            ),
+            RunnerWebStreamEnd(0),
+        ]
+    )
+    manager = RunnerWebTransportManager(
+        runtime_id="runtime-1",
+        accepted_generation=lambda: 7,
+        client_factory=lambda: client,
+    )
+    caplog.set_level(logging.WARNING, logger="azents_runtime_runner.web")
+
+    await manager.handle_open(RunnerWebOpenIntent(identity))
+    tunnel = manager.tunnels[identity.tunnel_id]
+    assert tunnel.task is not None
+    await asyncio.wait_for(tunnel.task, timeout=2)
+
+    assert client.sent[-1] == RunnerWebStreamError(
+        RunnerWebStreamErrorCode.APPLICATION_UNAVAILABLE
+    )
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime Web loopback application unavailable"
+    )
+    assert record.__dict__["runtime_id"] == identity.runtime_id
+    assert record.__dict__["tunnel_id"] == identity.tunnel_id
+    assert record.__dict__["port"] == identity.port
+    assert record.__dict__["error_type"] == "ClientConnectorError"
+    assert isinstance(record.__dict__["error_number"], int)
+    assert "do-not-log" not in caplog.text
 
 
 async def test_stale_generation_does_not_open_transport() -> None:
