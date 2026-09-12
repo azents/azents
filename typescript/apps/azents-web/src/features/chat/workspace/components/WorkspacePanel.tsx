@@ -64,6 +64,7 @@ export interface WorkspacePanelProps {
   metricsState: RuntimeSystemMetricsOverviewState;
   defaultTab?: WorkspacePanelTab;
   activeTab?: WorkspacePanelTab;
+  navigation?: "internal" | "external";
   restartConfirmOpen?: boolean;
   resetConfirmOpen?: boolean;
   onSetActiveTab?: (tab: WorkspacePanelTab) => void;
@@ -133,6 +134,7 @@ export function WorkspacePanel({
   metricsState,
   defaultTab = "workspace",
   activeTab = defaultTab,
+  navigation = "internal",
   restartConfirmOpen = false,
   resetConfirmOpen = false,
   onSetActiveTab = (): void => {},
@@ -746,7 +748,13 @@ export function WorkspacePanel({
           }
         }}
       >
-        <Tabs.List grow style={{ flexShrink: 0 }}>
+        <Tabs.List
+          grow
+          style={{
+            flexShrink: 0,
+            ...(navigation === "external" ? { display: "none" } : {}),
+          }}
+        >
           <Tabs.Tab
             aria-label={t("workspaceTab")}
             value="workspace"

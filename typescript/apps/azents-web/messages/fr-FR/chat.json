@@ -1,4 +1,15 @@
 {
+  "sessionPanel": {
+    "title": "Panneau de session",
+    "toggle": "Ouvrir ou fermer le panneau de session",
+    "close": "Fermer le panneau de session",
+    "files": "Fichiers",
+    "runtime": "Runtime",
+    "terminal": "Terminal",
+    "previousTabs": "Faire défiler vers les onglets précédents",
+    "nextTabs": "Afficher les onglets suivants",
+    "resize": "Redimensionner le panneau de session"
+  },
   "inheritModelProvider": "Hérite",
   "newMessage": "Nouveau message",
   "selectAgent": "Sélectionnez un agent pour\ndémarrer une nouvelle conversation",
