@@ -301,7 +301,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Subagent Model Override Policy Historical Requirements Reconstruction](requirements/override-260717-subagent-override-policy.md) | override-260717 | 2026-07-17 | 2026-07-17 |
 | [Remove AgentSession Runtime Ownership Historical Requirements Reconstruction](requirements/ownership-260625-ownership-removal.md) | ownership-260625 | 2026-06-25 | - |
 | [User-Managed Runtime Tools Requirements](requirements/packages-260901-user-managed-runtime-tools.md) | packages-260901 | 2026-09-01 | 2026-09-01 |
-| [Session Workspace Navigation Requirements](requirements/panel-260912-session-workspace.md) | panel-260912 | 2026-09-12 | - |
+| [Session Workspace Navigation Requirements](requirements/panel-260912-session-workspace.md) | panel-260912 | 2026-09-12 | 2026-09-12 |
 | [GitHub Per-User PAT Authentication Historical Requirements Reconstruction](requirements/pat-260321-pat.md) | pat-260321 | 2026-03-21 | 2026-03-21 |
 | [Select Provider-Specific Tool Dialects for Apply-Patch Historical Requirements Reconstruction](requirements/patch-260721-patch-dialects.md) | patch-260721 | 2026-07-21 | - |
 | [Keep Pending Buffer Deletion State-Neutral Historical Requirements Reconstruction](requirements/pending-260712-pending-buffer-deletion-neutral.md) | pending-260712 | 2026-07-12 | - |

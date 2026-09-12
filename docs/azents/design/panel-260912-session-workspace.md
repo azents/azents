@@ -2,6 +2,7 @@
 title: "Session Workspace Navigation Design"
 created: 2026-09-12
 updated: 2026-09-12
+implemented: 2026-09-12
 tags: [frontend, session]
 document_role: primary
 document_type: design
