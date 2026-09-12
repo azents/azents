@@ -120,7 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "Cache-Control": "no-store",
         "Content-Security-Policy": `default-src 'none'; script-src 'nonce-runtime-web'; form-action ${configuration.brokerOrigin}; frame-ancestors 'none'`,
         "Content-Type": "text/html; charset=utf-8",
-        "Referrer-Policy": "no-referrer",
+        "Referrer-Policy": "strict-origin",
         "X-Frame-Options": "DENY",
       },
     },
