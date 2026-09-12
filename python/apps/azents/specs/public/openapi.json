@@ -11614,6 +11614,1133 @@
         }
       }
     },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/endpoint": {
+      "put": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Prepare Runtime Web Endpoint",
+        "description": "Prepare one stable Session-and-port endpoint without creating exposure.",
+        "operationId": "runtime_web_v1_prepare_runtime_web_endpoint",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1,
+              "title": "Port"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebPrepareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services": {
+      "get": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "List Runtime Web Services",
+        "description": "List bounded current Runtime Web service projections.",
+        "operationId": "runtime_web_v1_list_runtime_web_services",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}": {
+      "get": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Get Runtime Web Service Projection",
+        "description": "Return one current Runtime Web service projection.",
+        "operationId": "runtime_web_v1_get_runtime_web_service_projection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1,
+              "title": "Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/requests": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Request Runtime Web Exposure",
+        "description": "Create or return the pending request without waiting for approval.",
+        "operationId": "runtime_web_v1_request_runtime_web_exposure",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1,
+              "title": "Port"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebExposureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/direct-create": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Direct Create Runtime Web Exposure",
+        "description": "Directly create one user-confirmed finite exposure cycle.",
+        "operationId": "runtime_web_v1_direct_create_runtime_web_exposure",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1,
+              "title": "Port"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebDirectCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/approve": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Approve Runtime Web Request",
+        "description": "Approve one exact pending request and displayed duration.",
+        "operationId": "runtime_web_v1_approve_runtime_web_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/reject": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Reject Runtime Web Request",
+        "description": "Reject one exact pending request.",
+        "operationId": "runtime_web_v1_reject_runtime_web_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Cancel Runtime Web Request",
+        "description": "Cancel one exact pending request without closing an active exposure.",
+        "operationId": "runtime_web_v1_cancel_runtime_web_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/cycles/{cycle_id}/close": {
+      "post": {
+        "tags": [
+          "Runtime Web v1"
+        ],
+        "summary": "Close Runtime Web Cycle",
+        "description": "Close one exact active exposure without managing the application process.",
+        "operationId": "runtime_web_v1_close_runtime_web_cycle",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cycle Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeWebCloseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot disclose or manage this Session service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The service resource is unavailable or intentionally hidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The service state or installation configuration changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A logical Runtime Web service quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks": {
       "get": {
         "tags": [
@@ -30159,6 +31286,586 @@
         "title": "RuntimeTerminalTicketStatus",
         "description": "Ticket issuance result without Runtime side effects."
       },
+      "RuntimeWebActionErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "not_found",
+              "access_denied",
+              "conflict",
+              "quota_exceeded",
+              "configuration_unavailable"
+            ],
+            "title": "Code"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "scope"
+        ],
+        "title": "RuntimeWebActionErrorDetail",
+        "description": "Bounded Public API control error detail."
+      },
+      "RuntimeWebActionErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RuntimeWebActionErrorDetail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "RuntimeWebActionErrorResponse",
+        "description": "FastAPI envelope for a bounded Runtime Web control error."
+      },
+      "RuntimeWebApprovalRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "maximum": 28800.0,
+            "minimum": 300.0,
+            "title": "Duration Seconds"
+          },
+          "duration_configuration_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Duration Configuration Revision"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "duration_seconds",
+          "duration_configuration_revision",
+          "operation_key"
+        ],
+        "title": "RuntimeWebApprovalRequest",
+        "description": "Revision- and displayed-duration-bound approval mutation."
+      },
+      "RuntimeWebCloseRequest": {
+        "properties": {
+          "expected_endpoint_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Endpoint Revision"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_endpoint_revision",
+          "operation_key"
+        ],
+        "title": "RuntimeWebCloseRequest",
+        "description": "Endpoint-revision-fenced exposure closure."
+      },
+      "RuntimeWebCycleEndReason": {
+        "type": "string",
+        "enum": [
+          "closed",
+          "expired",
+          "replaced",
+          "session_removed"
+        ],
+        "title": "RuntimeWebCycleEndReason",
+        "description": "Reason an approved exposure cycle stopped being current."
+      },
+      "RuntimeWebCycleResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "maximum": 28800.0,
+            "minimum": 300.0,
+            "title": "Duration Seconds"
+          },
+          "duration_configuration_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Duration Configuration Revision"
+          },
+          "approved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Approved At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "close_barrier": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Close Barrier"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "end_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeWebCycleEndReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "duration_seconds",
+          "duration_configuration_revision",
+          "approved_at",
+          "expires_at",
+          "close_barrier",
+          "ended_at",
+          "end_reason"
+        ],
+        "title": "RuntimeWebCycleResponse",
+        "description": "Finite approved exposure cycle projection."
+      },
+      "RuntimeWebDirectCreateRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "maximum": 28800.0,
+            "minimum": 300.0,
+            "title": "Duration Seconds"
+          },
+          "duration_configuration_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Duration Configuration Revision"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "duration_seconds",
+          "duration_configuration_revision",
+          "operation_key"
+        ],
+        "title": "RuntimeWebDirectCreateRequest",
+        "description": "Explicit direct-create confirmation using current displayed duration."
+      },
+      "RuntimeWebEndpointResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "configuration_state": {
+            "type": "string",
+            "enum": [
+              "configured",
+              "unconfigured"
+            ],
+            "title": "Configuration State"
+          },
+          "authority_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Authority Revision"
+          },
+          "close_barrier": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Close Barrier"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "port",
+          "label",
+          "url",
+          "configuration_state",
+          "authority_revision",
+          "close_barrier",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RuntimeWebEndpointResponse",
+        "description": "Stable Session-and-port endpoint projection."
+      },
+      "RuntimeWebExpectedRevisionRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "operation_key"
+        ],
+        "title": "RuntimeWebExpectedRevisionRequest",
+        "description": "Revision-fenced request control mutation."
+      },
+      "RuntimeWebExposureRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "operation_key"
+        ],
+        "title": "RuntimeWebExposureRequest",
+        "description": "Idempotent asynchronous exposure request."
+      },
+      "RuntimeWebPrepareRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "operation_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "operation_key"
+        ],
+        "title": "RuntimeWebPrepareRequest",
+        "description": "Idempotent endpoint preparation request."
+      },
+      "RuntimeWebRequestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "requester_kind": {
+            "$ref": "#/components/schemas/RuntimeWebRequesterKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RuntimeWebRequestState"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "decided_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By User Id"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "requester_kind",
+          "state",
+          "revision",
+          "label",
+          "decided_by_user_id",
+          "decided_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RuntimeWebRequestResponse",
+        "description": "Durable exposure request projection."
+      },
+      "RuntimeWebRequestState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "cancelled"
+        ],
+        "title": "RuntimeWebRequestState",
+        "description": "Durable Runtime Web request outcome."
+      },
+      "RuntimeWebRequesterKind": {
+        "type": "string",
+        "enum": [
+          "user",
+          "agent"
+        ],
+        "title": "RuntimeWebRequesterKind",
+        "description": "Principal kind that created a Runtime Web request."
+      },
+      "RuntimeWebServiceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeWebServiceResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total_count"
+        ],
+        "title": "RuntimeWebServiceListResponse",
+        "description": "Bounded service projection page."
+      },
+      "RuntimeWebServiceResponse": {
+        "properties": {
+          "endpoint": {
+            "$ref": "#/components/schemas/RuntimeWebEndpointResponse"
+          },
+          "current_request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeWebRequestResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeWebCycleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "maximum": 28800.0,
+            "minimum": 300.0,
+            "title": "Duration Seconds"
+          },
+          "duration_configuration_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Duration Configuration Revision"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "endpoint",
+          "current_request",
+          "current_cycle",
+          "active",
+          "duration_seconds",
+          "duration_configuration_revision",
+          "observed_at"
+        ],
+        "title": "RuntimeWebServiceResponse",
+        "description": "Orthogonal endpoint, request, cycle, and active-state projection."
+      },
       "ScheduledTaskCreateRequest": {
         "properties": {
           "session_id": {
@@ -34128,6 +35835,10 @@
     {
       "name": "Runtime Provider Enrollment v1",
       "description": "\nRuntime Provider Enrollment API (Public)\n\nOperator-facing one-time enrollment grant exchange for known Providers.\n"
+    },
+    {
+      "name": "Runtime Web v1",
+      "description": "\nRuntime Web service control API (Public)\n\nStable Session-and-port endpoint preparation, asynchronous exposure\nrequests, explicit Session-authorized approval, finite cycles, and\nclosure without Runtime process management.\n"
     },
     {
       "name": "Scheduled Task v1",

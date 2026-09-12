@@ -472,6 +472,7 @@ Design documents are accumulated records and are not listed individually in this
 | [PV-less Valkey Recovery Requirements](requirements/valkey-260912-pvless-recovery.md) | valkey-260912 | 2026-09-12 | 2026-09-12 |
 | [Fifteen-Minute Wait Timeout Requirements](requirements/wait-260726-fifteen-minute-timeout.md) | wait-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
+| [Temporary Runtime Web Services Requirements](requirements/web-260912-runtime-web-services.md) | web-260912 | 2026-09-12 | - |
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
 | [Workspace Settings Hub Requirements](requirements/workspace-260801-settings-hub.md) | workspace-260801 | 2026-08-01 | 2026-08-01 |
 | [Runner-Reported Agent Workspace Requirements](requirements/workspace-260803-runner-reported-agent-workspace.md) | workspace-260803 | 2026-08-03 | 2026-08-03 |
@@ -900,6 +901,7 @@ Design documents are accumulated records and are not listed individually in this
 - [PV-less Valkey Recovery Decisions](adr/valkey-260912-pvless-recovery.md)
 - [Fifteen-Minute Wait Timeout](adr/wait-260726-fifteen-minute-timeout.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
+- [Temporary Runtime Web Services](adr/web-260912-runtime-web-services.md)
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
 - [Workspace Settings Hub](adr/workspace-260801-settings-hub.md)
 - [Runner-Reported Agent Workspace](adr/workspace-260803-runner-reported-agent-workspace.md)

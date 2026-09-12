@@ -49,6 +49,7 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkitProvider,
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
+from azents.engine.tools.runtime_web import RuntimeWebToolkit, RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
@@ -65,6 +66,7 @@ from azents.runtime.types import RuntimeDomainConfig
 from azents.services.image_generation_catalog import (
     ImageGenerationRuntimeConfigurationError,
 )
+from azents.services.runtime_web.service import RuntimeWebService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -1264,6 +1266,43 @@ class TestResolveInvokeInput:
 
 class TestResolveAgentTools:
     """resolve_agent_tools auto-bound Toolkit tests."""
+
+    @pytest.mark.parametrize(
+        "execution_mode",
+        [ToolkitExecutionMode.ROOT, ToolkitExecutionMode.SUBAGENT],
+    )
+    async def test_auto_binds_runtime_web_without_runtime_capability(
+        self,
+        execution_mode: ToolkitExecutionMode,
+    ) -> None:
+        """Runtime Web authority tools remain available before Runtime startup."""
+        session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
+        provider = RuntimeWebToolkitProvider(
+            service=AsyncMock(spec=RuntimeWebService),
+        )
+
+        bindings = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=execution_mode,
+            toolkit_registry={},
+            toolkit_repository=_empty_toolkit_repository(),
+            session_manager=_session_manager_for(session),
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            runtime_web_toolkit_provider=provider,
+            memory_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        )
+
+        assert [binding.slug for binding in bindings] == ["runtime_web"]
+        assert isinstance(bindings[0].toolkit, RuntimeWebToolkit)
 
     @pytest.mark.parametrize(
         "execution_mode",

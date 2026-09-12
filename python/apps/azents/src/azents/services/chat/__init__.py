@@ -110,6 +110,11 @@ from azents.services.session_lifecycle.orchestrator import (
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
+from azents.services.session_resource_authority import (
+    PublicSessionResourceDenied,
+    PublicSessionResourceNotFound,
+    authorize_public_session_resource,
+)
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
@@ -1057,47 +1062,22 @@ class ChatSessionService:
         :param denied_as_not_found: When true, private denials collapse to not-found
         :return: Error instance when denied, otherwise None
         """
-        root_session = agent_session
-        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-            root_agent = await (
-                self.agent_session_repository.get_root_session_agent_by_session_id(
-                    session,
-                    agent_session.id,
-                )
-            )
-            if root_agent is None:
-                return SessionNotFound()
-            loaded_root = await self.agent_session_repository.get_by_id(
-                session,
-                root_agent.agent_session_id,
-            )
-            if loaded_root is None:
-                return SessionNotFound()
-            root_session = loaded_root
-        elif agent_session.session_kind is not AgentSessionKind.ROOT:
-            return SessionNotFound()
-
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+        result = await authorize_public_session_resource(
             session,
-            workspace_id=agent_session.workspace_id,
+            agent_session=agent_session,
             user_id=user_id,
+            require_active=False,
+            denied_as_not_found=denied_as_not_found,
+            expected_workspace_id=None,
+            expected_agent_id=None,
+            agent_session_repository=self.agent_session_repository,
+            workspace_user_repository=self.workspace_user_repository,
         )
-        if workspace_user is None:
-            # User Sessions are always not-found-safe, including for non-members.
-            if (
-                denied_as_not_found
-                or root_session.product_mode is AgentSessionProductMode.USER
-            ):
-                return SessionNotFound()
+        if isinstance(result, PublicSessionResourceDenied):
             return SessionAccessDenied()
-
-        if root_session.product_mode is AgentSessionProductMode.TEAM:
-            return None
-        if root_session.product_mode is AgentSessionProductMode.USER:
-            if root_session.associated_user_id == user_id:
-                return None
+        if isinstance(result, PublicSessionResourceNotFound):
             return SessionNotFound()
-        return SessionNotFound()
+        return None
 
     async def _create_session_workspace_items(
         self,
