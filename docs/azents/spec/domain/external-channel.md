@@ -7,6 +7,9 @@ domain: external-channel
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/c05bc1b811fa_add_external_account_linking_and_native_.py
+  - python/apps/azents/src/azents/core/external_account_link.py
+  - python/apps/azents/src/azents/core/external_model_settings.py
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/external_channel_file.py
@@ -22,9 +25,13 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
+  - python/apps/azents/src/azents/rdb/models/external_account_link.py
+  - python/apps/azents/src/azents/rdb/models/external_model_settings.py
+  - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/job_runtime/**
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
@@ -40,12 +47,17 @@ code_paths:
   - python/apps/azents/src/azents/api/public/external_channel/**
   - python/apps/azents/specs/public/openapi.json
   - python/libs/azents-public-client/src/azentspublicclient/api/external_channel_v1_api.py
+  - python/libs/azents-public-client/src/azentspublicclient/models/account_link_*.py
+  - python/libs/azents-public-client/src/azentspublicclient/models/external_account_link_*.py
   - python/libs/azents-public-client/src/azentspublicclient/models/external_channel_*.py
   - python/libs/azents-public-client/src/azentspublicclient/models/managed_*.py
   - typescript/apps/azents-web/src/features/external-channel-approval/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/features/session-channels/**
+  - typescript/apps/azents-web/src/features/external-account-links/**
+  - typescript/apps/azents-web/src/app/(app)/account/external-accounts/**
+  - typescript/apps/azents-web/src/app/(app)/external-channel/link/**
   - typescript/apps/azents-web/src/shared/lib/discord-thread-auto-archive-duration*
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/(workspace)/integrations/slack/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
@@ -53,7 +65,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
   - typescript/apps/azents-web/src/features/chat/externalChannelMessage.ts
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
+  - typescript/apps/azents-web/src/trpc/routers/account-links.ts
 api_routes:
+  - /external-channel/v1/account-links
+  - /external-channel/v1/account-links/{link_id}
+  - /external-channel/v1/account-link-origins/{origin_id}
+  - /external-channel/v1/account-link-origins/{origin_id}/candidates
+  - /external-channel/v1/account-link-candidates/{candidate_id}
+  - /external-channel/v1/account-link-candidates/{candidate_id}/confirm
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
@@ -75,7 +94,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-12
-spec_version: 76
+spec_version: 77
 ---
 
 # External Channel
@@ -97,6 +116,12 @@ administrators and has exactly one
 Agent route. A Multi App is managed by Workspace Owners and Managers and may have zero
 or more Agent routes. One Agent may appear in several Apps, and one AgentSession may
 contain multiple independent bindings.
+
+An optional Workspace-scoped external account link can prove that one human provider
+identity and one current Azents User belong to the same person. The link adds only
+actor-private account management and same-target model-setting authority. It does not
+replace the provider principal, grant or block state, Session execution identity, or
+any existing guest capability.
 
 ## Ownership and Security Boundaries
 
@@ -149,6 +174,10 @@ effects are not replayed.
   Azents execution User. After a binding releases durable work, the linked Team Session executes
   through canonical Session/Run authority without inferring a User from the principal, approver,
   route owner, Agent creator, Workspace owner, or broker signal.
+- An ExternalAccountLink is separate Workspace-owned identity evidence. Native
+  personalization resolves it only after verified actor-private provider ingress.
+  The linked User remains authorization evidence for the exact additional action and
+  never becomes the Session execution User or inherits the principal's guest grant.
 - External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications.
   A non-empty processing batch sends one wake after its mailbox rows commit. Pending
   canonical mailbox input and the existing Session recovery path are wake-recovery
@@ -178,6 +207,9 @@ effects are not replayed.
 | Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. A directly and unambiguously created Discord delivery thread additionally retains its exact normalized provisional name as optional one-shot initial-title evidence. Scope is explicit in type and labels and is never inferred from a missing thread field. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
+| External account link | Terminally revocable Workspace association between one normalized human provider identity and one Azents User. Active partial uniqueness permits one owner per external identity and one User identity per provider scope. Discord identity scope is global; Slack identity scope is the Slack team. Display-label changes do not change ownership. |
+| Link origin and candidate | Ten-minute two-sided proof rendezvous. The actor-bound provider origin retains bounded provider and return context but no callback credential or body. Each immutable browser candidate is bound to the exact User and auth Session, stores only the one-time code hash, and becomes usable only after original-provider proof. Five candidates and five invalid original-actor attempts are permitted per origin; terminal, expired, cancelled, consumed, or sibling-invalidated rows cannot be revived. |
+| External model draft and mutation | A 15-minute actor-, interaction-, link-, Binding-, Session-, and generation-bound private draft contains a bounded authorized option snapshot and typed selection. Explicit Apply either rejects stale generation or atomically writes the shared Session profile and immutable mutation audit. The audit snapshots historical provider actor, link/User, target, old/new profile, resulting generation, and the separate one-shot notice outcome. |
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, initial Channel Work, and the first content-free ingress item commit together only after setup selection or for an already configured conversation. |
 | Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. Slack `location=channel` may fan source threads into one parent owner. Discord parent-channel messages use the parent owner, while every existing Discord Thread keeps an exact independent owner and participation state. Parent participation can select the routed Agent and the response mode copied after an explicit Thread invocation, but it never makes an unbound Thread participate. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
@@ -223,6 +255,16 @@ effects are not replayed.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
+- Account-link completion requires the original signed human provider actor, an
+  immutable elevated browser candidate, provider code proof, and explicit final
+  confirmation from the same live elevated auth Session. Link lookup and model Apply
+  revalidate active User, Workspace membership, connection generation, exact target,
+  principal participation, and revocation fences. Conflicts are nondisclosing and
+  never overwrite another owner.
+- Account linking and private drafts are PostgreSQL correctness state. Expiry is
+  enforced synchronously; hourly bounded cleanup removes only proof rows older than
+  the 24-hour retention window. Redis, cleanup timing, provider delivery, and public
+  message state are not correctness authority.
 - A resource is `active`, `unavailable`, or `deleted`. Provider history is read on
   demand by a leased Session drain after durable callback admission and has no durable
   hydration lifecycle. When a live callback observed files but the provider-history
@@ -546,6 +588,24 @@ scrollable while hiding browser scrollbar chrome.
 Approval links contain only an opaque access-request ID and require an authenticated
 Agent administrator; unauthorized and missing requests are returned as not found.
 
+Slack and Discord native Conversation settings retain the existing guest
+location/response controls and add personalization only inside actor-private
+surfaces. Unlinked humans see a quiet optional Connect action. Linked humans may open
+the model editor only when their current web-equivalent authority applies to the
+exact connected Session. Denied participants receive only their own generic
+account-link/management surface, without route, Session, model, or participant
+disclosure. Slack uses private modals; Discord uses ephemeral interaction responses
+and modal submission. A provider or delivery path that cannot guarantee privacy
+omits personalization and never falls back to a public message, DM, or separate web
+conversation-settings page.
+
+Main Web exposes `/account/external-accounts` for the current User's own
+Workspace-scoped links and `/external-channel/link/{origin_id}` for the explicit
+identity-pair proof flow. Creating a candidate, final confirmation, and unlink use
+the existing elevation boundary. A candidate code is returned once with no-store
+handling and is never recoverable from a later status read. Inactive membership and
+revoked links remain visible as personal history but grant no model authority.
+
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
 ## Scheduled Task Binding
@@ -576,6 +636,9 @@ history, queue, retry, or fallback target is part of this boundary.
 - **2026-09-12** (spec_version 76) — Fenced direct Channel Work commit,
   provider admission, awaiting-input and effect settlement, and Discord delivery
   recording by the executing Session owner generation.
+- **2026-09-12** (spec_version 77) — Added optional Workspace external-account
+  linking, immutable two-sided proof, private native model drafts, generation-fenced
+  shared Apply, personal web management, and guest/execution-identity preservation.
 - **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
   Workspace-scoped configuration reads, and generation-fenced health persistence to
   completed repository operations while preserving provider validation outside database

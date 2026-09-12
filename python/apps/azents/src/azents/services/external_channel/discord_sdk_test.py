@@ -78,6 +78,117 @@ async def test_deferred_interaction_response_edits_original_via_public_webhook(
     assert call.kwargs["view"] is None
 
 
+@pytest.mark.asyncio
+async def test_deferred_interaction_response_supports_bounded_native_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate private buttons and selects through the existing public SDK."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    webhook = MagicMock(spec=discord.Webhook)
+    webhook.edit_message = AsyncMock()
+    monkeypatch.setattr(discord.Webhook, "partial", MagicMock(return_value=webhook))
+    client = discord_sdk.DiscordPyInteractionResponseClient(session)
+
+    await client.edit_original(
+        application_id="100000000000000001",
+        interaction_token="request-local-token",
+        response={
+            "type": 7,
+            "data": {
+                "content": "Private settings.",
+                "components": [
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 3,
+                                "custom_id": "ms1:m:draft:0:-:signature",
+                                "placeholder": "Choose model",
+                                "min_values": 1,
+                                "max_values": 1,
+                                "options": [
+                                    {
+                                        "label": "Quality",
+                                        "description": "Quality model",
+                                        "value": "option-1",
+                                        "default": True,
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "style": 1,
+                                "label": "Apply",
+                                "custom_id": "ms1:a:draft:0:fingerprint:signature",
+                            }
+                        ],
+                    },
+                ],
+            },
+        },
+    )
+
+    call = webhook.edit_message.await_args
+    assert call is not None
+    view = call.kwargs["view"]
+    assert isinstance(view, discord.ui.View)
+    assert len(view.children) == 2
+    assert isinstance(view.children[0], discord.ui.Select)
+    assert isinstance(view.children[1], discord.ui.Button)
+    allowed_mentions = call.kwargs["allowed_mentions"]
+    assert isinstance(allowed_mentions, discord.AllowedMentions)
+    assert allowed_mentions.everyone is False
+    assert allowed_mentions.users is False
+    assert allowed_mentions.roles is False
+
+
+@pytest.mark.asyncio
+async def test_deferred_interaction_response_rejects_component_limit_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail closed before SDK I/O when private response rows exceed Discord limits."""
+    webhook = MagicMock(spec=discord.Webhook)
+    webhook.edit_message = AsyncMock()
+    partial = MagicMock(return_value=webhook)
+    monkeypatch.setattr(discord.Webhook, "partial", partial)
+    client = discord_sdk.DiscordPyInteractionResponseClient(
+        MagicMock(spec=aiohttp.ClientSession)
+    )
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await client.edit_original(
+            application_id="100000000000000001",
+            interaction_token="request-local-token",
+            response={
+                "type": 7,
+                "data": {
+                    "content": "Private settings.",
+                    "components": [
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "style": 1,
+                                    "label": "Apply",
+                                    "custom_id": f"button-{index}",
+                                }
+                            ],
+                        }
+                        for index in range(6)
+                    ],
+                },
+            },
+        )
+
+    partial.assert_not_called()
+
+
 @dataclass
 class _PrivateHTTP:
     application_info: AsyncMock = field(default_factory=AsyncMock)

@@ -8,6 +8,7 @@
   "sidebar": {
     "workspaces": "Espaces de travail",
     "general": "Général",
+    "externalAccounts": "Comptes externes",
     "security": "Sécurité"
   }
 }

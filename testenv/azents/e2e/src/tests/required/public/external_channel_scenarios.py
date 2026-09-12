@@ -4356,7 +4356,8 @@ def test_discord_single_activation_and_interaction_journey(
             "interaction_type": 2,
             "response_status": 200,
             "response_type": 4,
-            "component_count": 0,
+            "ephemeral": True,
+            "component_count": 1,
             "has_content": True,
         },
     ]

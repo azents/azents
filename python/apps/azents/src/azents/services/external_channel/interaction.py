@@ -21,8 +21,10 @@ from azents.core.enums import (
     ExternalChannelInteractionType,
     ExternalChannelResponseMode,
 )
+from azents.core.external_account_link import VerifiedExternalAccountActor
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_model_settings import ExternalModelActorContext
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -70,6 +72,14 @@ from azents.services.external_channel.slack_http import (
     SLACK_SETTINGS_VIEW_CALLBACK_ID,
     SLACK_SETUP_VIEW_CALLBACK_ID,
 )
+from azents.services.external_channel.slack_native_protocol import (
+    SlackNativeControl,
+    parse_native_scope,
+)
+from azents.services.external_channel.slack_native_settings import (
+    SlackNativeSettingsService,
+)
+from azents.services.external_channel.slack_native_views import private_notice
 from azents.services.external_channel.slack_settings import (
     parse_slack_settings_locator,
 )
@@ -108,6 +118,7 @@ class ExternalChannelInteractionHandoff:
         "selector_submission",
         "settings_open",
         "settings_submission",
+        "native_control",
         "scheduled_task_edit_open",
         "scheduled_task_edit_submission",
         "scheduled_task_delete",
@@ -118,6 +129,8 @@ class ExternalChannelInteractionHandoff:
     settings_metadata: str | None = field(repr=False)
     settings_location: ExternalChannelConversationLocation | None = field(repr=False)
     settings_response_mode: ExternalChannelResponseMode | None = field(repr=False)
+    native_control: SlackNativeControl | None = field(repr=False)
+    verified_actor: ExternalModelActorContext | None = field(repr=False)
     trigger_id: str | None = field(default=None, repr=False)
     selector_interaction_id: str | None = field(default=None, repr=False)
     selector_metadata: str | None = field(default=None, repr=False)
@@ -238,6 +251,10 @@ class ExternalChannelInteractionProcessor:
         ExternalChannelParticipationService,
         Depends(ExternalChannelParticipationService),
     ]
+    native_settings: Annotated[
+        SlackNativeSettingsService,
+        Depends(SlackNativeSettingsService),
+    ]
     scheduled_task_control: Annotated[
         ScheduledTaskProviderControlService,
         Depends(ScheduledTaskProviderControlService),
@@ -251,6 +268,9 @@ class ExternalChannelInteractionProcessor:
     async def process(self, handoff: ExternalChannelInteractionHandoff) -> None:
         """Dispatch one explicitly identified selector or settings interaction."""
         now = datetime.datetime.now(datetime.UTC)
+        if handoff.handler == "native_control":
+            await self._process_native_control(handoff, now=now)
+            return
         if handoff.handler == "settings_open":
             await self._process_settings_open(handoff, now=now)
             return
@@ -436,20 +456,32 @@ class ExternalChannelInteractionProcessor:
                 expected_binding_id=None,
                 principal_id=interaction.principal_id,
             )
+            setup_view = _settings_view(
+                settings=settings,
+                metadata=build_settings_metadata(
+                    secret=self.config.auth.jwt.secret_key,
+                    settings=settings,
+                    connection_id=configuration.id,
+                    provider_parent_channel_id=(claim.provider_parent_channel_id),
+                    principal_id=interaction.principal_id,
+                    interaction_id=interaction.id,
+                ),
+            )
+            actor = self._native_actor(
+                handoff=handoff,
+                scope=_ProcessingInteractionScope(
+                    interaction=interaction, configuration=configuration
+                ),
+                channel_id=claim.provider_parent_channel_id,
+                thread_id=None,
+            )
+            setup_view = await self.native_settings.decorate(
+                view=setup_view, actor=actor, settings=settings, now=now
+            )
             result = await self.slack_client.open_interaction_view(
                 bot_token=self._slack_credentials(configuration).bot_token,
                 trigger_id=handoff.trigger_id,
-                view=_settings_view(
-                    settings=settings,
-                    metadata=build_settings_metadata(
-                        secret=self.config.auth.jwt.secret_key,
-                        settings=settings,
-                        connection_id=configuration.id,
-                        provider_parent_channel_id=(claim.provider_parent_channel_id),
-                        principal_id=interaction.principal_id,
-                        interaction_id=interaction.id,
-                    ),
-                ),
+                view=setup_view,
             )
             if result.status == "opened":
                 return
@@ -563,8 +595,21 @@ class ExternalChannelInteractionProcessor:
                     interaction_id=interaction.id,
                 ),
             )
-        except ExternalChannelParticipationError as error:
-            view = _settings_notice_view(str(error))
+        except ExternalChannelParticipationError:
+            settings = None
+            view = private_notice(
+                "Conversation settings are unavailable to you. "
+                "You can still manage your own optional account connection."
+            )
+        actor = self._native_actor(
+            handoff=handoff,
+            scope=scope,
+            channel_id=provider_parent_channel_id,
+            thread_id=handoff.provider_thread_key,
+        )
+        view = await self.native_settings.decorate(
+            view=view, actor=actor, settings=settings, now=now
+        )
         result = await self.slack_client.open_interaction_view(
             bot_token=self._slack_credentials(configuration).bot_token,
             trigger_id=handoff.trigger_id,
@@ -575,6 +620,96 @@ class ExternalChannelInteractionProcessor:
         if result.status == "expired":
             raise SlackInteractionTriggerExpired
         raise RuntimeError("Slack conversation settings modal could not be opened.")
+
+    def _native_actor(
+        self,
+        *,
+        handoff: ExternalChannelInteractionHandoff,
+        scope: _ProcessingInteractionScope,
+        channel_id: str,
+        thread_id: str | None,
+    ) -> VerifiedExternalAccountActor:
+        """Keep signed ingress generation rather than elevating stale callbacks."""
+        actor = handoff.verified_actor
+        if (
+            actor is None
+            or actor.connection_id != scope.configuration.id
+            or actor.principal_id != scope.interaction.principal_id
+            or actor.configuration_generation
+            != scope.configuration.configuration_generation
+            or actor.provider_tenant_id != scope.configuration.provider_tenant_id
+        ):
+            raise ValueError("Slack private actor is unavailable.")
+        return VerifiedExternalAccountActor(
+            connection_id=actor.connection_id,
+            connection_configuration_generation=actor.configuration_generation,
+            principal_id=actor.principal_id,
+            provider=actor.provider,
+            provider_tenant_id=actor.provider_tenant_id,
+            provider_tenant_display_label=None,
+            provider_user_id=actor.provider_user_id,
+            provider_display_label=actor.provider_display_name,
+            provider_interaction_id=scope.interaction.id,
+            provider_channel_id=channel_id,
+            provider_thread_id=thread_id,
+        )
+
+    async def _process_native_control(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+        *,
+        now: datetime.datetime,
+    ) -> None:
+        """Render private native operations with no public delivery fallback."""
+        control = handoff.native_control
+        if control is None:
+            raise ValueError("Slack private control is unavailable.")
+        scope = await self._load_processing_interaction(handoff)
+        try:
+            native_scope = parse_native_scope(
+                control.metadata, secret=self.config.auth.jwt.secret_key, now=now
+            )
+        except ValueError:
+            view = private_notice(
+                "This private control expired or is unavailable. Reopen settings."
+            )
+        else:
+            actor = self._native_actor(
+                handoff=handoff,
+                scope=scope,
+                channel_id=native_scope.channel_id,
+                thread_id=native_scope.thread_id,
+            )
+            view = await self.native_settings.process(
+                actor=actor, scope=native_scope, control=control, now=now
+            )
+        credentials = self._slack_credentials(scope.configuration)
+        if (
+            scope.interaction.interaction_type
+            is ExternalChannelInteractionType.BLOCK_ACTION
+            and control.view_id is not None
+        ):
+            result = await self.slack_client.update_interaction_view(
+                bot_token=credentials.bot_token,
+                view_id=control.view_id,
+                view_hash=control.view_hash,
+                view=view,
+            )
+            if result.status in {"updated", "conflict"}:
+                return
+        else:
+            if handoff.trigger_id is None:
+                raise SlackInteractionTriggerExpired
+            result = await self.slack_client.open_interaction_view(
+                bot_token=credentials.bot_token,
+                trigger_id=handoff.trigger_id,
+                view=view,
+            )
+            if result.status == "opened":
+                return
+        if result.status == "expired":
+            raise SlackInteractionTriggerExpired
+        raise RuntimeError("Slack private view could not be delivered.")
 
     async def _process_settings_submission(
         self,

@@ -14,6 +14,8 @@ from azents.core.enums import (
 )
 
 _DISCORD_SETTINGS_PREFIX = "a"
+_DISCORD_ACCOUNT_LINK_PREFIX = "al1"
+_DISCORD_MODEL_SETTINGS_PREFIX = "ms1"
 _DISCORD_SETTINGS_SIGNATURE_BYTES = 16
 
 DiscordSettingsAction = Literal[
@@ -24,6 +26,19 @@ DiscordSettingsAction = Literal[
     "parent_location",
     "parent_response_mode",
     "thread_response_mode",
+]
+
+DiscordAccountLinkAction = Literal["start", "enter_code"]
+
+DiscordModelSettingsAction = Literal[
+    "open",
+    "select_model",
+    "select_reasoning",
+    "select_execution",
+    "previous_page",
+    "next_page",
+    "apply",
+    "cancel",
 ]
 
 
@@ -40,6 +55,25 @@ class DiscordSettingsScope:
     settings_generation: int | None
     binding_id: str | None
     binding_version: str | None
+
+
+@dataclass(frozen=True)
+class DiscordAccountLinkScope:
+    """One signed private account-link control locator."""
+
+    action: DiscordAccountLinkAction
+    origin_interaction_id: str | None
+    origin_id: str | None
+
+
+@dataclass(frozen=True)
+class DiscordModelSettingsScope:
+    """One signed actor-owned model draft control locator."""
+
+    action: DiscordModelSettingsAction
+    draft_id: str
+    offset: int
+    selection_fingerprint: str | None
 
 
 def build_discord_binding_settings_open_custom_id(
@@ -190,6 +224,118 @@ def parse_discord_settings_custom_id(
     raise AssertionError("Discord settings action is not exhaustive.")
 
 
+def build_discord_account_link_custom_id(
+    *,
+    secret: str,
+    action: DiscordAccountLinkAction,
+    origin_interaction_id: str | None,
+    origin_id: str | None,
+) -> str:
+    """Build one signed actor-bound account-link component or modal ID."""
+    if action == "start":
+        value = _identifier(origin_interaction_id)
+        if origin_id is not None:
+            raise ValueError("Discord account-link scope is invalid.")
+        action_code = "s"
+    elif action == "enter_code":
+        value = _identifier(origin_id)
+        if origin_interaction_id is not None:
+            raise ValueError("Discord account-link scope is invalid.")
+        action_code = "e"
+    else:
+        raise AssertionError("Discord account-link action is not exhaustive.")
+    fields = [_DISCORD_ACCOUNT_LINK_PREFIX, action_code, value]
+    custom_id = ":".join((*fields, _signature(secret=secret, fields=fields)))
+    if len(custom_id) > 100:
+        raise ValueError("Discord account-link scope exceeds the component limit.")
+    return custom_id
+
+
+def parse_discord_account_link_custom_id(
+    *,
+    custom_id: str,
+    secret: str,
+) -> DiscordAccountLinkScope:
+    """Verify and parse one private account-link component or modal ID."""
+    fields = custom_id.split(":")
+    if len(fields) != 4 or fields[0] != _DISCORD_ACCOUNT_LINK_PREFIX:
+        raise ValueError("Discord account-link scope is invalid.")
+    unsigned_fields = fields[:-1]
+    if not hmac.compare_digest(
+        fields[-1], _signature(secret=secret, fields=unsigned_fields)
+    ):
+        raise ValueError("Discord account-link scope is invalid.")
+    value = _identifier(fields[2])
+    if fields[1] == "s":
+        return DiscordAccountLinkScope(
+            action="start",
+            origin_interaction_id=value,
+            origin_id=None,
+        )
+    if fields[1] == "e":
+        return DiscordAccountLinkScope(
+            action="enter_code",
+            origin_interaction_id=None,
+            origin_id=value,
+        )
+    raise ValueError("Discord account-link scope is invalid.")
+
+
+def build_discord_model_settings_custom_id(
+    *,
+    secret: str,
+    action: DiscordModelSettingsAction,
+    draft_id: str,
+    offset: int,
+    selection_fingerprint: str | None,
+) -> str:
+    """Build one signed model-draft action without embedding model authority."""
+    fields = [
+        _DISCORD_MODEL_SETTINGS_PREFIX,
+        _model_action_code(action),
+        _compact_identifier(draft_id),
+        str(_nonnegative_int(offset)),
+        _model_selection_fingerprint(
+            selection_fingerprint,
+            required=action == "apply",
+        ),
+    ]
+    custom_id = ":".join((*fields, _signature(secret=secret, fields=fields)))
+    if len(custom_id) > 100:
+        raise ValueError("Discord model settings scope exceeds the component limit.")
+    return custom_id
+
+
+def parse_discord_model_settings_custom_id(
+    *,
+    custom_id: str,
+    secret: str,
+) -> DiscordModelSettingsScope:
+    """Verify and parse one actor-owned model-draft action."""
+    fields = custom_id.split(":")
+    if len(fields) != 6 or fields[0] != _DISCORD_MODEL_SETTINGS_PREFIX:
+        raise ValueError("Discord model settings scope is invalid.")
+    unsigned_fields = fields[:-1]
+    if not hmac.compare_digest(
+        fields[-1], _signature(secret=secret, fields=unsigned_fields)
+    ):
+        raise ValueError("Discord model settings scope is invalid.")
+    action = _model_action_from_code(fields[1])
+    selection_fingerprint = (
+        None
+        if fields[4] == "-"
+        else _model_selection_fingerprint(fields[4], required=True)
+    )
+    if (action == "apply") != (selection_fingerprint is not None):
+        raise ValueError("Discord model settings scope is invalid.")
+    return DiscordModelSettingsScope(
+        action=action,
+        draft_id=_expanded_identifier(fields[2]),
+        offset=_nonnegative_int(fields[3]),
+        selection_fingerprint=selection_fingerprint,
+    )
+
+
 def discord_binding_version(updated_at: datetime.datetime) -> str:
     """Return a compact equality fence for one connected Binding revision."""
     if updated_at.tzinfo is None:
@@ -258,6 +404,36 @@ def _action_from_code(code: str) -> DiscordSettingsAction:
         raise ValueError("Discord settings scope is invalid.") from error
 
 
+def _model_action_code(action: DiscordModelSettingsAction) -> str:
+    return {
+        "open": "o",
+        "select_model": "m",
+        "select_reasoning": "r",
+        "select_execution": "x",
+        "previous_page": "p",
+        "next_page": "n",
+        "apply": "a",
+        "cancel": "c",
+    }[action]
+
+
+def _model_action_from_code(code: str) -> DiscordModelSettingsAction:
+    actions: dict[str, DiscordModelSettingsAction] = {
+        "o": "open",
+        "m": "select_model",
+        "r": "select_reasoning",
+        "x": "select_execution",
+        "p": "previous_page",
+        "n": "next_page",
+        "a": "apply",
+        "c": "cancel",
+    }
+    try:
+        return actions[code]
+    except KeyError as error:
+        raise ValueError("Discord model settings scope is invalid.") from error
+
+
 def _signature(*, secret: str, fields: list[str]) -> str:
     digest = hmac.new(
         secret.encode(), ":".join(fields).encode(), hashlib.sha256
@@ -319,3 +495,29 @@ def _positive_int(value: object) -> int:
     if parsed <= 0:
         raise ValueError("Discord settings scope is invalid.")
     return parsed
+
+
+def _nonnegative_int(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("Discord settings scope is invalid.")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value.isascii() and value.isdigit():
+        parsed = int(value)
+    else:
+        raise ValueError("Discord settings scope is invalid.")
+    if parsed < 0:
+        raise ValueError("Discord settings scope is invalid.")
+    return parsed
+
+
+def _model_selection_fingerprint(value: str | None, *, required: bool) -> str:
+    if value is None:
+        if required:
+            raise ValueError("Discord model settings scope is invalid.")
+        return "-"
+    if len(value) != 16 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError("Discord model settings scope is invalid.")
+    return value

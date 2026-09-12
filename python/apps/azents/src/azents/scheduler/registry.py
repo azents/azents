@@ -20,6 +20,7 @@ from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
 from azents.services.chat import ChatSessionService
+from azents.services.external_account_link import ExternalAccountLinkService
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
 from azents.services.owner_lifecycle import OwnerLifecycleService
@@ -181,6 +182,23 @@ async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
     )
 
 
+async def external_account_link_cleanup_handler(context: TaskContext) -> TaskResult:
+    """Delete one bounded batch of stale external account proof rows."""
+    service = await context.container.solve(ExternalAccountLinkService)
+    summary = await service.cleanup_expired(
+        now=context.attempt_started_at,
+        limit=500,
+    )
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
+
+
 HEARTBEAT_TASK = ScheduledTaskDefinition(
     key="scheduler_heartbeat",
     description="No-op scheduler heartbeat used to verify periodic execution wiring.",
@@ -304,6 +322,20 @@ FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+EXTERNAL_ACCOUNT_LINK_CLEANUP_TASK = ScheduledTaskDefinition(
+    key="external_account_link_cleanup",
+    description="Delete expired external account proof rows after retention.",
+    interval=datetime.timedelta(hours=1),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=5),
+        max_delay=datetime.timedelta(hours=1),
+    ),
+    handler=external_account_link_cleanup_handler,
+    enabled_by_default=True,
+)
+
 USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
     key="user_scheduled_task_dispatch",
     description="Admit due user Scheduled Tasks into their existing Session FIFO.",
@@ -328,6 +360,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     AGENT_RUNTIME_REMOVAL_TASK,
     OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
+    EXTERNAL_ACCOUNT_LINK_CLEANUP_TASK,
     USER_SCHEDULED_TASK_DISPATCH_TASK,
 )
 

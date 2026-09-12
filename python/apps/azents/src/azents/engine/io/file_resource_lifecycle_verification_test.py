@@ -169,6 +169,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
             return None
         return AgentSession(
             owner_generation=1,
+            applied_profile_generation=0,
             inference_state=None,
             id="session-1",
             workspace_id="workspace-1",

@@ -312,6 +312,12 @@ class RDBAgentSession(RDBModel):
         nullable=False,
         server_default=sa.text("'[]'::jsonb"),
     )
+    applied_profile_generation: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        init=False,
+        nullable=False,
+        server_default="0",
+    )
     current_effective_context_window_tokens: Mapped[int | None] = mapped_column(
         sa.Integer,
         nullable=True,

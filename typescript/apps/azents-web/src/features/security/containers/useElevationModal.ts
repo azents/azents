@@ -7,8 +7,9 @@
  * - Send email OTP → enter code → elevation
  * - Password input → elevation
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { synchronizeElevationState } from "../elevation-state";
 import type { ElevationState } from "../types";
 import type { AuthMethod } from "@azents/public-client";
 
@@ -24,21 +25,26 @@ export interface ElevationModalContainerProps {
 export function useElevationModal(
   methods: AuthMethod[],
   onElevated: () => void,
+  resetKey = 0,
 ): ElevationModalContainerProps {
   const [state, setState] = useState<ElevationState>({
     type: "CHOOSE_METHOD",
     methods,
   });
+  const resetKeyRef = useRef(resetKey);
 
-  // Synchronize CHOOSE_METHOD state when methods prop updates asynchronously
+  // Synchronize methods while choosing and reset completed flows for a new challenge.
   useEffect(() => {
-    setState((prev) => {
-      if (prev.type === "CHOOSE_METHOD") {
-        return { type: "CHOOSE_METHOD", methods };
-      }
-      return prev;
-    });
-  }, [methods]);
+    const shouldReset = resetKeyRef.current !== resetKey;
+    resetKeyRef.current = resetKey;
+    setState((previous) =>
+      synchronizeElevationState({
+        state: previous,
+        methods,
+        reset: shouldReset,
+      }),
+    );
+  }, [methods, resetKey]);
 
   const sendCodeMutation = trpc.security.sendElevationCode.useMutation();
   const elevateEmailMutation = trpc.security.elevateWithEmail.useMutation();

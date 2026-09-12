@@ -231,6 +231,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
+            applied_profile_generation=0,
             inference_state=None,
             applied_inference_profile=self.applied_inference_profile,
             id=agent_session_id,

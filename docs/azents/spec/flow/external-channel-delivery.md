@@ -28,6 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
   - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
+  - python/apps/azents/src/azents/services/external_channel/model_settings.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_presence.py
@@ -47,7 +48,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-09-12
-spec_version: 61
+spec_version: 62
 ---
 
 # External Channel Delivery and Channel Work
@@ -426,6 +427,24 @@ through a later explicit complete progress update. A matching Slack deletion eve
 confirmed `message_not_found` result clears the corresponding standalone identity. A
 Tracker delete that returns `message_not_found` is treated as already absent.
 
+## External Model Change Notice
+
+An actor-private model Apply atomically changes the shared Session applied profile
+and inserts one immutable external mutation audit with notice outcome `unknown`.
+Only the newly created mutation returns a process-local notice plan. After the
+database commit, the service performs one Slack or Discord SDK-backed message create
+to the proven conversation target and records `delivered`, `failed`, or `unknown` in
+a separate completed repository operation. An authorized duplicate Apply returns the
+existing result and never resends the notice.
+
+The common notice contains only the external display identity, committed model,
+reasoning effort or enabled execution-option labels when present, and the rule that
+new model calls use the setting while already-started calls continue. It excludes the
+Azents account, email, private role, link state, option catalog, callback credential,
+and provider request body. Slack text is provider-escaped and Discord text suppresses
+mentions and embeds. Failure, ambiguity, cancellation, or process loss does not roll
+back the shared save and creates no outbox, retry, compensation, or alternate target.
+
 ## Approval Control Messages
 
 Slack authorization control messages use Block Kit with a URL button and accessible
@@ -589,6 +608,9 @@ already-committed terminal result does not replay provider publication.
 - **2026-09-12** (spec_version 61) — Fenced Agent-owned Channel Work and
   provider effect admission/settlement by Session owner generation while retaining
   transaction-free provider I/O and no ambiguous replay.
+- **2026-09-12** (spec_version 62) — Added the single-shot post-commit external
+  model-change notice, immutable actor audit, separate delivery outcome, and
+  no-replay/no-fallback failure boundary.
 - **2026-09-08** (spec_version 60) — Moved pure provider contracts and
   Discord presentation lowering below service orchestration without changing
   provider payloads, serialization, operation keys, or delivery behavior.

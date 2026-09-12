@@ -6,13 +6,18 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**external_channel_v1_add_multi_discord_route**](ExternalChannelV1Api.md#external_channel_v1_add_multi_discord_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents | Add Multi Discord Route
 [**external_channel_v1_add_multi_slack_route**](ExternalChannelV1Api.md#external_channel_v1_add_multi_slack_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents | Add Multi Slack Route
+[**external_channel_v1_cancel_account_link_candidate**](ExternalChannelV1Api.md#external_channel_v1_cancel_account_link_candidate) | **DELETE** /external-channel/v1/account-link-candidates/{candidate_id} | Cancel Account Link Candidate
 [**external_channel_v1_clear_multi_discord_channel_default**](ExternalChannelV1Api.md#external_channel_v1_clear_multi_discord_channel_default) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults/{provider_channel_id} | Clear Multi Discord Channel Default
 [**external_channel_v1_clear_multi_slack_channel_default**](ExternalChannelV1Api.md#external_channel_v1_clear_multi_slack_channel_default) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Clear Multi Slack Channel Default
+[**external_channel_v1_confirm_account_link_candidate**](ExternalChannelV1Api.md#external_channel_v1_confirm_account_link_candidate) | **POST** /external-channel/v1/account-link-candidates/{candidate_id}/confirm | Confirm Account Link Candidate
+[**external_channel_v1_create_account_link_candidate**](ExternalChannelV1Api.md#external_channel_v1_create_account_link_candidate) | **POST** /external-channel/v1/account-link-origins/{origin_id}/candidates | Create Account Link Candidate
 [**external_channel_v1_decide_approval_request**](ExternalChannelV1Api.md#external_channel_v1_decide_approval_request) | **POST** /external-channel/v1/approval-requests/{access_request_id}/decision | Decide Approval Request
 [**external_channel_v1_disconnect_connection**](ExternalChannelV1Api.md#external_channel_v1_disconnect_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id} | Disconnect Connection
 [**external_channel_v1_disconnect_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_disconnect_multi_discord_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Disconnect Multi Discord Connection
 [**external_channel_v1_disconnect_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_disconnect_multi_slack_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Disconnect Multi Slack Connection
 [**external_channel_v1_disconnect_session_channel**](ExternalChannelV1Api.md#external_channel_v1_disconnect_session_channel) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id} | Disconnect Session Channel
+[**external_channel_v1_get_account_link_candidate**](ExternalChannelV1Api.md#external_channel_v1_get_account_link_candidate) | **GET** /external-channel/v1/account-link-candidates/{candidate_id} | Get Account Link Candidate
+[**external_channel_v1_get_account_link_origin**](ExternalChannelV1Api.md#external_channel_v1_get_account_link_origin) | **GET** /external-channel/v1/account-link-origins/{origin_id} | Get Account Link Origin
 [**external_channel_v1_get_approval_request**](ExternalChannelV1Api.md#external_channel_v1_get_approval_request) | **GET** /external-channel/v1/approval-requests/{access_request_id} | Get Approval Request
 [**external_channel_v1_get_manifest_guidance**](ExternalChannelV1Api.md#external_channel_v1_get_manifest_guidance) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest | Get Manifest Guidance
 [**external_channel_v1_get_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_get_multi_discord_connection) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Get Multi Discord Connection
@@ -21,6 +26,7 @@ Method | HTTP request | Description
 [**external_channel_v1_get_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Get Multi Slack Connection
 [**external_channel_v1_get_multi_slack_connection_impact**](ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/impact | Get Multi Slack Connection Impact
 [**external_channel_v1_get_multi_slack_route_impact**](ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_route_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/impact | Get Multi Slack Route Impact
+[**external_channel_v1_list_account_links**](ExternalChannelV1Api.md#external_channel_v1_list_account_links) | **GET** /external-channel/v1/account-links | List Account Links
 [**external_channel_v1_list_agent_access**](ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
 [**external_channel_v1_list_connections**](ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
 [**external_channel_v1_list_multi_connections**](ExternalChannelV1Api.md#external_channel_v1_list_multi_connections) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/multi | List Multi Connections
@@ -48,6 +54,7 @@ Method | HTTP request | Description
 [**external_channel_v1_setup_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 [**external_channel_v1_setup_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 [**external_channel_v1_setup_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
+[**external_channel_v1_unlink_account_link**](ExternalChannelV1Api.md#external_channel_v1_unlink_account_link) | **DELETE** /external-channel/v1/account-links/{link_id} | Unlink Account Link
 [**external_channel_v1_update_connection_access_policy**](ExternalChannelV1Api.md#external_channel_v1_update_connection_access_policy) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy | Update Connection Access Policy
 [**external_channel_v1_update_default_response_mode**](ExternalChannelV1Api.md#external_channel_v1_update_default_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode | Update Default Response Mode
 [**external_channel_v1_update_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_update_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord | Update Discord Connection
@@ -228,6 +235,85 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **external_channel_v1_cancel_account_link_candidate**
+> AccountLinkCandidateResponse external_channel_v1_cancel_account_link_candidate(candidate_id)
+
+Cancel Account Link Candidate
+
+Cancel one exact current User/auth-Session candidate.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_candidate_response import AccountLinkCandidateResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    candidate_id = 'candidate_id_example' # str | 
+
+    try:
+        # Cancel Account Link Candidate
+        api_response = api_instance.external_channel_v1_cancel_account_link_candidate(candidate_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_cancel_account_link_candidate:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_cancel_account_link_candidate: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **candidate_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkCandidateResponse**](AccountLinkCandidateResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **external_channel_v1_clear_multi_discord_channel_default**
 > ManagedChannelDefaultMutation external_channel_v1_clear_multi_discord_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
 
@@ -389,6 +475,164 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_confirm_account_link_candidate**
+> AccountLinkResponse external_channel_v1_confirm_account_link_candidate(candidate_id)
+
+Confirm Account Link Candidate
+
+Atomically finalize an exact elevated browser candidate.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_response import AccountLinkResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    candidate_id = 'candidate_id_example' # str | 
+
+    try:
+        # Confirm Account Link Candidate
+        api_response = api_instance.external_channel_v1_confirm_account_link_candidate(candidate_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_confirm_account_link_candidate:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_confirm_account_link_candidate: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **candidate_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkResponse**](AccountLinkResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_create_account_link_candidate**
+> AccountLinkCandidateCreatedResponse external_channel_v1_create_account_link_candidate(origin_id)
+
+Create Account Link Candidate
+
+Create one immutable elevated browser candidate and return its code once.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_candidate_created_response import AccountLinkCandidateCreatedResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    origin_id = 'origin_id_example' # str | 
+
+    try:
+        # Create Account Link Candidate
+        api_response = api_instance.external_channel_v1_create_account_link_candidate(origin_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_create_account_link_candidate:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_create_account_link_candidate: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **origin_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkCandidateCreatedResponse**](AccountLinkCandidateCreatedResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 ### HTTP response details
@@ -799,6 +1043,164 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ManagedBindingListResponse**](ManagedBindingListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_get_account_link_candidate**
+> AccountLinkCandidateResponse external_channel_v1_get_account_link_candidate(candidate_id)
+
+Get Account Link Candidate
+
+Get status for an exact current User/auth-Session candidate.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_candidate_response import AccountLinkCandidateResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    candidate_id = 'candidate_id_example' # str | 
+
+    try:
+        # Get Account Link Candidate
+        api_response = api_instance.external_channel_v1_get_account_link_candidate(candidate_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_get_account_link_candidate:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_get_account_link_candidate: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **candidate_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkCandidateResponse**](AccountLinkCandidateResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_get_account_link_origin**
+> AccountLinkOriginResponse external_channel_v1_get_account_link_origin(origin_id)
+
+Get Account Link Origin
+
+Load bounded provider identity and Workspace confirmation context.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_origin_response import AccountLinkOriginResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    origin_id = 'origin_id_example' # str | 
+
+    try:
+        # Get Account Link Origin
+        api_response = api_instance.external_channel_v1_get_account_link_origin(origin_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_get_account_link_origin:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_get_account_link_origin: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **origin_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkOriginResponse**](AccountLinkOriginResponse.md)
 
 ### Authorization
 
@@ -1470,6 +1872,80 @@ Name | Type | Description  | Notes
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_list_account_links**
+> AccountLinkListResponse external_channel_v1_list_account_links()
+
+List Account Links
+
+List the current User's own Workspace external account links.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_list_response import AccountLinkListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+
+    try:
+        # List Account Links
+        api_response = api_instance.external_channel_v1_list_account_links()
+        print("The response of ExternalChannelV1Api->external_channel_v1_list_account_links:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_list_account_links: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**AccountLinkListResponse**](AccountLinkListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
@@ -3726,6 +4202,85 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_unlink_account_link**
+> AccountLinkResponse external_channel_v1_unlink_account_link(link_id)
+
+Unlink Account Link
+
+Terminally disconnect one elevated owner's link.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.account_link_response import AccountLinkResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    link_id = 'link_id_example' # str | 
+
+    try:
+        # Unlink Account Link
+        api_response = api_instance.external_channel_v1_unlink_account_link(link_id)
+        print("The response of ExternalChannelV1Api->external_channel_v1_unlink_account_link:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_unlink_account_link: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **link_id** | **str**|  | 
+
+### Return type
+
+[**AccountLinkResponse**](AccountLinkResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

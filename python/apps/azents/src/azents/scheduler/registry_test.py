@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from azents.core.external_account_link import ExternalAccountLinkCleanupSummary
 from azents.scheduler import registry
 from azents.scheduler.types import TaskContext
 from azents.services.chat import ChatSessionService
+from azents.services.external_account_link import ExternalAccountLinkService
 from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
@@ -58,6 +60,18 @@ class _ScheduledTaskDispatchContainer:
         """Return the configured dispatcher composition."""
         assert target is get_user_scheduled_task_dispatcher
         return self.dispatcher
+
+
+class _ExternalAccountLinkCleanupContainer:
+    """Container double for external account proof cleanup."""
+
+    def __init__(self, service: ExternalAccountLinkService) -> None:
+        self.service = service
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the configured account link service."""
+        assert target is ExternalAccountLinkService
+        return self.service
 
 
 @pytest.mark.asyncio
@@ -145,6 +159,41 @@ def test_user_scheduled_task_dispatch_is_registered_once() -> None:
     assert definition.timeout == datetime.timedelta(minutes=2)
     assert definition.retry_policy.kind == "bounded_backoff"
     assert definition.enabled_by_default is True
+
+
+@pytest.mark.asyncio
+async def test_external_account_link_cleanup_handler_is_bounded() -> None:
+    """The registered proof cleanup delegates one bounded retained-row pass."""
+    service = cast(Any, Mock())
+    service.cleanup_expired = AsyncMock(
+        return_value=ExternalAccountLinkCleanupSummary(
+            deleted_origin_count=3,
+            deleted_candidate_count=4,
+        )
+    )
+    now = datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="external_account_link_cleanup",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=2),
+        manual_triggered=False,
+        container=cast(Any, _ExternalAccountLinkCleanupContainer(service)),
+    )
+
+    result = await registry.external_account_link_cleanup_handler(context)
+
+    service.cleanup_expired.assert_awaited_once_with(now=now, limit=500)
+    assert result.summary == {
+        "task_key": "external_account_link_cleanup",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "deleted_origin_count": 3,
+        "deleted_candidate_count": 4,
+    }
+    assert registry.EXTERNAL_ACCOUNT_LINK_CLEANUP_TASK in (
+        registry.get_task_definitions()
+    )
 
 
 @pytest.mark.asyncio

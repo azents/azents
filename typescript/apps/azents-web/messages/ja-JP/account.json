@@ -8,6 +8,7 @@
   "sidebar": {
     "workspaces": "ワークスペース一覧",
     "general": "一般",
+    "externalAccounts": "外部アカウント",
     "security": "セキュリティ"
   }
 }

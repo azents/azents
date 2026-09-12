@@ -1,6 +1,7 @@
 """Signed Discord conversation-settings component scope tests."""
 
 import datetime
+from collections.abc import Callable
 
 import pytest
 
@@ -9,8 +10,14 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
 )
 from azents.services.external_channel.discord_settings_scope import (
+    DiscordAccountLinkScope,
+    DiscordModelSettingsScope,
     DiscordSettingsScope,
+    build_discord_account_link_custom_id,
+    build_discord_model_settings_custom_id,
     build_discord_settings_custom_id,
+    parse_discord_account_link_custom_id,
+    parse_discord_model_settings_custom_id,
     parse_discord_settings_custom_id,
     settings_selected_location,
     settings_selected_response_mode,
@@ -19,6 +26,7 @@ from azents.services.external_channel.discord_settings_scope import (
 _UPDATED_AT = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 _ORIGIN_INTERACTION_ID = "01a03c28f6137b60b35e68ba50ce5319"
 _BINDING_ID = "01a03bfcc50a7891a94d3328bdbd88bf"
+_DRAFT_ID = "01a03bfcc50a7891a94d3328bdbd8901"
 
 
 def test_setup_settings_scope_round_trips_with_current_source_fences() -> None:
@@ -176,3 +184,98 @@ def test_settings_scope_rejects_tampering(mutation: str) -> None:
             custom_id=":".join(fields),
             secret="secret",
         )
+
+
+def test_account_link_scopes_round_trip_without_account_authority() -> None:
+    """Sign only opaque origin locators for start and code-entry actions."""
+    start = build_discord_account_link_custom_id(
+        secret="secret",
+        action="start",
+        origin_interaction_id="interaction-1",
+        origin_id=None,
+    )
+    enter = build_discord_account_link_custom_id(
+        secret="secret",
+        action="enter_code",
+        origin_interaction_id=None,
+        origin_id="origin-1",
+    )
+
+    assert parse_discord_account_link_custom_id(
+        custom_id=start,
+        secret="secret",
+    ) == DiscordAccountLinkScope(
+        action="start",
+        origin_interaction_id="interaction-1",
+        origin_id=None,
+    )
+    assert parse_discord_account_link_custom_id(
+        custom_id=enter,
+        secret="secret",
+    ) == DiscordAccountLinkScope(
+        action="enter_code",
+        origin_interaction_id=None,
+        origin_id="origin-1",
+    )
+    assert len(start) <= 100
+    assert len(enter) <= 100
+
+
+def test_model_scope_round_trips_opaque_draft_and_page_only() -> None:
+    """Keep model labels and permissions outside Discord custom IDs."""
+    custom_id = build_discord_model_settings_custom_id(
+        secret="secret",
+        action="select_execution",
+        draft_id=_DRAFT_ID,
+        offset=20,
+        selection_fingerprint=None,
+    )
+
+    assert parse_discord_model_settings_custom_id(
+        custom_id=custom_id,
+        secret="secret",
+    ) == DiscordModelSettingsScope(
+        action="select_execution",
+        draft_id=_DRAFT_ID,
+        offset=20,
+        selection_fingerprint=None,
+    )
+    assert len(custom_id) <= 100
+    assert "model" not in custom_id
+
+
+@pytest.mark.parametrize(
+    ("builder", "parser"),
+    [
+        (
+            lambda: build_discord_account_link_custom_id(
+                secret="secret",
+                action="enter_code",
+                origin_interaction_id=None,
+                origin_id="origin-1",
+            ),
+            parse_discord_account_link_custom_id,
+        ),
+        (
+            lambda: build_discord_model_settings_custom_id(
+                secret="secret",
+                action="apply",
+                draft_id=_DRAFT_ID,
+                offset=0,
+                selection_fingerprint="0123456789abcdef",
+            ),
+            parse_discord_model_settings_custom_id,
+        ),
+    ],
+)
+def test_private_settings_scopes_reject_tampering(
+    builder: Callable[[], str],
+    parser: Callable[..., object],
+) -> None:
+    """A copied private control cannot be modified into another locator."""
+    custom_id = builder()
+    fields = custom_id.split(":")
+    fields[-1] = ("A" if fields[-1][0] != "A" else "B") + fields[-1][1:]
+
+    with pytest.raises(ValueError, match="scope is invalid"):
+        parser(custom_id=":".join(fields), secret="secret")

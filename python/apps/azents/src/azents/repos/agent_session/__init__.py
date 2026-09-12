@@ -1182,10 +1182,7 @@ class AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Lock one AgentSession after its referenced Agent in stable FK order."""
-        if not await self.lock_agent_parent_for_session(
-            session,
-            agent_session_id,
-        ):
+        if not await self.lock_agent_parent_for_session(session, agent_session_id):
             return None
         result = await session.execute(
             sa.select(RDBAgentSession)
@@ -1280,6 +1277,25 @@ class AgentSessionRepository:
                     return self._build(locked_session)
             return None
 
+    async def lock_by_id_nowait(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Try to lock one Session and its Agent parent without waiting."""
+        if not await self.lock_agent_parent_for_session_nowait(
+            session,
+            agent_session_id,
+        ):
+            return None
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == agent_session_id)
+            .with_for_update(key_share=True, nowait=True)
+        )
+        rdb = result.scalar_one_or_none()
+        return None if rdb is None else self._build(rdb)
+
     async def lock_agent_parent_for_session(
         self,
         session: AsyncSession,
@@ -1297,6 +1313,26 @@ class AgentSessionRepository:
             sa.select(RDBAgent.id)
             .where(RDBAgent.id == agent_id)
             .with_for_update(read=True, key_share=True)
+        )
+        return locked_agent_id is not None
+
+    async def lock_agent_parent_for_session_nowait(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> bool:
+        """Try to lock the Session's Agent parent without waiting."""
+        agent_id = await session.scalar(
+            sa.select(RDBAgentSession.agent_id).where(
+                RDBAgentSession.id == agent_session_id
+            )
+        )
+        if agent_id is None:
+            return False
+        locked_agent_id = await session.scalar(
+            sa.select(RDBAgent.id)
+            .where(RDBAgent.id == agent_id)
+            .with_for_update(read=True, key_share=True, nowait=True)
         )
         return locked_agent_id is not None
 
@@ -1980,6 +2016,9 @@ class AgentSessionRepository:
                 applied_enabled_execution_options=[
                     option.value for option in enabled_execution_options
                 ],
+                applied_profile_generation=(
+                    RDBAgentSession.applied_profile_generation + 1
+                ),
             )
             .returning(RDBAgentSession)
         )
@@ -2581,6 +2620,7 @@ class AgentSessionRepository:
             handle=rdb.handle,
             inference_state=inference_state,
             applied_inference_profile=applied_inference_profile,
+            applied_profile_generation=rdb.applied_profile_generation,
             session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,

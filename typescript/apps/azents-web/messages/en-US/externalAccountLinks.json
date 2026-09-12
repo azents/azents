@@ -1,0 +1,100 @@
+{
+  "title": "External accounts",
+  "description": "Review the Slack and Discord identities connected to your Azents account in each Workspace.",
+  "loading": "Loading external accounts...",
+  "loadErrorTitle": "Could not load external accounts",
+  "retry": "Try again",
+  "elevationLoading": "Loading available verification methods...",
+  "elevationErrorTitle": "Could not load verification methods",
+  "emptyTitle": "No external accounts connected",
+  "emptyDescription": "Start from private Conversation settings in Slack or Discord when you want to connect an account.",
+  "workspace": "Workspace",
+  "linkedAt": "Connected",
+  "providerTeam": "{provider} · {team}",
+  "providers": {
+    "slack": "Slack",
+    "discord": "Discord"
+  },
+  "status": {
+    "active": "Connected",
+    "inactive": "Inactive",
+    "revoked": "Disconnected"
+  },
+  "inactiveDescription": "Your Workspace membership is not active. This link cannot authorize account-based conversation settings.",
+  "disconnect": "Disconnect",
+  "disconnected": "Disconnected",
+  "cancel": "Cancel",
+  "elevationDisconnect": "Verify your identity to disconnect {account} from {workspace}.",
+  "disconnectDialog": {
+    "title": "Disconnect external account?",
+    "description": "Disconnect {account} from your Azents account in {workspace}.",
+    "impact": "Future link-dependent controls will stop working in this Workspace. Existing guest access, messages, history, shared settings, grants, and blocks are preserved.",
+    "confirm": "Disconnect account"
+  },
+  "candidateStatus": {
+    "pending_provider_proof": "Waiting for Slack or Discord",
+    "provider_verified": "External service verified",
+    "connected": "Connected",
+    "cancelled": "Cancelled",
+    "expired": "Expired"
+  },
+  "errors": {
+    "membership_required": "Join or accept an invitation to this Workspace before connecting.",
+    "elevation_required": "Verify your identity to continue.",
+    "resource_not_found": "This confirmation no longer matches the external account or browser session.",
+    "expired": "This confirmation has expired. Start again.",
+    "conflict": "This external account is already connected in this Workspace.",
+    "candidate_not_ready": "Enter the code in the original external service, then check the status again.",
+    "candidate_terminal": "This confirmation can no longer be used. Create a fresh code.",
+    "busy": "The connection service is temporarily busy. Try again."
+  },
+  "confirmation": {
+    "title": "Confirm external account",
+    "description": "Connect only accounts that belong to you. Review the complete account pair before continuing.",
+    "loading": "Loading confirmation...",
+    "accountPair": "Account pair",
+    "accountPairDescription": "This connection applies only to the Workspace shown below.",
+    "externalAccount": "External account",
+    "providerTeam": "External service and team",
+    "azentsAccount": "Current Azents account",
+    "beforeCode": "Creating a code does not connect the accounts. You must enter it in the original private Slack or Discord screen and confirm here afterward.",
+    "createCode": "Create confirmation code",
+    "codeTitle": "One-time confirmation code",
+    "codeExpires": "Expires {time}",
+    "codeSafety": "Enter only this code from your own Azents screen. Never enter a code someone else sent you.",
+    "copyCode": "Copy confirmation code",
+    "copy": "Copy",
+    "copied": "Copied",
+    "enterInProvider": "Return to the original private Slack or Discord screen and enter this code. Then come back here and check its status.",
+    "checkStatus": "Check status",
+    "providerVerified": "The original external account entered this code. Review the account pair once more before connecting.",
+    "confirm": "Connect these accounts",
+    "startFresh": "Create a fresh confirmation",
+    "switchAccount": "Switch Azents account",
+    "elevationCreate": "Verify your current Azents account before creating the one-time code.",
+    "elevationConfirm": "Verify your current Azents account before the final connection.",
+    "connectedTitle": "External account connected",
+    "connectedDescription": "{account} is now connected to your Azents account in {workspace}.",
+    "connectedImpact": "Link-dependent controls can now use your current Azents authority. Existing guest permissions and conversation history are unchanged.",
+    "return": "Return to Slack or Discord",
+    "manage": "Manage external accounts",
+    "notFoundTitle": "Confirmation not found",
+    "notFoundDescription": "This link is invalid or does not belong to your current account and browser session.",
+    "errorTitle": "Could not load confirmation",
+    "errorDescription": "Try again from the original private Slack or Discord screen.",
+    "origin": {
+      "cancelled": {
+        "title": "Confirmation cancelled",
+        "description": "Start a new connection from the original private Slack or Discord screen."
+      },
+      "consumed": {
+        "title": "Confirmation already completed",
+        "description": "Return to Slack or Discord, or review your external accounts in Account settings."
+      },
+      "expired": {
+        "title": "Confirmation expired",
+        "description": "Start a new connection from the original private Slack or Discord screen."
+      }
+    }
+  }
+}

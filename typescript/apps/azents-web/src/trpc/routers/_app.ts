@@ -3,6 +3,7 @@
  * - Combine all sub-routers
  */
 import { router } from "../init";
+import { accountLinksRouter } from "./account-links";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
 import { chatRouter } from "./chat";
@@ -22,6 +23,7 @@ import { workspaceMemberRouter } from "./workspace-member";
 import { workspaceModelSettingsRouter } from "./workspace-model-settings";
 
 export const appRouter = router({
+  accountLinks: accountLinksRouter,
   agent: agentRouter,
   auth: authRouter,
   chat: chatRouter,

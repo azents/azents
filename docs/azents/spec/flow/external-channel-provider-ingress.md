@@ -25,6 +25,11 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
+  - python/apps/azents/src/azents/services/external_channel/discord_account_link.py
+  - python/apps/azents/src/azents/services/external_channel/discord_model_settings.py
+  - python/apps/azents/src/azents/services/external_channel/slack_native_protocol.py
+  - python/apps/azents/src/azents/services/external_channel/slack_native_settings.py
+  - python/apps/azents/src/azents/services/external_channel/slack_native_views.py
   - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
   - python/apps/azents/src/azents/services/external_channel/discord_endpoint.py
   - python/apps/azents/src/azents/services/external_channel/discord_testenv.py
@@ -71,8 +76,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-10
-spec_version: 61
+last_verified_at: 2026-09-12
+spec_version: 62
 ---
 
 # External Channel Provider Ingress
@@ -237,6 +242,22 @@ principal, original interaction, and page offset. Navigation and submission rech
 that scope, interaction expiry, route availability, Workspace boundary, and callback
 actor before any selection. Duplicate callbacks reuse the durable interaction claim,
 preserve any selected route, and one interaction can select at most once.
+
+Actor-private account linking and model controls enter only after normal Slack or
+Discord signature verification has produced the exact human principal and connection
+generation. Slack extends its private modal operations with signed account-link and
+model actions. Discord parses closed account-link/model component and modal scopes,
+uses type 9 only to open the private code modal, and otherwise acknowledges slow work
+before completing the claimed interaction ephemerally. A denied Discord public
+settings action sends a new type-4 response with the ephemeral flag; type-7 source
+message updates are reserved for interactions whose source is already proven private.
+
+Submitted link codes and provider callback credentials remain request-local. The
+durable origin/candidate stores only typed proof metadata and a code hash; private
+model drafts retain only bounded typed options and opaque option IDs. Unsupported
+private operations and processing failures return private current-state/unavailable
+results and never publish personalized account or model data to the conversation,
+DMs, provider history, logs, or durable E2E evidence.
 
 ## Socket Mode Admission
 
@@ -595,6 +616,9 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 62) — Added signed actor-private Slack and Discord
+  account-link/model controls, deferred ephemeral Discord completion, and the rule
+  that public Discord sources receive a new ephemeral response rather than an update.
 - **2026-09-10** (spec_version 61) — Added the complete testenv-only Discord Gateway
   lease, renewal, and connection-discovery poll timing override while preserving
   production timing defaults.

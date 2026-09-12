@@ -6,10 +6,12 @@ from fastapi import APIRouter
 
 from azents.utils.fastapi.route import RouteMounter
 
+from .account_link_route import router as account_link_router
 from .management_route import router as management_router
 from .route import router as callback_router
 
 router = APIRouter()
+router.include_router(account_link_router)
 router.include_router(callback_router)
 router.include_router(management_router)
 

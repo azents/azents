@@ -40,6 +40,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
 )
+from azents.rdb.models.external_model_settings import RDBExternalModelDraft
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
@@ -224,6 +225,11 @@ class ExternalChannelLifecycleRepository:
         deleted_work_count = await self.work_state_store.delete_for_sessions(
             session,
             session_ids=session_ids,
+        )
+        await self._delete(
+            session,
+            RDBExternalModelDraft,
+            RDBExternalModelDraft.session_id.in_(session_ids),
         )
         deleted_binding_count = await self._delete(
             session,

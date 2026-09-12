@@ -406,6 +406,8 @@ async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
         assert callback.trigger_id == "trigger-secret-must-not-persist"
         assert shortcut_source_event is not None
         return ExternalChannelInteractionHandoff(
+            native_control=callback.native_control,
+            verified_actor=None,
             interaction_id="interaction-1",
             handler=callback.handler,
             provider_parent_channel_id=callback.provider_parent_channel_id,

@@ -208,6 +208,7 @@ def _agent_session(
     """Create AgentSession fixture."""
     return AgentSession(
         owner_generation=0,
+        applied_profile_generation=0,
         inference_state=SessionInferenceState(
             model_target_label="Quality",
             model_selection=_agent().model_selection,

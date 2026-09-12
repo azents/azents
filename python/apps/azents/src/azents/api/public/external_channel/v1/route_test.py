@@ -12,6 +12,7 @@ from azents.app import create_dummy_public_app
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionResult,
     DiscordHTTPIngressService,
+    DiscordPrivateSettingsHandoff,
     DiscordSettingsComponentHandoff,
 )
 from azents.services.external_channel.discord_interaction import (
@@ -21,6 +22,7 @@ from azents.services.external_channel.discord_interaction import (
 )
 from azents.services.external_channel.discord_settings import DiscordSettingsContext
 from azents.services.external_channel.discord_settings_scope import (
+    DiscordAccountLinkScope,
     DiscordSettingsScope,
 )
 from azents.services.external_channel.http_admission import (
@@ -80,15 +82,20 @@ def test_discord_admission_returns_matching_initial_response(
             interaction_type=interaction_type,
             application_id="app-1",
             guild_id="guild-1",
+            guild_display_name="Guild One",
             channel_id="channel-1",
             provider_parent_channel_id="channel-1",
             provider_thread_id=None,
             actor_user_id="user-1",
+            actor_display_name="Discord User",
             command=None,
             message_command_source=None,
             component_custom_id=None,
             selected_value=None,
+            selected_values=(),
             modal_custom_id=None,
+            account_link_code_submission=None,
+            scheduled_task_edit=None,
         ),
         admission=None,
     )
@@ -120,15 +127,20 @@ def test_discord_control_plans_run_after_provider_response() -> None:
             interaction_type=3,
             application_id="app-1",
             guild_id="guild-1",
+            guild_display_name="Guild One",
             channel_id="channel-1",
             provider_parent_channel_id="channel-1",
             provider_thread_id=None,
             actor_user_id="user-1",
+            actor_display_name="Discord User",
             command=None,
             message_command_source=None,
             component_custom_id="a:pc:interaction-1:setting-1:1:signature",
             selected_value=None,
+            selected_values=(),
             modal_custom_id=None,
+            account_link_code_submission=None,
+            scheduled_task_edit=None,
         ),
         admission=None,
         response={"type": 7, "data": {"content": "Saved.", "components": []}},
@@ -177,10 +189,16 @@ def test_discord_setup_handoff_runs_after_deferred_response() -> None:
         ),
         context=DiscordSettingsContext(
             connection_id="connection-1",
+            connection_configuration_generation=2,
             guild_id="guild-1",
+            guild_display_name="Guild One",
             provider_parent_channel_id="channel-1",
+            provider_thread_id=None,
             provider_thread_resource_key=None,
             principal_id="principal-1",
+            provider_user_id="user-1",
+            provider_display_name="Discord User",
+            provider_interaction_id="provider-interaction-1",
         ),
         received_at=datetime.datetime(2026, 8, 25, tzinfo=datetime.UTC),
     )
@@ -190,15 +208,20 @@ def test_discord_setup_handoff_runs_after_deferred_response() -> None:
             interaction_type=3,
             application_id="app-1",
             guild_id="guild-1",
+            guild_display_name="Guild One",
             channel_id="channel-1",
             provider_parent_channel_id="channel-1",
             provider_thread_id=None,
             actor_user_id="user-1",
+            actor_display_name="Discord User",
             command=None,
             message_command_source=None,
             component_custom_id="a:sc:origin-1:claim-1:1:1:signature",
             selected_value=None,
+            selected_values=(),
             modal_custom_id=None,
+            account_link_code_submission=None,
+            scheduled_task_edit=None,
         ),
         admission=None,
         response={"type": 6},
@@ -217,6 +240,76 @@ def test_discord_setup_handoff_runs_after_deferred_response() -> None:
     assert response.status_code == 200
     assert response.json() == {"type": 6}
     service.run_settings_component_handoff.assert_awaited_once_with(handoff)
+
+
+def test_discord_private_handoff_runs_after_ephemeral_deferred_response() -> None:
+    """Schedule private business work behind the valid initial ACK."""
+    service = AsyncMock(spec=DiscordHTTPIngressService)
+    context = DiscordSettingsContext(
+        connection_id="connection-1",
+        connection_configuration_generation=2,
+        guild_id="guild-1",
+        guild_display_name="Guild One",
+        provider_parent_channel_id="channel-1",
+        provider_thread_id=None,
+        provider_thread_resource_key=None,
+        principal_id="principal-1",
+        provider_user_id="user-1",
+        provider_display_name="Discord User",
+        provider_interaction_id="provider-interaction-1",
+    )
+    handoff = DiscordPrivateSettingsHandoff(
+        interaction_id="interaction-row-1",
+        application_id="app-1",
+        interaction_token="request-local-token",
+        scope=DiscordAccountLinkScope(
+            action="start",
+            origin_interaction_id="origin-interaction-1",
+            origin_id=None,
+        ),
+        selected_values=(),
+        account_link_code=None,
+        context=context,
+        received_at=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
+    )
+    service.handle.return_value = DiscordHTTPAdmissionResult(
+        envelope=DiscordInteractionEnvelope(
+            interaction_id="interaction-1",
+            interaction_type=3,
+            application_id="app-1",
+            guild_id="guild-1",
+            guild_display_name="Guild One",
+            channel_id="channel-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_id=None,
+            actor_user_id="user-1",
+            actor_display_name="Discord User",
+            command=None,
+            message_command_source=None,
+            component_custom_id="al1:s:origin-interaction-1:signature",
+            selected_value=None,
+            selected_values=(),
+            modal_custom_id=None,
+            account_link_code_submission=None,
+            scheduled_task_edit=None,
+        ),
+        admission=None,
+        response={"type": 6},
+        private_settings_handoff=handoff,
+    )
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b'{"token":"request-local-only"}',
+        headers={
+            "X-Signature-Ed25519": "signature",
+            "X-Signature-Timestamp": "1784682000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"type": 6}
+    service.run_private_settings_handoff.assert_awaited_once_with(handoff)
 
 
 def test_discord_authentication_failure_uses_one_safe_response(

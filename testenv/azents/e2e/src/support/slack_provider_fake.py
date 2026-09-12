@@ -177,6 +177,7 @@ class FakeState:
             self.presence: list[dict[str, object]] = []
             self.views: list[dict[str, object]] = []
             self._transient_views: dict[str, dict[str, object]] = {}
+            self._transient_actions: dict[str, dict[str, object]] = {}
             self.socket_connections = 0
             self.socket_envelope_ids: list[str] = []
             self.socket_acknowledgements: list[str] = []
@@ -353,6 +354,7 @@ class FakeState:
             self.presence = []
             self.views = []
             self._transient_views = {}
+            self._transient_actions = {}
             self.uploads = {}
             self.socket_connections = 0
             self.socket_envelope_ids = []
@@ -495,6 +497,7 @@ class FakeState:
         private_metadata: str | None,
         route_ids: list[str],
         has_submit: bool,
+        control_handoff: dict[str, object],
     ) -> _RecordedView:
         """Record bounded view evidence without persisting signed metadata."""
         with self.lock:
@@ -502,20 +505,39 @@ class FakeState:
             view_id = requested_view_id or f"V-E2E-{self._view_sequence}"
             view_hash = f"hash-{self._view_sequence}"
             control_scope = _view_control_scope(callback_id)
-            self.views.append(
-                {
-                    "operation": operation,
-                    "control_scope": control_scope,
-                    "route_count": len(route_ids),
-                    "has_submit": has_submit,
-                    "outcome": "delivered",
-                }
-            )
+            evidence: dict[str, object] = {
+                "operation": operation,
+                "control_scope": control_scope,
+                "route_count": len(route_ids),
+                "has_submit": has_submit,
+                "outcome": "delivered",
+            }
+            if control_scope in {"account_link_code", "model"}:
+                action_ids = control_handoff.get("action_ids")
+                input_action_ids = control_handoff.get("input_action_ids")
+                option_values = control_handoff.get("option_values")
+                evidence["control_count"] = (
+                    len(action_ids) if isinstance(action_ids, list) else 0
+                )
+                evidence["input_count"] = (
+                    len(input_action_ids) if isinstance(input_action_ids, list) else 0
+                )
+                evidence["option_count"] = (
+                    sum(
+                        len(values)
+                        for values in option_values.values()
+                        if isinstance(values, list)
+                    )
+                    if isinstance(option_values, dict)
+                    else 0
+                )
+            self.views.append(evidence)
             self._transient_views[control_scope] = {
                 "view_id": view_id,
                 "view_hash": view_hash,
                 "private_metadata": private_metadata,
                 "route_ids": route_ids,
+                **control_handoff,
             }
             return _RecordedView(view_id, view_hash)
 
@@ -524,6 +546,23 @@ class FakeState:
         with self.lock:
             view = self._transient_views.get(control_scope)
             return dict(view) if view is not None else None
+
+    def record_transient_actions(
+        self,
+        actions: list[dict[str, object]],
+    ) -> None:
+        """Retain signed Block Kit action values only in transient test state."""
+        with self.lock:
+            for action in actions:
+                action_id = action.get("action_id")
+                if isinstance(action_id, str):
+                    self._transient_actions[action_id] = dict(action)
+
+    def transient_action(self, action_id: str) -> dict[str, object] | None:
+        """Return one signed action handoff without adding it to evidence."""
+        with self.lock:
+            action = self._transient_actions.get(action_id)
+            return dict(action) if action is not None else None
 
     def completed_uploads(
         self,
@@ -583,6 +622,10 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/transient-view":
             scope = parse_qs(parsed.query).get("scope", [""])[0]
             self._json_response(200, self.state.transient_view(scope) or {})
+            return
+        if parsed.path == "/__testenv/transient-action":
+            action_id = parse_qs(parsed.query).get("action_id", [""])[0]
+            self._json_response(200, self.state.transient_action(action_id) or {})
             return
         if parsed.path.startswith("/files/"):
             provider_file_id = parsed.path.removeprefix("/files/")
@@ -748,6 +791,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         view = body.get("view")
         typed_view = _object(view) if isinstance(view, dict) else {}
         route_ids = _selector_route_ids(typed_view)
+        control_handoff = _view_control_handoff(typed_view)
         callback_id = _optional_string(typed_view, "callback_id")
         private_metadata = _optional_string(typed_view, "private_metadata")
         view_id, view_hash = self.state.record_view(
@@ -757,6 +801,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             private_metadata=private_metadata,
             route_ids=route_ids,
             has_submit=isinstance(typed_view.get("submit"), dict),
+            control_handoff=control_handoff,
         )
         self._json_response(
             200,
@@ -1055,6 +1100,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         timestamp = _optional_string(body, "ts") or self.state.next_message_timestamp()
         approval_request_id = _approval_request_id(body)
         action_ids, selector_admission_id = _selector_control_evidence(body)
+        self.state.record_transient_actions(_block_action_handoffs(body))
         delivery: dict[str, object] = {
             "operation": operation,
             "channel": _optional_string(body, "channel"),
@@ -1540,7 +1586,109 @@ def _view_control_scope(callback_id: str | None) -> str:
         return "setup"
     if callback_id == "azents_conversation_settings":
         return "settings"
+    if callback_id == "azents_account_link_code":
+        return "account_link_code"
+    if callback_id == "azents_model_apply":
+        return "model"
     return "unknown"
+
+
+def _view_control_handoff(view: dict[str, object]) -> dict[str, object]:
+    """Extract opaque Slack control identities for the next signed callback."""
+    action_ids: list[str] = []
+    input_action_ids: list[str] = []
+    block_ids: list[str] = []
+    option_values: dict[str, list[str]] = {}
+    option_labels: dict[str, dict[str, str]] = {}
+    action_values: dict[str, str] = {}
+    link_paths: list[str] = []
+    for block in _object_list_or_empty(view.get("blocks")):
+        block_id = block.get("block_id")
+        if isinstance(block_id, str) and block_id:
+            block_ids.append(block_id)
+        raw_elements: list[dict[str, object]] = []
+        element = block.get("element")
+        if isinstance(element, dict):
+            raw_elements.append(_object(element))
+        accessory = block.get("accessory")
+        if isinstance(accessory, dict):
+            raw_elements.append(_object(accessory))
+        raw_elements.extend(_object_list_or_empty(block.get("elements")))
+        for raw_element in raw_elements:
+            url = raw_element.get("url")
+            if isinstance(url, str):
+                parsed = urlparse(url)
+                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                    link_paths.append(parsed.path)
+            action_id = raw_element.get("action_id")
+            if not isinstance(action_id, str) or not action_id:
+                continue
+            action_ids.append(action_id)
+            if raw_element.get("type") == "plain_text_input":
+                input_action_ids.append(action_id)
+            value = raw_element.get("value")
+            if isinstance(value, str) and value:
+                action_values[action_id] = value
+            values = [
+                option.get("value")
+                for option in _object_list_or_empty(raw_element.get("options"))
+                if isinstance(option.get("value"), str) and option.get("value")
+            ]
+            labels: dict[str, str] = {}
+            for option in _object_list_or_empty(raw_element.get("options")):
+                option_value = option.get("value")
+                text = option.get("text")
+                if (
+                    isinstance(option_value, str)
+                    and option_value
+                    and isinstance(text, dict)
+                ):
+                    label = _object(text).get("text")
+                    if isinstance(label, str) and label:
+                        labels[option_value] = label
+            initial_option = raw_element.get("initial_option")
+            if isinstance(initial_option, dict):
+                initial_value = _object(initial_option).get("value")
+                if (
+                    isinstance(initial_value, str)
+                    and initial_value
+                    and initial_value not in values
+                ):
+                    values.append(initial_value)
+            if values:
+                option_values[action_id] = [
+                    option for option in values if isinstance(option, str)
+                ]
+            if labels:
+                option_labels[action_id] = labels
+    return {
+        "action_ids": action_ids,
+        "input_action_ids": input_action_ids,
+        "block_ids": block_ids,
+        "option_values": option_values,
+        "option_labels": option_labels,
+        "action_values": action_values,
+        "link_paths": link_paths,
+    }
+
+
+def _block_action_handoffs(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Extract signed action values transiently without visible Block Kit copy."""
+    handoffs: list[dict[str, object]] = []
+    for block in _object_list_or_empty(payload.get("blocks")):
+        block_id = block.get("block_id")
+        for element in _object_list_or_empty(block.get("elements")):
+            action_id = element.get("action_id")
+            if not isinstance(action_id, str) or not action_id:
+                continue
+            handoff: dict[str, object] = {"action_id": action_id}
+            if isinstance(block_id, str) and block_id:
+                handoff["block_id"] = block_id
+            value = element.get("value")
+            if isinstance(value, str) and value:
+                handoff["value"] = value
+            handoffs.append(handoff)
+    return handoffs
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:

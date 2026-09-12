@@ -175,6 +175,25 @@ class WorkspaceUserRepository:
             return None
         return self._build_workspace_user(rdb_workspace_user)
 
+    async def lock_by_workspace_and_user_nowait(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        user_id: str,
+    ) -> WorkspaceUser | None:
+        """Try to lock one membership without waiting on deletion."""
+        result = await session.execute(
+            sa.select(RDBWorkspaceUser)
+            .where(
+                RDBWorkspaceUser.workspace_id == workspace_id,
+                RDBWorkspaceUser.user_id == user_id,
+            )
+            .with_for_update(key_share=True, nowait=True)
+        )
+        rdb = result.scalar_one_or_none()
+        return None if rdb is None else self._build_workspace_user(rdb)
+
     async def list_by_user(
         self, session: AsyncSession, user_id: str
     ) -> WorkspaceUserList:

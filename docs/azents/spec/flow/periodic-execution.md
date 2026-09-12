@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/job_runtime/registry.py
   - python/apps/azents/src/azents/job_runtime/types.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
+  - python/apps/azents/src/azents/services/external_account_link.py
+  - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
@@ -39,8 +41,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-09-10
-spec_version: 18
+last_verified_at: 2026-09-12
+spec_version: 19
 ---
 
 # Periodic Execution Flow Spec
@@ -85,7 +87,8 @@ definition that scans that domain.
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
 `archived_session_retention_recalculation`, `archived_session_purge`, `session_auto_archive`,
 `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`, and
-`file_lifecycle_cleanup`, plus the user Scheduled Task dispatcher definition.
+`file_lifecycle_cleanup`, `external_account_link_cleanup`, plus the user Scheduled
+Task dispatcher definition.
 `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
 
@@ -261,6 +264,19 @@ under a new token, including by a later attempt in the same scheduler process;
 the stale token cannot settle the new claim. Agent deletion clears only the
 optional diagnostic Agent ID and cannot remove the cleanup snapshot.
 
+## External account link proof cleanup task
+
+`external_account_link_cleanup` runs hourly with a two-minute timeout and bounded
+five-minute-to-one-hour retry backoff. Each pass deletes at most 500 expired
+account-link origins and their candidate rows only after the ten-minute proof
+lifetime has ended and the rows are older than the 24-hour retention window. The
+result reports deleted origin and candidate counts.
+
+Proof expiry is enforced synchronously by every linking operation. This scheduled
+task is storage reclamation only: delayed execution, lease recovery, Redis loss, or a
+failed cleanup pass cannot make an expired, cancelled, consumed, or otherwise
+terminal proof usable again.
+
 ## Session automatic archive task
 
 `session_auto_archive` runs every five minutes with a ten-minute task timeout and bounded
@@ -359,6 +375,8 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-09-12** — v19. Added bounded hourly reclamation of expired external-account
+  proof rows while keeping synchronous expiry checks as correctness authority.
 - **2026-09-06** — v18. Added Runtime Control to local devserver composition and
   made it ready before Worker dependency resolution.
 - **2026-08-18** — v16. Added durable scheduler-owned cleanup for avatars

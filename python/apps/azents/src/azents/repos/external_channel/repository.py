@@ -3764,6 +3764,21 @@ class ExternalChannelRepository:
         grant_id: str,
     ) -> ExternalChannelAccessGrant | None:
         """Delete one participant grant while retaining external content."""
+        snapshot = await session.execute(
+            sa.select(
+                RDBExternalChannelAccessGrant.agent_id,
+                RDBExternalChannelAccessGrant.principal_id,
+            ).where(RDBExternalChannelAccessGrant.id == grant_id)
+        )
+        authority = snapshot.one_or_none()
+        if authority is None:
+            return None
+        await self.acquire_principal_agent_authorization_fence(
+            session,
+            agent_id=authority.agent_id,
+            principal_id=authority.principal_id,
+            nowait=False,
+        )
         rdb = await session.scalar(
             sa.select(RDBExternalChannelAccessGrant)
             .where(RDBExternalChannelAccessGrant.id == grant_id)
@@ -3782,6 +3797,12 @@ class ExternalChannelRepository:
         create: ExternalChannelBlockCreate,
     ) -> ExternalChannelBlock:
         """Create or reactivate the unique Agent-and-principal block record."""
+        await self.acquire_principal_agent_authorization_fence(
+            session,
+            agent_id=create.agent_id,
+            principal_id=create.principal_id,
+            nowait=False,
+        )
         insert = pg_insert(RDBExternalChannelBlock).values(
             id=uuid7().hex,
             **create.model_dump(),
@@ -3799,6 +3820,28 @@ class ExternalChannelRepository:
         )
         rdb: RDBExternalChannelBlock = result.scalar_one()
         return ExternalChannelBlock.model_validate(rdb)
+
+    async def acquire_principal_agent_authorization_fence(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        principal_id: str,
+        nowait: bool,
+    ) -> bool:
+        """Fence block insertion and grant revocation for one authorization key."""
+        key = f"external-channel-authorization:{agent_id}:{principal_id}"
+        if nowait:
+            acquired = await session.scalar(
+                sa.select(
+                    sa.func.pg_try_advisory_xact_lock(sa.func.hashtextextended(key, 0))
+                )
+            )
+            return bool(acquired)
+        await session.execute(
+            sa.select(sa.func.pg_advisory_xact_lock(sa.func.hashtextextended(key, 0)))
+        )
+        return True
 
     async def get_active_block(
         self,

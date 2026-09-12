@@ -163,7 +163,10 @@ class FakeState:
             ] = {
                 "selector": [],
                 "settings": [],
+                "account_link": [],
+                "model": [],
             }
+            self._transient_interactions: dict[str, dict[str, object]] = {}
             self.guild_commands: dict[str, dict[str, object]] = {}
             self._command_sequence = 500000000000000000
             self.deliveries: list[dict[str, object]] = []
@@ -275,7 +278,10 @@ class FakeState:
             self._transient_component_custom_ids = {
                 "selector": [],
                 "settings": [],
+                "account_link": [],
+                "model": [],
             }
+            self._transient_interactions = {}
             self.guild_commands = configured_guild_commands
             self._command_sequence = max(
                 (
@@ -599,6 +605,10 @@ class FakeState:
                 response_payload,
                 channel_id=channel_id,
             )
+            self._capture_transient_interaction(
+                response_payload,
+                channel_id=channel_id,
+            )
             evidence: dict[str, object] = {
                 "interaction_id": interaction_id,
                 "interaction_type": interaction_type,
@@ -612,12 +622,19 @@ class FakeState:
                 data = response_object.get("data")
                 if isinstance(data, dict):
                     data_object = data
+                    flags = data_object.get("flags")
+                    if isinstance(flags, int) and not isinstance(flags, bool):
+                        evidence["ephemeral"] = bool(flags & 64)
                     settings_error_kind = _settings_error_kind(data_object)
                     if settings_error_kind is not None:
                         evidence["settings_error_kind"] = settings_error_kind
                     components = data_object.get("components")
                     if isinstance(components, list):
                         evidence["component_count"] = len(components)
+                        if response_type == 9:
+                            evidence["modal_input_count"] = _discord_text_input_count(
+                                data_object
+                            )
                         settings_controls = _settings_control_evidence(data_object)
                         if settings_controls:
                             evidence["settings_controls"] = settings_controls
@@ -655,6 +672,10 @@ class FakeState:
                 response,
                 channel_id=channel_id,
             )
+            self._capture_transient_interaction(
+                response,
+                channel_id=channel_id,
+            )
             completion: dict[str, object] = {}
             response_type = response.get("type")
             if isinstance(response_type, int):
@@ -662,6 +683,9 @@ class FakeState:
             data = response.get("data")
             if isinstance(data, dict):
                 data_object = data
+                flags = data_object.get("flags")
+                if isinstance(flags, int) and not isinstance(flags, bool):
+                    completion["completed_ephemeral"] = bool(flags & 64)
                 completion["completed_has_content"] = isinstance(
                     data_object.get("content"), str
                 )
@@ -707,6 +731,10 @@ class FakeState:
                 value,
                 channel_id=channel_id,
             )
+            self._capture_transient_interaction(
+                value,
+                channel_id=channel_id,
+            )
 
     def _capture_transient_component_custom_ids(
         self,
@@ -726,6 +754,14 @@ class FakeState:
                         self._transient_component_custom_ids["settings"].append(
                             _TransientComponent(nested, channel_id)
                         )
+                    elif nested.startswith("al1:"):
+                        self._transient_component_custom_ids["account_link"].append(
+                            _TransientComponent(nested, channel_id)
+                        )
+                    elif nested.startswith("ms1:"):
+                        self._transient_component_custom_ids["model"].append(
+                            _TransientComponent(nested, channel_id)
+                        )
                 else:
                     self._capture_transient_component_custom_ids(
                         nested,
@@ -737,6 +773,29 @@ class FakeState:
                     nested,
                     channel_id=channel_id,
                 )
+
+    def _capture_transient_interaction(
+        self,
+        value: object,
+        *,
+        channel_id: str | None,
+    ) -> None:
+        """Retain one content-free private control handoff for the next callback."""
+        handoff = _discord_control_handoff(value)
+        custom_ids = handoff.get("custom_ids")
+        if not isinstance(custom_ids, list) or not custom_ids:
+            return
+        self._transient_interactions[channel_id or ""] = handoff
+
+    def transient_interaction(
+        self,
+        *,
+        channel_id: str | None,
+    ) -> dict[str, object] | None:
+        """Return the latest private interaction handoff outside durable evidence."""
+        with self.lock:
+            handoff = self._transient_interactions.get(channel_id or "")
+            return dict(handoff) if handoff is not None else None
 
     def create_message(
         self,
@@ -1095,6 +1154,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                         channel_id=channel_id,
                     )
                 },
+            )
+            return
+        if parsed.path == "/__testenv/transient-interaction":
+            query = parse_qs(parsed.query)
+            channel_ids = query.get("channel_id")
+            channel_id = channel_ids[0] if channel_ids else None
+            self._json_response(
+                200,
+                self.state.transient_interaction(channel_id=channel_id) or {},
             )
             return
         if parsed.path == "/__testenv/command-id":
@@ -2466,6 +2534,95 @@ def _settings_error_kind(body: dict[str, object]) -> str | None:
         if fragment in content:
             return kind
     return None
+
+
+def _discord_control_handoff(value: object) -> dict[str, object]:
+    """Extract opaque Discord controls without retaining labels or content."""
+    response_type: int | None = None
+    ephemeral = False
+    custom_ids: list[str] = []
+    input_custom_ids: list[str] = []
+    option_values: dict[str, list[str]] = {}
+    option_labels: dict[str, dict[str, str]] = {}
+    link_paths: list[str] = []
+
+    if isinstance(value, dict):
+        response_type_value = value.get("type")
+        data = value.get("data")
+        if (
+            isinstance(response_type_value, int)
+            and not isinstance(response_type_value, bool)
+            and isinstance(data, dict)
+        ):
+            response_type = response_type_value
+            flags = data.get("flags")
+            ephemeral = (
+                isinstance(flags, int)
+                and not isinstance(flags, bool)
+                and bool(flags & 64)
+            )
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            component_type = item.get("type")
+            url = item.get("url")
+            if isinstance(url, str):
+                parsed = urlparse(url)
+                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                    link_paths.append(parsed.path)
+            custom_id = item.get("custom_id")
+            if isinstance(custom_id, str) and custom_id:
+                custom_ids.append(custom_id)
+                if component_type == 4:
+                    input_custom_ids.append(custom_id)
+                options = item.get("options")
+                if isinstance(options, list):
+                    values = [
+                        option.get("value")
+                        for option in options
+                        if isinstance(option, dict)
+                        and isinstance(option.get("value"), str)
+                        and option.get("value")
+                    ]
+                    if values:
+                        option_values[custom_id] = [
+                            option for option in values if isinstance(option, str)
+                        ]
+                    labels = {
+                        option["value"]: option["label"]
+                        for option in options
+                        if isinstance(option, dict)
+                        and isinstance(option.get("value"), str)
+                        and option.get("value")
+                        and isinstance(option.get("label"), str)
+                        and option.get("label")
+                    }
+                    if labels:
+                        option_labels[custom_id] = labels
+            for key, nested in item.items():
+                if key not in {"content", "title", "label", "placeholder", "value"}:
+                    visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return {
+        "response_type": response_type,
+        "ephemeral": ephemeral,
+        "custom_ids": custom_ids,
+        "input_custom_ids": input_custom_ids,
+        "option_values": option_values,
+        "option_labels": option_labels,
+        "link_paths": link_paths,
+    }
+
+
+def _discord_text_input_count(body: dict[str, object]) -> int:
+    """Count text inputs in a modal without retaining their entered values."""
+    handoff = _discord_control_handoff({"type": 9, "data": body})
+    input_custom_ids = handoff.get("input_custom_ids")
+    return len(input_custom_ids) if isinstance(input_custom_ids, list) else 0
 
 
 def _multipart_file_evidence(raw_body: bytes) -> _MultipartFileEvidence:

@@ -516,6 +516,198 @@ def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     assert "signed-opaque-metadata" not in rendered
 
 
+def test_slack_fake_keeps_account_link_code_modal_handoff_transient(
+    slack_fake_url: str,
+) -> None:
+    """Expose signed proof controls without retaining account or code material."""
+    response = requests.post(
+        f"{slack_fake_url}/api/views.open",
+        json={
+            "trigger_id": "private-trigger",
+            "view": {
+                "type": "modal",
+                "callback_id": "azents_account_link_code",
+                "private_metadata": "signed-original-actor-origin",
+                "title": {"type": "plain_text", "text": "Connect account"},
+                "blocks": [
+                    {
+                        "type": "input",
+                        "block_id": "azents_account_link_code",
+                        "label": {
+                            "type": "plain_text",
+                            "text": "Private confirmation code",
+                        },
+                        "element": {
+                            "type": "plain_text_input",
+                            "action_id": "value",
+                        },
+                    }
+                ],
+                "submit": {"type": "plain_text", "text": "Verify"},
+            },
+        },
+        timeout=5,
+    )
+    response.raise_for_status()
+
+    transient = requests.get(
+        f"{slack_fake_url}/__testenv/transient-view",
+        params={"scope": "account_link_code"},
+        timeout=5,
+    ).json()
+    assert transient == {
+        "view_id": "V-E2E-1",
+        "view_hash": "hash-1",
+        "private_metadata": "signed-original-actor-origin",
+        "route_ids": [],
+        "action_ids": ["value"],
+        "input_action_ids": ["value"],
+        "block_ids": ["azents_account_link_code"],
+        "option_values": {},
+        "option_labels": {},
+        "action_values": {},
+        "link_paths": [],
+    }
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["views"] == [
+        {
+            "operation": "views.open",
+            "control_scope": "account_link_code",
+            "route_count": 0,
+            "has_submit": True,
+            "outcome": "delivered",
+            "control_count": 1,
+            "input_count": 1,
+            "option_count": 0,
+        }
+    ]
+    rendered = str(evidence)
+    assert "signed-original-actor-origin" not in rendered
+    assert "Private confirmation code" not in rendered
+    assert "private-trigger" not in rendered
+
+
+def test_slack_fake_keeps_model_draft_controls_and_actions_transient(
+    slack_fake_url: str,
+) -> None:
+    """Expose opaque model draft values while evidence records only safe counts."""
+    response = requests.post(
+        f"{slack_fake_url}/api/views.update",
+        json={
+            "view_id": "V-E2E-MODEL",
+            "hash": "private-old-hash",
+            "view": {
+                "type": "modal",
+                "callback_id": "azents_model_apply",
+                "private_metadata": "signed-model-draft",
+                "title": {"type": "plain_text", "text": "Private model settings"},
+                "blocks": [
+                    {
+                        "type": "input",
+                        "block_id": "model",
+                        "element": {
+                            "type": "static_select",
+                            "action_id": "azents_model_select",
+                            "options": [
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Private model label",
+                                    },
+                                    "value": "option-opaque-1",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "type": "actions",
+                        "block_id": "pagination",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "action_id": "azents_model_next",
+                                "value": "signed-page-2",
+                            }
+                        ],
+                    },
+                ],
+                "submit": {"type": "plain_text", "text": "Apply"},
+            },
+        },
+        timeout=5,
+    )
+    response.raise_for_status()
+
+    transient = requests.get(
+        f"{slack_fake_url}/__testenv/transient-view",
+        params={"scope": "model"},
+        timeout=5,
+    ).json()
+    assert transient["view_id"] == "V-E2E-MODEL"
+    assert transient["private_metadata"] == "signed-model-draft"
+    assert transient["action_ids"] == [
+        "azents_model_select",
+        "azents_model_next",
+    ]
+    assert transient["option_values"] == {"azents_model_select": ["option-opaque-1"]}
+    assert transient["option_labels"] == {
+        "azents_model_select": {"option-opaque-1": "Private model label"}
+    }
+    assert transient["action_values"] == {"azents_model_next": "signed-page-2"}
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["views"][0]["control_scope"] == "model"
+    assert evidence["views"][0]["control_count"] == 2
+    assert evidence["views"][0]["option_count"] == 1
+    rendered = str(evidence)
+    assert "signed-model-draft" not in rendered
+    assert "option-opaque-1" not in rendered
+    assert "signed-page-2" not in rendered
+    assert "Private model label" not in rendered
+
+    requests.post(
+        f"{slack_fake_url}/api/chat.postMessage",
+        json={
+            "channel": "C-E2E",
+            "text": "Private settings controls",
+            "blocks": [
+                {
+                    "type": "actions",
+                    "block_id": "account",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "action_id": "azents_account_link_start",
+                            "value": "signed-account-origin",
+                        }
+                    ],
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    action = requests.get(
+        f"{slack_fake_url}/__testenv/transient-action",
+        params={"action_id": "azents_account_link_start"},
+        timeout=5,
+    ).json()
+    assert action == {
+        "action_id": "azents_account_link_start",
+        "block_id": "account",
+        "value": "signed-account-origin",
+    }
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert "signed-account-origin" not in str(evidence)
+
+
 def test_slack_fake_captures_selector_control_without_visible_copy(
     slack_fake_url: str,
 ) -> None:

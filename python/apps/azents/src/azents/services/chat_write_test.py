@@ -62,6 +62,9 @@ from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_model_profile.repository import (
+    SessionModelProfileRepository,
+)
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -104,13 +107,16 @@ class _SubagentLockRepository(AgentSessionRepository):
         self,
         session: AsyncSession,
         agent_session_id: str,
+        *,
+        nowait: bool = False,
     ) -> AgentSession | None:
         """Return a subagent AgentSession for idle-control lock attempts."""
-        del session
+        del session, nowait
         self.calls.append("lock_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
+            applied_profile_generation=0,
             inference_state=None,
             id=agent_session_id,
             workspace_id="workspace-1",
@@ -234,18 +240,28 @@ def _service(
         ),
         external_channel_repository=ExternalChannelRepository(),
     )
+    agent_repository = AgentRepository()
+    agent_session_repository = AgentSessionRepository()
+    effective_workspace_user_repository = workspace_user_repository or cast(
+        WorkspaceUserRepository, _WorkspaceUserRepository()
+    )
+    chat_write_request_repository = ChatWriteRequestRepository()
     return ChatWriteService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        workspace_user_repository=(
-            workspace_user_repository
-            or cast(WorkspaceUserRepository, _WorkspaceUserRepository())
-        ),
+        agent_repository=agent_repository,
+        agent_session_repository=agent_session_repository,
+        workspace_user_repository=effective_workspace_user_repository,
         agent_run_repository=AgentRunRepository(),
-        chat_write_request_repository=ChatWriteRequestRepository(),
+        chat_write_request_repository=chat_write_request_repository,
         message_repository=MessageRepository(),
         exchange_file_service=_ExchangeFileService(),
         mailbox_item_service=mailbox_item_service,
+        session_model_profile_repository=SessionModelProfileRepository(
+            agent_repository=agent_repository,
+            agent_session_repository=agent_session_repository,
+            workspace_user_repository=effective_workspace_user_repository,
+            chat_write_request_repository=chat_write_request_repository,
+            session_manager=rdb_session_manager,
+        ),
         session_manager=rdb_session_manager,
     )
 
@@ -520,15 +536,26 @@ def _control_service(
         control_session or _control_session(),
         subtree=subtree,
     )
+    agent_repository = cast(AgentRepository, _ControlAgentRepository())
+    agent_session_repository = cast(AgentSessionRepository, sessions)
+    workspace_user_repository = cast(WorkspaceUserRepository, workspace_users)
+    write_repository = cast(ChatWriteRequestRepository, writes)
     service = ChatWriteService(
-        agent_repository=cast(AgentRepository, _ControlAgentRepository()),
-        agent_session_repository=cast(AgentSessionRepository, sessions),
-        workspace_user_repository=cast(WorkspaceUserRepository, workspace_users),
+        agent_repository=agent_repository,
+        agent_session_repository=agent_session_repository,
+        workspace_user_repository=workspace_user_repository,
         agent_run_repository=cast(AgentRunRepository, object()),
-        chat_write_request_repository=cast(ChatWriteRequestRepository, writes),
+        chat_write_request_repository=write_repository,
         message_repository=cast(MessageRepository, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
         mailbox_item_service=cast(MailboxService, _ControlMailboxService()),
+        session_model_profile_repository=SessionModelProfileRepository(
+            agent_repository=agent_repository,
+            agent_session_repository=agent_session_repository,
+            workspace_user_repository=workspace_user_repository,
+            chat_write_request_repository=write_repository,
+            session_manager=_session_manager_double,
+        ),
         session_manager=_session_manager_double,
     )
     return service, workspace_users, writes, sessions
@@ -601,6 +628,7 @@ class TestChatWriteService:
             assert current.applied_inference_profile is not None
             assert current.applied_inference_profile.model_target_label == "default"
             assert current.applied_inference_profile.reasoning_effort is None
+            assert current.applied_profile_generation == 1
             assert current.inference_state is not None
             assert current.inference_state.model_dump() == prepared.model_dump()
             agent = await AgentRepository().get_by_id(session, agent_id)
@@ -622,6 +650,12 @@ class TestChatWriteService:
                 reasoning_effort=None,
                 enabled_execution_options=[],
             )
+            changed = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert changed is not None
+            assert changed.applied_profile_generation == 2
             mailbox_count = await session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBMailboxItem)
@@ -640,6 +674,13 @@ class TestChatWriteService:
         )
         assert replay.request.created is False
         assert replay.model_target_label == "default"
+        async with rdb_session_manager() as session:
+            after_replay = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert after_replay is not None
+            assert after_replay.applied_profile_generation == 2
 
         with pytest.raises(ValueError, match="another payload"):
             await service.replace_session_model_profile(
@@ -1046,6 +1087,10 @@ class TestChatWriteService:
             message_repository=cast(MessageRepository, object()),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=cast(MailboxService, object()),
+            session_model_profile_repository=cast(
+                SessionModelProfileRepository,
+                object(),
+            ),
             session_manager=_session_manager_double,
         )
 
@@ -1102,6 +1147,10 @@ class TestChatWriteService:
                     rdb_session_manager
                 ),
                 external_channel_repository=ExternalChannelRepository(),
+            ),
+            session_model_profile_repository=cast(
+                SessionModelProfileRepository,
+                object(),
             ),
             session_manager=rdb_session_manager,
         )

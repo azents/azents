@@ -16,8 +16,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-12 | 76 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-12 | 166 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-12 | 76 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-12 | 167 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-12 | 77 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 24 |
@@ -38,15 +38,15 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 48 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 61 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 44 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-10 | 61 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-12 | 26 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-12 | 62 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-12 | 49 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-10 | 18 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-12 | 19 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-12 | 35 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-12 | 21 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 58 |
@@ -257,6 +257,7 @@ Design documents are accumulated records and are not listed individually in this
 | [kubernetes_asyncio → lightkube Migration Discussion Historical Requirements Reconstruction](requirements/lightkube-260401-lightkube-migration.md) | lightkube-260401 | 2026-04-01 | - |
 | [Agent Home kubernetes_asyncio → lightkube Migration Discussion Historical Requirements Reconstruction](requirements/lightkube-260403-lightkube-migration-home.md) | lightkube-260403 | 2026-04-03 | 2026-04-03 |
 | [Linearize Input Buffer Boundaries on the Session Row Lock Historical Requirements Reconstruction](requirements/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md) | linearize-260712 | 2026-07-12 | - |
+| [External Account Linking and Conversation Settings Requirements](requirements/linking-260912-external-account-settings.md) | linking-260912 | 2026-09-12 | 2026-09-12 |
 | [Use LiteLLM Only as the OpenAI Cost Calculator Historical Requirements Reconstruction](requirements/litellm-260716-litellm-only-as-openai-cost-calculator.md) | litellm-260716 | 2026-07-16 | - |
 | [Define Chat Live/History Handoff and Streaming Partial Batching Historical Requirements Reconstruction](requirements/live-260604-live-history-projection-handoff-and-stream-batching.md) | live-260604 | 2026-06-04 | - |
 | [Chat Live State Separates Partial History from Other Live State Historical Requirements Reconstruction](requirements/live-260610-live-partial-history-taxonomy.md) | live-260610 | 2026-06-10 | 2026-06-10 |
@@ -684,6 +685,7 @@ Design documents are accumulated records and are not listed individually in this
 - [kubernetes_asyncio → lightkube Migration Discussion](adr/lightkube-260401-lightkube-migration.md)
 - [Agent Home kubernetes_asyncio → lightkube Migration Discussion](adr/lightkube-260403-lightkube-migration-home.md)
 - [Linearize Input Buffer Boundaries on the Session Row Lock](adr/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md)
+- [External Account Linking and Conversation Settings Decisions](adr/linking-260912-external-account-settings.md)
 - [Use LiteLLM Only as the OpenAI Cost Calculator](adr/litellm-260716-litellm-only-as-openai-cost-calculator.md)
 - [Define Chat Live/History Handoff and Streaming Partial Batching](adr/live-260604-live-history-projection-handoff-and-stream-batching.md)
 - [Chat Live State Separates Partial History from Other Live State](adr/live-260610-live-partial-history-taxonomy.md)

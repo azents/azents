@@ -136,6 +136,60 @@ class _DeferredInteractionHandler(_SignedInteractionHandler):
         self.wfile.write(response)
 
 
+class _AccountLinkModalInteractionHandler(_SignedInteractionHandler):
+    """Return a code modal while keeping signed IDs and copy request-local."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and return one bounded text input modal."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = (
+            b'{"type":9,"data":{"custom_id":"al1:e:origin:signature",'
+            b'"title":"Connect account","components":[{"type":1,"components":['
+            b'{"type":4,"custom_id":"azents_account_link_code","style":1,'
+            b'"label":"Private confirmation code","required":true}]}]}}'
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
+class _ModelControlsInteractionHandler(_SignedInteractionHandler):
+    """Return ephemeral model controls with only opaque transient values."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and return one model option page."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = (
+            b'{"type":4,"data":{"flags":64,"content":"Private model state",'
+            b'"components":[{"type":1,"components":[{"type":3,'
+            b'"custom_id":"ms1:m:draft:0:signature","options":['
+            b'{"label":"Private model label","value":"option-opaque-1"}]}]},'
+            b'{"type":1,"components":[{"type":2,"style":1,'
+            b'"custom_id":"ms1:a:draft:0:signature","label":"Apply"}]}]}}'
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
 @pytest.fixture
 def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     """Run one isolated SDK-facing/provider-gap fake with fresh global state."""
@@ -679,6 +733,146 @@ def test_discord_fake_correlates_transient_components_by_channel(
     )
     first.raise_for_status()
     assert first.json() == {"custom_id": first_custom_id}
+
+
+def test_discord_fake_keeps_account_link_modal_controls_transient(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose modal callback IDs without retaining proof copy or entered codes."""
+    discord_fake_url, _ = discord_fake_urls
+    callback_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _AccountLinkModalInteractionHandler,
+    )
+    callback_thread = threading.Thread(
+        target=callback_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
+    callback_thread.start()
+    try:
+        callback_url = (
+            f"http://{callback_server.server_address[0]}:"
+            f"{callback_server.server_address[1]}"
+        )
+        _configure_interaction_endpoint(
+            discord_fake_url, callback_url
+        ).raise_for_status()
+        delivered = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={
+                "id": "interaction-link-modal",
+                "type": 3,
+                "token": "private-interaction-token",
+                "channel_id": "400000000000000011",
+            },
+            timeout=5,
+        )
+        delivered.raise_for_status()
+    finally:
+        callback_server.shutdown()
+        callback_server.server_close()
+        callback_thread.join(timeout=5)
+
+    transient = requests.get(
+        f"{discord_fake_url}/__testenv/transient-interaction",
+        params={"channel_id": "400000000000000011"},
+        timeout=5,
+    ).json()
+    assert transient == {
+        "response_type": 9,
+        "ephemeral": False,
+        "custom_ids": [
+            "al1:e:origin:signature",
+            "azents_account_link_code",
+        ],
+        "input_custom_ids": ["azents_account_link_code"],
+        "option_values": {},
+        "option_labels": {},
+        "link_paths": [],
+    }
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["interactions"] == [
+        {
+            "interaction_id": "interaction-link-modal",
+            "interaction_type": 3,
+            "response_status": 200,
+            "response_type": 9,
+            "component_count": 1,
+            "modal_input_count": 1,
+            "has_content": False,
+        }
+    ]
+    rendered = str(evidence)
+    assert "private-interaction-token" not in rendered
+    assert "al1:e:origin:signature" not in rendered
+    assert "Private confirmation code" not in rendered
+
+
+def test_discord_fake_keeps_ephemeral_model_controls_transient(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose opaque draft controls while durable evidence records privacy only."""
+    discord_fake_url, _ = discord_fake_urls
+    callback_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _ModelControlsInteractionHandler,
+    )
+    callback_thread = threading.Thread(
+        target=callback_server.serve_forever,
+        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
+        daemon=True,
+    )
+    callback_thread.start()
+    try:
+        callback_url = (
+            f"http://{callback_server.server_address[0]}:"
+            f"{callback_server.server_address[1]}"
+        )
+        _configure_interaction_endpoint(
+            discord_fake_url, callback_url
+        ).raise_for_status()
+        delivered = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={
+                "id": "interaction-model-controls",
+                "type": 3,
+                "token": "private-model-token",
+                "channel_id": "400000000000000012",
+            },
+            timeout=5,
+        )
+        delivered.raise_for_status()
+    finally:
+        callback_server.shutdown()
+        callback_server.server_close()
+        callback_thread.join(timeout=5)
+
+    transient = requests.get(
+        f"{discord_fake_url}/__testenv/transient-interaction",
+        params={"channel_id": "400000000000000012"},
+        timeout=5,
+    ).json()
+    assert transient["response_type"] == 4
+    assert transient["ephemeral"] is True
+    assert transient["custom_ids"] == [
+        "ms1:m:draft:0:signature",
+        "ms1:a:draft:0:signature",
+    ]
+    assert transient["option_values"] == {
+        "ms1:m:draft:0:signature": ["option-opaque-1"]
+    }
+    assert transient["option_labels"] == {
+        "ms1:m:draft:0:signature": {
+            "option-opaque-1": "Private model label",
+        }
+    }
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["interactions"][0]["ephemeral"] is True
+    rendered = str(evidence)
+    assert "private-model-token" not in rendered
+    assert "option-opaque-1" not in rendered
+    assert "Private model label" not in rendered
 
 
 def test_discord_fake_preserves_state_for_one_shot_scenarios(

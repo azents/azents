@@ -96,6 +96,7 @@ def _agent_session(
     now = datetime.datetime.now(datetime.UTC)
     return AgentSession(
         owner_generation=0,
+        applied_profile_generation=0,
         inference_state=None,
         id=session_id,
         workspace_id=workspace_id,

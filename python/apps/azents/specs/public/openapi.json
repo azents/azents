@@ -5399,6 +5399,319 @@
         }
       }
     },
+    "/external-channel/v1/account-links": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Account Links",
+        "description": "List the current User's own Workspace external account links.",
+        "operationId": "external_channel_v1_list_account_links",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/external-channel/v1/account-links/{link_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Unlink Account Link",
+        "description": "Terminally disconnect one elevated owner's link.",
+        "operationId": "external_channel_v1_unlink_account_link",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/account-link-origins/{origin_id}": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Account Link Origin",
+        "description": "Load bounded provider identity and Workspace confirmation context.",
+        "operationId": "external_channel_v1_get_account_link_origin",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "origin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Origin Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkOriginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/account-link-origins/{origin_id}/candidates": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Create Account Link Candidate",
+        "description": "Create one immutable elevated browser candidate and return its code once.",
+        "operationId": "external_channel_v1_create_account_link_candidate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "origin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Origin Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkCandidateCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/account-link-candidates/{candidate_id}": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Account Link Candidate",
+        "description": "Get status for an exact current User/auth-Session candidate.",
+        "operationId": "external_channel_v1_get_account_link_candidate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkCandidateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Cancel Account Link Candidate",
+        "description": "Cancel one exact current User/auth-Session candidate.",
+        "operationId": "external_channel_v1_cancel_account_link_candidate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkCandidateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/account-link-candidates/{candidate_id}/confirm": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Confirm Account Link Candidate",
+        "description": "Atomically finalize an exact elevated browser candidate.",
+        "operationId": "external_channel_v1_confirm_account_link_candidate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/external-channels/multi": {
       "get": {
         "tags": [
@@ -14844,6 +15157,273 @@
         "title": "AcceptDeclineResponse",
         "description": "Invitation accept/reject response schema."
       },
+      "AccountLinkCandidateCreatedResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "origin_id": {
+            "type": "string",
+            "title": "Origin Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalAccountLinkCandidateStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "origin_id",
+          "code",
+          "expires_at",
+          "status"
+        ],
+        "title": "AccountLinkCandidateCreatedResponse",
+        "description": "One-time candidate response containing the plaintext code."
+      },
+      "AccountLinkCandidateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "origin_id": {
+            "type": "string",
+            "title": "Origin Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalAccountLinkCandidateStatus"
+          },
+          "link_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "origin_id",
+          "expires_at",
+          "status",
+          "link_id"
+        ],
+        "title": "AccountLinkCandidateResponse",
+        "description": "Status-only immutable candidate response."
+      },
+      "AccountLinkListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountLinkResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AccountLinkListResponse",
+        "description": "Current User's Workspace external account links."
+      },
+      "AccountLinkOriginResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "identity_scope": {
+            "type": "string",
+            "title": "Identity Scope"
+          },
+          "provider_tenant_id": {
+            "type": "string",
+            "title": "Provider Tenant Id"
+          },
+          "provider_tenant_display_label": {
+            "type": "string",
+            "title": "Provider Tenant Display Label"
+          },
+          "provider_display_label": {
+            "type": "string",
+            "title": "Provider Display Label"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ExternalAccountLinkOriginState"
+          },
+          "candidate_count": {
+            "type": "integer",
+            "title": "Candidate Count"
+          },
+          "candidate_limit": {
+            "type": "integer",
+            "title": "Candidate Limit"
+          },
+          "invalid_code_count": {
+            "type": "integer",
+            "title": "Invalid Code Count"
+          },
+          "invalid_code_limit": {
+            "type": "integer",
+            "title": "Invalid Code Limit"
+          },
+          "return_context": {
+            "$ref": "#/components/schemas/AccountLinkReturnContextResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "workspace_name",
+          "workspace_handle",
+          "provider",
+          "identity_scope",
+          "provider_tenant_id",
+          "provider_tenant_display_label",
+          "provider_display_label",
+          "expires_at",
+          "state",
+          "candidate_count",
+          "candidate_limit",
+          "invalid_code_count",
+          "invalid_code_limit",
+          "return_context"
+        ],
+        "title": "AccountLinkOriginResponse",
+        "description": "Browser-safe original provider confirmation context."
+      },
+      "AccountLinkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "identity_scope": {
+            "type": "string",
+            "title": "Identity Scope"
+          },
+          "provider_tenant_display_label": {
+            "type": "string",
+            "title": "Provider Tenant Display Label"
+          },
+          "provider_display_label": {
+            "type": "string",
+            "title": "Provider Display Label"
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Linked At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ExternalAccountLinkState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "workspace_name",
+          "workspace_handle",
+          "provider",
+          "identity_scope",
+          "provider_tenant_display_label",
+          "provider_display_label",
+          "linked_at",
+          "state"
+        ],
+        "title": "AccountLinkResponse",
+        "description": "Personal Workspace external account link."
+      },
+      "AccountLinkReturnContextResponse": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ExternalAccountLinkReturnKind"
+          },
+          "provider_tenant_display_label": {
+            "type": "string",
+            "title": "Provider Tenant Display Label"
+          },
+          "provider_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "provider_tenant_display_label",
+          "provider_url"
+        ],
+        "title": "AccountLinkReturnContextResponse",
+        "description": "Sanitized provider-native return navigation."
+      },
       "ActionExecutionEventResponse": {
         "properties": {
           "id": {
@@ -21200,6 +21780,48 @@
         ],
         "title": "ExistingProjectWorkspaceItemResponse",
         "description": "Existing Project default workspace item response."
+      },
+      "ExternalAccountLinkCandidateStatus": {
+        "type": "string",
+        "enum": [
+          "pending_provider_proof",
+          "provider_verified",
+          "connected",
+          "cancelled",
+          "expired"
+        ],
+        "title": "ExternalAccountLinkCandidateStatus",
+        "description": "Current state of an immutable browser candidate."
+      },
+      "ExternalAccountLinkOriginState": {
+        "type": "string",
+        "enum": [
+          "open",
+          "cancelled",
+          "consumed",
+          "expired"
+        ],
+        "title": "ExternalAccountLinkOriginState",
+        "description": "Current state of an external account link origin."
+      },
+      "ExternalAccountLinkReturnKind": {
+        "type": "string",
+        "enum": [
+          "slack_conversation",
+          "discord_conversation"
+        ],
+        "title": "ExternalAccountLinkReturnKind",
+        "description": "Provider-native return navigation kind."
+      },
+      "ExternalAccountLinkState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "inactive",
+          "revoked"
+        ],
+        "title": "ExternalAccountLinkState",
+        "description": "User-visible state of a Workspace external account link."
       },
       "ExternalChannelAccessGrantScope": {
         "type": "string",

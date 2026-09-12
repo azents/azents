@@ -334,6 +334,11 @@ class SlackHTTPAdmissionService:
                         ExternalChannelInteractionHandoff(
                             interaction_id=claim.interaction.id,
                             handler=callback.handler,
+                            native_control=callback.native_control,
+                            verified_actor=callback.verified_actor(
+                                configuration=configuration,
+                                principal_id=claim.interaction.principal_id,
+                            ),
                             provider_parent_channel_id=(
                                 callback.provider_parent_channel_id
                             ),
