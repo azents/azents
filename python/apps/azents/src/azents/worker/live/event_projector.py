@@ -5,7 +5,7 @@ import functools
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
+class _OwnerKey(NamedTuple):
+    """Structured result returned by `_owner_key`."""
+
+    session_id: str
+    owner_generation: int
+
+
 class LiveEventProjector:
     """Reflect Runtime events through a PostgreSQL-derived live writer fence."""
 
@@ -73,8 +80,8 @@ class LiveEventProjector:
         self._active_tool_events: dict[tuple[str, int], dict[str, Event]] = {}
 
     @staticmethod
-    def _owner_key(session_id: str, owner_generation: int) -> tuple[str, int]:
-        return (session_id, owner_generation)
+    def _owner_key(session_id: str, owner_generation: int) -> _OwnerKey:
+        return _OwnerKey(session_id=session_id, owner_generation=owner_generation)
 
     def _partial_batcher(
         self,

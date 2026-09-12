@@ -613,7 +613,7 @@ class RedisBroker:
                 phase=phase,
             )
         )
-        result = await cast(Any, self._redis).eval(
+        result = await self._redis.eval(
             _SET_ACTIVITY_SCRIPT,
             1,
             key,
@@ -637,7 +637,7 @@ class RedisBroker:
         :param owner_generation: Durable Session execution generation
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        result = await cast(Any, self._redis).eval(
+        result = await self._redis.eval(
             _CLEAR_ACTIVITY_SCRIPT,
             1,
             key,
@@ -655,7 +655,7 @@ class RedisBroker:
         :return: SessionActivity when running, otherwise None
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        raw = await cast(Any, self._redis).eval(
+        raw = await self._redis.eval(
             _GET_ACTIVITY_SCRIPT,
             1,
             key,

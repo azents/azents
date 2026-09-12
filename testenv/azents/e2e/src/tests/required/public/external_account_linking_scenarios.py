@@ -327,12 +327,19 @@ def _slack_action_value(view: dict[str, object], action_id: str) -> str:
     return value
 
 
+class _SlackLinkOrigin(NamedTuple):
+    """Structured result returned by `_open_slack_link_origin`."""
+
+    origin_id: str
+    code_view: dict[str, object]
+
+
 def _open_slack_link_origin(
     *,
     callback_url: str,
     fake_url: str,
     user_id: str,
-) -> tuple[str, dict[str, object]]:
+) -> _SlackLinkOrigin:
     """Open settings and create one origin through the signed native CTA."""
     existing_code_view = _slack_transient_view(
         fake_url,
@@ -405,7 +412,7 @@ def _open_slack_link_origin(
         None,
     )
     assert isinstance(path, str)
-    return path.rsplit("/", 1)[-1], code_view
+    return _SlackLinkOrigin(origin_id=path.rsplit("/", 1)[-1], code_view=code_view)
 
 
 def _submit_slack_link_code(
@@ -495,13 +502,20 @@ def _origin(
     )
 
 
+class _InvitedMember(NamedTuple):
+    """Structured result returned by `_invite_member`."""
+
+    token: str
+    email: str
+
+
 def _invite_member(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     *,
     owner_token: str,
     handle: str,
-) -> tuple[str, str]:
+) -> _InvitedMember:
     """Create and join one ordinary Workspace member through supported APIs."""
     email = f"external-link-member-{unique()}@example.com"
     token, _, _ = authenticate_user(
@@ -519,7 +533,7 @@ def _invite_member(
         invitation.id,
         _headers=_auth(token),
     )
-    return token, email
+    return _InvitedMember(token=token, email=email)
 
 
 def _complete_slack_link(

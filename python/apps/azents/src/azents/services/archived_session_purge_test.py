@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple, cast
 
 import pytest
 from azcommon.infra.s3.service import S3Service
@@ -918,6 +918,18 @@ def _exchange_file(now: datetime.datetime) -> ExchangeFile:
     )
 
 
+class _ArchivedSessionPurgeFixture(NamedTuple):
+    """Structured result returned by `_build_service`."""
+
+    service: ArchivedSessionPurgeService
+    retention_repository: _RetentionRepository
+    agent_session_repository: _AgentSessionRepository
+    model_file_repository: _ModelFileRepository
+    worktree_service: _WorktreeService
+    broker: _Broker
+    s3_service: _S3Service
+
+
 def _build_service(
     *,
     events: list[str],
@@ -928,15 +940,7 @@ def _build_service(
     worktree_failure_count: int = 0,
     external_lifecycle_fail_phase: str | None = None,
     scheduled_allows_active_runs: bool = False,
-) -> tuple[
-    ArchivedSessionPurgeService,
-    _RetentionRepository,
-    _AgentSessionRepository,
-    _ModelFileRepository,
-    _WorktreeService,
-    _Broker,
-    _S3Service,
-]:
+) -> _ArchivedSessionPurgeFixture:
     now = datetime.datetime.now(datetime.UTC)
     retention_repository = _RetentionRepository(_job(now), events)
     agent_session_repository = _AgentSessionRepository(
@@ -1009,14 +1013,14 @@ def _build_service(
             ),
         ),
     )
-    return (
-        service,
-        retention_repository,
-        agent_session_repository,
-        model_file_repository,
-        worktree_service,
-        broker,
-        s3_service,
+    return _ArchivedSessionPurgeFixture(
+        service=service,
+        retention_repository=retention_repository,
+        agent_session_repository=agent_session_repository,
+        model_file_repository=model_file_repository,
+        worktree_service=worktree_service,
+        broker=broker,
+        s3_service=s3_service,
     )
 
 

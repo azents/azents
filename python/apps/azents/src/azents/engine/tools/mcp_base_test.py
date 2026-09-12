@@ -1,7 +1,7 @@
 """MCP snapshot lifecycle tests."""
 
 import asyncio
-from typing import AsyncContextManager
+from typing import AsyncContextManager, NamedTuple
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,6 +16,15 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.testing.types import is_object_factory
+
+
+class _ToolkitStateKey(NamedTuple):
+    """Structured result returned by `_key`."""
+
+    agent_id: str
+    session_id: str
+    toolkit_namespace: str
+    state_name: str
 
 
 class _FakeToolkitStateHandle:
@@ -44,12 +53,12 @@ class _FakeToolkitStateHandle:
         """Clear stored Toolkit State."""
         cls._states.clear()
 
-    def _key(self) -> tuple[str, str, str, str]:
-        return (
-            self.identity.agent_id,
-            self.identity.session_id,
-            self.identity.toolkit_namespace,
-            self.identity.state_name,
+    def _key(self) -> _ToolkitStateKey:
+        return _ToolkitStateKey(
+            agent_id=self.identity.agent_id,
+            session_id=self.identity.session_id,
+            toolkit_namespace=self.identity.toolkit_namespace,
+            state_name=self.identity.state_name,
         )
 
 
@@ -129,17 +138,22 @@ async def _wait_refresh(toolkit: McpToolkit) -> None:
         await task
 
 
+class _McpListToolsResult(NamedTuple):
+    """Structured result returned by `slow_list_tools`."""
+
+    tools: list[object]
+    cacheable: bool
+
+
 async def test_update_context_returns_immediately_without_snapshot() -> None:
     """Slow MCP list_tools does not block request preparation."""
     started = asyncio.Event()
     continue_list = asyncio.Event()
 
-    async def slow_list_tools(
-        *_args: object, **_kwargs: object
-    ) -> tuple[list[object], bool]:
+    async def slow_list_tools(*_args: object, **_kwargs: object) -> _McpListToolsResult:
         started.set()
         await continue_list.wait()
-        return ([_tool("alpha")], False)
+        return _McpListToolsResult(tools=[_tool("alpha")], cacheable=False)
 
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),

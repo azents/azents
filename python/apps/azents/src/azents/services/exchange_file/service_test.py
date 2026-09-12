@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -533,12 +533,20 @@ def _make_exchange_file_service(**kwargs: Any) -> ExchangeFileService:  # noqa: 
     return ExchangeFileService(**kwargs)
 
 
+class _ExchangeFileServiceFixture(NamedTuple):
+    """Structured result returned by `_make_service`."""
+
+    service: ExchangeFileService
+    repository: _FakeExchangeFileRepository
+    s3_service: _FakeS3Service
+
+
 def _make_service(
     *,
     workspace_user: WorkspaceUser | None,
     agent: Agent | None = None,
     agent_session: AgentSession | None = None,
-) -> tuple[ExchangeFileService, _FakeExchangeFileRepository, _FakeS3Service]:
+) -> _ExchangeFileServiceFixture:
     """Create ExchangeFileService for tests."""
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = (
@@ -575,17 +583,23 @@ def _make_service(
         s3_service=s3_service,
         config=_Config(),
     )
-    return service, exchange_file_repository, s3_service
+    return _ExchangeFileServiceFixture(
+        service=service, repository=exchange_file_repository, s3_service=s3_service
+    )
+
+
+class _AuthorityExchangeFileServiceFixture(NamedTuple):
+    """Structured result returned by `_make_authority_service`."""
+
+    service: _AuthorityExchangeFileService
+    repository: _FakeExchangeFileRepository
+    s3_service: _FakeS3Service
 
 
 def _make_authority_service(
     *,
     authority_results: list[bool],
-) -> tuple[
-    _AuthorityExchangeFileService,
-    _FakeExchangeFileRepository,
-    _FakeS3Service,
-]:
+) -> _AuthorityExchangeFileServiceFixture:
     """Create Exchange service with authority checks injected for publication tests."""
     service, repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
@@ -628,7 +642,9 @@ def _make_authority_service(
         config=service.config,
     )
     authority_service.authority_results = authority_results
-    return authority_service, repository, s3_service
+    return _AuthorityExchangeFileServiceFixture(
+        service=authority_service, repository=repository, s3_service=s3_service
+    )
 
 
 def _jpeg_bytes(size: tuple[int, int] = (900, 600)) -> bytes:

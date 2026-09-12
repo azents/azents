@@ -6,7 +6,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pytest
 import sqlalchemy as sa
@@ -808,9 +808,17 @@ class _BindingServiceDouble(SessionWorkingFolderBindingService):
         """Bypass base dataclass initialization."""
 
 
+class _AgentContextFixture(NamedTuple):
+    """Structured result returned by `_create_agent_context`."""
+
+    workspace_id: str
+    user_id: str
+    agent_id: str
+
+
 async def _create_agent_context(
     session: AsyncSession, slug: str
-) -> tuple[str, str, str]:
+) -> _AgentContextFixture:
     """Create workspace, user, and agent fixtures."""
     workspace = await WorkspaceRepository().create(
         session,
@@ -870,7 +878,9 @@ async def _create_agent_context(
         expected_desired_generation=runtime.desired_generation,
         workspace_path="/workspace/agent",
     )
-    return workspace_id, user.id, agent.id
+    return _AgentContextFixture(
+        workspace_id=workspace_id, user_id=user.id, agent_id=agent.id
+    )
 
 
 def _service(
@@ -1160,12 +1170,21 @@ async def _execute_first_setup_action(
     return worktree_action.buffer.id
 
 
+class _ReadyWorktreeSessionFixture(NamedTuple):
+    """Structured result returned by `_create_ready_worktree_session`."""
+
+    service: SessionGitWorktreeService
+    user_id: str
+    agent_id: str
+    session_id: str
+
+
 async def _create_ready_worktree_session(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     slug: str,
     runner: _RunnerOperations,
-) -> tuple[SessionGitWorktreeService, str, str, str]:
+) -> _ReadyWorktreeSessionFixture:
     """Create a ready worktree session through the first-message path."""
     async with rdb_session_manager() as session:
         _, user_id, agent_id = await _create_agent_context(session, slug)
@@ -1201,7 +1220,12 @@ async def _create_ready_worktree_session(
     )
     async with rdb_session_manager() as session:
         await AgentSessionRepository().mark_idle(session, session_id)
-    return worktree_service, user_id, agent_id, session_id
+    return _ReadyWorktreeSessionFixture(
+        service=worktree_service,
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1307,6 +1331,13 @@ async def _create_agent_worktree_session(
     )
 
 
+class _PromotedCreateAction(NamedTuple):
+    """Structured result returned by `_admit_and_promote_agent_create`."""
+
+    action: AgentCreateGitWorktreeAction
+    execution: ActionExecution
+
+
 async def _admit_and_promote_agent_create(
     rdb_session_manager: SessionManager[AsyncSession],
     fixture: _AgentCreateSessionFixture,
@@ -1314,7 +1345,7 @@ async def _admit_and_promote_agent_create(
     client_tool_call_id: str,
     starting_ref: str | None = None,
     branch_name: str | None = None,
-) -> tuple[AgentCreateGitWorktreeAction, ActionExecution]:
+) -> _PromotedCreateAction:
     """Admit and claim one Agent create action through the mailbox boundary."""
     admission = await fixture.service.admit_agent_create_git_worktree(
         agent_id=fixture.agent_id,
@@ -1336,7 +1367,14 @@ async def _admit_and_promote_agent_create(
     assert operation.execution is not None
     assert operation.buffer.id == admission.mailbox_item_id
     assert isinstance(operation.action, AgentCreateGitWorktreeAction)
-    return operation.action, operation.execution
+    return _PromotedCreateAction(action=operation.action, execution=operation.execution)
+
+
+class _ManagedWorktreeFixture(NamedTuple):
+    """Structured result returned by `_create_agent_managed_worktree`."""
+
+    worktree: SessionGitWorktreeCreate
+    session_workspace_project_id: str
 
 
 async def _create_agent_managed_worktree(
@@ -1344,7 +1382,7 @@ async def _create_agent_managed_worktree(
     fixture: _AgentCreateSessionFixture,
     *,
     client_tool_call_id: str,
-) -> tuple[SessionGitWorktreeCreate, str]:
+) -> _ManagedWorktreeFixture:
     """Create one ready Agent-managed worktree and clear its continuation."""
     action, execution = await _admit_and_promote_agent_create(
         rdb_session_manager,
@@ -1372,8 +1410,8 @@ async def _create_agent_managed_worktree(
             session,
             fixture.session_id,
         )
-    return (
-        SessionGitWorktreeCreate(
+    return _ManagedWorktreeFixture(
+        worktree=SessionGitWorktreeCreate(
             id=allocation.id,
             session_id=allocation.session_id,
             action_execution_id=allocation.action_execution_id,
@@ -1385,8 +1423,15 @@ async def _create_agent_managed_worktree(
             branch_created_by=allocation.branch_created_by,
             status=allocation.status,
         ),
-        allocation.session_workspace_project_id,
+        session_workspace_project_id=allocation.session_workspace_project_id,
     )
+
+
+class _PromotedRemoveAction(NamedTuple):
+    """Structured result returned by `_admit_and_promote_agent_remove`."""
+
+    action: AgentRemoveGitWorktreeAction
+    execution: ActionExecution
 
 
 async def _admit_and_promote_agent_remove(
@@ -1396,7 +1441,7 @@ async def _admit_and_promote_agent_remove(
     worktree_path: str,
     client_tool_call_id: str,
     force: bool,
-) -> tuple[AgentRemoveGitWorktreeAction, ActionExecution]:
+) -> _PromotedRemoveAction:
     """Admit and claim one Agent removal through the mailbox boundary."""
     admission = await fixture.service.admit_agent_remove_git_worktree(
         agent_id=fixture.agent_id,
@@ -1417,7 +1462,7 @@ async def _admit_and_promote_agent_remove(
     assert operation.execution is not None
     assert operation.buffer.id == admission.mailbox_item_id
     assert isinstance(operation.action, AgentRemoveGitWorktreeAction)
-    return operation.action, operation.execution
+    return _PromotedRemoveAction(action=operation.action, execution=operation.execution)
 
 
 class TestSessionGitWorktreeService:

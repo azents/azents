@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple, cast
 
 import pytest
 import sqlalchemy as sa
@@ -314,6 +314,13 @@ def _failed_run_system_error_payload() -> dict[str, JSONValue]:
     ).model_dump(mode="json", exclude_none=True)
 
 
+class _IdempotentWriteResult(NamedTuple):
+    """Structured result returned by `create_idempotent`."""
+
+    request: ChatWriteRequest
+    created: bool
+
+
 class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
     """ChatWriteRequestRepository double returning an existing record."""
 
@@ -325,11 +332,11 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
         self,
         session: AsyncSession,
         create: ChatWriteRequestCreate,
-    ) -> tuple[ChatWriteRequest, bool]:
+    ) -> _IdempotentWriteResult:
         """Return an existing idempotency record for another session."""
         del session
-        return (
-            ChatWriteRequest(
+        return _IdempotentWriteResult(
+            request=ChatWriteRequest(
                 id="write-request-1",
                 session_id=self.existing_session_id,
                 requester_user_id=create.requester_user_id,
@@ -342,7 +349,7 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
                 payload=create.payload,
                 created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             ),
-            False,
+            created=False,
         )
 
 
@@ -517,18 +524,22 @@ class _ControlMailboxService:
         raise AssertionError("Mutable pending-input state was inspected before replay")
 
 
+class _ChatWriteControlFixture(NamedTuple):
+    """Structured result returned by `_control_service`."""
+
+    service: ChatWriteService
+    workspace_users: _ControlWorkspaceUserRepository
+    writes: _ControlWriteRequestRepository
+    sessions: _ControlAgentSessionRepository
+
+
 def _control_service(
     *,
     membership_allowed: bool,
     existing: ChatWriteRequest | None = None,
     control_session: AgentSession | None = None,
     subtree: list[AgentSession] | None = None,
-) -> tuple[
-    ChatWriteService,
-    _ControlWorkspaceUserRepository,
-    _ControlWriteRequestRepository,
-    _ControlAgentSessionRepository,
-]:
+) -> _ChatWriteControlFixture:
     """Build a service that pins public-control admission ordering."""
     workspace_users = _ControlWorkspaceUserRepository(allowed=membership_allowed)
     writes = _ControlWriteRequestRepository(existing)
@@ -558,7 +569,12 @@ def _control_service(
         ),
         session_manager=_session_manager_double,
     )
-    return service, workspace_users, writes, sessions
+    return _ChatWriteControlFixture(
+        service=service,
+        workspace_users=workspace_users,
+        writes=writes,
+        sessions=sessions,
+    )
 
 
 class TestChatWriteService:

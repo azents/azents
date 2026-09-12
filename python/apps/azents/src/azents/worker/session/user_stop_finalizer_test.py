@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -470,19 +470,23 @@ def _construct_finalizer(**kwargs: Any) -> UserStopFinalizer:  # noqa: ANN401
     return UserStopFinalizer(**kwargs)
 
 
+class _FinalizerFixture(NamedTuple):
+    """Structured result returned by `_finalizer`."""
+
+    finalizer: Any
+    run_repository: _AgentRunRepository
+    session_repository: _AgentSessionRepository
+    transcript_repository: _EventTranscriptRepository
+    projector: _LiveEventProjector
+    broker: _Broker
+    event_publisher: _EventPublisher
+
+
 def _finalizer(
     *,
     running_run: AgentRunState | None,
     live_events: Sequence[Event],
-) -> tuple[
-    Any,
-    _AgentRunRepository,
-    _AgentSessionRepository,
-    _EventTranscriptRepository,
-    _LiveEventProjector,
-    _Broker,
-    _EventPublisher,
-]:
+) -> _FinalizerFixture:
     """Create subject under test and main dependency doubles."""
     run_repository = _AgentRunRepository(running_run)
     session_repository = _AgentSessionRepository()
@@ -500,14 +504,14 @@ def _finalizer(
         event_publisher=event_publisher,
         session_lifecycle=_SessionLifecycle(run_repository),
     )
-    return (
-        finalizer,
-        run_repository,
-        session_repository,
-        transcript_repository,
-        projector,
-        broker,
-        event_publisher,
+    return _FinalizerFixture(
+        finalizer=finalizer,
+        run_repository=run_repository,
+        session_repository=session_repository,
+        transcript_repository=transcript_repository,
+        projector=projector,
+        broker=broker,
+        event_publisher=event_publisher,
     )
 
 

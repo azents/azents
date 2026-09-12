@@ -4,7 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Annotated, assert_never
+from typing import Annotated, NamedTuple, assert_never
 
 import httpx
 from fastapi import Depends
@@ -82,6 +82,13 @@ def get_external_model_discord_client(
         sdk_factory,
         DiscordFileMessageTransport(http_client),
     )
+
+
+class _NoticeDeliveryResult(NamedTuple):
+    """Structured result returned by `_deliver_notice`."""
+
+    outcome: ExternalModelNoticeOutcome
+    error_summary: str | None
 
 
 @dataclass
@@ -202,7 +209,7 @@ class ExternalModelSettingsService:
                 mutation_id=result.mutation_id
             )
         except Exception as error:
-            logger.error(
+            logger.exception(
                 "External model notice context loading failed after Apply commit",
                 extra={
                     "mutation_id": result.mutation_id,
@@ -221,6 +228,11 @@ class ExternalModelSettingsService:
         except Exception as error:
             logger.error(
                 "External model notice delivery failed after Apply commit",
+                exc_info=(
+                    RuntimeError,
+                    RuntimeError("External model notice failure details redacted."),
+                    error.__traceback__,
+                ),
                 extra={
                     "mutation_id": result.mutation_id,
                     "provider": context.plan.provider.value,
@@ -237,7 +249,7 @@ class ExternalModelSettingsService:
                 error_summary=error_summary,
             )
         except Exception as error:
-            logger.error(
+            logger.exception(
                 "External model notice outcome recording failed after Apply commit",
                 extra={
                     "mutation_id": result.mutation_id,
@@ -254,7 +266,7 @@ class ExternalModelSettingsService:
         actor: ExternalModelActorContext,
         plan: ExternalModelNoticePlan,
         encrypted_credentials: str,
-    ) -> tuple[ExternalModelNoticeOutcome, str | None]:
+    ) -> _NoticeDeliveryResult:
         credentials = self.credentials_codec.decrypt(encrypted_credentials)
         text = _notice_text(plan)
         match plan.provider:
@@ -270,9 +282,9 @@ class ExternalModelSettingsService:
             case ExternalChannelProvider.DISCORD:
                 channel_id = plan.provider_thread_id
                 if channel_id is None:
-                    return (
-                        ExternalModelNoticeOutcome.FAILED,
-                        "Discord notice target is unavailable.",
+                    return _NoticeDeliveryResult(
+                        outcome=ExternalModelNoticeOutcome.FAILED,
+                        error_summary="Discord notice target is unavailable.",
                     )
                 delivered = await self.discord_client.create_message(
                     bot_token=credentials.bot_token,
@@ -286,10 +298,18 @@ class ExternalModelSettingsService:
             case _ as unreachable:
                 assert_never(unreachable)
         if delivered.status == "delivered":
-            return ExternalModelNoticeOutcome.DELIVERED, None
+            return _NoticeDeliveryResult(
+                outcome=ExternalModelNoticeOutcome.DELIVERED, error_summary=None
+            )
         if delivered.status == "failed":
-            return ExternalModelNoticeOutcome.FAILED, delivered.error_summary
-        return ExternalModelNoticeOutcome.UNKNOWN, delivered.error_summary
+            return _NoticeDeliveryResult(
+                outcome=ExternalModelNoticeOutcome.FAILED,
+                error_summary=delivered.error_summary,
+            )
+        return _NoticeDeliveryResult(
+            outcome=ExternalModelNoticeOutcome.UNKNOWN,
+            error_summary=delivered.error_summary,
+        )
 
 
 def _notice_text(plan: ExternalModelNoticePlan) -> str:

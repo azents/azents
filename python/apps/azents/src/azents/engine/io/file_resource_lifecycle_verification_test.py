@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import IO
+from typing import IO, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -362,9 +362,15 @@ def _event(kind: EventKind, payload: EventPayload) -> Event:
     )
 
 
-def _artifact_service() -> tuple[
-    ArtifactService, _FakeArtifactRepository, _FakeS3Service
-]:
+class _ArtifactServiceFixture(NamedTuple):
+    """Structured result returned by `_artifact_service`."""
+
+    service: ArtifactService
+    artifact_repository: _FakeArtifactRepository
+    s3_service: _FakeS3Service
+
+
+def _artifact_service() -> _ArtifactServiceFixture:
     """Configure ArtifactService for tests."""
     artifact_repo = _FakeArtifactRepository()
     s3_service = _FakeS3Service()
@@ -388,7 +394,9 @@ def _artifact_service() -> tuple[
         s3_service=s3_service,
         config=_config(),
     )
-    return service, artifact_repo, s3_service
+    return _ArtifactServiceFixture(
+        service=service, artifact_repository=artifact_repo, s3_service=s3_service
+    )
 
 
 @pytest.mark.asyncio

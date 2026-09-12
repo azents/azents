@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +77,13 @@ class _LockedParticipationState:
 
     settings: tuple[RDBExternalChannelParticipationSetting, ...]
     claims: tuple[RDBExternalChannelSetupClaim, ...]
+
+
+class _ExternalChannelImpactDetails(NamedTuple):
+    """Structured result returned by `_impact_details`."""
+
+    affected_defaults: tuple[ExternalChannelMultiImpactDefault, ...]
+    affected_bindings: tuple[ExternalChannelMultiImpactBinding, ...]
 
 
 class ExternalChannelLifecycleRepository:
@@ -1165,13 +1173,12 @@ class ExternalChannelLifecycleRepository:
         session: AsyncSession,
         *,
         route_ids: Sequence[str],
-    ) -> tuple[
-        tuple[ExternalChannelMultiImpactDefault, ...],
-        tuple[ExternalChannelMultiImpactBinding, ...],
-    ]:
+    ) -> _ExternalChannelImpactDetails:
         """Load bounded, sanitized default and binding identities for confirmation."""
         if not route_ids:
-            return (), ()
+            return _ExternalChannelImpactDetails(
+                affected_defaults=(), affected_bindings=()
+            )
         default_rows = (
             await session.execute(
                 sa.select(
@@ -1248,7 +1255,9 @@ class ExternalChannelLifecycleRepository:
             )
             for binding, resource in binding_rows
         )
-        return defaults, bindings
+        return _ExternalChannelImpactDetails(
+            affected_defaults=defaults, affected_bindings=bindings
+        )
 
     async def _terminalize_bindings(
         self,

@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Literal
+from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlencode
 
@@ -274,6 +274,13 @@ def _configuration(
     )
 
 
+class _AdmissionServiceFixture(NamedTuple):
+    """Structured result returned by `_service`."""
+
+    service: SlackHTTPAdmissionService
+    repository: _RepositoryDouble
+
+
 def _service(
     *,
     configuration: ExternalChannelConnectionConfiguration | None,
@@ -281,7 +288,7 @@ def _service(
     admission: _AdmissionDouble,
     interaction_processor: ExternalChannelInteractionProcessor | None = None,
     config: Config | None = None,
-) -> tuple[SlackHTTPAdmissionService, _RepositoryDouble]:
+) -> _AdmissionServiceFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield MagicMock(spec=AsyncSession)
@@ -299,8 +306,8 @@ def _service(
         spec=ExternalChannelConnectionRevocationService,
         wraps=admission,
     )
-    return (
-        SlackHTTPAdmissionService(
+    return _AdmissionServiceFixture(
+        service=SlackHTTPAdmissionService(
             session_manager=session_manager,
             repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
             credentials_codec=codec,
@@ -313,7 +320,7 @@ def _service(
             revocation_service=revocation_service,
             config=config,
         ),
-        repository,
+        repository=repository,
     )
 
 
@@ -325,11 +332,18 @@ def _shortcut_source_ensure(service: SlackHTTPAdmissionService) -> AsyncMock:
     return ensure
 
 
-def _signed(body: bytes) -> tuple[str, str]:
+class _SignedRequest(NamedTuple):
+    """Structured result returned by `_signed`."""
+
+    timestamp: str
+    signature: str
+
+
+def _signed(body: bytes) -> _SignedRequest:
     timestamp = str(int(_NOW.timestamp()))
     base = b"v0:" + timestamp.encode() + b":" + body
     signature = "v0=" + hmac.new(_SECRET.encode(), base, hashlib.sha256).hexdigest()
-    return timestamp, signature
+    return _SignedRequest(timestamp=timestamp, signature=signature)
 
 
 def _event_body(

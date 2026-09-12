@@ -540,9 +540,16 @@ def _projection_outcome(
     )
 
 
+class _PreparedProgressIdentity(NamedTuple):
+    """Structured result returned by `_prepared_progress_identity`."""
+
+    cycle_id: str
+    state_revision: int
+
+
 def _prepared_progress_identity(
     preparation: ScheduledTaskProgressPreparation,
-) -> tuple[str, int]:
+) -> _PreparedProgressIdentity:
     """Return required identities from one successful preparation."""
     if (
         preparation.status != "prepared"
@@ -550,7 +557,9 @@ def _prepared_progress_identity(
         or preparation.state_revision is None
     ):
         raise RuntimeError("Scheduled progress preparation is incomplete.")
-    return preparation.cycle_id, preparation.state_revision
+    return _PreparedProgressIdentity(
+        cycle_id=preparation.cycle_id, state_revision=preparation.state_revision
+    )
 
 
 def _provider_outcome(

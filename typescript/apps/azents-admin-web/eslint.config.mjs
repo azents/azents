@@ -108,9 +108,9 @@ export default defineConfig([
       "check-file/no-index": "error",
       // Require description for eslint-disable comments
       "@eslint-community/eslint-comments/require-description": "error",
-      // 순환 참조 금지
+      // Disallow circular imports
       "import/no-cycle": "error",
-      // 계층 간 import 규칙
+      // Enforce import boundaries between layers
       "import/no-restricted-paths": [
         "error",
         {
@@ -138,7 +138,7 @@ export default defineConfig([
       ],
     },
   },
-  // config 외부에서 process.env 접근 금지
+  // Disallow process.env access outside config modules
   {
     files: ["**/*.ts", "**/*.tsx"],
     ignores: ["src/config.ts", "src/config/**"],
@@ -149,12 +149,12 @@ export default defineConfig([
           selector:
             "MemberExpression[object.name='process'][property.name='env']",
           message:
-            "process.env 직접 접근 금지. @/config의 getServerConfig(), getPublicConfig() 또는 useConfig()를 사용하세요.",
+            "Direct process.env access is forbidden. Use getServerConfig(), getPublicConfig(), or useConfig() from @/config.",
         },
       ],
     },
   },
-  // NEXT_PUBLIC_ 환경변수 사용 금지 (빌드 타임 환경변수 대신 서버 사이드 환경변수 사용)
+  // Disallow NEXT_PUBLIC_ variables; use server-side configuration instead
   {
     files: ["**/*.ts", "**/*.tsx"],
     rules: {
@@ -164,18 +164,18 @@ export default defineConfig([
           selector:
             "MemberExpression[object.object.name='process'][object.property.name='env'][property.name=/^NEXT_PUBLIC_/]",
           message:
-            "NEXT_PUBLIC_ 환경변수 사용 금지. 서버 사이드 환경변수를 사용하고 클라이언트에는 ConfigProvider를 통해 전달하세요.",
+            "NEXT_PUBLIC_ variables are forbidden. Use server-side configuration and pass client values through ConfigProvider.",
         },
         {
           selector:
             "MemberExpression[object.name='process'][object.property.name='env'] > Literal[value=/NEXT_PUBLIC_/]",
           message:
-            "NEXT_PUBLIC_ 환경변수 사용 금지. 서버 사이드 환경변수를 사용하고 클라이언트에는 ConfigProvider를 통해 전달하세요.",
+            "NEXT_PUBLIC_ variables are forbidden. Use server-side configuration and pass client values through ConfigProvider.",
         },
       ],
     },
   },
-  // Prettier 통합
+  // Integrate Prettier
   prettier,
   {
     rules: {
