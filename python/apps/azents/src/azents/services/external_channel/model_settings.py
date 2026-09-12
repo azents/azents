@@ -1,6 +1,7 @@
 """Provider-neutral orchestration for actor-private shared model settings."""
 
 import datetime
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, assert_never
@@ -42,6 +43,8 @@ from azents.services.external_channel.slack_events import (
     SlackPrivateFileTransport,
 )
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
+
+logger = logging.getLogger(__name__)
 
 
 async def get_external_model_notice_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -194,22 +197,55 @@ class ExternalModelSettingsService:
         result = commit.result
         if not isinstance(result, ExternalModelApplied) or not result.created:
             return result
-        context = await self.repository.get_notice_delivery_context(
-            mutation_id=result.mutation_id
-        )
+        try:
+            context = await self.repository.get_notice_delivery_context(
+                mutation_id=result.mutation_id
+            )
+        except Exception as error:
+            logger.error(
+                "External model notice context loading failed after Apply commit",
+                extra={
+                    "mutation_id": result.mutation_id,
+                    "exception_type": type(error).__name__,
+                },
+            )
+            return result
         if context is None:
             return result
-        outcome, error_summary = await self._deliver_notice(
-            actor=actor,
-            plan=context.plan,
-            encrypted_credentials=context.encrypted_credentials,
-        )
-        stored = await self.repository.record_notice_outcome(
-            mutation_id=result.mutation_id,
-            outcome=outcome,
-            attempted_at=now,
-            error_summary=error_summary,
-        )
+        try:
+            outcome, error_summary = await self._deliver_notice(
+                actor=actor,
+                plan=context.plan,
+                encrypted_credentials=context.encrypted_credentials,
+            )
+        except Exception as error:
+            logger.error(
+                "External model notice delivery failed after Apply commit",
+                extra={
+                    "mutation_id": result.mutation_id,
+                    "provider": context.plan.provider.value,
+                    "exception_type": type(error).__name__,
+                },
+            )
+            outcome = ExternalModelNoticeOutcome.UNKNOWN
+            error_summary = "External model notice delivery outcome is unknown."
+        try:
+            stored = await self.repository.record_notice_outcome(
+                mutation_id=result.mutation_id,
+                outcome=outcome,
+                attempted_at=now,
+                error_summary=error_summary,
+            )
+        except Exception as error:
+            logger.error(
+                "External model notice outcome recording failed after Apply commit",
+                extra={
+                    "mutation_id": result.mutation_id,
+                    "outcome": outcome.value,
+                    "exception_type": type(error).__name__,
+                },
+            )
+            return result
         return result.model_copy(update={"notice_outcome": stored})
 
     async def _deliver_notice(

@@ -46,6 +46,7 @@
     "conflict": "Ce compte externe est déjà associé dans ce Workspace.",
     "candidate_not_ready": "Saisissez le code dans le service d’origine, puis vérifiez de nouveau l’état.",
     "candidate_terminal": "Cette confirmation n’est plus utilisable. Créez un nouveau code.",
+    "unavailable": "Cette connexion externe a changé ou n’est plus disponible. Revenez dans Slack ou Discord et rouvrez les paramètres privés.",
     "busy": "Le service d’association est temporairement occupé. Réessayez."
   },
   "confirmation": {
@@ -94,6 +95,10 @@
       "expired": {
         "title": "Confirmation expirée",
         "description": "Démarrez une nouvelle association depuis l’écran privé du service d’origine."
+      },
+      "unavailable": {
+        "title": "Connexion externe modifiée",
+        "description": "Revenez dans Slack ou Discord et rouvrez les paramètres privés."
       }
     }
   }

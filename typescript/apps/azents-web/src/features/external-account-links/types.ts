@@ -10,6 +10,7 @@ export type AccountLinkFailureReason =
   | "conflict"
   | "candidate_not_ready"
   | "candidate_terminal"
+  | "unavailable"
   | "busy";
 
 export interface ExternalAccountLinkItem {
@@ -86,7 +87,7 @@ export type ExternalAccountLinkConfirmationState =
   | { type: "NOT_FOUND" }
   | {
       type: "ORIGIN_UNAVAILABLE";
-      reason: "cancelled" | "consumed" | "expired";
+      reason: "cancelled" | "consumed" | "expired" | "unavailable";
       origin: ExternalAccountLinkOrigin;
       accountEmail: string;
     }

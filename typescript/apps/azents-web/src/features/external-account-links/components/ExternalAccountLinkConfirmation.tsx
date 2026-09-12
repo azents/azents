@@ -172,6 +172,42 @@ function StateMessage({
   );
 }
 
+function ConfirmationExitActions({
+  onCancel,
+  onSwitchAccount,
+  disabled = false,
+  switching = false,
+}: Pick<
+  ExternalAccountLinkConfirmationContainerProps,
+  "onCancel" | "onSwitchAccount"
+> & {
+  disabled?: boolean;
+  switching?: boolean;
+}): React.ReactElement {
+  const t = useTranslations("externalAccountLinks");
+  return (
+    <Group justify="space-between" wrap="wrap">
+      <Button
+        variant="subtle"
+        color="gray"
+        disabled={disabled}
+        onClick={onCancel}
+      >
+        {t("cancel")}
+      </Button>
+      <Button
+        variant="default"
+        leftSection={<IconSwitchHorizontal size={16} />}
+        loading={switching}
+        disabled={disabled}
+        onClick={onSwitchAccount}
+      >
+        {t("confirmation.switchAccount")}
+      </Button>
+    </Group>
+  );
+}
+
 function ReadyConfirmation({
   state,
   onCreateCandidate,
@@ -369,25 +405,12 @@ function ReadyConfirmation({
           </Alert>
         ) : null}
 
-        <Group justify="space-between" wrap="wrap">
-          <Button
-            variant="subtle"
-            color="gray"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            {t("cancel")}
-          </Button>
-          <Button
-            variant="default"
-            leftSection={<IconSwitchHorizontal size={16} />}
-            loading={state.action.type === "SWITCHING_ACCOUNT"}
-            disabled={busy}
-            onClick={onSwitchAccount}
-          >
-            {t("confirmation.switchAccount")}
-          </Button>
-        </Group>
+        <ConfirmationExitActions
+          onCancel={onCancel}
+          onSwitchAccount={onSwitchAccount}
+          disabled={busy}
+          switching={state.action.type === "SWITCHING_ACCOUNT"}
+        />
       </Stack>
     </Container>
   );
@@ -475,15 +498,21 @@ export function ExternalAccountLinkConfirmation({
       return (
         <Stack gap={0}>
           <Container size="sm" pt="xl">
-            <IdentityContext
-              origin={state.origin}
-              accountEmail={state.accountEmail}
-            />
-            <Alert color="blue" mt="md">
-              {state.action === "create_candidate"
-                ? t("confirmation.elevationCreate")
-                : t("confirmation.elevationConfirm")}
-            </Alert>
+            <Stack gap="md">
+              <IdentityContext
+                origin={state.origin}
+                accountEmail={state.accountEmail}
+              />
+              <Alert color="blue">
+                {state.action === "create_candidate"
+                  ? t("confirmation.elevationCreate")
+                  : t("confirmation.elevationConfirm")}
+              </Alert>
+              <ConfirmationExitActions
+                onCancel={onCancel}
+                onSwitchAccount={onSwitchAccount}
+              />
+            </Stack>
           </Container>
           <ElevationView {...state.elevation} />
         </Stack>
@@ -491,13 +520,19 @@ export function ExternalAccountLinkConfirmation({
     case "ELEVATION_LOADING":
       return (
         <Container size="sm" py="xl">
-          <IdentityContext
-            origin={state.origin}
-            accountEmail={state.accountEmail}
-          />
-          <Stack align="center" gap="sm" py="xl" aria-live="polite">
-            <Loader />
-            <Text c="dimmed">{t("elevationLoading")}</Text>
+          <Stack gap="md">
+            <IdentityContext
+              origin={state.origin}
+              accountEmail={state.accountEmail}
+            />
+            <ConfirmationExitActions
+              onCancel={onCancel}
+              onSwitchAccount={onSwitchAccount}
+            />
+            <Stack align="center" gap="sm" py="xl" aria-live="polite">
+              <Loader />
+              <Text c="dimmed">{t("elevationLoading")}</Text>
+            </Stack>
           </Stack>
         </Container>
       );
@@ -521,6 +556,10 @@ export function ExternalAccountLinkConfirmation({
                 </Button>
               </Stack>
             </Alert>
+            <ConfirmationExitActions
+              onCancel={onCancel}
+              onSwitchAccount={onSwitchAccount}
+            />
           </Stack>
         </Container>
       );

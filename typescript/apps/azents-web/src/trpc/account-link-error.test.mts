@@ -22,6 +22,17 @@ void test("keeps structured membership failure distinct from elevation", () => {
   assert.equal(accountLinkFailureReason(error), "membership_required");
 });
 
+void test("projects an unavailable scope as a typed terminal failure", () => {
+  const error = new ApiError(409, {
+    detail: {
+      code: "unavailable",
+      message: "The account link scope is no longer available.",
+    },
+  });
+
+  assert.equal(accountLinkFailureReason(error), "unavailable");
+});
+
 void test("does not treat unrelated forbidden responses as elevation", () => {
   const error = new ApiError(403, {
     detail: "Forbidden",

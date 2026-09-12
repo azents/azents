@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useElevationModal } from "@/features/security/containers/useElevationModal";
 import { trpc } from "@/trpc/client";
 import { elevationMethodsOrEmpty } from "../elevation-methods";
@@ -30,6 +30,11 @@ export interface ExternalAccountLinkConfirmationContainerProps {
 }
 
 type PendingElevationAction = "create_candidate" | "confirm_candidate";
+interface ActiveElevation {
+  action: PendingElevationAction;
+  generation: number;
+}
+
 type ActionState =
   | "IDLE"
   | "CREATING_CANDIDATE"
@@ -69,6 +74,9 @@ export function useExternalAccountLinkConfirmationContainer({
     useState<AccountLinkFailureReason | null>(null);
   const [pendingElevation, setPendingElevation] =
     useState<PendingElevationAction | null>(null);
+  const activeElevationRef = useRef<ActiveElevation | null>(null);
+  const elevationGenerationRef = useRef(0);
+  const [scopeUnavailable, setScopeUnavailable] = useState(false);
   const [elevationChallengeKey, setElevationChallengeKey] = useState(0);
 
   const createMutation = trpc.accountLinks.createCandidate.useMutation();
@@ -104,6 +112,14 @@ export function useExternalAccountLinkConfirmationContainer({
   }, [currentOrigin]);
   const origin = preserveLastSafeOrigin(currentOrigin, lastSafeOrigin);
 
+  const beginElevation = useCallback((action: PendingElevationAction): void => {
+    const generation = elevationGenerationRef.current + 1;
+    elevationGenerationRef.current = generation;
+    activeElevationRef.current = { action, generation };
+    setElevationChallengeKey(generation);
+    setPendingElevation(action);
+  }, []);
+
   const runCreateCandidate = useCallback((): void => {
     setAction("CREATING_CANDIDATE");
     setActionError(null);
@@ -118,28 +134,36 @@ export function useExternalAccountLinkConfirmationContainer({
               expiresAt: result.data.expires_at,
               status: result.data.status,
             });
+            activeElevationRef.current = null;
             setPendingElevation(null);
             setAction("IDLE");
             return;
           }
           if (result.reason === "elevation_required") {
-            setElevationChallengeKey((value) => value + 1);
-            setPendingElevation("create_candidate");
+            beginElevation("create_candidate");
             setAction("IDLE");
             return;
           }
+          activeElevationRef.current = null;
           setPendingElevation(null);
+          if (result.reason === "unavailable") {
+            setScopeUnavailable(true);
+            setActionError(null);
+            setAction("IDLE");
+            return;
+          }
           setActionError(result.reason);
           setAction("IDLE");
         },
         onError: (): void => {
+          activeElevationRef.current = null;
           setPendingElevation(null);
           setActionError("busy");
           setAction("IDLE");
         },
       },
     );
-  }, [createMutation, originId]);
+  }, [beginElevation, createMutation, originId]);
 
   const runConfirmCandidate = useCallback((): void => {
     if (candidate === null) {
@@ -158,39 +182,53 @@ export function useExternalAccountLinkConfirmationContainer({
               externalDisplayLabel: result.data.provider_display_label,
             });
             setCandidate(null);
+            activeElevationRef.current = null;
             setPendingElevation(null);
             setAction("IDLE");
             void utils.accountLinks.list.invalidate();
             return;
           }
           if (result.reason === "elevation_required") {
-            setElevationChallengeKey((value) => value + 1);
-            setPendingElevation("confirm_candidate");
+            beginElevation("confirm_candidate");
             setAction("IDLE");
             return;
           }
+          activeElevationRef.current = null;
           setPendingElevation(null);
+          if (result.reason === "unavailable") {
+            setScopeUnavailable(true);
+            setActionError(null);
+            setAction("IDLE");
+            return;
+          }
           setActionError(result.reason);
           setAction("IDLE");
         },
         onError: (): void => {
+          activeElevationRef.current = null;
           setPendingElevation(null);
           setActionError("busy");
           setAction("IDLE");
         },
       },
     );
-  }, [candidate, confirmMutation, utils]);
+  }, [beginElevation, candidate, confirmMutation, utils]);
 
   const onElevated = useCallback((): void => {
-    if (pendingElevation === "create_candidate") {
+    const activeElevation = activeElevationRef.current;
+    if (
+      activeElevation === null ||
+      activeElevation.generation !== elevationChallengeKey
+    ) {
+      return;
+    }
+    activeElevationRef.current = null;
+    if (activeElevation.action === "create_candidate") {
       runCreateCandidate();
       return;
     }
-    if (pendingElevation === "confirm_candidate") {
-      runConfirmCandidate();
-    }
-  }, [pendingElevation, runConfirmCandidate, runCreateCandidate]);
+    runConfirmCandidate();
+  }, [elevationChallengeKey, runConfirmCandidate, runCreateCandidate]);
 
   const elevationMethodsQuery = trpc.security.getElevationMethods.useQuery(
     void 0,
@@ -228,6 +266,12 @@ export function useExternalAccountLinkConfirmationContainer({
             status: result.data.status,
             expiresAt: result.data.expires_at,
           });
+          setAction("IDLE");
+          return;
+        }
+        if (result.reason === "unavailable") {
+          setScopeUnavailable(true);
+          setActionError(null);
           setAction("IDLE");
           return;
         }
@@ -276,6 +320,13 @@ export function useExternalAccountLinkConfirmationContainer({
               next();
               return;
             }
+            if (result.reason === "unavailable") {
+              setCandidate(null);
+              setScopeUnavailable(true);
+              setAction("IDLE");
+              next();
+              return;
+            }
             setActionError(result.reason);
             setAction("IDLE");
           },
@@ -297,12 +348,16 @@ export function useExternalAccountLinkConfirmationContainer({
   }, [cancelCandidateThen]);
 
   const onCancel = useCallback((): void => {
+    activeElevationRef.current = null;
+    setPendingElevation(null);
     if (origin !== null) {
       cancelCandidateThen((): void => returnToProvider(origin));
     }
   }, [cancelCandidateThen, origin]);
 
   const onSwitchAccount = useCallback((): void => {
+    activeElevationRef.current = null;
+    setPendingElevation(null);
     cancelCandidateThen((): void => {
       setAction("SWITCHING_ACCOUNT");
       logoutMutation.mutate(void 0, {
@@ -365,6 +420,13 @@ export function useExternalAccountLinkConfirmationContainer({
       provider: connected.provider,
       externalDisplayLabel: connected.externalDisplayLabel,
       returnUrl: origin.returnUrl,
+    };
+  } else if (scopeUnavailable) {
+    state = {
+      type: "ORIGIN_UNAVAILABLE",
+      reason: "unavailable",
+      origin,
+      accountEmail: meQuery.data.email,
     };
   } else if (origin.state !== "open") {
     state = {

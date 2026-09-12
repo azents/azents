@@ -46,6 +46,7 @@
     "conflict": "この外部アカウントは、この Workspace ですでに連携されています。",
     "candidate_not_ready": "元の外部サービスにコードを入力してから、もう一度状態を確認してください。",
     "candidate_terminal": "この確認はもう使用できません。新しいコードを作成してください。",
+    "unavailable": "外部サービスの接続が変更されたか、利用できなくなりました。Slack または Discord に戻り、非公開設定を開き直してください。",
     "busy": "連携サービスが一時的に混み合っています。もう一度お試しください。"
   },
   "confirmation": {
@@ -94,6 +95,10 @@
       "expired": {
         "title": "確認の有効期限が切れました",
         "description": "元の Slack または Discord の非公開画面から新しい連携を開始してください。"
+      },
+      "unavailable": {
+        "title": "外部サービスの接続が変更されました",
+        "description": "Slack または Discord に戻り、非公開設定を開き直してください。"
       }
     }
   }

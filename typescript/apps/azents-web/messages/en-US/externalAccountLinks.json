@@ -46,6 +46,7 @@
     "conflict": "This external account is already connected in this Workspace.",
     "candidate_not_ready": "Enter the code in the original external service, then check the status again.",
     "candidate_terminal": "This confirmation can no longer be used. Create a fresh code.",
+    "unavailable": "This external connection changed or is no longer available. Return to Slack or Discord and open the private settings again.",
     "busy": "The connection service is temporarily busy. Try again."
   },
   "confirmation": {
@@ -94,6 +95,10 @@
       "expired": {
         "title": "Confirmation expired",
         "description": "Start a new connection from the original private Slack or Discord screen."
+      },
+      "unavailable": {
+        "title": "External connection changed",
+        "description": "Return to Slack or Discord and open the private settings again."
       }
     }
   }

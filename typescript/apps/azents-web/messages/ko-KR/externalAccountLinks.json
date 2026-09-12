@@ -46,6 +46,7 @@
     "conflict": "이 외부 계정은 이 Workspace에서 이미 연결되어 있습니다.",
     "candidate_not_ready": "원래 외부 서비스 화면에 코드를 입력한 다음 상태를 다시 확인하세요.",
     "candidate_terminal": "이 확인 요청은 더 이상 사용할 수 없습니다. 새 코드를 만드세요.",
+    "unavailable": "외부 서비스 연결이 변경되었거나 더 이상 사용할 수 없습니다. Slack 또는 Discord로 돌아가 비공개 설정을 다시 여세요.",
     "busy": "연결 서비스가 일시적으로 사용 중입니다. 다시 시도하세요."
   },
   "confirmation": {
@@ -94,6 +95,10 @@
       "expired": {
         "title": "확인 요청이 만료되었습니다",
         "description": "원래 외부 서비스의 비공개 화면에서 새 연결을 시작하세요."
+      },
+      "unavailable": {
+        "title": "외부 서비스 연결이 변경되었습니다",
+        "description": "Slack 또는 Discord로 돌아가 비공개 설정을 다시 여세요."
       }
     }
   }

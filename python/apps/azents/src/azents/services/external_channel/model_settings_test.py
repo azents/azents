@@ -1,9 +1,12 @@
 """External model settings service tests."""
 
 import datetime
+import logging
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_model_settings import (
@@ -99,9 +102,12 @@ _PLAN = ExternalModelNoticePlan(
 def _service(
     repository: object,
     slack_client: object,
+    *,
+    codec: ExternalChannelCredentialsCodec | None = None,
 ) -> ExternalModelSettingsService:
-    codec = MagicMock(spec=ExternalChannelCredentialsCodec)
-    codec.decrypt.return_value = SimpleNamespace(bot_token="secret")
+    if codec is None:
+        codec = MagicMock(spec=ExternalChannelCredentialsCodec)
+        codec.decrypt.return_value = SimpleNamespace(bot_token="secret")
     return ExternalModelSettingsService(
         repository=cast(ExternalModelSettingsRepository, repository),
         credentials_codec=codec,
@@ -176,3 +182,160 @@ async def test_apply_attempts_notice_once_only_for_new_commit() -> None:
     assert replay.created is False
     slack_client.post_message.assert_awaited_once()
     repository.get_notice_delivery_context.assert_awaited_once()
+
+
+async def test_apply_preserves_commit_when_notice_delivery_raises() -> None:
+    """An unexpected provider failure records unknown without failing Apply."""
+    repository = SimpleNamespace(
+        apply_draft=AsyncMock(
+            return_value=ExternalModelApplyCommit(
+                result=ExternalModelApplied(
+                    editor=_EDITOR,
+                    created=True,
+                    mutation_id="mutation-1",
+                    notice_outcome=ExternalModelNoticeOutcome.UNKNOWN,
+                ),
+                notice_plan=_PLAN,
+            )
+        ),
+        get_notice_delivery_context=AsyncMock(
+            return_value=ExternalModelNoticeDeliveryContext(
+                plan=_PLAN,
+                encrypted_credentials="encrypted",
+            )
+        ),
+        record_notice_outcome=AsyncMock(
+            return_value=ExternalModelNoticeOutcome.UNKNOWN
+        ),
+    )
+    slack_client = SimpleNamespace(
+        post_message=AsyncMock(side_effect=RuntimeError("provider failed"))
+    )
+    service = _service(repository, slack_client)
+
+    applied = await service.apply_draft(
+        actor=_ACTOR,
+        draft_id="draft-1",
+        expected_selection_fingerprint="a" * 16,
+        apply_interaction_key="apply-1",
+        now=_NOW,
+    )
+
+    assert isinstance(applied, ExternalModelApplied)
+    assert applied.notice_outcome is ExternalModelNoticeOutcome.UNKNOWN
+    repository.record_notice_outcome.assert_awaited_once_with(
+        mutation_id="mutation-1",
+        outcome=ExternalModelNoticeOutcome.UNKNOWN,
+        attempted_at=_NOW,
+        error_summary="External model notice delivery outcome is unknown.",
+    )
+
+
+async def test_apply_preserves_commit_when_notice_decryption_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Credential decode failure records unknown without invoking a provider."""
+    repository = SimpleNamespace(
+        apply_draft=AsyncMock(
+            return_value=ExternalModelApplyCommit(
+                result=ExternalModelApplied(
+                    editor=_EDITOR,
+                    created=True,
+                    mutation_id="mutation-1",
+                    notice_outcome=ExternalModelNoticeOutcome.UNKNOWN,
+                ),
+                notice_plan=_PLAN,
+            )
+        ),
+        get_notice_delivery_context=AsyncMock(
+            return_value=ExternalModelNoticeDeliveryContext(
+                plan=_PLAN,
+                encrypted_credentials="encrypted",
+            )
+        ),
+        record_notice_outcome=AsyncMock(
+            return_value=ExternalModelNoticeOutcome.UNKNOWN
+        ),
+    )
+    codec = MagicMock(spec=ExternalChannelCredentialsCodec)
+    codec.decrypt.side_effect = RuntimeError("decrypted-secret-must-not-log")
+    slack_client = SimpleNamespace(post_message=AsyncMock())
+    service = _service(repository, slack_client, codec=codec)
+
+    with caplog.at_level(logging.ERROR):
+        applied = await service.apply_draft(
+            actor=_ACTOR,
+            draft_id="draft-1",
+            expected_selection_fingerprint="a" * 16,
+            apply_interaction_key="apply-1",
+            now=_NOW,
+        )
+
+    assert isinstance(applied, ExternalModelApplied)
+    assert applied.notice_outcome is ExternalModelNoticeOutcome.UNKNOWN
+    assert "decrypted-secret-must-not-log" not in caplog.text
+    slack_client.post_message.assert_not_awaited()
+    repository.record_notice_outcome.assert_awaited_once_with(
+        mutation_id="mutation-1",
+        outcome=ExternalModelNoticeOutcome.UNKNOWN,
+        attempted_at=_NOW,
+        error_summary="External model notice delivery outcome is unknown.",
+    )
+
+
+async def test_apply_preserves_commit_when_notice_context_or_recording_fails() -> None:
+    """Post-commit repository failures keep the already-saved unknown result."""
+    applied_result = ExternalModelApplied(
+        editor=_EDITOR,
+        created=True,
+        mutation_id="mutation-1",
+        notice_outcome=ExternalModelNoticeOutcome.UNKNOWN,
+    )
+    repository = SimpleNamespace(
+        apply_draft=AsyncMock(
+            return_value=ExternalModelApplyCommit(
+                result=applied_result,
+                notice_plan=_PLAN,
+            )
+        ),
+        get_notice_delivery_context=AsyncMock(
+            side_effect=RuntimeError("context failed")
+        ),
+        record_notice_outcome=AsyncMock(),
+    )
+    slack_client = SimpleNamespace(post_message=AsyncMock())
+    service = _service(repository, slack_client)
+
+    context_failure = await service.apply_draft(
+        actor=_ACTOR,
+        draft_id="draft-1",
+        expected_selection_fingerprint="a" * 16,
+        apply_interaction_key="apply-1",
+        now=_NOW,
+    )
+    assert context_failure is applied_result
+    slack_client.post_message.assert_not_awaited()
+    repository.record_notice_outcome.assert_not_awaited()
+
+    repository.get_notice_delivery_context.side_effect = None
+    repository.get_notice_delivery_context.return_value = (
+        ExternalModelNoticeDeliveryContext(
+            plan=_PLAN,
+            encrypted_credentials="encrypted",
+        )
+    )
+    repository.record_notice_outcome.side_effect = RuntimeError("record failed")
+    slack_client.post_message.return_value = SimpleNamespace(
+        status="delivered",
+        error_summary=None,
+    )
+
+    recording_failure = await service.apply_draft(
+        actor=_ACTOR,
+        draft_id="draft-1",
+        expected_selection_fingerprint="a" * 16,
+        apply_interaction_key="apply-1",
+        now=_NOW,
+    )
+    assert recording_failure is applied_result
+    slack_client.post_message.assert_awaited_once()

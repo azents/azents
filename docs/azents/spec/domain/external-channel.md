@@ -94,7 +94,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-09-12
-spec_version: 77
+spec_version: 78
 ---
 
 # External Channel
@@ -605,6 +605,11 @@ identity-pair proof flow. Creating a candidate, final confirmation, and unlink u
 the existing elevation boundary. A candidate code is returned once with no-store
 handling and is never recoverable from a later status read. Inactive membership and
 revoked links remain visible as personal history but grant no model authority.
+The confirmation screen keeps cancel and account-switch recovery available while
+elevation methods load, fail, or accept proof. A connection-generation or provider
+scope change is a typed terminal `unavailable` outcome that preserves the displayed
+identity pair and directs the User to reopen private settings in Slack or Discord
+instead of presenting the failure as retryable service contention.
 
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
@@ -633,12 +638,15 @@ history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
 
-- **2026-09-12** (spec_version 76) — Fenced direct Channel Work commit,
-  provider admission, awaiting-input and effect settlement, and Discord delivery
-  recording by the executing Session owner generation.
+- **2026-09-12** (spec_version 78) — Kept confirmation exit recovery available
+  throughout elevation and projected provider scope changes as a typed terminal
+  return-to-provider state.
 - **2026-09-12** (spec_version 77) — Added optional Workspace external-account
   linking, immutable two-sided proof, private native model drafts, generation-fenced
   shared Apply, personal web management, and guest/execution-identity preservation.
+- **2026-09-12** (spec_version 76) — Fenced direct Channel Work commit,
+  provider admission, awaiting-input and effect settlement, and Discord delivery
+  recording by the executing Session owner generation.
 - **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
   Workspace-scoped configuration reads, and generation-fenced health persistence to
   completed repository operations while preserving provider validation outside database

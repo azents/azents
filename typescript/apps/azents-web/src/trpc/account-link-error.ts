@@ -8,6 +8,7 @@ export const ACCOUNT_LINK_FAILURE_REASONS = [
   "conflict",
   "candidate_not_ready",
   "candidate_terminal",
+  "unavailable",
   "busy",
 ] as const;
 
