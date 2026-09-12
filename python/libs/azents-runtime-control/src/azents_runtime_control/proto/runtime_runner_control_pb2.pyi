@@ -14,6 +14,7 @@ import builtins as _builtins
 from . import runtime_configuration_pb2 as _runtime_configuration_pb2
 from . import runtime_runner_terminal_pb2 as _runtime_runner_terminal_pb2
 from . import runtime_runner_transfer_pb2 as _runtime_runner_transfer_pb2
+from . import runtime_web_transport_pb2 as _runtime_web_transport_pb2
 import sys
 import typing as _typing
 
@@ -305,6 +306,8 @@ class RunnerControlMessage(_message.Message):
     TRANSFER_CANCEL_FIELD_NUMBER: _builtins.int
     TERMINAL_OPEN_INTENT_FIELD_NUMBER: _builtins.int
     TERMINAL_TERMINATE_INTENT_FIELD_NUMBER: _builtins.int
+    WEB_OPEN_INTENT_FIELD_NUMBER: _builtins.int
+    WEB_CANCEL_INTENT_FIELD_NUMBER: _builtins.int
     ERROR_FIELD_NUMBER: _builtins.int
     request_id: _builtins.str
     @_builtins.property
@@ -326,6 +329,10 @@ class RunnerControlMessage(_message.Message):
     @_builtins.property
     def terminal_terminate_intent(self) -> Global___RunnerTerminalTerminateIntent: ...
     @_builtins.property
+    def web_open_intent(self) -> _runtime_web_transport_pb2.RunnerWebOpenIntent: ...
+    @_builtins.property
+    def web_cancel_intent(self) -> _runtime_web_transport_pb2.RunnerWebCancelIntent: ...
+    @_builtins.property
     def error(self) -> Global___RunnerError: ...
     def __init__(
         self,
@@ -340,6 +347,9 @@ class RunnerControlMessage(_message.Message):
         transfer_cancel: Global___RunnerTransferCancel | None = ...,
         terminal_open_intent: Global___RunnerTerminalOpenIntent | None = ...,
         terminal_terminate_intent: Global___RunnerTerminalTerminateIntent | None = ...,
+        web_open_intent: _runtime_web_transport_pb2.RunnerWebOpenIntent | None = ...,
+        web_cancel_intent: _runtime_web_transport_pb2.RunnerWebCancelIntent
+        | None = ...,
         error: Global___RunnerError | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -365,6 +375,10 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
+        "web_cancel_intent",
+        b"web_cancel_intent",
+        "web_open_intent",
+        b"web_open_intent",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -392,6 +406,10 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
+        "web_cancel_intent",
+        b"web_cancel_intent",
+        "web_open_intent",
+        b"web_open_intent",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_payload: _TypeAlias = _typing.Literal[
@@ -404,6 +422,8 @@ class RunnerControlMessage(_message.Message):
         "transfer_cancel",
         "terminal_open_intent",
         "terminal_terminate_intent",
+        "web_open_intent",
+        "web_cancel_intent",
         "error",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]

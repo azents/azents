@@ -1,0 +1,204 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service RuntimeWebProxy {
+  rpc Proxy(stream GatewayWebMessage) returns (stream GatewayWebMessage);
+}
+
+service RuntimeRunnerWeb {
+  rpc ConnectWeb(stream RunnerWebMessage)
+      returns (stream RunnerWebControlMessage);
+}
+
+service RuntimeWebRelay {
+  rpc RelayWeb(stream RelayWebMessage) returns (stream RelayWebMessage);
+}
+
+enum RuntimeWebProtocol {
+  RUNTIME_WEB_PROTOCOL_UNSPECIFIED = 0;
+  RUNTIME_WEB_PROTOCOL_HTTP = 1;
+  RUNTIME_WEB_PROTOCOL_WEBSOCKET = 2;
+}
+
+enum RuntimeWebSocketOpcode {
+  RUNTIME_WEB_SOCKET_OPCODE_UNSPECIFIED = 0;
+  RUNTIME_WEB_SOCKET_OPCODE_TEXT = 1;
+  RUNTIME_WEB_SOCKET_OPCODE_BINARY = 2;
+  RUNTIME_WEB_SOCKET_OPCODE_PING = 3;
+  RUNTIME_WEB_SOCKET_OPCODE_PONG = 4;
+  RUNTIME_WEB_SOCKET_OPCODE_CLOSE = 5;
+}
+
+enum RuntimeWebCancelReason {
+  RUNTIME_WEB_CANCEL_REASON_UNSPECIFIED = 0;
+  RUNTIME_WEB_CANCEL_REASON_CALLER = 1;
+  RUNTIME_WEB_CANCEL_REASON_APPROVAL_EXPIRED = 2;
+  RUNTIME_WEB_CANCEL_REASON_AUTHORITY_REVOKED = 3;
+  RUNTIME_WEB_CANCEL_REASON_RUNTIME_REPLACED = 4;
+  RUNTIME_WEB_CANCEL_REASON_DEADLINE = 5;
+  RUNTIME_WEB_CANCEL_REASON_SHUTDOWN = 6;
+  RUNTIME_WEB_CANCEL_REASON_PROTOCOL_VIOLATION = 7;
+}
+
+enum RuntimeWebStreamErrorCode {
+  RUNTIME_WEB_STREAM_ERROR_CODE_UNSPECIFIED = 0;
+  RUNTIME_WEB_STREAM_ERROR_CODE_STALE_AUTHORITY = 1;
+  RUNTIME_WEB_STREAM_ERROR_CODE_STALE_RUNTIME_GENERATION = 2;
+  RUNTIME_WEB_STREAM_ERROR_CODE_STALE_ROUTE = 3;
+  RUNTIME_WEB_STREAM_ERROR_CODE_DUPLICATE_JOIN = 4;
+  RUNTIME_WEB_STREAM_ERROR_CODE_PROTOCOL_VIOLATION = 5;
+  RUNTIME_WEB_STREAM_ERROR_CODE_RESOURCE_EXHAUSTED = 6;
+  RUNTIME_WEB_STREAM_ERROR_CODE_DEADLINE_EXCEEDED = 7;
+  RUNTIME_WEB_STREAM_ERROR_CODE_APPLICATION_UNAVAILABLE = 8;
+  RUNTIME_WEB_STREAM_ERROR_CODE_TRANSPORT_UNAVAILABLE = 9;
+}
+
+message RuntimeWebHeader {
+  bytes name = 1;
+  bytes value = 2;
+}
+
+message RuntimeWebTunnelIdentity {
+  string tunnel_id = 1;
+  string endpoint_id = 2;
+  string cycle_id = 3;
+  uint64 endpoint_authority_revision = 4;
+  uint64 close_barrier = 5;
+  string runtime_id = 6;
+  uint64 desired_generation = 7;
+  uint64 runner_generation = 8;
+  uint32 port = 9;
+  string join_nonce = 10;
+  google.protobuf.Timestamp registration_deadline_at = 11;
+  google.protobuf.Timestamp approval_deadline_at = 12;
+  google.protobuf.Timestamp transport_deadline_at = 13;
+}
+
+message RuntimeWebRequestHead {
+  RuntimeWebTunnelIdentity identity = 1;
+  RuntimeWebProtocol protocol = 2;
+  bytes method = 3;
+  bytes target = 4;
+  repeated RuntimeWebHeader headers = 5;
+}
+
+message RuntimeWebResponseHead {
+  uint32 status = 1;
+  repeated RuntimeWebHeader headers = 2;
+}
+
+message RuntimeWebBodyChunk {
+  uint64 sequence = 1;
+  bytes data = 2;
+}
+
+message RuntimeWebStreamEnd {
+  uint64 final_sequence = 1;
+}
+
+message RuntimeWebSocketFrame {
+  uint64 sequence = 1;
+  RuntimeWebSocketOpcode opcode = 2;
+  bool final = 3;
+  bytes data = 4;
+}
+
+message RuntimeWebHeartbeat {
+  uint64 monotonic_sequence = 1;
+}
+
+message RuntimeWebHeartbeatAcknowledgement {
+  uint64 monotonic_sequence = 1;
+}
+
+message RuntimeWebCancel {
+  RuntimeWebCancelReason reason = 1;
+}
+
+message RuntimeWebStreamError {
+  RuntimeWebStreamErrorCode code = 1;
+}
+
+message RuntimeWebStreamAccepted {
+  string tunnel_id = 1;
+}
+
+message GatewayWebMessage {
+  oneof payload {
+    RuntimeWebRequestHead request_head = 1;
+    RuntimeWebStreamAccepted accepted = 2;
+    RuntimeWebResponseHead response_head = 3;
+    RuntimeWebBodyChunk body = 4;
+    RuntimeWebStreamEnd end = 5;
+    RuntimeWebSocketFrame websocket = 6;
+    RuntimeWebHeartbeat heartbeat = 7;
+    RuntimeWebHeartbeatAcknowledgement heartbeat_ack = 8;
+    RuntimeWebCancel cancel = 9;
+    RuntimeWebStreamError error = 10;
+  }
+}
+
+message RunnerWebRegistration {
+  RuntimeWebTunnelIdentity identity = 1;
+}
+
+message RunnerWebMessage {
+  oneof payload {
+    RunnerWebRegistration register = 1;
+    RuntimeWebResponseHead response_head = 2;
+    RuntimeWebBodyChunk body = 3;
+    RuntimeWebStreamEnd end = 4;
+    RuntimeWebSocketFrame websocket = 5;
+    RuntimeWebHeartbeat heartbeat = 6;
+    RuntimeWebHeartbeatAcknowledgement heartbeat_ack = 7;
+    RuntimeWebStreamError error = 8;
+  }
+}
+
+message RunnerWebControlMessage {
+  oneof payload {
+    RuntimeWebStreamAccepted accepted = 1;
+    RuntimeWebRequestHead request_head = 2;
+    RuntimeWebBodyChunk body = 3;
+    RuntimeWebStreamEnd end = 4;
+    RuntimeWebSocketFrame websocket = 5;
+    RuntimeWebHeartbeat heartbeat = 6;
+    RuntimeWebHeartbeatAcknowledgement heartbeat_ack = 7;
+    RuntimeWebCancel cancel = 8;
+    RuntimeWebStreamError error = 9;
+  }
+}
+
+message RelayWebRegistration {
+  RuntimeWebTunnelIdentity identity = 1;
+  string owner_boot_id = 2;
+  string route_lease_id = 3;
+}
+
+message RelayWebMessage {
+  oneof payload {
+    RelayWebRegistration register = 1;
+    RuntimeWebStreamAccepted accepted = 2;
+    RuntimeWebRequestHead request_head = 3;
+    RuntimeWebResponseHead response_head = 4;
+    RuntimeWebBodyChunk body = 5;
+    RuntimeWebStreamEnd end = 6;
+    RuntimeWebSocketFrame websocket = 7;
+    RuntimeWebHeartbeat heartbeat = 8;
+    RuntimeWebHeartbeatAcknowledgement heartbeat_ack = 9;
+    RuntimeWebCancel cancel = 10;
+    RuntimeWebStreamError error = 11;
+  }
+}
+
+message RunnerWebOpenIntent {
+  RuntimeWebTunnelIdentity identity = 1;
+}
+
+message RunnerWebCancelIntent {
+  RuntimeWebTunnelIdentity identity = 1;
+  RuntimeWebCancelReason reason = 2;
+}

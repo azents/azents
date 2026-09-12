@@ -4,6 +4,7 @@ import sqlalchemy as sa
 
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.runtime_web import (
+    RDBRuntimeWebAdmissionLease,
     RDBRuntimeWebAuthBinding,
     RDBRuntimeWebAuthConfiguration,
     RDBRuntimeWebAuthTicket,
@@ -13,6 +14,7 @@ from azents.rdb.models.runtime_web import (
     RDBRuntimeWebOperationReceipt,
     RDBRuntimeWebQuotaScope,
     RDBRuntimeWebRequest,
+    RDBRuntimeWebTunnelRoute,
 )
 
 
@@ -43,6 +45,8 @@ def test_runtime_web_authority_tables_are_durable_metadata_only() -> None:
         RDBRuntimeWebGatewayIdentity.__table__,
         RDBRuntimeWebAuthBinding.__table__,
         RDBRuntimeWebAuthTicket.__table__,
+        RDBRuntimeWebTunnelRoute.__table__,
+        RDBRuntimeWebAdmissionLease.__table__,
     ]
     forbidden = {"body", "request_body", "response_body", "headers", "cookie"}
 
@@ -102,3 +106,28 @@ def test_runtime_web_enums_use_postgresql_enum_columns() -> None:
     ]
 
     assert all(isinstance(column.type, sa.Enum) for column in enum_columns)
+
+
+def test_runtime_web_transport_routes_are_exact_and_lease_fenced() -> None:
+    """Keep transport ownership separate from durable approval authority."""
+    route = RDBModel.metadata.tables["runtime_web_tunnel_routes"]
+    admission = RDBModel.metadata.tables["runtime_web_admission_leases"]
+    route_constraints = {constraint.name for constraint in route.constraints}
+    admission_constraints = {constraint.name for constraint in admission.constraints}
+
+    assert route.primary_key.columns.keys() == ["tunnel_id"]
+    assert "uq_runtime_web_tunnel_routes_join_nonce" in route_constraints
+    assert "uq_runtime_web_tunnel_routes_route_lease" in route_constraints
+    assert "uq_runtime_web_admission_leases_tunnel" in admission_constraints
+    assert {
+        "endpoint_authority_revision",
+        "close_barrier",
+        "runtime_id",
+        "desired_generation",
+        "runner_generation",
+        "join_nonce",
+        "owner_boot_id",
+        "route_lease_id",
+        "lease_generation",
+        "lease_expires_at",
+    }.issubset(route.columns.keys())

@@ -20,8 +20,9 @@ from azents_runtime_runner.main import (
 )
 
 
-def test_runner_advertises_terminal_capability() -> None:
+def test_runner_advertises_streaming_capabilities() -> None:
     assert "terminal.v1" in _CAPABILITIES
+    assert "runtime-web-http.v1" in _CAPABILITIES
 
 
 def test_runner_authority_rejections_require_reprovisioning() -> None:

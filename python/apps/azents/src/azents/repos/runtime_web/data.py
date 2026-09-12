@@ -115,6 +115,37 @@ class RuntimeWebMutationResult(BaseModel):
     cycle: RuntimeWebCycle | None
 
 
+class RuntimeWebTunnelAuthority(BaseModel):
+    """Exact approval and Runtime authority for one data-plane tunnel."""
+
+    tunnel_id: str = Field(min_length=1, max_length=128)
+    endpoint_id: str = Field(min_length=1, max_length=32)
+    cycle_id: str = Field(min_length=1, max_length=32)
+    endpoint_authority_revision: int = Field(ge=0)
+    close_barrier: int = Field(ge=0)
+    runtime_id: str = Field(min_length=1, max_length=32)
+    desired_generation: int = Field(ge=1)
+    runner_generation: int = Field(ge=1)
+    port: int = Field(ge=1, le=65_535)
+    join_nonce: str = Field(min_length=1, max_length=128)
+    registration_deadline_at: datetime.datetime
+    approval_deadline_at: datetime.datetime
+    transport_deadline_at: datetime.datetime
+
+
+class RuntimeWebTunnelRoute(BaseModel):
+    """Current renewable owner route for one tunnel."""
+
+    authority: RuntimeWebTunnelAuthority
+    owner_replica_id: str
+    owner_boot_id: str
+    owner_address: str
+    route_lease_id: str
+    lease_generation: int
+    lease_expires_at: datetime.datetime
+    admission_lease_id: str
+
+
 def derived_operation_key(operation_key: str, suffix: str) -> str:
     """Derive a bounded collision-resistant key from one complete parent key."""
     material = f"{len(operation_key)}:{operation_key}:{suffix}"
