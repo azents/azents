@@ -42,3 +42,15 @@ def test_timing_cache_save_keys_are_unique_per_attempt() -> None:
     assert (
         "key: e2e-timing-baseline-${{ github.run_id }}-${{ github.run_attempt }}"
     ) in main_save
+
+
+def test_workflow_dispatch_detects_changes_from_first_parent() -> None:
+    """Manual runs classify image changes against the checked-out first parent."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    base_step = _step_block(workflow, "Resolve changed-scope base")
+    filter_step = _step_block(workflow, "Compute changed scopes")
+
+    assert 'base="$GITHUB_REF"' in base_step
+    assert "if [ \"$GITHUB_EVENT_NAME\" = 'workflow_dispatch' ]; then" in base_step
+    assert 'base="$(git rev-parse "$GITHUB_SHA^")"' in base_step
+    assert "base: ${{ steps.change_base.outputs.base }}" in filter_step
