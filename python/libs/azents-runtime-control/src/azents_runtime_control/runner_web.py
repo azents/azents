@@ -99,8 +99,6 @@ class RunnerWebIdentity:
                 raise ValueError(f"{name} must be timezone-aware")
         if self.registration_deadline_at > self.transport_deadline_at:
             raise ValueError("Registration deadline must not exceed transport deadline")
-        if self.approval_deadline_at > self.transport_deadline_at:
-            raise ValueError("Approval deadline must not exceed transport deadline")
 
 
 @dataclasses.dataclass(frozen=True)

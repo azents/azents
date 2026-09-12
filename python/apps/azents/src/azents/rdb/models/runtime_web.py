@@ -853,7 +853,6 @@ class RDBRuntimeWebTunnelRoute(RDBModel):
     )
     CK_DEADLINES = sa.CheckConstraint(
         "registration_deadline_at <= transport_deadline_at "
-        "AND approval_deadline_at <= transport_deadline_at "
         "AND lease_expires_at <= transport_deadline_at",
         name="ck_runtime_web_tunnel_routes_deadlines",
     )

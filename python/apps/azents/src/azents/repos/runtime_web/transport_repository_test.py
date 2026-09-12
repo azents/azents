@@ -106,6 +106,32 @@ async def _active_tunnel(
     )
 
 
+async def test_route_accepts_transport_inside_longer_approval_cycle(
+    rdb_session: AsyncSession,
+) -> None:
+    """Keep cycle authority while bounding one finite HTTP transport."""
+    authority = await _active_tunnel(rdb_session)
+    transport_deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+        minutes=10
+    )
+    authority = authority.model_copy(
+        update={"transport_deadline_at": transport_deadline}
+    )
+
+    route = await RuntimeWebTransportRepository().acquire_route(
+        rdb_session,
+        authority=authority,
+        owner_replica_id="control-a",
+        owner_boot_id="boot-a",
+        owner_address="control-a.internal:8031",
+        lease_seconds=30,
+        maximum_active_connections=8,
+    )
+
+    assert route.authority.approval_deadline_at > transport_deadline
+    assert route.authority.transport_deadline_at == transport_deadline
+
+
 async def test_route_lease_rejects_live_owner_and_allows_expired_takeover(
     rdb_session: AsyncSession,
 ) -> None:

@@ -405,7 +405,6 @@ class RuntimeWebTransportRepository:
             or authority.approval_deadline_at <= now
             or authority.transport_deadline_at <= now
             or authority.registration_deadline_at > authority.transport_deadline_at
-            or authority.approval_deadline_at > authority.transport_deadline_at
         ):
             raise RuntimeWebRouteConflict("Runtime Web tunnel deadline is stale")
 
