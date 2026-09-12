@@ -2912,6 +2912,7 @@ def _agent_session() -> AgentSession:
     now = datetime.datetime.now(datetime.UTC)
     return AgentSession(
         owner_generation=0,
+        applied_profile_generation=0,
         inference_state=None,
         id="session-1",
         workspace_id="workspace-1",

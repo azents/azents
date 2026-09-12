@@ -46,6 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
+  - python/apps/azents/src/azents/repos/session_model_profile/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
@@ -126,7 +127,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-12
-spec_version: 166
+spec_version: 167
 ---
 
 # Conversation & Events
@@ -250,6 +251,7 @@ Runtime lifecycle lock or wait condition.
 | `handle`                                                                                         | string                | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths.             |
 | `workspace_id` / `agent_id`                                                                      | FK                    | Workspace and agent boundary                                                                                                      |
 | `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. |
+| `applied_profile_generation`                                                                     | bigint                | Monotonic generation incremented by every accepted applied-profile replacement; private external drafts use it to reject stale or ABA saves. |
 | `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Prepared-turn label and effort for the immutable current provider call or retry/recovery; this is not the public applied intent.                    |
 | `current_model_selection` / `current_model_settings`                                            | JSONB \| null         | Complete prepared physical model and model-scoped settings snapshot for the current call.                                                          |
 | `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null           | Effective limits stored with the prepared physical snapshot.                                                                                         |
@@ -1136,7 +1138,11 @@ before revalidating mutable Agent options; reusing the key with a different payl
 Success changes only the durable applied Session intent: it creates no mailbox item, transcript
 event, pending command, Run, wake-up, provider call, or prepared-turn snapshot. The current
 prepared snapshot remains authoritative for an already-started provider call, while future implicit
-turn boundaries resolve the newly applied intent against the current Agent option mapping.
+turn boundaries resolve the newly applied intent against the current Agent option mapping. The
+repository-owned replacement operation preserves this web contract and the matching-replay result.
+Every newly accepted replacement through web, input preparation, edited input, or subagent setup
+increments `applied_profile_generation`, including an equal-value replacement. A matching web
+idempotency replay does not invoke the setter and does not increment the generation.
 
 Composer execution-option controls are separate from static model capabilities and built-in tools.
 The first boolean option, Fast, is off by default and appears only for supported selected model
@@ -1259,6 +1265,8 @@ remain as an unbounded raw tail or storage JSON dump.
 - Mailbox items are session-bound and must not store or require `agent_runtime_id`.
 - Run-producing human inputs carry an explicit requested profile, and preparation processes exactly one FIFO head per transaction before folding its effect into the next turn.
 - Requested profile intent and ordered run-input associations are durable; the Session's complete prepared inference snapshot is authoritative for the next turn and may change at a later boundary within the same active run.
+- Applied-profile generation fences actor-private external drafts against stale and
+  change-away-and-back replacement without changing the immutable prepared model call.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
 - Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
@@ -1336,6 +1344,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-12** — v167. Added the repository-owned applied-profile replacement
+  boundary and monotonic generation used to reject stale external native drafts
+  while preserving web idempotency and already-prepared model calls.
 - **2026-09-12** — v166. Made composer subscription usage follow the currently
   displayed model, exposed completed-turn Fast state in token usage details, and
   refreshed current Session inference intent before automatic model-call retry

@@ -1,7 +1,7 @@
 """Discord-native conversation settings responses and signed control mutations."""
 
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Literal
 
 from fastapi import Depends
@@ -12,17 +12,53 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelInteractionStatus,
+    ExternalChannelProvider,
     ExternalChannelResponseMode,
+)
+from azents.core.external_account_link import (
+    ExternalAccountLinkError,
+    ExternalAccountLinkState,
+    ExternalAccountNativeLinkState,
+    VerifiedExternalAccountActor,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
+from azents.core.external_model_settings import (
+    ExternalModelActorContext,
+    ExternalModelDraftSelection,
+    ExternalModelEditorReady,
+    ExternalModelTargetContext,
+)
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_channel.discord_account_link import (
+    DiscordAccountLinkPresentation,
+    discord_account_link_code_modal,
+    discord_account_link_error_response,
+    discord_account_link_presentation,
+    discord_account_link_started_response,
+    discord_account_link_state_unavailable,
+    discord_account_link_verified_response,
+)
+from azents.services.external_channel.discord_model_settings import (
+    DiscordModelSettingsPresentation,
+    discord_model_apply_response,
+    discord_model_cancel_response,
+    discord_model_editor_result_response,
+    discord_model_entry_presentation,
+    discord_model_invalid_selection_response,
+    model_page_size,
+    parse_reasoning_effort,
+)
 from azents.services.external_channel.discord_settings_scope import (
+    DiscordAccountLinkScope,
+    DiscordModelSettingsScope,
     DiscordSettingsScope,
     build_discord_settings_custom_id,
     discord_binding_version,
@@ -33,6 +69,7 @@ from azents.services.external_channel.discord_settings_scope import (
 from azents.services.external_channel.ingestion_replay import (
     external_channel_replay_deadline,
 )
+from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationError,
     ExternalChannelParticipationService,
@@ -53,10 +90,24 @@ class DiscordSettingsContext:
     """Authenticated provider scope needed to resolve current settings."""
 
     connection_id: str
+    connection_configuration_generation: int
     guild_id: str
+    guild_display_name: str | None
     provider_parent_channel_id: str
+    provider_thread_id: str | None
     provider_thread_resource_key: str | None
     principal_id: str
+    provider_user_id: str
+    provider_display_name: str
+    provider_interaction_id: str
+
+
+@dataclass(frozen=True)
+class DiscordPrivatePresentations:
+    """Private personal sections appended independently from guest controls."""
+
+    account: DiscordAccountLinkPresentation
+    model: DiscordModelSettingsPresentation
 
 
 @dataclass
@@ -75,6 +126,14 @@ class DiscordSettingsResponseService:
         ExternalChannelParticipationService,
         Depends(ExternalChannelParticipationService),
     ]
+    account_link_service: Annotated[
+        ExternalAccountLinkService,
+        Depends(ExternalAccountLinkService),
+    ]
+    model_settings_service: Annotated[
+        ExternalModelSettingsService,
+        Depends(ExternalModelSettingsService),
+    ]
     config: Annotated[Config, Depends(get_config)]
 
     async def initial_response(
@@ -82,15 +141,27 @@ class DiscordSettingsResponseService:
         *,
         origin_interaction_id: str,
         context: DiscordSettingsContext,
+        now: datetime.datetime,
     ) -> DiscordSettingsResponse:
-        """Render current setup, parent, or thread settings for a command actor."""
+        """Render guest controls and actor-private personal settings."""
+        account_state, account = await self._account_presentation(
+            origin_interaction_id=origin_interaction_id,
+            context=context,
+            now=now,
+        )
         try:
             settings = await self._resolve(context, expected_binding_id=None)
-        except ExternalChannelParticipationError as error:
+        except ExternalChannelParticipationError:
             return DiscordSettingsResponse(
-                response=_notice_response(str(error)),
+                response=_link_only_response(account=account, response_type=4),
                 cleanup_plans=(),
             )
+        model = await self._model_presentation(
+            settings=settings,
+            account_state=account_state,
+            context=context,
+            now=now,
+        )
         return DiscordSettingsResponse(
             response=_settings_response(
                 settings=settings,
@@ -98,6 +169,7 @@ class DiscordSettingsResponseService:
                 secret=self.config.auth.jwt.secret_key,
                 web_url=self.config.web_url,
                 response_type=4,
+                personal=DiscordPrivatePresentations(account=account, model=model),
             ),
             cleanup_plans=(),
         )
@@ -119,14 +191,13 @@ class DiscordSettingsResponseService:
                     scope=scope,
                     context=context,
                     interaction_id=interaction_id,
+                    now=now,
                 )
             effective_context = (
-                DiscordSettingsContext(
-                    connection_id=context.connection_id,
-                    guild_id=context.guild_id,
-                    provider_parent_channel_id=context.provider_parent_channel_id,
+                replace(
+                    context,
+                    provider_thread_id=None,
                     provider_thread_resource_key=None,
-                    principal_id=context.principal_id,
                 )
                 if scope.action in {"setup_channel", "setup_threads"}
                 else context
@@ -155,6 +226,12 @@ class DiscordSettingsResponseService:
                         secret=self.config.auth.jwt.secret_key,
                         web_url=self.config.web_url,
                         response_type=4,
+                        personal=await self._private_presentations(
+                            settings=settings,
+                            origin_interaction_id=scope.origin_interaction_id,
+                            context=context,
+                            now=now,
+                        ),
                     ),
                     cleanup_plans=(),
                 )
@@ -175,11 +252,169 @@ class DiscordSettingsResponseService:
                     now=now,
                 )
             raise AssertionError("Discord settings action is not exhaustive.")
-        except ExternalChannelParticipationError as error:
+        except ExternalChannelParticipationError:
+            _, account = await self._account_presentation(
+                origin_interaction_id=interaction_id,
+                context=context,
+                now=now,
+            )
             return DiscordSettingsResponse(
-                response=_notice_response(str(error)),
+                response=_link_only_response(account=account, response_type=4),
                 cleanup_plans=(),
             )
+
+    async def account_link_response(
+        self,
+        *,
+        scope: DiscordAccountLinkScope,
+        code: str | None,
+        context: DiscordSettingsContext,
+        now: datetime.datetime,
+    ) -> DiscordSettingsResponse:
+        """Run an account-link control without conversation authority."""
+        try:
+            actor = _account_actor(context)
+            if scope.action == "start":
+                if code is not None or scope.origin_interaction_id is None:
+                    raise ValueError("Discord account-link control is invalid.")
+                await self._validate_origin_interaction(
+                    origin_interaction_id=scope.origin_interaction_id,
+                    context=context,
+                )
+                created = await self.account_link_service.create_origin(
+                    actor=actor,
+                    now=now,
+                )
+                response = discord_account_link_started_response(
+                    created=created,
+                    secret=self.config.auth.jwt.secret_key,
+                    web_url=self.config.web_url,
+                )
+            elif scope.action == "enter_code":
+                if scope.origin_id is None:
+                    raise ValueError("Discord account-link control is invalid.")
+                if code is None:
+                    response = discord_account_link_code_modal(
+                        origin_id=scope.origin_id,
+                        secret=self.config.auth.jwt.secret_key,
+                    )
+                else:
+                    proof = await self.account_link_service.verify_candidate_code(
+                        actor=actor,
+                        origin_id=scope.origin_id,
+                        code=code,
+                        now=now,
+                    )
+                    response = discord_account_link_verified_response(
+                        result=proof,
+                        origin_id=scope.origin_id,
+                        web_url=self.config.web_url,
+                    )
+            else:
+                raise AssertionError("Discord account-link action is not exhaustive.")
+        except ExternalAccountLinkError as error:
+            response = discord_account_link_error_response(error)
+        except ExternalChannelParticipationError, ValueError:
+            response = _private_control_unavailable_response()
+        return DiscordSettingsResponse(response=response, cleanup_plans=())
+
+    async def model_response(
+        self,
+        *,
+        scope: DiscordModelSettingsScope,
+        selected_values: tuple[str, ...],
+        context: DiscordSettingsContext,
+        now: datetime.datetime,
+    ) -> DiscordSettingsResponse:
+        """Run one actor-owned model draft independently from guest settings."""
+        actor = _model_actor(context)
+        limit = model_page_size()
+        if scope.action in {"open", "previous_page", "next_page"}:
+            result = await self.model_settings_service.page_options(
+                actor=actor,
+                draft_id=scope.draft_id,
+                now=now,
+                offset=scope.offset,
+                limit=limit,
+            )
+            return DiscordSettingsResponse(
+                response=discord_model_editor_result_response(
+                    result=result,
+                    secret=self.config.auth.jwt.secret_key,
+                ),
+                cleanup_plans=(),
+            )
+        if scope.action == "cancel":
+            result = await self.model_settings_service.cancel_draft(
+                actor=actor,
+                draft_id=scope.draft_id,
+                now=now,
+            )
+            return DiscordSettingsResponse(
+                response=discord_model_cancel_response(result),
+                cleanup_plans=(),
+            )
+        if scope.action == "apply":
+            if scope.selection_fingerprint is None:
+                return DiscordSettingsResponse(
+                    response=discord_model_invalid_selection_response(),
+                    cleanup_plans=(),
+                )
+            result = await self.model_settings_service.apply_draft(
+                actor=actor,
+                draft_id=scope.draft_id,
+                expected_selection_fingerprint=scope.selection_fingerprint,
+                apply_interaction_key=context.provider_interaction_id,
+                now=now,
+            )
+            return DiscordSettingsResponse(
+                response=discord_model_apply_response(
+                    result=result,
+                    secret=self.config.auth.jwt.secret_key,
+                ),
+                cleanup_plans=(),
+            )
+        current = await self.model_settings_service.page_options(
+            actor=actor,
+            draft_id=scope.draft_id,
+            now=now,
+            offset=scope.offset,
+            limit=limit,
+        )
+        if not isinstance(current, ExternalModelEditorReady):
+            return DiscordSettingsResponse(
+                response=discord_model_editor_result_response(
+                    result=current,
+                    secret=self.config.auth.jwt.secret_key,
+                ),
+                cleanup_plans=(),
+            )
+        try:
+            selection = _updated_model_selection(
+                scope=scope,
+                selected_values=selected_values,
+                current=current,
+            )
+        except ValueError:
+            return DiscordSettingsResponse(
+                response=discord_model_invalid_selection_response(),
+                cleanup_plans=(),
+            )
+        result = await self.model_settings_service.update_draft(
+            actor=actor,
+            draft_id=scope.draft_id,
+            selection=selection,
+            now=now,
+            offset=scope.offset,
+            limit=limit,
+        )
+        return DiscordSettingsResponse(
+            response=discord_model_editor_result_response(
+                result=result,
+                secret=self.config.auth.jwt.secret_key,
+            ),
+            cleanup_plans=(),
+        )
 
     async def _binding_open_response(
         self,
@@ -187,6 +422,7 @@ class DiscordSettingsResponseService:
         scope: DiscordSettingsScope,
         context: DiscordSettingsContext,
         interaction_id: str,
+        now: datetime.datetime,
     ) -> DiscordSettingsResponse:
         """Open settings from a shared joined-presence Binding control."""
         settings = await self._resolve(
@@ -207,6 +443,12 @@ class DiscordSettingsResponseService:
                 secret=self.config.auth.jwt.secret_key,
                 web_url=self.config.web_url,
                 response_type=4,
+                personal=await self._private_presentations(
+                    settings=settings,
+                    origin_interaction_id=interaction_id,
+                    context=context,
+                    now=now,
+                ),
             ),
             cleanup_plans=(),
         )
@@ -302,6 +544,12 @@ class DiscordSettingsResponseService:
                 secret=self.config.auth.jwt.secret_key,
                 web_url=self.config.web_url,
                 response_type=7,
+                personal=await self._private_presentations(
+                    settings=mutation.settings,
+                    origin_interaction_id=scope.origin_interaction_id,
+                    context=context,
+                    now=now,
+                ),
             ),
             cleanup_plans=mutation.cleanup_plans,
         )
@@ -349,6 +597,12 @@ class DiscordSettingsResponseService:
                 secret=self.config.auth.jwt.secret_key,
                 web_url=self.config.web_url,
                 response_type=7,
+                personal=await self._private_presentations(
+                    settings=mutation.settings,
+                    origin_interaction_id=scope.origin_interaction_id,
+                    context=context,
+                    now=now,
+                ),
             ),
             cleanup_plans=mutation.cleanup_plans,
         )
@@ -382,15 +636,98 @@ class DiscordSettingsResponseService:
         context: DiscordSettingsContext,
     ) -> None:
         """Bind controls to their original authenticated command actor and scope."""
+        await self._validate_origin_interaction(
+            origin_interaction_id=scope.origin_interaction_id,
+            context=context,
+        )
+
+    async def _validate_origin_interaction(
+        self,
+        *,
+        origin_interaction_id: str,
+        context: DiscordSettingsContext,
+    ) -> None:
+        """Bind any signed private control to its original admitted actor."""
         async with self.session_manager() as session:
             origin = await self.repository.lock_interaction(
                 session,
-                interaction_id=scope.origin_interaction_id,
+                interaction_id=origin_interaction_id,
             )
         if not _origin_matches(origin=origin, context=context):
             raise ExternalChannelParticipationError(
                 "Discord conversation settings control is unavailable."
             )
+
+    async def _account_presentation(
+        self,
+        *,
+        origin_interaction_id: str,
+        context: DiscordSettingsContext,
+        now: datetime.datetime,
+    ) -> tuple[ExternalAccountNativeLinkState | None, DiscordAccountLinkPresentation]:
+        try:
+            state = await self.account_link_service.get_native_link_state(
+                actor=_account_actor(context),
+                now=now,
+            )
+        except ExternalAccountLinkError:
+            return None, discord_account_link_state_unavailable()
+        return state, discord_account_link_presentation(
+            state=state,
+            origin_interaction_id=origin_interaction_id,
+            secret=self.config.auth.jwt.secret_key,
+            web_url=self.config.web_url,
+        )
+
+    async def _private_presentations(
+        self,
+        *,
+        settings: ExternalChannelParticipationSettings,
+        origin_interaction_id: str,
+        context: DiscordSettingsContext,
+        now: datetime.datetime,
+    ) -> DiscordPrivatePresentations:
+        account_state, account = await self._account_presentation(
+            origin_interaction_id=origin_interaction_id,
+            context=context,
+            now=now,
+        )
+        model = await self._model_presentation(
+            settings=settings,
+            account_state=account_state,
+            context=context,
+            now=now,
+        )
+        return DiscordPrivatePresentations(account=account, model=model)
+
+    async def _model_presentation(
+        self,
+        *,
+        settings: ExternalChannelParticipationSettings,
+        account_state: ExternalAccountNativeLinkState | None,
+        context: DiscordSettingsContext,
+        now: datetime.datetime,
+    ) -> DiscordModelSettingsPresentation:
+        target = _model_target(settings)
+        if (
+            account_state is None
+            or account_state.link is None
+            or account_state.link.state is not ExternalAccountLinkState.ACTIVE
+            or target is None
+        ):
+            return DiscordModelSettingsPresentation(summary=None, rows=[])
+        result = await self.model_settings_service.open_editor(
+            actor=_model_actor(context),
+            target=target,
+            owner_interaction_key=context.provider_interaction_id,
+            now=now,
+            offset=0,
+            limit=model_page_size(),
+        )
+        return discord_model_entry_presentation(
+            result=result,
+            secret=self.config.auth.jwt.secret_key,
+        )
 
 
 def _origin_matches(
@@ -434,20 +771,31 @@ def _settings_response(
     secret: str,
     web_url: str,
     response_type: Literal[4, 7],
+    personal: DiscordPrivatePresentations | None = None,
 ) -> dict[str, object]:
     title = (
         "Conversation setup" if settings.target == "setup" else "Conversation settings"
     )
-    description = _settings_description(settings)
+    description_parts = [_settings_description(settings)]
+    if personal is not None:
+        description_parts.append(personal.account.summary)
+        if personal.model.summary is not None:
+            description_parts.append(personal.model.summary)
+    description = "\n\n".join(description_parts)
+    components = _settings_components(
+        settings=settings,
+        origin_interaction_id=origin_interaction_id,
+        secret=secret,
+        session_url=_settings_session_url(settings=settings, web_url=web_url),
+    )
+    if personal is not None:
+        components.extend(personal.account.rows)
+        components.extend(personal.model.rows)
     data: dict[str, object] = {
         "content": description,
         "embeds": [{"title": title, "description": description, "color": 0x5865F2}],
-        "components": _settings_components(
-            settings=settings,
-            origin_interaction_id=origin_interaction_id,
-            secret=secret,
-            session_url=_settings_session_url(settings=settings, web_url=web_url),
-        ),
+        "components": components,
+        "allowed_mentions": {"parse": []},
     }
     if response_type == 4:
         data["flags"] = 64
@@ -725,6 +1073,135 @@ def _notice_response(message: str) -> dict[str, object]:
             "components": [],
         },
     }
+
+
+def _link_only_response(
+    *,
+    account: DiscordAccountLinkPresentation,
+    response_type: Literal[4, 7],
+) -> dict[str, object]:
+    description = (
+        f"Conversation settings are unavailable for this account.\n\n{account.summary}"
+    )
+    data: dict[str, object] = {
+        "content": description,
+        "embeds": [
+            {
+                "title": "Personal settings",
+                "description": description,
+                "color": 0x99AAB5,
+            }
+        ],
+        "components": account.rows,
+        "allowed_mentions": {"parse": []},
+    }
+    if response_type == 4:
+        data["flags"] = 64
+    return {"type": response_type, "data": data}
+
+
+def _private_control_unavailable_response() -> dict[str, object]:
+    description = "This private settings control is unavailable. Reopen settings."
+    return {
+        "type": 7,
+        "data": {
+            "content": description,
+            "embeds": [
+                {
+                    "title": "Private settings unavailable",
+                    "description": description,
+                    "color": 0x99AAB5,
+                }
+            ],
+            "components": [],
+            "allowed_mentions": {"parse": []},
+        },
+    }
+
+
+def _account_actor(context: DiscordSettingsContext) -> VerifiedExternalAccountActor:
+    return VerifiedExternalAccountActor(
+        connection_id=context.connection_id,
+        connection_configuration_generation=context.connection_configuration_generation,
+        principal_id=context.principal_id,
+        provider=ExternalChannelProvider.DISCORD,
+        provider_tenant_id=context.guild_id,
+        provider_tenant_display_label=context.guild_display_name,
+        provider_user_id=context.provider_user_id,
+        provider_display_label=context.provider_display_name,
+        provider_interaction_id=context.provider_interaction_id,
+        provider_channel_id=context.provider_parent_channel_id,
+        provider_thread_id=context.provider_thread_id,
+    )
+
+
+def _model_actor(context: DiscordSettingsContext) -> ExternalModelActorContext:
+    return ExternalModelActorContext(
+        provider=ExternalChannelProvider.DISCORD,
+        connection_id=context.connection_id,
+        configuration_generation=context.connection_configuration_generation,
+        principal_id=context.principal_id,
+        provider_tenant_id=context.guild_id,
+        provider_user_id=context.provider_user_id,
+        provider_display_name=context.provider_display_name,
+    )
+
+
+def _model_target(
+    settings: ExternalChannelParticipationSettings,
+) -> ExternalModelTargetContext | None:
+    binding = settings.binding
+    navigation = settings.session_navigation
+    if (
+        settings.target == "setup"
+        or binding is None
+        or navigation is None
+        or binding.agent_session_id != navigation.session_id
+    ):
+        return None
+    return ExternalModelTargetContext(
+        binding_id=binding.id,
+        session_id=navigation.session_id,
+        agent_id=navigation.agent_id,
+    )
+
+
+def _updated_model_selection(
+    *,
+    scope: DiscordModelSettingsScope,
+    selected_values: tuple[str, ...],
+    current: ExternalModelEditorReady,
+) -> ExternalModelDraftSelection:
+    existing = current.editor.draft.selection
+    if scope.action == "select_model":
+        if len(selected_values) != 1:
+            raise ValueError("Discord model selection is invalid.")
+        return ExternalModelDraftSelection(
+            option_id=selected_values[0],
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        )
+    if scope.action == "select_reasoning":
+        if len(selected_values) != 1:
+            raise ValueError("Discord model selection is invalid.")
+        return ExternalModelDraftSelection(
+            option_id=existing.option_id,
+            reasoning_effort=parse_reasoning_effort(selected_values[0]),
+            enabled_execution_options=existing.enabled_execution_options,
+        )
+    if scope.action == "select_execution":
+        try:
+            execution_options = [
+                ModelExecutionOptionId(value) for value in selected_values
+            ]
+        except ValueError as error:
+            raise ValueError("Discord model selection is invalid.") from error
+        return ExternalModelDraftSelection(
+            option_id=existing.option_id,
+            reasoning_effort=existing.reasoning_effort,
+            enabled_execution_options=execution_options,
+        )
+    raise AssertionError("Discord model selection action is not exhaustive.")
 
 
 def _location_label(location: ExternalChannelConversationLocation) -> str:

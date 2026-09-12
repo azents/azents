@@ -86,6 +86,11 @@ async def receive_discord_interaction(
             service.run_settings_component_handoff,
             result.settings_component_handoff,
         )
+    if result.private_settings_handoff is not None:
+        background_tasks.add_task(
+            service.run_private_settings_handoff,
+            result.private_settings_handoff,
+        )
     if result.response is not None:
         if result.control_plans:
             if result.control_delivery_connection_id is None:

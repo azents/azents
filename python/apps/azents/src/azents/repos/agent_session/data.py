@@ -79,6 +79,10 @@ class AgentSession(BaseModel):
         default=None,
         description="Agent-owned model intent applied to the Session",
     )
+    applied_profile_generation: int = Field(
+        ge=0,
+        description="Monotonic generation of accepted applied-profile replacements",
+    )
     session_kind: AgentSessionKind = Field(description="Session listing category")
     status: AgentSessionStatus = Field(description="AgentSession status")
     primary_kind: AgentSessionPrimaryKind | None = Field(

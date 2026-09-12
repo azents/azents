@@ -32,13 +32,20 @@ from azents.core.external_channel_provider import (
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
 )
+from azents.core.external_model_settings import ExternalModelActorContext
 from azents.repos.external_channel.data import (
+    ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
 from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.services.external_channel.slack_blocks import projected_slack_blocks
+from azents.services.external_channel.slack_native_protocol import (
+    NATIVE_ACTIONS,
+    SlackNativeControl,
+    decode_native_control,
+)
 from azents.services.scheduled_task.control import ScheduledTaskEditInput
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
@@ -144,6 +151,7 @@ class SlackInteractionCallback:
     app_id: str
     tenant_id: str
     actor_user_id: str
+    actor_display_name: str | None = field(repr=False)
     provider_interaction_key: str
     interaction_type: ExternalChannelInteractionType
     handler: Literal[
@@ -152,6 +160,7 @@ class SlackInteractionCallback:
         "selector_submission",
         "settings_open",
         "settings_submission",
+        "native_control",
         "scheduled_task_edit_open",
         "scheduled_task_edit_submission",
         "scheduled_task_delete",
@@ -164,6 +173,7 @@ class SlackInteractionCallback:
     resource_correlation_key: str | None
     projection: dict[str, object]
     expires_at: datetime.datetime
+    native_control: SlackNativeControl | None = field(repr=False)
     selector_metadata: str | None = field(default=None, repr=False)
     selected_route_id: str | None = field(default=None, repr=False)
     selector_navigation: Literal["search", "previous", "next"] | None = field(
@@ -200,7 +210,11 @@ class SlackInteractionCallback:
 
     def requires_settings_processing(self) -> bool:
         """Return whether this callback belongs to Slack conversation settings."""
-        return self.handler in {"settings_open", "settings_submission"}
+        return self.handler in {
+            "settings_open",
+            "settings_submission",
+            "native_control",
+        }
 
     def requires_provider_processing(
         self,
@@ -219,6 +233,29 @@ class SlackInteractionCallback:
         return (
             app_mode is ExternalChannelAppMode.MULTI
             and self.requires_selector_processing()
+        )
+
+    def verified_actor(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        principal_id: str | None,
+    ) -> ExternalModelActorContext:
+        """Capture verified ingress identity and its configuration generation."""
+        if (
+            principal_id is None
+            or self.tenant_id != configuration.provider_tenant_id
+            or self.app_id != configuration.provider_app_id
+        ):
+            raise SlackHTTPUnauthorized("Slack private actor is unavailable.")
+        return ExternalModelActorContext(
+            provider=ExternalChannelProvider.SLACK,
+            connection_id=configuration.id,
+            configuration_generation=configuration.configuration_generation,
+            principal_id=principal_id,
+            provider_tenant_id=self.tenant_id,
+            provider_user_id=self.actor_user_id,
+            provider_display_name=self.actor_display_name or self.actor_user_id,
         )
 
     def interaction_create(
@@ -252,7 +289,7 @@ class SlackInteractionCallback:
             provider_tenant_id=self.tenant_id,
             provider_user_id=self.actor_user_id,
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            display_name=None,
+            display_name=self.actor_display_name or self.actor_user_id,
             avatar_url=None,
             profile=None,
         )
@@ -402,6 +439,26 @@ def parse_slack_callback(
     )
 
 
+def _interaction_actor_display_name(payload: dict[str, object]) -> str | None:
+    """Read optional signed display data without using it as actor authority."""
+    user = payload.get("user")
+    values = (
+        (user.get("name"), user.get("username"))
+        if is_external_channel_projection(user)
+        else (payload.get("user_name"),)
+    )
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        normalized = " ".join(value.split())[:_MAX_SLACK_IDENTIFIER_LENGTH]
+        normalized = "".join(
+            character for character in normalized if character.isprintable()
+        )
+        if normalized:
+            return normalized
+    return None
+
+
 def parse_slack_interaction_payload(
     *,
     payload: dict[str, object],
@@ -478,13 +535,23 @@ def parse_slack_interaction_payload(
         interaction_type=interaction_type,
         handler=handler,
     )
+    native_control = None
+    if handler == "native_control":
+        try:
+            native_control = decode_native_control(
+                payload, action=action_id or callback_id or ""
+            )
+        except ValueError:
+            raise SlackHTTPInvalidPayload("Slack private control is invalid.") from None
     return SlackInteractionCallback(
         app_id=app_id,
         tenant_id=tenant_id,
         actor_user_id=actor_user_id,
+        actor_display_name=_interaction_actor_display_name(payload),
         provider_interaction_key=provider_interaction_key,
         interaction_type=interaction_type,
         handler=handler,
+        native_control=native_control,
         callback_id=callback_id,
         action_id=action_id,
         trigger_id=_optional_string(payload, "trigger_id"),
@@ -979,6 +1046,7 @@ def _interaction_handler(
     "selector_submission",
     "settings_open",
     "settings_submission",
+    "native_control",
     "scheduled_task_edit_open",
     "scheduled_task_edit_submission",
     "scheduled_task_delete",
@@ -1001,6 +1069,8 @@ def _interaction_handler(
                 return "settings_open"
             return "unsupported"
         case ExternalChannelInteractionType.BLOCK_ACTION:
+            if action_id in NATIVE_ACTIONS:
+                return "native_control"
             if action_id == "azents_agent_selector_open":
                 return "selector_open"
             if action_id in {
@@ -1019,6 +1089,8 @@ def _interaction_handler(
         case ExternalChannelInteractionType.OPTIONS:
             return "unsupported"
         case ExternalChannelInteractionType.VIEW_SUBMISSION:
+            if callback_id in {"azents_account_link_code", "azents_model_apply"}:
+                return "native_control"
             if callback_id == SLACK_SELECTOR_VIEW_CALLBACK_ID:
                 return "selector_submission"
             if callback_id in {

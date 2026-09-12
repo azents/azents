@@ -13,8 +13,8 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-12 | 76 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-12 | 166 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-12 | 76 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-12 | 167 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-12 | 78 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-10 | 24 |
@@ -35,15 +35,15 @@ Details of all living specs. Synchronized from frontmatter.
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 48 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
-| [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-07 | 25 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 61 |
-| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-08 | 44 |
-| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-10 | 61 |
+| [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-12 | 26 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
+| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
+| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-12 | 62 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-12 | 49 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-10 | 18 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-12 | 19 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-12 | 35 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-12 | 21 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 58 |

@@ -53,7 +53,11 @@ from azents.services.external_channel.discord_settings import (
     DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
+    DiscordAccountLinkScope,
+    DiscordModelSettingsScope,
     DiscordSettingsScope,
+    parse_discord_account_link_custom_id,
+    parse_discord_model_settings_custom_id,
     parse_discord_settings_custom_id,
 )
 from azents.services.external_channel.shortcut_source import (
@@ -84,6 +88,20 @@ class DiscordSettingsComponentHandoff:
 
 
 @dataclass(frozen=True)
+class DiscordPrivateSettingsHandoff:
+    """Claimed private control completed after the initial Discord ACK."""
+
+    interaction_id: str
+    application_id: str
+    interaction_token: str = field(repr=False)
+    scope: DiscordAccountLinkScope | DiscordModelSettingsScope = field(repr=False)
+    selected_values: tuple[str, ...] = field(repr=False)
+    account_link_code: str | None = field(repr=False)
+    context: DiscordSettingsContext = field(repr=False)
+    received_at: datetime.datetime
+
+
+@dataclass(frozen=True)
 class DiscordHTTPAdmissionResult:
     """Verified Discord interaction result before provider acknowledgement."""
 
@@ -93,6 +111,10 @@ class DiscordHTTPAdmissionResult:
     control_plans: tuple[ProviderEffectPlan, ...] = ()
     control_delivery_connection_id: str | None = None
     settings_component_handoff: DiscordSettingsComponentHandoff | None = field(
+        default=None,
+        repr=False,
+    )
+    private_settings_handoff: DiscordPrivateSettingsHandoff | None = field(
         default=None,
         repr=False,
     )
@@ -203,7 +225,7 @@ class DiscordHTTPAdmissionService:
             raise RuntimeError("Discord interaction principal is unavailable.")
         context = _settings_context(
             envelope=envelope,
-            connection_id=configuration.id,
+            configuration=configuration,
             principal_id=principal_id,
         )
         if envelope.component_custom_id is not None:
@@ -271,6 +293,14 @@ class DiscordHTTPAdmissionService:
                 context=context,
                 received_at=received_at,
             )
+        if custom_id.startswith(("al1:", "ms1:")):
+            return await self._private_settings_component_result(
+                envelope=envelope,
+                admission=admission,
+                context=context,
+                received_at=received_at,
+                account_link_code=None,
+            )
         if not custom_id.startswith("a:"):
             return await self._unsupported_result(
                 envelope=envelope,
@@ -327,6 +357,139 @@ class DiscordHTTPAdmissionService:
             control_delivery_connection_id=(
                 context.connection_id if response.cleanup_plans else None
             ),
+        )
+
+    async def _private_settings_component_result(
+        self,
+        *,
+        envelope: DiscordInteractionEnvelope,
+        admission: ExternalChannelInteractionAdmission,
+        context: DiscordSettingsContext,
+        received_at: datetime.datetime,
+        account_link_code: str | None,
+    ) -> DiscordHTTPAdmissionResult:
+        """Run only an immediate native private control such as modal opening."""
+        custom_id = envelope.component_custom_id or envelope.modal_custom_id
+        if custom_id is None:
+            raise AssertionError("Discord private settings dispatch is incomplete.")
+        claim = await self.admission_service.begin_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            now=received_at,
+        )
+        if claim is None or not claim.claimed:
+            return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
+        try:
+            scope = self._parse_private_settings_scope(custom_id)
+            response = await self._run_private_settings(
+                scope=scope,
+                selected_values=envelope.selected_values,
+                account_link_code=account_link_code,
+                context=context,
+                received_at=received_at,
+            )
+        except ValueError:
+            await self.admission_service.finish_interaction_provider_mutation(
+                interaction_id=admission.interaction.id,
+                status=ExternalChannelInteractionStatus.REJECTED,
+                error_kind="private_settings_scope_invalid",
+                error_summary="Discord private settings scope is invalid.",
+            )
+            return DiscordHTTPAdmissionResult(
+                envelope=envelope,
+                admission=admission,
+                response=_private_settings_unavailable_component_response(),
+            )
+        except Exception:
+            await self._finish_private_settings_failure(admission.interaction.id)
+            raise
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            status=ExternalChannelInteractionStatus.COMPLETED,
+            error_kind=None,
+            error_summary=None,
+        )
+        return DiscordHTTPAdmissionResult(
+            envelope=envelope,
+            admission=admission,
+            response=response.response,
+        )
+
+    async def run_private_settings_handoff(
+        self,
+        handoff: DiscordPrivateSettingsHandoff,
+    ) -> None:
+        """Complete claimed private work after its valid initial ACK."""
+        try:
+            response = await self._run_private_settings(
+                scope=handoff.scope,
+                selected_values=handoff.selected_values,
+                account_link_code=handoff.account_link_code,
+                context=handoff.context,
+                received_at=handoff.received_at,
+            )
+            await self.interaction_response_client.edit_original(
+                application_id=handoff.application_id,
+                interaction_token=handoff.interaction_token,
+                response=response.response,
+            )
+        except Exception:
+            await self._finish_private_settings_failure(handoff.interaction_id)
+            raise
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=handoff.interaction_id,
+            status=ExternalChannelInteractionStatus.COMPLETED,
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def _run_private_settings(
+        self,
+        *,
+        scope: DiscordAccountLinkScope | DiscordModelSettingsScope,
+        selected_values: tuple[str, ...],
+        account_link_code: str | None,
+        context: DiscordSettingsContext,
+        received_at: datetime.datetime,
+    ) -> DiscordSettingsResponse:
+        if isinstance(scope, DiscordAccountLinkScope):
+            return await self.settings_response_service.account_link_response(
+                scope=scope,
+                code=account_link_code,
+                context=context,
+                now=received_at,
+            )
+        if account_link_code is not None:
+            raise ValueError("Discord model settings control is invalid.")
+        return await self.settings_response_service.model_response(
+            scope=scope,
+            selected_values=selected_values,
+            context=context,
+            now=received_at,
+        )
+
+    def _parse_private_settings_scope(
+        self,
+        custom_id: str,
+    ) -> DiscordAccountLinkScope | DiscordModelSettingsScope:
+        secret = self.settings_response_service.config.auth.jwt.secret_key
+        if custom_id.startswith("al1:"):
+            return parse_discord_account_link_custom_id(
+                custom_id=custom_id,
+                secret=secret,
+            )
+        if custom_id.startswith("ms1:"):
+            return parse_discord_model_settings_custom_id(
+                custom_id=custom_id,
+                secret=secret,
+            )
+        raise ValueError("Discord private settings control is invalid.")
+
+    async def _finish_private_settings_failure(self, interaction_id: str) -> None:
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=interaction_id,
+            status=ExternalChannelInteractionStatus.FAILED,
+            error_kind="private_settings_component_failed",
+            error_summary="Discord private settings component could not be processed.",
         )
 
     async def run_settings_component_handoff(
@@ -543,6 +706,19 @@ class DiscordHTTPAdmissionService:
         received_at: datetime.datetime,
     ) -> DiscordHTTPAdmissionResult:
         custom_id = envelope.modal_custom_id
+        if custom_id is not None and custom_id.startswith("al1:"):
+            submission = envelope.account_link_code_submission
+            if submission is None:
+                raise DiscordInteractionInvalidPayload(
+                    "Discord account-link submission is invalid."
+                )
+            return await self._private_settings_component_result(
+                envelope=envelope,
+                admission=admission,
+                context=context,
+                received_at=received_at,
+                account_link_code=submission.code,
+            )
         if custom_id is None or not custom_id.startswith("a:"):
             return await self._unsupported_result(
                 envelope=envelope,
@@ -555,15 +731,19 @@ class DiscordHTTPAdmissionService:
                 interaction_type=3,
                 application_id=envelope.application_id,
                 guild_id=envelope.guild_id,
+                guild_display_name=envelope.guild_display_name,
                 channel_id=envelope.channel_id,
                 provider_parent_channel_id=envelope.provider_parent_channel_id,
                 provider_thread_id=envelope.provider_thread_id,
                 actor_user_id=envelope.actor_user_id,
+                actor_display_name=envelope.actor_display_name,
                 command=None,
                 message_command_source=None,
                 component_custom_id=custom_id,
                 selected_value=None,
+                selected_values=(),
                 modal_custom_id=None,
+                account_link_code_submission=None,
                 scheduled_task_edit=None,
             ),
             admission=admission,
@@ -687,6 +867,7 @@ class DiscordHTTPAdmissionService:
             response = await self.settings_response_service.initial_response(
                 origin_interaction_id=admission.interaction.id,
                 context=context,
+                now=received_at,
             )
         except Exception:
             await self.admission_service.finish_interaction_provider_mutation(
@@ -761,7 +942,7 @@ class DiscordHTTPDispatcherResolver:
 
 @dataclass
 class DiscordHTTPIngressService:
-    """Acknowledge setup controls before resolving the heavy replay graph."""
+    """Acknowledge slow controls before resolving the heavy replay graph."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -790,7 +971,7 @@ class DiscordHTTPIngressService:
         signature: str | None,
         received_at: datetime.datetime,
     ) -> DiscordHTTPAdmissionResult:
-        """Authenticate once and defer only slow setup component processing."""
+        """Authenticate once and defer slow provider-private processing."""
         authenticated = await _authenticate_discord_interaction(
             selector=selector,
             raw_body=raw_body,
@@ -824,7 +1005,7 @@ class DiscordHTTPIngressService:
                 )
             context = _settings_context(
                 envelope=envelope,
-                connection_id=authenticated.configuration.id,
+                configuration=authenticated.configuration,
                 principal_id=principal_id,
             )
             claim = await self.admission_service.begin_interaction_provider_mutation(
@@ -849,6 +1030,62 @@ class DiscordHTTPIngressService:
                     received_at=received_at,
                 ),
             )
+        private_custom_id = envelope.component_custom_id or envelope.modal_custom_id
+        private_scope = _optional_discord_private_settings_scope(
+            custom_id=private_custom_id,
+            secret=self.config.auth.jwt.secret_key,
+        )
+        modal_open = (
+            envelope.component_custom_id is not None
+            and isinstance(private_scope, DiscordAccountLinkScope)
+            and private_scope.action == "enter_code"
+        )
+        if private_scope is not None and not modal_open:
+            acknowledgement = _private_settings_deferred_response(
+                envelope.interaction_type
+            )
+            principal_id = admission.interaction.principal_id
+            if not isinstance(principal_id, str) or not principal_id:
+                raise RuntimeError("Discord interaction principal is unavailable.")
+            if authenticated.interaction_token is None:
+                raise DiscordInteractionInvalidPayload(
+                    "Discord private interaction token is unavailable."
+                )
+            claim = await self.admission_service.begin_interaction_provider_mutation(
+                interaction_id=admission.interaction.id,
+                now=received_at,
+            )
+            if claim is None or not claim.claimed:
+                return DiscordHTTPAdmissionResult(
+                    envelope=envelope,
+                    admission=admission,
+                    response=acknowledgement,
+                )
+            context = _settings_context(
+                envelope=envelope,
+                configuration=authenticated.configuration,
+                principal_id=principal_id,
+            )
+            account_link_code = (
+                None
+                if envelope.account_link_code_submission is None
+                else envelope.account_link_code_submission.code
+            )
+            return DiscordHTTPAdmissionResult(
+                envelope=envelope,
+                admission=admission,
+                response=acknowledgement,
+                private_settings_handoff=DiscordPrivateSettingsHandoff(
+                    interaction_id=admission.interaction.id,
+                    application_id=envelope.application_id,
+                    interaction_token=authenticated.interaction_token,
+                    scope=private_scope,
+                    selected_values=envelope.selected_values,
+                    account_link_code=account_link_code,
+                    context=context,
+                    received_at=received_at,
+                ),
+            )
         async with self.dispatcher_resolver.open() as dispatcher:
             return await dispatcher.dispatch_authenticated(
                 authenticated=authenticated,
@@ -862,6 +1099,14 @@ class DiscordHTTPIngressService:
         """Resolve and run the replay graph after Discord acknowledgement."""
         async with self.dispatcher_resolver.open() as dispatcher:
             await dispatcher.run_settings_component_handoff(handoff)
+
+    async def run_private_settings_handoff(
+        self,
+        handoff: DiscordPrivateSettingsHandoff,
+    ) -> None:
+        """Resolve and complete claimed private work after its initial ACK."""
+        async with self.dispatcher_resolver.open() as dispatcher:
+            await dispatcher.run_private_settings_handoff(handoff)
 
     async def attempt_control_delivery(
         self,
@@ -980,24 +1225,71 @@ def _optional_discord_settings_scope(
         return None
 
 
+def _optional_discord_private_settings_scope(
+    *,
+    custom_id: str | None,
+    secret: str,
+) -> DiscordAccountLinkScope | DiscordModelSettingsScope | None:
+    """Parse a valid private scope without running its business operation."""
+    if custom_id is None:
+        return None
+    try:
+        if custom_id.startswith("al1:"):
+            return parse_discord_account_link_custom_id(
+                custom_id=custom_id,
+                secret=secret,
+            )
+        if custom_id.startswith("ms1:"):
+            return parse_discord_model_settings_custom_id(
+                custom_id=custom_id,
+                secret=secret,
+            )
+    except ValueError:
+        return None
+    return None
+
+
+def _private_settings_deferred_response(
+    interaction_type: int,
+) -> dict[str, object]:
+    if interaction_type == 3:
+        return {"type": 6}
+    if interaction_type == 5:
+        return {"type": 5, "data": {"flags": 64}}
+    raise DiscordInteractionInvalidPayload(
+        "Discord private interaction type is invalid."
+    )
+
+
 def _settings_context(
     *,
     envelope: DiscordInteractionEnvelope,
-    connection_id: str,
+    configuration: ExternalChannelConnectionConfiguration,
     principal_id: str,
 ) -> DiscordSettingsContext:
-    if envelope.guild_id is None or envelope.provider_parent_channel_id is None:
+    if (
+        envelope.guild_id is None
+        or envelope.provider_parent_channel_id is None
+        or envelope.actor_user_id is None
+        or envelope.actor_display_name is None
+    ):
         raise DiscordInteractionInvalidPayload("Discord settings scope is unavailable.")
     return DiscordSettingsContext(
-        connection_id=connection_id,
+        connection_id=configuration.id,
+        connection_configuration_generation=configuration.configuration_generation,
         guild_id=envelope.guild_id,
+        guild_display_name=envelope.guild_display_name,
         provider_parent_channel_id=envelope.provider_parent_channel_id,
+        provider_thread_id=envelope.provider_thread_id,
         provider_thread_resource_key=(
             None
             if envelope.provider_thread_id is None
             else f"discord:{envelope.guild_id}:{envelope.provider_thread_id}"
         ),
         principal_id=principal_id,
+        provider_user_id=envelope.actor_user_id,
+        provider_display_name=envelope.actor_display_name,
+        provider_interaction_id=envelope.interaction_id,
     )
 
 
@@ -1056,5 +1348,16 @@ def _scheduled_task_unavailable_component_response() -> dict[str, object]:
         "data": {
             "content": "This Scheduled Task control is unavailable.",
             "components": [],
+        },
+    }
+
+
+def _private_settings_unavailable_component_response() -> dict[str, object]:
+    return {
+        "type": 7,
+        "data": {
+            "content": "This private settings control is unavailable.",
+            "components": [],
+            "allowed_mentions": {"parse": []},
         },
     }

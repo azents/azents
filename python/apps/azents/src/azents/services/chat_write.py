@@ -6,7 +6,6 @@ from typing import Annotated, NamedTuple, assert_never
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -41,6 +40,9 @@ from azents.repos.chat_write_request.data import (
 )
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
+from azents.repos.session_model_profile.repository import (
+    SessionModelProfileRepository,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.exchange_file import (
     ExchangeFileService,
@@ -51,17 +53,6 @@ from azents.services.exchange_file import (
     FileUnavailable,
 )
 from azents.services.mailbox import MailboxEnqueue, MailboxService
-
-_EXECUTION_OPTIONS_ADAPTER = TypeAdapter(list[ModelExecutionOptionId])
-
-
-def _stored_enabled_execution_options(
-    payload: dict[str, object],
-) -> list[ModelExecutionOptionId]:
-    """Decode historical model-profile payloads with all-off option intent."""
-    return _EXECUTION_OPTIONS_ADAPTER.validate_python(
-        payload.get("enabled_execution_options", [])
-    )
 
 
 def _raise_attachment_claim_error(error: object) -> None:
@@ -159,6 +150,9 @@ class ChatWriteService:
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+    session_model_profile_repository: Annotated[
+        SessionModelProfileRepository, Depends(SessionModelProfileRepository)
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -570,113 +564,28 @@ class ChatWriteService:
         payload: dict[str, object],
     ) -> AcceptedModelProfile:
         """Replace a root Session's applied model profile idempotently."""
-        async with self.session_manager() as session:
-            locked = await self._lock_and_reauthorize_session(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-            )
-            existing = await self._get_existing_idempotent_record(
-                session,
-                session_id=session_id,
-                user_id=user_id,
-                client_request_id=client_request_id,
-                write_type=ChatWriteRequestType.MODEL_PROFILE,
-                payload=payload,
-            )
-            if existing is not None:
-                existing_label = existing.payload.get("model_target_label")
-                existing_effort = existing.payload.get("reasoning_effort")
-                if not isinstance(existing_label, str):
-                    raise RuntimeError("Stored model-profile payload is invalid")
-                parsed_effort = (
-                    ModelReasoningEffort(existing_effort)
-                    if isinstance(existing_effort, str)
-                    else None
-                )
-                return AcceptedModelProfile(
-                    request=AcceptedChatWriteRequest(
-                        session_id=existing.session_id,
-                        record=existing,
-                        created=False,
-                    ),
-                    model_target_label=existing_label,
-                    reasoning_effort=parsed_effort,
-                    enabled_execution_options=_stored_enabled_execution_options(
-                        existing.payload
-                    ),
-                )
-
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.workspace_id != locked.workspace_id
-            ):
-                raise ValueError("AgentSession is not active")
-            validate_requested_profile_against_options(
-                agent.selectable_model_options,
-                RequestedInferenceProfile(
-                    model_target_label=model_target_label,
-                    reasoning_effort=reasoning_effort,
-                    enabled_execution_options=enabled_execution_options,
-                ),
-            )
-
-            record, created = await self._create_idempotent_record(
-                session,
-                session_id=session_id,
-                user_id=user_id,
-                client_request_id=client_request_id,
-                write_type=ChatWriteRequestType.MODEL_PROFILE,
-                accepted_type=ChatWriteRequestType.MODEL_PROFILE,
-                accepted_id=session_id,
-                history_reload_required=False,
-                payload=payload,
-            )
-            if not created:
-                existing_label = record.payload.get("model_target_label")
-                existing_effort = record.payload.get("reasoning_effort")
-                if not isinstance(existing_label, str):
-                    raise RuntimeError("Stored model-profile payload is invalid")
-                parsed_effort = (
-                    ModelReasoningEffort(existing_effort)
-                    if isinstance(existing_effort, str)
-                    else None
-                )
-                return AcceptedModelProfile(
-                    request=AcceptedChatWriteRequest(
-                        session_id=record.session_id,
-                        record=record,
-                        created=False,
-                    ),
-                    model_target_label=existing_label,
-                    reasoning_effort=parsed_effort,
-                    enabled_execution_options=_stored_enabled_execution_options(
-                        record.payload
-                    ),
-                )
-
-            updated = await self.agent_session_repository.set_applied_inference_profile(
-                session,
-                session_id=session_id,
+        replacement = await self.session_model_profile_repository.replace_web_profile(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            client_request_id=client_request_id,
+            profile=RequestedInferenceProfile(
                 model_target_label=model_target_label,
                 reasoning_effort=reasoning_effort,
                 enabled_execution_options=enabled_execution_options,
-            )
-            if updated.id != locked.id:
-                raise RuntimeError("AgentSession model profile target changed")
+            ),
+            payload=payload,
+        )
 
         return AcceptedModelProfile(
             request=AcceptedChatWriteRequest(
-                session_id=record.session_id,
-                record=record,
-                created=True,
+                session_id=replacement.session_id,
+                record=replacement.record,
+                created=replacement.created,
             ),
-            model_target_label=model_target_label,
-            reasoning_effort=reasoning_effort,
-            enabled_execution_options=enabled_execution_options,
+            model_target_label=replacement.model_target_label,
+            reasoning_effort=replacement.reasoning_effort,
+            enabled_execution_options=replacement.enabled_execution_options,
         )
 
     def _validate_failed_run_retry_target(

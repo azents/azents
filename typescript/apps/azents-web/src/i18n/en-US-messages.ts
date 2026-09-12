@@ -7,6 +7,7 @@ import chatPreview from "../../messages/en-US/chatPreview.json";
 import common from "../../messages/en-US/common.json";
 import cta from "../../messages/en-US/cta.json";
 import elevation from "../../messages/en-US/elevation.json";
+import externalAccountLinks from "../../messages/en-US/externalAccountLinks.json";
 import externalChannelApproval from "../../messages/en-US/externalChannelApproval.json";
 import features from "../../messages/en-US/features.json";
 import footer from "../../messages/en-US/footer.json";
@@ -35,6 +36,7 @@ const messages = composeMessages([
   ["common", common],
   ["cta", cta],
   ["elevation", elevation],
+  ["externalAccountLinks", externalAccountLinks],
   ["externalChannelApproval", externalChannelApproval],
   ["features", features],
   ["footer", footer],

@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/management_operations.py
   - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/src/azents/rdb/models/external_model_settings.py
   - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
@@ -39,8 +40,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-08
-spec_version: 44
+last_verified_at: 2026-09-12
+spec_version: 45
 ---
 
 # External Channel Lifecycle
@@ -281,14 +282,20 @@ Channel roots exist outside that earlier snapshot.
 
 - **Prepare** validates the terminal owner-local state without provider execution.
 - **Cleanup** deletes access decisions tied directly to the Session, binding-specific
-  External Channel Work Toolkit State values, and bindings in restrictive ownership
-  order.
+  External Channel Work Toolkit State values, actor-private external model drafts,
+  and bindings in restrictive ownership order. Immutable model mutation audit remains
+  Session-owned and is removed only by the final AgentSession cascade after required
+  cleanup is verified.
 - **Verify/finalize** rejects AgentSession tree finalization while actionable bindings
   or binding-specific Work Toolkit State remain. Generic Session ownership remains
   the final database cascade boundary for any other Toolkit State.
 
 Connection, route, resource, conversation-position, principal, interaction,
 Agent-scoped grant, and block roots are not cascade-deleted through AgentSession.
+Workspace/User deletion cascades account links and transient proof rows within their
+own ownership boundary without modifying principals, grants, blocks, messages, or
+provider conversation history. Unlink only timestamps the link and never deletes
+historical model mutation snapshots.
 
 ## Agent Decommission
 
@@ -333,6 +340,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 45) — Added Session purge ordering for private
+  external model drafts and clarified Workspace/User link-proof cleanup and retained
+  mutation-history boundaries.
 - **2026-09-08** (spec_version 44) — Moved direct management transaction ownership
   into completed repository operations while preserving two-stage Single App
   disconnect and post-commit provider effects.

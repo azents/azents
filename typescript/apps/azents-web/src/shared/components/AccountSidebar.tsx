@@ -7,7 +7,12 @@
  * Rendered as fixed sidebar on desktop and inside Drawer on mobile.
  */
 import { Divider, NavLink, Stack } from "@mantine/core";
-import { IconLayoutGrid, IconShield, IconUser } from "@tabler/icons-react";
+import {
+  IconLayoutGrid,
+  IconPlugConnected,
+  IconShield,
+  IconUser,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -24,6 +29,7 @@ export function AccountSidebar({
   const pathname = usePathname();
 
   const isAccount = pathname === "/account";
+  const isExternalAccounts = pathname === "/account/external-accounts";
   const isSecurity = pathname === "/account/security";
 
   return (
@@ -47,6 +53,14 @@ export function AccountSidebar({
         label={t("general")}
         leftSection={<IconUser size={18} />}
         active={isAccount}
+        onClick={onNavigate}
+      />
+      <NavLink
+        component={Link}
+        href="/account/external-accounts"
+        label={t("externalAccounts")}
+        leftSection={<IconPlugConnected size={18} />}
+        active={isExternalAccounts}
         onClick={onNavigate}
       />
       <NavLink

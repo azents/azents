@@ -330,11 +330,12 @@ class DiscordPyInteractionResponseClient:
             raise DiscordSDKRequestRejected(
                 "Discord interaction response embeds are invalid."
             )
-        if components is not None and components != []:
+        if components is not None and not isinstance(components, list):
             raise DiscordSDKRequestRejected(
-                "Deferred Discord interaction response components are unsupported."
+                "Discord interaction response components are invalid."
             )
         try:
+            view = _sdk_view(components)
             webhook = discord.Webhook.partial(
                 int(application_id),
                 interaction_token,
@@ -352,7 +353,8 @@ class DiscordPyInteractionResponseClient:
                         if isinstance(item, dict)
                     ]
                 ),
-                view=None,
+                view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         except (TypeError, ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
@@ -1255,15 +1257,29 @@ def _sdk_embeds(
 
 
 def _sdk_view(components: list[dict[str, object]] | None) -> discord.ui.View | None:
-    if components is None:
+    if not components:
         return None
+    if len(components) > 5:
+        raise ValueError("Discord component rows exceed the provider limit.")
     view = discord.ui.View(timeout=None)
     for row_index, row in enumerate(components):
         row_components = row.get("components")
-        if row.get("type") != 1 or not isinstance(row_components, list):
+        if (
+            row.get("type") != 1
+            or not isinstance(row_components, list)
+            or not row_components
+            or len(row_components) > 5
+        ):
             raise ValueError("Discord component row is invalid.")
         for item in row_components:
-            if not isinstance(item, dict) or item.get("type") != 2:
+            if not isinstance(item, dict):
+                raise ValueError("Discord component is unsupported.")
+            if item.get("type") == 3:
+                if len(row_components) != 1:
+                    raise ValueError("Discord Select row is invalid.")
+                view.add_item(_sdk_select(item, row=row_index))
+                continue
+            if item.get("type") != 2:
                 raise ValueError("Discord component is unsupported.")
             style = item.get("style")
             if not isinstance(style, int):
@@ -1282,6 +1298,68 @@ def _sdk_view(components: list[dict[str, object]] | None) -> discord.ui.View | N
                 )
             )
     return view
+
+
+def _sdk_select(item: dict[str, object], *, row: int) -> discord.ui.Select:
+    custom_id = item.get("custom_id")
+    placeholder = item.get("placeholder")
+    min_values = item.get("min_values")
+    max_values = item.get("max_values")
+    raw_options = item.get("options")
+    if (
+        not isinstance(custom_id, str)
+        or not custom_id
+        or len(custom_id) > 100
+        or placeholder is not None
+        and (not isinstance(placeholder, str) or len(placeholder) > 150)
+        or not isinstance(min_values, int)
+        or isinstance(min_values, bool)
+        or not isinstance(max_values, int)
+        or isinstance(max_values, bool)
+        or min_values < 0
+        or max_values < 1
+        or min_values > max_values
+        or max_values > 25
+        or not isinstance(raw_options, list)
+        or not raw_options
+        or len(raw_options) > 25
+    ):
+        raise ValueError("Discord Select is invalid.")
+    options: list[discord.SelectOption] = []
+    for raw_option in raw_options:
+        if not isinstance(raw_option, dict):
+            raise ValueError("Discord Select option is invalid.")
+        label = raw_option.get("label")
+        value = raw_option.get("value")
+        description = raw_option.get("description")
+        if (
+            not isinstance(label, str)
+            or not label
+            or len(label) > 100
+            or not isinstance(value, str)
+            or not value
+            or len(value) > 100
+            or description is not None
+            and (not isinstance(description, str) or len(description) > 100)
+        ):
+            raise ValueError("Discord Select option is invalid.")
+        options.append(
+            discord.SelectOption(
+                label=label,
+                value=value,
+                description=description,
+                default=raw_option.get("default") is True,
+            )
+        )
+    return discord.ui.Select(
+        custom_id=custom_id,
+        placeholder=placeholder,
+        min_values=min_values,
+        max_values=max_values,
+        options=options,
+        disabled=item.get("disabled") is True,
+        row=row,
+    )
 
 
 def _sdk_button_style(value: int) -> discord.ButtonStyle:

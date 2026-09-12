@@ -21,12 +21,17 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
+  - python/apps/azents/src/azents/services/external_channel/model_settings.py
+  - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/external_channel/repository.py
+  - python/apps/azents/src/azents/repos/external_channel/model_settings.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
+  - python/apps/azents/src/azents/repos/external_account_link/**
+  - python/apps/azents/src/azents/repos/session_model_profile/**
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/broker/types.py
@@ -37,8 +42,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-09-07
-spec_version: 25
+last_verified_at: 2026-09-12
+spec_version: 26
 ---
 
 # External Channel Authorization
@@ -226,12 +231,43 @@ response may expose `View session` only from the authorized route's exact connec
 Binding, current Agent, and current Workspace; parent settings omit navigation when
 there is no single parent Binding.
 
+## Linked Account and Shared Model Settings Authorization
+
+Optional external-account linking is an additional identity proof, not an admission
+policy. Every existing principal grant, block, open-access decision, setup control,
+response mode, and location mutation remains authorized independently. An unlinked
+human retains those guest capabilities, and a link never makes the provider
+principal an execution User.
+
+The native link origin is created only from a verified human Slack or Discord
+interaction and binds connection generation, provider tenant/user identity,
+principal, and original interaction. The browser locator carries no identity proof.
+An elevated Azents User stages an immutable candidate bound to the current auth
+Session; only a hash of its one-time code is durable. The original signed provider
+actor proves the code, and the same live elevated User/auth Session explicitly
+confirms the candidate. Finalization locks and revalidates current account,
+membership, origin/candidate, connection generation, and active uniqueness in one
+commit. Conflicts and cross-user lookup remain nondisclosing.
+
+A linked human may open and Apply private model settings only for the exact connected
+Binding and root Session for which both provider participation and current
+web-equivalent User authority succeed. The operation revalidates active User,
+membership, link, connection, Resource, Binding, Session, Agent, model options,
+grant/block policy, actor and draft ownership. Relevant revoke, block, membership,
+account, unlink, archive, and connection writes share row or transaction fences.
+Native lock acquisition is nonblocking and the complete DB-only operation has a
+bounded retry; exhaustion returns a retryable busy result without mutation or
+provider I/O. An observed applied-profile generation rejects stale and ABA drafts.
+
 ## Revocation
 
 Agent administrators can revoke active grants or remove blocks. Grant revocation
 locks and deletes the selected grant row, preventing future invocation without
 deleting canonical messages, projected Session history, or unrelated grants.
 Binding and connection disconnect remain separate lifecycle operations.
+Owner unlink is terminal and immediately removes future link-based model authority,
+but does not alter guest grants/blocks, prior messages, the already-committed shared
+profile, or immutable mutation audit.
 
 ## Scheduled Task Authorization
 
@@ -249,6 +285,9 @@ Session cannot mutate the Task.
 
 ## Changelog
 
+- **2026-09-12** (spec_version 26) — Added two-sided external-account proof and
+  exact-target linked User model-setting authorization while preserving independent
+  provider-principal admission, guest grants, blocks, and execution identity.
 - **2026-08-16** (spec_version 24) — Added fail-closed exact-Binding authority for
   Scheduled Task management and signed provider controls.
 

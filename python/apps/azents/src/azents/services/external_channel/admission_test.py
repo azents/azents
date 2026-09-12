@@ -157,6 +157,8 @@ async def test_post_claim_mutation_terminalizes_once_without_trigger_retention(
         yield cast(AsyncSession, session)
 
     handoff = ExternalChannelInteractionHandoff(
+        native_control=None,
+        verified_actor=None,
         interaction_id="interaction-1",
         handler="selector_open",
         provider_parent_channel_id=None,
@@ -313,6 +315,8 @@ async def test_provider_mutation_timeout_terminalizes_without_replay() -> None:
         processing_lease=datetime.timedelta(seconds=1),
     ).run_interaction_provider_mutation(
         handoff=ExternalChannelInteractionHandoff(
+            native_control=None,
+            verified_actor=None,
             interaction_id="interaction-1",
             handler="selector_open",
             provider_parent_channel_id=None,

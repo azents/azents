@@ -14,6 +14,7 @@ export const MESSAGE_NAMESPACES = [
   "common",
   "cta",
   "elevation",
+  "externalAccountLinks",
   "externalChannelApproval",
   "features",
   "footer",

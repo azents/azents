@@ -38,6 +38,9 @@ MAX_DISCORD_INTERACTION_BODY_BYTES = 256 * 1024
 DISCORD_INTERACTION_TTL = datetime.timedelta(minutes=15)
 _DISCORD_MESSAGE_COMMAND_TYPE = 3
 _DISCORD_THREAD_CHANNEL_TYPES = {10, 11, 12}
+_DISCORD_ACCOUNT_LINK_MODAL_PREFIX = "al1:e:"
+_DISCORD_ACCOUNT_LINK_CODE_COMPONENT_ID = "azents_account_link_code"
+_MAX_DISCORD_ACCOUNT_LINK_CODE_LENGTH = 128
 
 
 class DiscordInteractionError(ValueError):
@@ -82,6 +85,21 @@ class DiscordApplicationCommand:
 
 
 @dataclass(frozen=True)
+class DiscordAccountLinkCodeSubmission:
+    """One request-local account-link code extracted from a signed modal."""
+
+    code: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class DiscordInteractionActor:
+    """Bounded Discord human identity derived from the signed interaction."""
+
+    user_id: str
+    display_name: str
+
+
+@dataclass(frozen=True)
 class DiscordInteractionEnvelope:
     """Minimal, content-free facts needed to dispatch one authenticated interaction."""
 
@@ -89,17 +107,22 @@ class DiscordInteractionEnvelope:
     interaction_type: int
     application_id: str
     guild_id: str | None
+    guild_display_name: str | None
     channel_id: str | None
     provider_parent_channel_id: str | None
     provider_thread_id: str | None
     actor_user_id: str | None
+    actor_display_name: str | None
     command: DiscordApplicationCommand | None
     message_command_source: dict[str, object] | None
     component_custom_id: str | None
     selected_value: str | None
+    selected_values: tuple[str, ...]
     modal_custom_id: str | None
+    account_link_code_submission: DiscordAccountLinkCodeSubmission | None = field(
+        repr=False,
+    )
     scheduled_task_edit: ScheduledTaskEditInput | None = field(
-        default=None,
         repr=False,
     )
 
@@ -331,13 +354,19 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         provider_parent_channel_id=provider_parent_channel_id,
         provider_thread_id=provider_thread_id,
     )
-    component_custom_id, selected_value = _component(
+    component_custom_id, selected_value, selected_values = _component(
         payload=payload,
         interaction_type=interaction_type,
     )
     modal_custom_id = _modal_custom_id(
         payload=payload,
         interaction_type=interaction_type,
+    )
+    actor = _actor_identity(payload)
+    account_link_code_submission = _account_link_code_submission(
+        payload=payload,
+        interaction_type=interaction_type,
+        modal_custom_id=modal_custom_id,
     )
     scheduled_task_edit = _scheduled_task_edit(
         payload=payload,
@@ -349,15 +378,19 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         interaction_type=interaction_type,
         application_id=application_id,
         guild_id=guild_id,
+        guild_display_name=_guild_display_name(payload),
         channel_id=channel_id,
         provider_parent_channel_id=provider_parent_channel_id,
         provider_thread_id=provider_thread_id,
-        actor_user_id=_actor_user_id(payload),
+        actor_user_id=None if actor is None else actor.user_id,
+        actor_display_name=None if actor is None else actor.display_name,
         command=command,
         message_command_source=message_command_source,
         component_custom_id=component_custom_id,
         selected_value=selected_value,
+        selected_values=selected_values,
         modal_custom_id=modal_custom_id,
+        account_link_code_submission=account_link_code_submission,
         scheduled_task_edit=scheduled_task_edit,
     )
 
@@ -380,8 +413,10 @@ def discord_interaction_token(raw_body: bytes) -> str | None:
     return token
 
 
-def _actor_user_id(payload: dict[str, object]) -> str | None:
-    """Extract one authenticated Discord actor without retaining profile details."""
+def _actor_identity(
+    payload: dict[str, object],
+) -> DiscordInteractionActor | None:
+    """Extract one authenticated Discord actor without retaining raw profile data."""
     member = payload.get("member")
     if member is not None and not is_external_channel_projection(member):
         raise DiscordInteractionInvalidPayload("Discord interaction member is invalid.")
@@ -404,7 +439,56 @@ def _actor_user_id(payload: dict[str, object]) -> str | None:
         raise DiscordInteractionInvalidPayload(
             "Discord interaction actor identity is invalid."
         )
-    return actor_user_id
+    if actor_user_id is None:
+        return None
+    display_name = _discord_actor_display_name(
+        member=member,
+        member_user=member_user,
+        user=user,
+    )
+    return DiscordInteractionActor(
+        user_id=actor_user_id,
+        display_name=display_name,
+    )
+
+
+def _guild_display_name(payload: dict[str, object]) -> str | None:
+    """Extract a bounded verified Guild label when Discord includes one."""
+    guild = payload.get("guild")
+    if guild is None:
+        return None
+    if not is_external_channel_projection(guild):
+        raise DiscordInteractionInvalidPayload("Discord interaction Guild is invalid.")
+    name = guild.get("name")
+    if name is None:
+        return None
+    if not isinstance(name, str):
+        raise DiscordInteractionInvalidPayload("Discord interaction Guild is invalid.")
+    normalized = " ".join(name.split())
+    return normalized[:255] or None
+
+
+def _discord_actor_display_name(
+    *,
+    member: dict[str, object] | None,
+    member_user: dict[str, object] | None,
+    user: dict[str, object] | None,
+) -> str:
+    """Choose the safe signed-interaction display fallback without retaining profile."""
+    values = (
+        member.get("global_name") if member is not None else None,
+        member_user.get("global_name") if member_user is not None else None,
+        user.get("global_name") if user is not None else None,
+        member_user.get("username") if member_user is not None else None,
+        user.get("username") if user is not None else None,
+    )
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        normalized = " ".join(value.split())
+        if normalized:
+            return normalized[:255]
+    return "Discord user"
 
 
 def _channel_scope(
@@ -539,10 +623,10 @@ def _component(
     *,
     payload: dict[str, object],
     interaction_type: int,
-) -> tuple[str | None, str | None]:
-    """Extract a compact component custom ID and at most one selected value."""
+) -> tuple[str | None, str | None, tuple[str, ...]]:
+    """Extract a compact component ID and bounded typed selection values."""
     if interaction_type != 3:
-        return None, None
+        return None, None, ()
     data = payload.get("data")
     if not is_external_channel_projection(data):
         raise DiscordInteractionInvalidPayload("Discord component is invalid.")
@@ -551,16 +635,20 @@ def _component(
         raise DiscordInteractionInvalidPayload("Discord component ID is invalid.")
     values = data.get("values")
     if values is None:
-        return custom_id, None
-    if (
-        not isinstance(values, list)
-        or len(values) != 1
-        or not isinstance(values[0], str)
-        or not values[0]
-        or len(values[0]) > 64
-    ):
+        return custom_id, None, ()
+    if not isinstance(values, list) or len(values) > 25:
         raise DiscordInteractionInvalidPayload("Discord component value is invalid.")
-    return custom_id, values[0]
+    selected_values: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value or len(value) > 64:
+            raise DiscordInteractionInvalidPayload(
+                "Discord component value is invalid."
+            )
+        selected_values.append(value)
+    if not custom_id.startswith("ms1:x:") and len(selected_values) > 1:
+        raise DiscordInteractionInvalidPayload("Discord component value is invalid.")
+    selected = selected_values[0] if len(selected_values) == 1 else None
+    return custom_id, selected, tuple(selected_values)
 
 
 def _modal_custom_id(
@@ -578,6 +666,56 @@ def _modal_custom_id(
     if not isinstance(custom_id, str) or not custom_id or len(custom_id) > 100:
         raise DiscordInteractionInvalidPayload("Discord modal submission is invalid.")
     return custom_id
+
+
+def _account_link_code_submission(
+    *,
+    payload: dict[str, object],
+    interaction_type: int,
+    modal_custom_id: str | None,
+) -> DiscordAccountLinkCodeSubmission | None:
+    """Decode only the signed account-link modal into a bounded transient code."""
+    if (
+        interaction_type != 5
+        or modal_custom_id is None
+        or not modal_custom_id.startswith(_DISCORD_ACCOUNT_LINK_MODAL_PREFIX)
+    ):
+        return None
+    data = payload.get("data")
+    components = (
+        data.get("components") if is_external_channel_projection(data) else None
+    )
+    if not isinstance(components, list) or len(components) != 1:
+        raise DiscordInteractionInvalidPayload(
+            "Discord account-link submission is invalid."
+        )
+    row = components[0]
+    row_components = (
+        row.get("components") if is_external_channel_projection(row) else None
+    )
+    if not isinstance(row_components, list) or len(row_components) != 1:
+        raise DiscordInteractionInvalidPayload(
+            "Discord account-link submission is invalid."
+        )
+    component = row_components[0]
+    if not is_external_channel_projection(component):
+        raise DiscordInteractionInvalidPayload(
+            "Discord account-link submission is invalid."
+        )
+    custom_id = component.get("custom_id")
+    value = component.get("value")
+    if custom_id != _DISCORD_ACCOUNT_LINK_CODE_COMPONENT_ID or not isinstance(
+        value, str
+    ):
+        raise DiscordInteractionInvalidPayload(
+            "Discord account-link submission is invalid."
+        )
+    code = value.strip()
+    if not code or len(code) > _MAX_DISCORD_ACCOUNT_LINK_CODE_LENGTH:
+        raise DiscordInteractionInvalidPayload(
+            "Discord account-link submission is invalid."
+        )
+    return DiscordAccountLinkCodeSubmission(code=code)
 
 
 def _scheduled_task_edit(

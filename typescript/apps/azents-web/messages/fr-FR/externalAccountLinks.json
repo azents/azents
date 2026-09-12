@@ -1,0 +1,105 @@
+{
+  "title": "Comptes externes",
+  "description": "Consultez les identités Slack et Discord associées à votre compte Azents dans chaque Workspace.",
+  "loading": "Chargement des comptes externes...",
+  "loadErrorTitle": "Impossible de charger les comptes externes",
+  "retry": "Réessayer",
+  "elevationLoading": "Chargement des méthodes de vérification disponibles...",
+  "elevationErrorTitle": "Impossible de charger les méthodes de vérification",
+  "emptyTitle": "Aucun compte externe associé",
+  "emptyDescription": "Pour associer un compte, commencez depuis les paramètres privés de la conversation dans Slack ou Discord.",
+  "workspace": "Workspace",
+  "linkedAt": "Associé le",
+  "providerTeam": "{provider} · {team}",
+  "providers": {
+    "slack": "Slack",
+    "discord": "Discord"
+  },
+  "status": {
+    "active": "Associé",
+    "inactive": "Inactif",
+    "revoked": "Dissocié"
+  },
+  "inactiveDescription": "Votre adhésion au Workspace n’est pas active. Cette association ne peut pas autoriser les paramètres de conversation liés au compte.",
+  "disconnect": "Dissocier",
+  "disconnected": "Dissocié",
+  "cancel": "Annuler",
+  "elevationDisconnect": "Vérifiez votre identité pour dissocier {account} de {workspace}.",
+  "disconnectDialog": {
+    "title": "Dissocier le compte externe ?",
+    "description": "Dissocier {account} de votre compte Azents dans {workspace}.",
+    "impact": "Les contrôles dépendant de cette association ne fonctionneront plus dans ce Workspace. Les accès invités, messages, historiques, paramètres partagés, autorisations et blocages existants sont conservés.",
+    "confirm": "Dissocier le compte"
+  },
+  "candidateStatus": {
+    "pending_provider_proof": "En attente du service externe",
+    "provider_verified": "Service externe vérifié",
+    "connected": "Associé",
+    "cancelled": "Annulé",
+    "expired": "Expiré"
+  },
+  "errors": {
+    "membership_required": "Rejoignez ce Workspace ou acceptez une invitation avant d’associer le compte.",
+    "elevation_required": "Vérifiez votre identité pour continuer.",
+    "resource_not_found": "Cette confirmation ne correspond plus au compte externe ou à la session du navigateur.",
+    "expired": "Cette confirmation a expiré. Recommencez.",
+    "conflict": "Ce compte externe est déjà associé dans ce Workspace.",
+    "candidate_not_ready": "Saisissez le code dans le service d’origine, puis vérifiez de nouveau l’état.",
+    "candidate_terminal": "Cette confirmation n’est plus utilisable. Créez un nouveau code.",
+    "unavailable": "Cette connexion externe a changé ou n’est plus disponible. Revenez dans Slack ou Discord et rouvrez les paramètres privés.",
+    "busy": "Le service d’association est temporairement occupé. Réessayez."
+  },
+  "confirmation": {
+    "title": "Confirmer le compte externe",
+    "description": "N’associez que des comptes qui vous appartiennent. Vérifiez les deux comptes avant de continuer.",
+    "loading": "Chargement de la confirmation...",
+    "accountPair": "Comptes à associer",
+    "accountPairDescription": "Cette association s’applique uniquement au Workspace ci-dessous.",
+    "externalAccount": "Compte externe",
+    "providerTeam": "Service externe et équipe",
+    "azentsAccount": "Compte Azents actuel",
+    "beforeCode": "La création d’un code n’associe pas les comptes. Vous devez le saisir dans l’écran privé du service d’origine, puis confirmer ici.",
+    "createCode": "Créer un code de confirmation",
+    "codeTitle": "Code de confirmation à usage unique",
+    "codeExpires": "Expire le {time}",
+    "codeSafety": "Saisissez uniquement ce code affiché dans votre propre écran Azents. Ne saisissez jamais un code envoyé par quelqu’un d’autre.",
+    "copyCode": "Copier le code de confirmation",
+    "copy": "Copier",
+    "copied": "Copié",
+    "enterInProvider": "Revenez à l’écran privé Slack ou Discord d’origine et saisissez ce code. Revenez ensuite ici pour vérifier son état.",
+    "checkStatus": "Vérifier l’état",
+    "providerVerified": "Le compte externe d’origine a saisi ce code. Vérifiez encore une fois les deux comptes avant de les associer.",
+    "confirm": "Associer ces comptes",
+    "startFresh": "Créer une nouvelle confirmation",
+    "switchAccount": "Changer de compte Azents",
+    "elevationCreate": "Vérifiez votre compte Azents actuel avant de créer le code à usage unique.",
+    "elevationConfirm": "Vérifiez votre compte Azents actuel avant l’association finale.",
+    "connectedTitle": "Compte externe associé",
+    "connectedDescription": "{account} est maintenant associé à votre compte Azents dans {workspace}.",
+    "connectedImpact": "Les contrôles liés au compte peuvent maintenant utiliser vos autorisations Azents actuelles. Les autorisations invité et l’historique de la conversation restent inchangés.",
+    "return": "Revenir à Slack ou Discord",
+    "manage": "Gérer les comptes externes",
+    "notFoundTitle": "Confirmation introuvable",
+    "notFoundDescription": "Ce lien n’est pas valide ou n’appartient pas à votre compte et à votre session de navigateur actuels.",
+    "errorTitle": "Impossible de charger la confirmation",
+    "errorDescription": "Réessayez depuis l’écran privé du service d’origine.",
+    "origin": {
+      "cancelled": {
+        "title": "Confirmation annulée",
+        "description": "Démarrez une nouvelle association depuis l’écran privé du service d’origine."
+      },
+      "consumed": {
+        "title": "Confirmation déjà terminée",
+        "description": "Revenez à Slack ou Discord, ou consultez vos comptes externes dans les paramètres du compte."
+      },
+      "expired": {
+        "title": "Confirmation expirée",
+        "description": "Démarrez une nouvelle association depuis l’écran privé du service d’origine."
+      },
+      "unavailable": {
+        "title": "Connexion externe modifiée",
+        "description": "Revenez dans Slack ou Discord et rouvrez les paramètres privés."
+      }
+    }
+  }
+}

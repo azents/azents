@@ -698,6 +698,7 @@ def _default_agent_session(
         pinned=False,
         started_at=now,
         owner_generation=owner_generation,
+        applied_profile_generation=0,
         created_at=now,
         updated_at=now,
     )

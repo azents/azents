@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import AsyncMock
@@ -25,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_model_settings import ExternalModelActorContext
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -55,6 +57,7 @@ from azents.services.external_channel.interaction import (
     verify_selector_metadata,
 )
 from azents.services.external_channel.participation import (
+    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
     ExternalChannelParticipationSettings,
 )
@@ -76,6 +79,7 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
 )
+from azents.services.external_channel.slack_native_protocol import SlackNativeControl
 from azents.services.scheduled_task.control import (
     ScheduledTaskProviderControlResult,
     build_scheduled_task_control_locator,
@@ -327,7 +331,15 @@ def _processor(
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield cast(AsyncSession, _Session())
 
+    async def decorate(
+        *, view: SlackInteractionView, **kwargs: object
+    ) -> SlackInteractionView:
+        return view
+
+    native_settings = AsyncMock()
+    native_settings.decorate.side_effect = decorate
     return ExternalChannelInteractionProcessor(
+        native_settings=native_settings,
         session_manager=cast(SessionManager[AsyncSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
         selector_service=cast(ExternalChannelSelectorService, selector),
@@ -378,10 +390,24 @@ def _catalog(*, empty: bool = False) -> ExternalChannelSelectorCatalog:
     )
 
 
+def _verified_actor() -> ExternalModelActorContext:
+    return ExternalModelActorContext(
+        provider=ExternalChannelProvider.SLACK,
+        connection_id="connection-1",
+        configuration_generation=1,
+        principal_id="principal-1",
+        provider_tenant_id="T-1",
+        provider_user_id="U-1",
+        provider_display_name="User",
+    )
+
+
 def _handoff(
     *, selector_interaction_id: str | None = None
 ) -> ExternalChannelInteractionHandoff:
     return ExternalChannelInteractionHandoff(
+        native_control=None,
+        verified_actor=_verified_actor(),
         interaction_id="interaction-1",
         handler="selector_open",
         provider_parent_channel_id=None,
@@ -416,6 +442,8 @@ async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
     )
     scheduled_task_channel = SimpleNamespace(execute_deletion=AsyncMock())
     handoff = ExternalChannelInteractionHandoff(
+        native_control=None,
+        verified_actor=_verified_actor(),
         interaction_id="interaction-1",
         handler="scheduled_task_delete",
         provider_parent_channel_id="C-1",
@@ -517,6 +545,8 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
         scheduled_task_channel=SimpleNamespace(),
     ).process(
         ExternalChannelInteractionHandoff(
+            native_control=None,
+            verified_actor=_verified_actor(),
             interaction_id=submission.id,
             handler="settings_submission",
             provider_parent_channel_id=None,
@@ -785,6 +815,8 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
         scheduled_task_channel=SimpleNamespace(),
     ).process(
         ExternalChannelInteractionHandoff(
+            native_control=None,
+            verified_actor=_verified_actor(),
             interaction_id="interaction-2",
             handler="selector_navigation",
             provider_parent_channel_id=None,
@@ -864,6 +896,8 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
         replay=replay,
     ).process(
         ExternalChannelInteractionHandoff(
+            native_control=None,
+            verified_actor=_verified_actor(),
             interaction_id="interaction-2",
             handler="selector_submission",
             provider_parent_channel_id=None,
@@ -948,6 +982,8 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
         provider_control=provider_control,
     ).process(
         ExternalChannelInteractionHandoff(
+            native_control=None,
+            verified_actor=_verified_actor(),
             interaction_id="interaction-2",
             handler="selector_submission",
             provider_parent_channel_id=None,
@@ -1005,6 +1041,8 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
             scheduled_task_channel=SimpleNamespace(),
         ).process(
             ExternalChannelInteractionHandoff(
+                native_control=None,
+                verified_actor=_verified_actor(),
                 interaction_id="interaction-2",
                 handler="selector_submission",
                 provider_parent_channel_id=None,
@@ -1018,6 +1056,104 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
         )
 
     assert selector.selection_calls == []
+
+
+@pytest.mark.asyncio
+async def test_denied_settings_never_exposes_participation_error_details() -> None:
+    repository = _Repository()
+    slack = _Slack(
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
+    )
+    participation = AsyncMock()
+    participation.resolve_settings.side_effect = ExternalChannelParticipationError(
+        "Secret Agent, route, and Session details"
+    )
+    processor = _processor(
+        repository,
+        _Selector(_catalog()),
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+        participation=participation,
+    )
+    await processor.process(
+        replace(
+            _handoff(),
+            handler="settings_open",
+            provider_parent_channel_id="C-1",
+        )
+    )
+    assert len(slack.views) == 1
+    assert "Secret Agent" not in repr(slack.views)
+    assert "optional account connection" in repr(slack.views)
+
+
+@pytest.mark.asyncio
+async def test_stale_ingress_generation_cannot_acquire_current_native_authority() -> (
+    None
+):
+    repository = _Repository()
+    repository.configuration = repository.configuration.model_copy(
+        update={"configuration_generation": 2}
+    )
+    slack = _Slack(
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
+    )
+    participation = AsyncMock()
+    participation.resolve_settings.side_effect = ExternalChannelParticipationError(
+        "Unavailable"
+    )
+    processor = _processor(
+        repository,
+        _Selector(_catalog()),
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+        participation=participation,
+    )
+    with pytest.raises(ValueError, match="private actor is unavailable"):
+        await processor.process(
+            replace(
+                _handoff(), handler="settings_open", provider_parent_channel_id="C-1"
+            )
+        )
+    assert slack.views == []
+    assert isinstance(processor.native_settings, AsyncMock)
+    processor.native_settings.decorate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_view_delivery_failure_has_no_public_fallback() -> None:
+    repository = _Repository()
+    slack = _Slack(
+        SlackInteractionViewResult(
+            status="rejected", error_kind="denied", error_summary="Rejected"
+        )
+    )
+    processor = _processor(
+        repository,
+        _Selector(_catalog()),
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    )
+    control = SlackNativeControl(
+        action="azents_account_link_code",
+        metadata="invalid-signed-scope",
+        code="transient-proof",
+        option_id=None,
+        reasoning_effort=None,
+        execution_options=None,
+        view_id=None,
+        view_hash=None,
+    )
+    with pytest.raises(RuntimeError, match="private view could not be delivered"):
+        await processor.process(
+            replace(_handoff(), handler="native_control", native_control=control)
+        )
+    assert len(slack.views) == 1
+    assert "transient-proof" not in repr(slack.views)
+    assert "invalid-signed-scope" not in repr(slack.views)
 
 
 @pytest.mark.asyncio

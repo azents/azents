@@ -14,6 +14,9 @@ from azents.services.external_channel.discord_interaction import (
     parse_discord_interaction,
     verify_discord_interaction_signature,
 )
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_account_link_custom_id,
+)
 from azents.services.scheduled_task.control import build_scheduled_task_control_locator
 
 
@@ -193,3 +196,104 @@ def test_rejects_invalid_routing_fields() -> None:
     """Malformed payloads do not produce a routeable envelope."""
     with pytest.raises(DiscordInteractionInvalidPayload, match="invalid routing"):
         parse_discord_interaction(b'{"id":1,"type":2,"application_id":"app"}')
+
+
+def test_parses_account_link_code_as_request_local_typed_input() -> None:
+    """Decode one signed-modal shape without projecting the plaintext code."""
+    custom_id = build_discord_account_link_custom_id(
+        secret="secret",
+        action="enter_code",
+        origin_interaction_id=None,
+        origin_id="origin-1",
+    )
+    envelope = parse_discord_interaction(
+        json.dumps(
+            {
+                "id": "interaction-1",
+                "type": 5,
+                "application_id": "app-1",
+                "guild_id": "guild-1",
+                "guild": {"name": "Guild One"},
+                "channel_id": "channel-1",
+                "channel": {"id": "channel-1", "type": 0},
+                "member": {
+                    "global_name": "Member Name",
+                    "user": {
+                        "id": "user-1",
+                        "global_name": "User Name",
+                        "username": "username",
+                    },
+                },
+                "data": {
+                    "custom_id": custom_id,
+                    "components": [
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_account_link_code",
+                                    "value": "  browser-secret-code  ",
+                                }
+                            ]
+                        }
+                    ],
+                },
+            }
+        ).encode()
+    )
+
+    assert envelope.actor_display_name == "Member Name"
+    assert envelope.guild_display_name == "Guild One"
+    assert envelope.account_link_code_submission is not None
+    assert envelope.account_link_code_submission.code == "browser-secret-code"
+    assert "browser-secret-code" not in repr(envelope)
+
+
+@pytest.mark.parametrize(
+    "components",
+    [
+        [],
+        [{"components": []}],
+        [
+            {
+                "components": [
+                    {
+                        "custom_id": "another_input",
+                        "value": "browser-secret-code",
+                    }
+                ]
+            }
+        ],
+    ],
+)
+def test_rejects_malformed_account_link_modal_components(
+    components: list[object],
+) -> None:
+    """Accept only the exact bounded account-link input component."""
+    custom_id = build_discord_account_link_custom_id(
+        secret="secret",
+        action="enter_code",
+        origin_interaction_id=None,
+        origin_id="origin-1",
+    )
+
+    with pytest.raises(
+        DiscordInteractionInvalidPayload,
+        match="account-link submission is invalid",
+    ):
+        parse_discord_interaction(
+            json.dumps(
+                {
+                    "id": "interaction-1",
+                    "type": 5,
+                    "application_id": "app-1",
+                    "guild_id": "guild-1",
+                    "channel_id": "channel-1",
+                    "channel": {"id": "channel-1", "type": 0},
+                    "member": {"user": {"id": "user-1"}},
+                    "data": {
+                        "custom_id": custom_id,
+                        "components": components,
+                    },
+                }
+            ).encode()
+        )

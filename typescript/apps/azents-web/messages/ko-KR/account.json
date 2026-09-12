@@ -8,6 +8,7 @@
   "sidebar": {
     "workspaces": "워크스페이스 목록",
     "general": "일반",
+    "externalAccounts": "외부 계정",
     "security": "보안"
   }
 }

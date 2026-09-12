@@ -322,6 +322,7 @@ def _make_agent_session() -> AgentSession:
     """Create AgentSession for tests."""
     return AgentSession(
         owner_generation=0,
+        applied_profile_generation=0,
         inference_state=None,
         id="session-1",
         workspace_id="workspace-1",

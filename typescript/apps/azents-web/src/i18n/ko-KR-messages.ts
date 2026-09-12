@@ -7,6 +7,7 @@ import chatPreview from "../../messages/ko-KR/chatPreview.json";
 import common from "../../messages/ko-KR/common.json";
 import cta from "../../messages/ko-KR/cta.json";
 import elevation from "../../messages/ko-KR/elevation.json";
+import externalAccountLinks from "../../messages/ko-KR/externalAccountLinks.json";
 import externalChannelApproval from "../../messages/ko-KR/externalChannelApproval.json";
 import features from "../../messages/ko-KR/features.json";
 import footer from "../../messages/ko-KR/footer.json";
@@ -36,6 +37,7 @@ const messages = composeMessages([
   ["common", common],
   ["cta", cta],
   ["elevation", elevation],
+  ["externalAccountLinks", externalAccountLinks],
   ["externalChannelApproval", externalChannelApproval],
   ["features", features],
   ["footer", footer],

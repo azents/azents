@@ -210,7 +210,7 @@ class _AdmissionDouble:
         assert now == _NOW
         self.claimed_interaction_ids.append(interaction_id)
         return SimpleNamespace(
-            interaction=SimpleNamespace(id=interaction_id),
+            interaction=SimpleNamespace(id=interaction_id, principal_id="principal-1"),
             claimed=self.claimed,
         )
 
@@ -824,6 +824,10 @@ async def test_provider_processor_runs_only_after_http_admission_returns(
 
     assert result.interaction_handoff is not None
     processor.process.assert_not_awaited()
+    actor = result.interaction_handoff.verified_actor
+    assert actor is not None
+    assert actor.principal_id == "principal-1"
+    assert actor.configuration_generation == 1
 
     await service.run_interaction_handoff(result.interaction_handoff)
 

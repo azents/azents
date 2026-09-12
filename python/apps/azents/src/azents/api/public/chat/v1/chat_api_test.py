@@ -521,6 +521,7 @@ class _BufferedInputService(AgentSessionInputService):
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session=AgentSession(
                     owner_generation=0,
+                    applied_profile_generation=0,
                     inference_state=None,
                     id=session_id,
                     workspace_id="workspace-1",
@@ -682,6 +683,7 @@ class _RestWriteChatService(ChatSessionService):
         return Success(
             AgentSession(
                 owner_generation=0,
+                applied_profile_generation=0,
                 inference_state=None,
                 id=self.session_id,
                 workspace_id="workspace-1",
@@ -734,6 +736,7 @@ class _StopChatService(ChatSessionService):
         self.result: Result[AgentSession, SessionAccessError] = Success(
             AgentSession(
                 owner_generation=0,
+                applied_profile_generation=0,
                 inference_state=None,
                 id="1123456789abcdef0123456789abcdef",
                 workspace_id="workspace-1",
@@ -1134,6 +1137,7 @@ class _EventService(ChatSessionService):
         return Success(
             AgentSession(
                 owner_generation=0,
+                applied_profile_generation=0,
                 inference_state=None,
                 id=session_id,
                 workspace_id="workspace-1",
@@ -1213,6 +1217,7 @@ class _AgentSessionRouteChatService(ChatSessionService):
         self.setup_actions: list[CreateGitWorktreeAction] | None = None
         self.primary_session = AgentSession(
             owner_generation=0,
+            applied_profile_generation=0,
             inference_state=None,
             id="1123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
@@ -1237,6 +1242,7 @@ class _AgentSessionRouteChatService(ChatSessionService):
         )
         self.secondary_session = AgentSession(
             owner_generation=0,
+            applied_profile_generation=0,
             inference_state=None,
             id="2123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",

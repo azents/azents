@@ -37,6 +37,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -171,6 +172,50 @@ async def _bind_root_working_folder(
 
 class TestAgentSessionRepository:
     """AgentSessionRepository tests."""
+
+    async def test_applied_profile_generation_increments_for_equal_replacements(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Every accepted common setter call advances the ABA fence once."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "applied-profile-generation",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "applied-profile-generation",
+        )
+        repository = AgentSessionRepository()
+        created = await repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        first = await repository.set_applied_inference_profile(
+            rdb_session,
+            session_id=created.id,
+            model_target_label="default",
+            reasoning_effort=ModelReasoningEffort.MEDIUM,
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        )
+        second = await repository.set_applied_inference_profile(
+            rdb_session,
+            session_id=created.id,
+            model_target_label="default",
+            reasoning_effort=ModelReasoningEffort.MEDIUM,
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        )
+
+        assert first.applied_profile_generation == 1
+        assert second.applied_profile_generation == 2
 
     async def test_root_context_without_runtime_uses_none_binding(
         self,

@@ -844,6 +844,7 @@ def _agent_session(
         pinned=False,
         started_at=now,
         owner_generation=1,
+        applied_profile_generation=0,
         archived_at=now,
         purge_after=now,
         archive_policy_revision=1,
