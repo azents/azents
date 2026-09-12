@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from typing import Protocol
 
@@ -37,6 +38,8 @@ from azents.runtime.web_transport_coordinator import (
     RuntimeWebOwnedTunnel,
 )
 from azents.runtime.web_transport_dispatcher import RuntimeWebDispatchUnavailable
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RuntimeWebOwnerCoordinator(Protocol):
@@ -117,7 +120,15 @@ class RuntimeWebProxyGrpcServicer(
                 "Runtime Web route authority is stale",
             )
             raise AssertionError("unreachable") from None
-        except RuntimeWebDispatchUnavailable:
+        except RuntimeWebDispatchUnavailable as error:
+            _LOGGER.warning(
+                "Runtime Web Runner dispatch unavailable",
+                extra={
+                    "runtime_id": head.identity.runtime_id,
+                    "runner_generation": head.identity.runner_generation,
+                    "reason": str(error),
+                },
+            )
             await context.abort(
                 grpc.StatusCode.UNAVAILABLE,
                 "Runtime Web Runner is unavailable",
