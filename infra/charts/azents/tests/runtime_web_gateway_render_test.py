@@ -74,7 +74,6 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
 
     assert 'command: ["./bin/runtime-web-gateway.sh"]' in rendered
     assert "name: runtime-web-gateway" in rendered
-    assert "AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION" in rendered
     assert "AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN" in rendered
     assert "AZ_RUNTIME_WEB_GATEWAY_CONTROL_TLS_CERTIFICATE_FILE" in rendered
     assert "runtime-web-gateway-tls" in rendered

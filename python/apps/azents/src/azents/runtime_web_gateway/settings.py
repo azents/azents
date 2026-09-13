@@ -30,7 +30,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
     runtime_web_gateway_enabled: bool = False
     runtime_web_gateway_port: int = Field(default=8040, ge=1, le=65_535)
     runtime_web_gateway_auth_mode: RuntimeWebAuthMode = RuntimeWebAuthMode.SHARED_COOKIE
-    runtime_web_gateway_auth_configuration_version: int = Field(default=1, ge=1)
     runtime_web_gateway_main_web_origin: str | None = None
     runtime_web_gateway_broker_origin: str | None = None
     runtime_web_gateway_service_suffix: str | None = None
@@ -231,7 +230,6 @@ class RuntimeWebGatewayConfig(BaseModel):
 
     enabled: bool
     auth_mode: RuntimeWebAuthMode
-    configuration_version: int
     main_web_origin: str
     broker_origin: str
     service_suffix: str
@@ -256,9 +254,6 @@ class RuntimeWebGatewayConfig(BaseModel):
         return cls(
             enabled=True,
             auth_mode=settings.runtime_web_gateway_auth_mode,
-            configuration_version=(
-                settings.runtime_web_gateway_auth_configuration_version
-            ),
             main_web_origin=_origin_text(
                 _exact_origin(settings.runtime_web_gateway_main_web_origin)
             ),

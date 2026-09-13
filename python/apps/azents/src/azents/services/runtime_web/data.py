@@ -40,7 +40,6 @@ class RuntimeWebServiceProjection(BaseModel):
     current_cycle: RuntimeWebCycle | None
     active: bool
     duration_seconds: int
-    duration_configuration_revision: int
     observed_at: datetime.datetime
 
 

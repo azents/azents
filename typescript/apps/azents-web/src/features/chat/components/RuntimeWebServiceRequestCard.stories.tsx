@@ -31,7 +31,6 @@ const service: RuntimeWebServiceResponse = {
   current_cycle: null,
   active: false,
   duration_seconds: 3600,
-  duration_configuration_revision: 2,
   observed_at: "2026-09-12T00:05:00Z",
 };
 

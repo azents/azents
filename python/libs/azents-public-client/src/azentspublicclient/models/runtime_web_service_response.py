@@ -36,10 +36,9 @@ class RuntimeWebServiceResponse(BaseModel):
     current_cycle: Optional[RuntimeWebCycleResponse]
     active: StrictBool
     duration_seconds: Annotated[int, Field(le=28800, strict=True, ge=300)]
-    duration_configuration_revision: Annotated[int, Field(strict=True, ge=1)]
     observed_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["endpoint", "current_request", "current_cycle", "active", "duration_seconds", "duration_configuration_revision", "observed_at"]
+    __properties: ClassVar[List[str]] = ["endpoint", "current_request", "current_cycle", "active", "duration_seconds", "observed_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -123,7 +122,6 @@ class RuntimeWebServiceResponse(BaseModel):
             "current_cycle": RuntimeWebCycleResponse.from_dict(obj["current_cycle"]) if obj.get("current_cycle") is not None else None,
             "active": obj.get("active"),
             "duration_seconds": obj.get("duration_seconds"),
-            "duration_configuration_revision": obj.get("duration_configuration_revision"),
             "observed_at": obj.get("observed_at")
         })
         # store additional fields in additional_properties

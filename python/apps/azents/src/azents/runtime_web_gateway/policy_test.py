@@ -20,7 +20,6 @@ from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 _CONFIG = RuntimeWebGatewayConfig(
     enabled=True,
     auth_mode=RuntimeWebAuthMode.SHARED_COOKIE,
-    configuration_version=1,
     main_web_origin="https://app.example.com",
     broker_origin="https://auth.services.example.net",
     service_suffix="services.example.net",

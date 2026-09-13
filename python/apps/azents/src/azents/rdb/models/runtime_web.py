@@ -360,10 +360,6 @@ class RDBRuntimeWebCycle(RDBModel):
         "duration_seconds >= 300 AND duration_seconds <= 28800",
         name="ck_runtime_web_cycles_duration",
     )
-    CK_CONFIG_REVISION = sa.CheckConstraint(
-        "duration_configuration_revision >= 1",
-        name="ck_runtime_web_cycles_duration_configuration_revision",
-    )
     CK_DEADLINE = sa.CheckConstraint(
         "expires_at > approved_at",
         name="ck_runtime_web_cycles_deadline",
@@ -416,10 +412,6 @@ class RDBRuntimeWebCycle(RDBModel):
         nullable=False,
     )
     duration_seconds: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    duration_configuration_revision: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        nullable=False,
-    )
     approved_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         nullable=False,
@@ -448,7 +440,6 @@ class RDBRuntimeWebCycle(RDBModel):
 
     __table_args__ = (
         CK_DURATION,
-        CK_CONFIG_REVISION,
         CK_DEADLINE,
         CK_END,
         CK_CLOSE_BARRIER,
@@ -542,18 +533,13 @@ class RDBRuntimeWebQuotaScope(RDBModel):
 
 
 class RDBRuntimeWebAuthConfiguration(RDBModel):
-    """Monotonic Runtime Web authentication and duration configuration."""
+    """Current Runtime Web authentication and duration configuration."""
 
     __tablename__ = "runtime_web_auth_configuration"
 
     CK_SINGLETON = sa.CheckConstraint(
         "id = 1",
         name="ck_runtime_web_auth_configuration_singleton",
-    )
-    CK_VERSION = sa.CheckConstraint(
-        "configuration_version >= 1 AND active_epoch >= 1 "
-        "AND duration_configuration_revision >= 1",
-        name="ck_runtime_web_auth_configuration_versions",
     )
     CK_DURATION = sa.CheckConstraint(
         "active_duration_seconds >= 300 AND active_duration_seconds <= 28800",
@@ -571,16 +557,7 @@ class RDBRuntimeWebAuthConfiguration(RDBModel):
         runtime_web_auth_mode_enum,
         nullable=False,
     )
-    configuration_version: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        nullable=False,
-    )
     fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    active_epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
-    duration_configuration_revision: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        nullable=False,
-    )
     active_duration_seconds: Mapped[int] = mapped_column(
         sa.Integer,
         nullable=False,
@@ -599,7 +576,7 @@ class RDBRuntimeWebAuthConfiguration(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    __table_args__ = (CK_SINGLETON, CK_VERSION, CK_DURATION)
+    __table_args__ = (CK_SINGLETON, CK_DURATION)
 
 
 class RDBRuntimeWebGatewayIdentity(RDBModel):
@@ -647,7 +624,6 @@ class RDBRuntimeWebGatewayIdentity(RDBModel):
         runtime_web_auth_mode_enum,
         nullable=False,
     )
-    epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     browser_profile: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     issued_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -727,7 +703,6 @@ class RDBRuntimeWebAuthBinding(RDBModel):
         sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
         nullable=False,
     )
-    epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     expires_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         nullable=False,
@@ -809,7 +784,6 @@ class RDBRuntimeWebAuthTicket(RDBModel):
         sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
         nullable=False,
     )
-    epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     issued_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         nullable=False,

@@ -33,7 +33,6 @@ const requestDecisionSchema = z.object({
 });
 const approvalSchema = requestDecisionSchema.extend({
   durationSeconds: z.number().int().min(300).max(28_800),
-  durationRevision: z.number().int().min(1),
 });
 
 const expectedErrors = {
@@ -145,7 +144,6 @@ export const runtimeWebRouter = router({
       serviceSchema.extend({
         label: z.string().max(120).nullable(),
         durationSeconds: z.number().int().min(300).max(28_800),
-        durationRevision: z.number().int().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -161,7 +159,6 @@ export const runtimeWebRouter = router({
           body: {
             label: input.label,
             duration_seconds: input.durationSeconds,
-            duration_configuration_revision: input.durationRevision,
             operation_key: operationKey(),
           },
           throwOnError: true,
@@ -187,7 +184,6 @@ export const runtimeWebRouter = router({
           body: {
             expected_revision: input.expectedRevision,
             duration_seconds: input.durationSeconds,
-            duration_configuration_revision: input.durationRevision,
             operation_key: operationKey(),
           },
           throwOnError: true,
@@ -212,7 +208,6 @@ export const runtimeWebRouter = router({
             body: {
               expected_revision: input.expectedRevision,
               duration_seconds: input.durationSeconds,
-              duration_configuration_revision: input.durationRevision,
               operation_key: operationKey(),
             },
             throwOnError: true,

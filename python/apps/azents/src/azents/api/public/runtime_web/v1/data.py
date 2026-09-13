@@ -75,7 +75,6 @@ class RuntimeWebCycleResponse(_ClosedModel):
     id: str
     request_id: str
     duration_seconds: int = Field(ge=300, le=28_800)
-    duration_configuration_revision: int = Field(ge=1)
     approved_at: datetime
     expires_at: datetime
     close_barrier: int = Field(ge=0)
@@ -91,7 +90,6 @@ class RuntimeWebServiceResponse(_ClosedModel):
     current_cycle: RuntimeWebCycleResponse | None
     active: bool
     duration_seconds: int = Field(ge=300, le=28_800)
-    duration_configuration_revision: int = Field(ge=1)
     observed_at: datetime
 
     @classmethod
@@ -127,9 +125,6 @@ class RuntimeWebServiceResponse(_ClosedModel):
                     id=cycle.id,
                     request_id=cycle.request_id,
                     duration_seconds=cycle.duration_seconds,
-                    duration_configuration_revision=(
-                        cycle.duration_configuration_revision
-                    ),
                     approved_at=cycle.approved_at,
                     expires_at=cycle.expires_at,
                     close_barrier=cycle.close_barrier,
@@ -139,9 +134,6 @@ class RuntimeWebServiceResponse(_ClosedModel):
             ),
             active=projection.active,
             duration_seconds=projection.duration_seconds,
-            duration_configuration_revision=(
-                projection.duration_configuration_revision
-            ),
             observed_at=projection.observed_at,
         )
 
@@ -182,7 +174,6 @@ class RuntimeWebApprovalRequest(_ClosedModel):
 
     expected_revision: int = Field(ge=1)
     duration_seconds: int = Field(ge=300, le=28_800)
-    duration_configuration_revision: int = Field(ge=1)
     operation_key: str = Field(min_length=1, max_length=128)
 
 
@@ -191,7 +182,6 @@ class RuntimeWebDirectCreateRequest(_ClosedModel):
 
     label: str | None = Field(max_length=120)
     duration_seconds: int = Field(ge=300, le=28_800)
-    duration_configuration_revision: int = Field(ge=1)
     operation_key: str = Field(min_length=1, max_length=128)
 
 

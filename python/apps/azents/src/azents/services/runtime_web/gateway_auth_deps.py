@@ -40,7 +40,6 @@ class RuntimeWebGatewayAuthSettings(BaseSettings):
     )
     runtime_web_gateway_enabled: bool = False
     runtime_web_gateway_auth_mode: RuntimeWebAuthMode = RuntimeWebAuthMode.SHARED_COOKIE
-    runtime_web_gateway_auth_configuration_version: int = Field(default=1, ge=1)
     runtime_web_gateway_main_web_origin: str | None = None
     runtime_web_gateway_broker_origin: str | None = None
     runtime_web_gateway_service_suffix: str | None = None
@@ -78,7 +77,6 @@ def get_runtime_web_gateway_auth_service(
     desired = RuntimeWebDesiredConfiguration(
         enabled=settings.runtime_web_gateway_enabled,
         mode=settings.runtime_web_gateway_auth_mode,
-        configuration_version=(settings.runtime_web_gateway_auth_configuration_version),
         fingerprint=runtime_web_security_fingerprint(
             enabled=settings.runtime_web_gateway_enabled,
             mode=settings.runtime_web_gateway_auth_mode,

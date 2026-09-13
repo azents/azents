@@ -13,11 +13,10 @@ from azents.repos.runtime_web.data import (
 
 
 class RuntimeWebDesiredConfiguration(BaseModel):
-    """Deployment configuration proposed to the monotonic DB authority."""
+    """Deployment configuration proposed to the shared DB authority."""
 
     enabled: bool
     mode: RuntimeWebAuthMode
-    configuration_version: int = Field(ge=1)
     fingerprint: str = Field(min_length=64, max_length=64)
     active_duration_seconds: int = Field(ge=300, le=28_800)
 
@@ -29,7 +28,6 @@ class RuntimeWebGatewayIdentity(BaseModel):
     user_id: str
     auth_session_id: str
     mode: RuntimeWebAuthMode
-    epoch: int
     browser_profile: str
     issued_at: datetime.datetime
     expires_at: datetime.datetime
@@ -56,7 +54,6 @@ class RuntimeWebAuthBinding(BaseModel):
     user_id: str
     auth_session_id: str
     endpoint_id: str
-    epoch: int
     expires_at: datetime.datetime
     broker_bound: bool
     settled: bool

@@ -32141,11 +32141,6 @@
             "minimum": 300.0,
             "title": "Duration Seconds"
           },
-          "duration_configuration_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Duration Configuration Revision"
-          },
           "operation_key": {
             "type": "string",
             "maxLength": 128,
@@ -32158,7 +32153,6 @@
         "required": [
           "expected_revision",
           "duration_seconds",
-          "duration_configuration_revision",
           "operation_key"
         ],
         "title": "RuntimeWebApprovalRequest",
@@ -32232,11 +32226,6 @@
             "minimum": 300.0,
             "title": "Duration Seconds"
           },
-          "duration_configuration_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Duration Configuration Revision"
-          },
           "approved_at": {
             "type": "string",
             "format": "date-time",
@@ -32281,7 +32270,6 @@
           "id",
           "request_id",
           "duration_seconds",
-          "duration_configuration_revision",
           "approved_at",
           "expires_at",
           "close_barrier",
@@ -32311,11 +32299,6 @@
             "minimum": 300.0,
             "title": "Duration Seconds"
           },
-          "duration_configuration_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Duration Configuration Revision"
-          },
           "operation_key": {
             "type": "string",
             "maxLength": 128,
@@ -32328,7 +32311,6 @@
         "required": [
           "label",
           "duration_seconds",
-          "duration_configuration_revision",
           "operation_key"
         ],
         "title": "RuntimeWebDirectCreateRequest",
@@ -32809,11 +32791,6 @@
             "minimum": 300.0,
             "title": "Duration Seconds"
           },
-          "duration_configuration_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Duration Configuration Revision"
-          },
           "observed_at": {
             "type": "string",
             "format": "date-time",
@@ -32828,7 +32805,6 @@
           "current_cycle",
           "active",
           "duration_seconds",
-          "duration_configuration_revision",
           "observed_at"
         ],
         "title": "RuntimeWebServiceResponse",

@@ -77,7 +77,6 @@ async def _active_tunnel(
         expected_revision=pending.request.revision,
         approver_user_id=user_id,
         duration_seconds=7_200,
-        duration_configuration_revision=1,
         operation=RuntimeWebOperationIdentity(
             actor_kind=RuntimeWebRequesterKind.USER,
             actor_id=user_id,

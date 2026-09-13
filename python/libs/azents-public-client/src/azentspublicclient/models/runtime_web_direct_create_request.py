@@ -29,10 +29,9 @@ class RuntimeWebDirectCreateRequest(BaseModel):
     """ # noqa: E501
     label: Optional[Annotated[str, Field(strict=True, max_length=120)]]
     duration_seconds: Annotated[int, Field(le=28800, strict=True, ge=300)]
-    duration_configuration_revision: Annotated[int, Field(strict=True, ge=1)]
     operation_key: Annotated[str, Field(min_length=1, strict=True, max_length=128)]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["label", "duration_seconds", "duration_configuration_revision", "operation_key"]
+    __properties: ClassVar[List[str]] = ["label", "duration_seconds", "operation_key"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -99,7 +98,6 @@ class RuntimeWebDirectCreateRequest(BaseModel):
         _obj = cls.model_validate({
             "label": obj.get("label"),
             "duration_seconds": obj.get("duration_seconds"),
-            "duration_configuration_revision": obj.get("duration_configuration_revision"),
             "operation_key": obj.get("operation_key")
         })
         # store additional fields in additional_properties

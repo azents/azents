@@ -37,14 +37,12 @@ class TestRuntimeWebApprovalRequest(unittest.TestCase):
             return RuntimeWebApprovalRequest(
                 expected_revision = 1.0,
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 operation_key = '0'
             )
         else:
             return RuntimeWebApprovalRequest(
                 expected_revision = 1.0,
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 operation_key = '0',
         )
         """

@@ -80,7 +80,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-13
-spec_version: 80
+spec_version: 81
 ---
 
 # Agent Runtime Control
@@ -189,8 +189,8 @@ The Public API authorizes every projection and mutation through the concrete Age
 Session. Team Session access follows current Workspace membership; User Session
 access remains owner-only. Agent tools resolve subagents to their same-root Session
 authority and return non-secret endpoint/request/cycle projections. Request creation
-is nonblocking. Human approval binds the exact pending request revision, displayed
-duration, and configuration revision. Repeated or stale decisions fail with conflict
+is nonblocking. Human approval binds the exact pending request revision and displayed
+duration. Repeated or stale decisions fail with conflict
 instead of mutating the newer projection.
 
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
@@ -211,10 +211,12 @@ the Runner continues to use its established Control connection. Gateway-to-Contr
 and Control-to-Control authentication uses the dedicated mTLS listener in deployed
 environments. Local E2E may explicitly use the isolated insecure trusted port.
 
-The independent Gateway synchronizes one monotonic Runtime Web configuration epoch,
-resolves the endpoint by opaque hostname, authenticates a browser identity, validates
-current approval and Runtime/Runner generations, acquires admission, and streams the
-exchange. It fails closed when configuration or database authority is unavailable.
+The independent Gateway synchronizes the current Runtime Web configuration,
+explicitly invalidates browser identities, bindings, and tickets when security
+configuration changes, resolves the endpoint by opaque hostname, authenticates a
+browser identity, validates current approval and Runtime/Runner generations, acquires
+admission, and streams the exchange. It fails closed when configuration or database
+authority is unavailable.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
 responses as applicable; safe browser navigation is redirected only to the exact
 configured Main Web authentication or confirmation route.
@@ -991,6 +993,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-13 (spec_version=81)** — Removed Runtime Web configuration versions,
+  epochs, and duration revisions. Security configuration changes explicitly
+  invalidate browser authentication state, and approval compares the displayed
+  duration directly with the current configured duration.
 - **2026-09-12 (spec_version=79)** — Assigned each newly dispatched Provider,
   Runner, and Runtime Transfer operation a request-scoped reply stream while
   preserving metadata-recorded streams for existing operations.

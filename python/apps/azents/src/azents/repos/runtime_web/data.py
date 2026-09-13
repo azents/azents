@@ -60,7 +60,6 @@ class RuntimeWebCycle(BaseModel):
     request_id: str
     approver_user_id: str
     duration_seconds: int
-    duration_configuration_revision: int
     approved_at: datetime.datetime
     expires_at: datetime.datetime
     close_barrier: int
@@ -74,10 +73,7 @@ class RuntimeWebConfiguration(BaseModel):
 
     enabled: bool
     mode: RuntimeWebAuthMode
-    configuration_version: int
     fingerprint: str
-    active_epoch: int
-    duration_configuration_revision: int
     active_duration_seconds: int
 
 

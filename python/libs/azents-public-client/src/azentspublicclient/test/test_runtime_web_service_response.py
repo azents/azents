@@ -40,7 +40,6 @@ class TestRuntimeWebServiceResponse(unittest.TestCase):
                 current_cycle = { },
                 active = True,
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -50,7 +49,6 @@ class TestRuntimeWebServiceResponse(unittest.TestCase):
                 current_cycle = { },
                 active = True,
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

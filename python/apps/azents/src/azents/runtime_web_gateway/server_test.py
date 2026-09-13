@@ -34,7 +34,6 @@ from azents.runtime_web_gateway.transport import RuntimeWebProxySession
 _CONFIG = RuntimeWebGatewayConfig(
     enabled=True,
     auth_mode=RuntimeWebAuthMode.SHARED_COOKIE,
-    configuration_version=1,
     main_web_origin="https://app.example.com",
     broker_origin="https://auth.services.example.net",
     service_suffix="services.example.net",
@@ -93,7 +92,6 @@ class _Auth:
                 user_id="u" * 32,
                 auth_session_id="s" * 32,
                 endpoint_id=_ENDPOINT.id,
-                epoch=1,
                 expires_at=now + timedelta(seconds=120),
                 broker_bound=True,
                 settled=False,

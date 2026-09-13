@@ -127,7 +127,6 @@ server:
     replicas: 2
     port: 8040
     authMode: shared_cookie
-    authConfigurationVersion: 1
     mainWebOrigin: ""
     brokerOrigin: ""
     serviceSuffix: ""

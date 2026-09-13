@@ -58,10 +58,7 @@ class RuntimeWebRepository:
         return RuntimeWebConfiguration(
             enabled=rdb.enabled,
             mode=rdb.mode,
-            configuration_version=rdb.configuration_version,
             fingerprint=rdb.fingerprint,
-            active_epoch=rdb.active_epoch,
-            duration_configuration_revision=rdb.duration_configuration_revision,
             active_duration_seconds=rdb.active_duration_seconds,
         )
 
@@ -202,7 +199,6 @@ class RuntimeWebRepository:
         requester_user_id: str,
         requester_call_id: str | None,
         duration_seconds: int,
-        duration_configuration_revision: int,
         operation: RuntimeWebOperationIdentity,
         endpoint_limit: int,
         active_session_limit: int,
@@ -245,7 +241,6 @@ class RuntimeWebRepository:
                 expected_revision=requested.request.revision,
                 approver_user_id=requester_user_id,
                 duration_seconds=duration_seconds,
-                duration_configuration_revision=duration_configuration_revision,
                 operation=self._suboperation(operation, "approve"),
                 active_session_limit=active_session_limit,
                 active_agent_limit=active_agent_limit,
@@ -266,7 +261,6 @@ class RuntimeWebRepository:
         expected_revision: int,
         approver_user_id: str,
         duration_seconds: int,
-        duration_configuration_revision: int,
         operation: RuntimeWebOperationIdentity,
         active_session_limit: int,
         active_agent_limit: int,
@@ -314,8 +308,6 @@ class RuntimeWebRepository:
         if (
             configuration is None
             or not configuration.enabled
-            or configuration.duration_configuration_revision
-            != duration_configuration_revision
             or configuration.active_duration_seconds != duration_seconds
         ):
             raise RuntimeWebRepositoryConflict("Duration configuration changed")
@@ -356,7 +348,6 @@ class RuntimeWebRepository:
             request_id=request.id,
             approver_user_id=approver_user_id,
             duration_seconds=duration_seconds,
-            duration_configuration_revision=duration_configuration_revision,
             approved_at=now,
             expires_at=now + datetime.timedelta(seconds=duration_seconds),
             close_barrier=endpoint.close_barrier,
