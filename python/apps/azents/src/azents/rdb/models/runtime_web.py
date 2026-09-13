@@ -1010,3 +1010,78 @@ class RDBRuntimeWebAdmissionLease(RDBModel):
     )
 
     __table_args__ = (CK_LEASE, UQ_TUNNEL, IX_EXPIRY, IX_OWNER)
+
+
+class RDBRuntimeWebGatewayAdmissionLease(RDBModel):
+    """Shared endpoint, user, and Agent admission owned by one Gateway request."""
+
+    __tablename__ = "runtime_web_gateway_admission_leases"
+
+    CK_DEADLINE = sa.CheckConstraint(
+        "lease_expires_at > created_at",
+        name="ck_runtime_web_gateway_admission_leases_deadline",
+    )
+    UQ_TUNNEL = sa.UniqueConstraint(
+        "tunnel_id",
+        name="uq_runtime_web_gateway_admission_leases_tunnel",
+    )
+    IX_ENDPOINT = sa.Index(
+        "ix_runtime_web_gateway_admission_leases_endpoint",
+        "endpoint_id",
+        "websocket",
+        "lease_expires_at",
+    )
+    IX_USER = sa.Index(
+        "ix_runtime_web_gateway_admission_leases_user",
+        "user_id",
+        "websocket",
+        "lease_expires_at",
+    )
+    IX_AGENT = sa.Index(
+        "ix_runtime_web_gateway_admission_leases_agent",
+        "agent_id",
+        "websocket",
+        "lease_expires_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    tunnel_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    endpoint_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    websocket: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    lease_expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+
+    __table_args__ = (
+        CK_DEADLINE,
+        UQ_TUNNEL,
+        IX_ENDPOINT,
+        IX_USER,
+        IX_AGENT,
+    )

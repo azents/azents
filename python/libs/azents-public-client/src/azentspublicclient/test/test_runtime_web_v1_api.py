@@ -61,10 +61,38 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_web_v1_initiate_runtime_web_separate_identity(self) -> None:
+        """Test case for runtime_web_v1_initiate_runtime_web_separate_identity
+
+        Initiate Runtime Web Separate Identity
+        """
+        pass
+
+    def test_runtime_web_v1_issue_runtime_web_separate_ticket(self) -> None:
+        """Test case for runtime_web_v1_issue_runtime_web_separate_ticket
+
+        Issue Runtime Web Separate Ticket
+        """
+        pass
+
+    def test_runtime_web_v1_issue_runtime_web_shared_identity(self) -> None:
+        """Test case for runtime_web_v1_issue_runtime_web_shared_identity
+
+        Issue Runtime Web Shared Identity
+        """
+        pass
+
     def test_runtime_web_v1_list_runtime_web_services(self) -> None:
         """Test case for runtime_web_v1_list_runtime_web_services
 
         List Runtime Web Services
+        """
+        pass
+
+    def test_runtime_web_v1_mark_runtime_web_separate_identity_bound(self) -> None:
+        """Test case for runtime_web_v1_mark_runtime_web_separate_identity_bound
+
+        Mark Runtime Web Separate Identity Bound
         """
         pass
 
@@ -86,6 +114,13 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """Test case for runtime_web_v1_request_runtime_web_exposure
 
         Request Runtime Web Exposure
+        """
+        pass
+
+    def test_runtime_web_v1_revoke_runtime_web_identity(self) -> None:
+        """Test case for runtime_web_v1_revoke_runtime_web_identity
+
+        Revoke Runtime Web Identity
         """
         pass
 

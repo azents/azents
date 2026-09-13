@@ -451,6 +451,7 @@ __all__ = [
     "RuntimeWebActionErrorDetail",
     "RuntimeWebActionErrorResponse",
     "RuntimeWebApprovalRequest",
+    "RuntimeWebBrowserProfileRequest",
     "RuntimeWebCloseRequest",
     "RuntimeWebCycleEndReason",
     "RuntimeWebCycleResponse",
@@ -458,10 +459,17 @@ __all__ = [
     "RuntimeWebEndpointResponse",
     "RuntimeWebExpectedRevisionRequest",
     "RuntimeWebExposureRequest",
+    "RuntimeWebIdentityRevokeRequest",
+    "RuntimeWebIdentityRevokeResponse",
+    "RuntimeWebIdentitySecretResponse",
     "RuntimeWebPrepareRequest",
     "RuntimeWebRequestResponse",
     "RuntimeWebRequestState",
     "RuntimeWebRequesterKind",
+    "RuntimeWebSeparateBoundRequest",
+    "RuntimeWebSeparateInitiateRequest",
+    "RuntimeWebSeparateInitiateResponse",
+    "RuntimeWebSeparateTicketResponse",
     "RuntimeWebServiceListResponse",
     "RuntimeWebServiceResponse",
     "ScheduledTaskCreateRequest",
@@ -1004,6 +1012,7 @@ from azentspublicclient.models.runtime_terminal_ticket_status import RuntimeTerm
 from azentspublicclient.models.runtime_web_action_error_detail import RuntimeWebActionErrorDetail as RuntimeWebActionErrorDetail
 from azentspublicclient.models.runtime_web_action_error_response import RuntimeWebActionErrorResponse as RuntimeWebActionErrorResponse
 from azentspublicclient.models.runtime_web_approval_request import RuntimeWebApprovalRequest as RuntimeWebApprovalRequest
+from azentspublicclient.models.runtime_web_browser_profile_request import RuntimeWebBrowserProfileRequest as RuntimeWebBrowserProfileRequest
 from azentspublicclient.models.runtime_web_close_request import RuntimeWebCloseRequest as RuntimeWebCloseRequest
 from azentspublicclient.models.runtime_web_cycle_end_reason import RuntimeWebCycleEndReason as RuntimeWebCycleEndReason
 from azentspublicclient.models.runtime_web_cycle_response import RuntimeWebCycleResponse as RuntimeWebCycleResponse
@@ -1011,10 +1020,17 @@ from azentspublicclient.models.runtime_web_direct_create_request import RuntimeW
 from azentspublicclient.models.runtime_web_endpoint_response import RuntimeWebEndpointResponse as RuntimeWebEndpointResponse
 from azentspublicclient.models.runtime_web_expected_revision_request import RuntimeWebExpectedRevisionRequest as RuntimeWebExpectedRevisionRequest
 from azentspublicclient.models.runtime_web_exposure_request import RuntimeWebExposureRequest as RuntimeWebExposureRequest
+from azentspublicclient.models.runtime_web_identity_revoke_request import RuntimeWebIdentityRevokeRequest as RuntimeWebIdentityRevokeRequest
+from azentspublicclient.models.runtime_web_identity_revoke_response import RuntimeWebIdentityRevokeResponse as RuntimeWebIdentityRevokeResponse
+from azentspublicclient.models.runtime_web_identity_secret_response import RuntimeWebIdentitySecretResponse as RuntimeWebIdentitySecretResponse
 from azentspublicclient.models.runtime_web_prepare_request import RuntimeWebPrepareRequest as RuntimeWebPrepareRequest
 from azentspublicclient.models.runtime_web_request_response import RuntimeWebRequestResponse as RuntimeWebRequestResponse
 from azentspublicclient.models.runtime_web_request_state import RuntimeWebRequestState as RuntimeWebRequestState
 from azentspublicclient.models.runtime_web_requester_kind import RuntimeWebRequesterKind as RuntimeWebRequesterKind
+from azentspublicclient.models.runtime_web_separate_bound_request import RuntimeWebSeparateBoundRequest as RuntimeWebSeparateBoundRequest
+from azentspublicclient.models.runtime_web_separate_initiate_request import RuntimeWebSeparateInitiateRequest as RuntimeWebSeparateInitiateRequest
+from azentspublicclient.models.runtime_web_separate_initiate_response import RuntimeWebSeparateInitiateResponse as RuntimeWebSeparateInitiateResponse
+from azentspublicclient.models.runtime_web_separate_ticket_response import RuntimeWebSeparateTicketResponse as RuntimeWebSeparateTicketResponse
 from azentspublicclient.models.runtime_web_service_list_response import RuntimeWebServiceListResponse as RuntimeWebServiceListResponse
 from azentspublicclient.models.runtime_web_service_response import RuntimeWebServiceResponse as RuntimeWebServiceResponse
 from azentspublicclient.models.scheduled_task_create_request import ScheduledTaskCreateRequest as ScheduledTaskCreateRequest

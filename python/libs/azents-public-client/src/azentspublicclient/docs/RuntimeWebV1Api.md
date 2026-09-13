@@ -9,10 +9,15 @@ Method | HTTP request | Description
 [**runtime_web_v1_close_runtime_web_cycle**](RuntimeWebV1Api.md#runtime_web_v1_close_runtime_web_cycle) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/cycles/{cycle_id}/close | Close Runtime Web Cycle
 [**runtime_web_v1_direct_create_runtime_web_exposure**](RuntimeWebV1Api.md#runtime_web_v1_direct_create_runtime_web_exposure) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/direct-create | Direct Create Runtime Web Exposure
 [**runtime_web_v1_get_runtime_web_service_projection**](RuntimeWebV1Api.md#runtime_web_v1_get_runtime_web_service_projection) | **GET** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port} | Get Runtime Web Service Projection
+[**runtime_web_v1_initiate_runtime_web_separate_identity**](RuntimeWebV1Api.md#runtime_web_v1_initiate_runtime_web_separate_identity) | **POST** /runtime-web/v1/auth/separate/initiate | Initiate Runtime Web Separate Identity
+[**runtime_web_v1_issue_runtime_web_separate_ticket**](RuntimeWebV1Api.md#runtime_web_v1_issue_runtime_web_separate_ticket) | **POST** /runtime-web/v1/auth/separate/ticket | Issue Runtime Web Separate Ticket
+[**runtime_web_v1_issue_runtime_web_shared_identity**](RuntimeWebV1Api.md#runtime_web_v1_issue_runtime_web_shared_identity) | **POST** /runtime-web/v1/auth/shared-identity | Issue Runtime Web Shared Identity
 [**runtime_web_v1_list_runtime_web_services**](RuntimeWebV1Api.md#runtime_web_v1_list_runtime_web_services) | **GET** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services | List Runtime Web Services
+[**runtime_web_v1_mark_runtime_web_separate_identity_bound**](RuntimeWebV1Api.md#runtime_web_v1_mark_runtime_web_separate_identity_bound) | **POST** /runtime-web/v1/auth/separate/bound | Mark Runtime Web Separate Identity Bound
 [**runtime_web_v1_prepare_runtime_web_endpoint**](RuntimeWebV1Api.md#runtime_web_v1_prepare_runtime_web_endpoint) | **PUT** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/endpoint | Prepare Runtime Web Endpoint
 [**runtime_web_v1_reject_runtime_web_request**](RuntimeWebV1Api.md#runtime_web_v1_reject_runtime_web_request) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/reject | Reject Runtime Web Request
 [**runtime_web_v1_request_runtime_web_exposure**](RuntimeWebV1Api.md#runtime_web_v1_request_runtime_web_exposure) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/requests | Request Runtime Web Exposure
+[**runtime_web_v1_revoke_runtime_web_identity**](RuntimeWebV1Api.md#runtime_web_v1_revoke_runtime_web_identity) | **POST** /runtime-web/v1/auth/revoke-identity | Revoke Runtime Web Identity
 
 
 # **runtime_web_v1_approve_runtime_web_request**
@@ -472,6 +477,249 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **runtime_web_v1_initiate_runtime_web_separate_identity**
+> RuntimeWebSeparateInitiateResponse runtime_web_v1_initiate_runtime_web_separate_identity(runtime_web_separate_initiate_request)
+
+Initiate Runtime Web Separate Identity
+
+Create one Main-origin binding without a URL-carried secret.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_web_separate_initiate_request import RuntimeWebSeparateInitiateRequest
+from azentspublicclient.models.runtime_web_separate_initiate_response import RuntimeWebSeparateInitiateResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
+    runtime_web_separate_initiate_request = azentspublicclient.RuntimeWebSeparateInitiateRequest() # RuntimeWebSeparateInitiateRequest | 
+
+    try:
+        # Initiate Runtime Web Separate Identity
+        api_response = api_instance.runtime_web_v1_initiate_runtime_web_separate_identity(runtime_web_separate_initiate_request)
+        print("The response of RuntimeWebV1Api->runtime_web_v1_initiate_runtime_web_separate_identity:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeWebV1Api->runtime_web_v1_initiate_runtime_web_separate_identity: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **runtime_web_separate_initiate_request** | [**RuntimeWebSeparateInitiateRequest**](RuntimeWebSeparateInitiateRequest.md)|  | 
+
+### Return type
+
+[**RuntimeWebSeparateInitiateResponse**](RuntimeWebSeparateInitiateResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | The authentication exchange or installation changed. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_web_v1_issue_runtime_web_separate_ticket**
+> RuntimeWebSeparateTicketResponse runtime_web_v1_issue_runtime_web_separate_ticket(runtime_web_separate_bound_request)
+
+Issue Runtime Web Separate Ticket
+
+Issue one thirty-second ticket after the broker callback.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_web_separate_bound_request import RuntimeWebSeparateBoundRequest
+from azentspublicclient.models.runtime_web_separate_ticket_response import RuntimeWebSeparateTicketResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
+    runtime_web_separate_bound_request = azentspublicclient.RuntimeWebSeparateBoundRequest() # RuntimeWebSeparateBoundRequest | 
+
+    try:
+        # Issue Runtime Web Separate Ticket
+        api_response = api_instance.runtime_web_v1_issue_runtime_web_separate_ticket(runtime_web_separate_bound_request)
+        print("The response of RuntimeWebV1Api->runtime_web_v1_issue_runtime_web_separate_ticket:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeWebV1Api->runtime_web_v1_issue_runtime_web_separate_ticket: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **runtime_web_separate_bound_request** | [**RuntimeWebSeparateBoundRequest**](RuntimeWebSeparateBoundRequest.md)|  | 
+
+### Return type
+
+[**RuntimeWebSeparateTicketResponse**](RuntimeWebSeparateTicketResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | The authentication exchange or installation changed. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_web_v1_issue_runtime_web_shared_identity**
+> RuntimeWebIdentitySecretResponse runtime_web_v1_issue_runtime_web_shared_identity(runtime_web_browser_profile_request)
+
+Issue Runtime Web Shared Identity
+
+Mint one opaque Gateway identity for a trusted Main Web response.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_web_browser_profile_request import RuntimeWebBrowserProfileRequest
+from azentspublicclient.models.runtime_web_identity_secret_response import RuntimeWebIdentitySecretResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
+    runtime_web_browser_profile_request = azentspublicclient.RuntimeWebBrowserProfileRequest() # RuntimeWebBrowserProfileRequest | 
+
+    try:
+        # Issue Runtime Web Shared Identity
+        api_response = api_instance.runtime_web_v1_issue_runtime_web_shared_identity(runtime_web_browser_profile_request)
+        print("The response of RuntimeWebV1Api->runtime_web_v1_issue_runtime_web_shared_identity:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeWebV1Api->runtime_web_v1_issue_runtime_web_shared_identity: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **runtime_web_browser_profile_request** | [**RuntimeWebBrowserProfileRequest**](RuntimeWebBrowserProfileRequest.md)|  | 
+
+### Return type
+
+[**RuntimeWebIdentitySecretResponse**](RuntimeWebIdentitySecretResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | The authentication exchange or installation changed. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **runtime_web_v1_list_runtime_web_services**
 > RuntimeWebServiceListResponse runtime_web_v1_list_runtime_web_services(handle, agent_id, session_id, offset=offset, limit=limit)
 
@@ -559,6 +807,84 @@ Name | Type | Description  | Notes
 **404** | The service resource is unavailable or intentionally hidden. |  -  |
 **409** | The service state or installation configuration changed. |  -  |
 **429** | A logical Runtime Web service quota is exhausted. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_web_v1_mark_runtime_web_separate_identity_bound**
+> runtime_web_v1_mark_runtime_web_separate_identity_bound(runtime_web_separate_bound_request)
+
+Mark Runtime Web Separate Identity Bound
+
+Record the exact broker callback under the current auth Session.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_web_separate_bound_request import RuntimeWebSeparateBoundRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
+    runtime_web_separate_bound_request = azentspublicclient.RuntimeWebSeparateBoundRequest() # RuntimeWebSeparateBoundRequest | 
+
+    try:
+        # Mark Runtime Web Separate Identity Bound
+        api_instance.runtime_web_v1_mark_runtime_web_separate_identity_bound(runtime_web_separate_bound_request)
+    except Exception as e:
+        print("Exception when calling RuntimeWebV1Api->runtime_web_v1_mark_runtime_web_separate_identity_bound: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **runtime_web_separate_bound_request** | [**RuntimeWebSeparateBoundRequest**](RuntimeWebSeparateBoundRequest.md)|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**409** | The authentication exchange or installation changed. |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -835,6 +1161,86 @@ Name | Type | Description  | Notes
 **404** | The service resource is unavailable or intentionally hidden. |  -  |
 **409** | The service state or installation configuration changed. |  -  |
 **429** | A logical Runtime Web service quota is exhausted. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_web_v1_revoke_runtime_web_identity**
+> RuntimeWebIdentityRevokeResponse runtime_web_v1_revoke_runtime_web_identity(runtime_web_identity_revoke_request)
+
+Revoke Runtime Web Identity
+
+Revoke a Gateway identity during trusted logout.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_web_identity_revoke_request import RuntimeWebIdentityRevokeRequest
+from azentspublicclient.models.runtime_web_identity_revoke_response import RuntimeWebIdentityRevokeResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
+    runtime_web_identity_revoke_request = azentspublicclient.RuntimeWebIdentityRevokeRequest() # RuntimeWebIdentityRevokeRequest | 
+
+    try:
+        # Revoke Runtime Web Identity
+        api_response = api_instance.runtime_web_v1_revoke_runtime_web_identity(runtime_web_identity_revoke_request)
+        print("The response of RuntimeWebV1Api->runtime_web_v1_revoke_runtime_web_identity:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeWebV1Api->runtime_web_v1_revoke_runtime_web_identity: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **runtime_web_identity_revoke_request** | [**RuntimeWebIdentityRevokeRequest**](RuntimeWebIdentityRevokeRequest.md)|  | 
+
+### Return type
+
+[**RuntimeWebIdentityRevokeResponse**](RuntimeWebIdentityRevokeResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

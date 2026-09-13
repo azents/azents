@@ -37,8 +37,35 @@ spec:
     - name: grpc
       port: 8030
       targetPort: grpc
+    {{- if .Values.server.runtimeControl.webTransport.enabled }}
+    - name: trusted-web
+      port: {{ .Values.server.runtimeControl.webTransport.trustedPort }}
+      targetPort: trusted-web
+    {{- end }}
   type: ClusterIP
 ---
+{{- if .Values.server.runtimeControl.webTransport.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-control-headless
+  namespace: {{ include "azents.serverNamespace" . | quote }}
+  labels:
+    {{- include "azents.componentLabels" (dict "root" . "component" "runtime-control") | nindent 4 }}
+    app.kubernetes.io/part-of: "azents"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: {{ include "azents.name" . | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/component: "runtime-control"
+  ports:
+    - name: trusted-web
+      port: {{ .Values.server.runtimeControl.webTransport.trustedPort }}
+      targetPort: trusted-web
+---
+{{- end }}
 {{- end }}
 {{- if and .Values.server.enabled .Values.server.adminserver.enabled }}
 apiVersion: v1

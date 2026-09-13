@@ -1,5 +1,6 @@
 {{- if and .Values.server.enabled .Values.server.runtimeControl.enabled }}
 {{- $transfer := .Values.server.runtimeControl.transfer }}
+{{- $webTransport := .Values.server.runtimeControl.webTransport }}
 {{- $objectStorageEndpoint := include "azents.objectStorageEndpoint" . }}
 {{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
@@ -39,6 +40,10 @@ spec:
           ports:
             - name: grpc
               containerPort: 8030
+            {{- if $webTransport.enabled }}
+            - name: trusted-web
+              containerPort: {{ $webTransport.trustedPort }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "azents.serverConfigMapName" . | quote }}
@@ -49,6 +54,26 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- if $webTransport.enabled }}
+            - name: AZ_RUNTIME_CONTROL_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AZ_RUNTIME_CONTROL_WEB_TRANSPORT_ENABLED
+              value: "true"
+            - name: AZ_RUNTIME_CONTROL_TRUSTED_PORT
+              value: {{ printf "%d" (int64 $webTransport.trustedPort) | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS
+              value: "$(AZ_RUNTIME_CONTROL_INSTANCE_ID).runtime-control-headless.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc:{{ $webTransport.trustedPort }}"
+            - name: AZ_RUNTIME_CONTROL_TRUSTED_GATEWAY_PEER_IDENTITIES
+              value: {{ required "server.runtimeControl.webTransport.gatewayPeerIdentities is required when trusted Runtime Web transport is enabled" $webTransport.gatewayPeerIdentities | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRUSTED_CONTROL_PEER_IDENTITIES
+              value: {{ required "server.runtimeControl.webTransport.controlPeerIdentities is required when trusted Runtime Web transport is enabled" $webTransport.controlPeerIdentities | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_ROUTE_LEASE_SECONDS
+              value: {{ printf "%v" $webTransport.routeLeaseSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_MAX_ACTIVE_CONNECTIONS
+              value: {{ printf "%d" (int64 $webTransport.maxActiveConnections) | quote }}
+            {{- end }}
             - name: AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS
               value: {{ printf "%d" (int64 .Values.server.runtimeControl.reconcileIntervalSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_LIFECYCLE_RETRY_DELAY_SECONDS

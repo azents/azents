@@ -46,6 +46,30 @@ spec:
           env:
             - name: AZ_PORT
               value: "8010"
+            - name: AZ_RUNTIME_WEB_GATEWAY_ENABLED
+              value: {{ .Values.server.runtimeWebGateway.enabled | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE
+              value: {{ .Values.server.runtimeWebGateway.authMode | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION
+              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.authConfigurationVersion) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN
+              value: {{ .Values.server.runtimeWebGateway.mainWebOrigin | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN
+              value: {{ .Values.server.runtimeWebGateway.brokerOrigin | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX
+              value: {{ .Values.server.runtimeWebGateway.serviceSuffix | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN
+              value: {{ .Values.server.runtimeWebGateway.cookieDomain | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME
+              value: {{ .Values.server.runtimeWebGateway.identityCookieName | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_IDENTITY_LIFETIME_SECONDS
+              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.identityLifetimeSeconds) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_ACTIVE_DURATION_SECONDS
+              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.activeDurationSeconds) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION
+              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.chromium.minVersion) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION
+              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.chromium.maxVersion) | quote }}
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
