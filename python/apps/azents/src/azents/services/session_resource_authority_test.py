@@ -1,6 +1,7 @@
 """Shared public Session resource authority tests."""
 
 import datetime
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -28,6 +29,13 @@ from .session_resource_authority import (
     accepts_execution_owner,
     authorize_public_session_resource,
 )
+
+
+class _ResourceAuthorityRepositories(NamedTuple):
+    """Field-named result for ``_repositories``."""
+
+    agent_sessions: AgentSessionRepository
+    workspace_users: WorkspaceUserRepository
 
 
 def _session(
@@ -73,7 +81,7 @@ def _repositories(
     sessions: dict[str, AgentSession],
     roots: dict[str, str] | None = None,
     members: set[tuple[str, str]] | None = None,
-) -> tuple[AgentSessionRepository, WorkspaceUserRepository]:
+) -> _ResourceAuthorityRepositories:
     agent_sessions = AsyncMock(spec=AgentSessionRepository)
     agent_sessions.get_by_id.side_effect = lambda _session, session_id: sessions.get(
         session_id
@@ -95,7 +103,10 @@ def _repositories(
             else None
         )
     )
-    return agent_sessions, workspace_users
+    return _ResourceAuthorityRepositories(
+        agent_sessions=agent_sessions,
+        workspace_users=workspace_users,
+    )
 
 
 async def _authorize(

@@ -1,5 +1,7 @@
 """Browser E2E coverage for model fallback and Primary recovery controls."""
 
+from typing import NamedTuple
+
 import azentsadminclient
 import azentspublicclient
 import pytest
@@ -20,6 +22,16 @@ from tests.required.public.test_per_prompt_inference_profile import (
     _setup_profile_agent,
 )
 from tests.web.public.test_model_execution_options import _login_main_web
+
+
+class _ConfiguredSession(NamedTuple):
+    """Field-named result for ``_create_configured_session``."""
+
+    email: str
+    workspace_handle: str
+    access_token: str
+    agent_id: str
+    session_id: str
 
 
 def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
@@ -121,7 +133,7 @@ def _create_configured_session(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-) -> tuple[str, str, str, str, str]:
+) -> _ConfiguredSession:
     """Create a Session with an available Primary and ordered fallback."""
     suffix = unique()
     email = f"quota-fallback-web-{suffix}@example.com"
@@ -139,7 +151,13 @@ def _create_configured_session(
         handle=handle,
         agent_id=agent_id,
     )
-    return email, handle, token, agent_id, session_id
+    return _ConfiguredSession(
+        email=email,
+        workspace_handle=handle,
+        access_token=token,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
 
 
 def _wait_for_cooldown(

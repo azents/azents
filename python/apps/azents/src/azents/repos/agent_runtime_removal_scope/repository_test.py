@@ -1,6 +1,7 @@
 """Agent Runtime removal scope repository tests."""
 
 import datetime
+from typing import NamedTuple
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -57,9 +58,17 @@ from azents.testing.model_selection import (
 from . import AgentRuntimeRemovalScopeRepository
 
 
+class _AgentRuntimeFixture(NamedTuple):
+    """Field-named result for ``_seed_agent``."""
+
+    workspace: RDBWorkspace
+    agent: RDBAgent
+    runtime: RDBAgentRuntime
+
+
 async def _seed_agent(
     session: AsyncSession,
-) -> tuple[RDBWorkspace, RDBAgent, RDBAgentRuntime]:
+) -> _AgentRuntimeFixture:
     """Create one Agent and empty logical Runtime."""
     workspace = RDBWorkspace(
         name="Runtime removal scope",
@@ -94,7 +103,11 @@ async def _seed_agent(
     )
     session.add(runtime)
     await session.flush()
-    return workspace, agent, runtime
+    return _AgentRuntimeFixture(
+        workspace=workspace,
+        agent=agent,
+        runtime=runtime,
+    )
 
 
 async def _create_operation(

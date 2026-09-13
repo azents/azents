@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from typing import NamedTuple
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -74,6 +75,15 @@ from azents.testing.model_selection import (
 
 from .data import AgentRuntimeAdditionRequest, AgentRuntimeAdditionUnavailable
 from .service import AgentRuntimeTransitionService
+
+
+class _RuntimeProfileFixture(NamedTuple):
+    """Field-named result for ``_create_profile``."""
+
+    provider_id: str
+    provider_record_id: str
+    infrastructure_id: str
+    profile_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,7 +192,7 @@ async def _create_profile(
     *,
     workspace_id: str,
     key: str,
-) -> tuple[str, str, str, str]:
+) -> _RuntimeProfileFixture:
     provider = await RuntimeProviderRepository().create(
         session,
         RuntimeProviderCreate(
@@ -255,11 +265,11 @@ async def _create_profile(
             actor_workspace_user_id=None,
         ),
     )
-    return (
-        provider.provider_id,
-        provider.id,
-        infrastructure.id,
-        profile.id,
+    return _RuntimeProfileFixture(
+        provider_id=provider.provider_id,
+        provider_record_id=provider.id,
+        infrastructure_id=infrastructure.id,
+        profile_id=profile.id,
     )
 
 

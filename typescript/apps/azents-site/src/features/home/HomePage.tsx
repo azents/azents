@@ -1,5 +1,3 @@
-"use client";
-
 import { Box } from "@mantine/core";
 import { ArchitectureDeepDiveSection } from "./components/ArchitectureDeepDiveSection";
 import { ArchitectureSection } from "./components/ArchitectureSection";

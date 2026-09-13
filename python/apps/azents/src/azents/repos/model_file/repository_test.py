@@ -1,6 +1,7 @@
 """ModelFile repository tests."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -32,6 +33,15 @@ from azents.testing.model_selection import (
 )
 
 
+class _ModelFileFixture(NamedTuple):
+    """Field-named result for ``_create_agent_session``."""
+
+    workspace_id: str
+    agent_id: str
+    agent_session_id: str
+    run_id: str
+
+
 async def _noop_terminal_finalization(
     _session: AsyncSession,
     _run_ids: list[str],
@@ -39,7 +49,7 @@ async def _noop_terminal_finalization(
     """Satisfy the atomic replacement finalization boundary in fixture tests."""
 
 
-async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, str]:
+async def _create_agent_session(session: AsyncSession) -> _ModelFileFixture:
     """Create AgentSession for tests."""
     await WorkspaceRepository().create(
         session,
@@ -123,7 +133,12 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, s
             parent_agent_run_id=None,
         ),
     )
-    return workspace_id, agent.id, agent_session.id, run.id
+    return _ModelFileFixture(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        agent_session_id=agent_session.id,
+        run_id=run.id,
+    )
 
 
 async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:

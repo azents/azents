@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -27,6 +27,14 @@ from .data import (
     ReservationClaimOutcome,
     ReservationClaimResult,
 )
+
+
+class CandidateHealthRenewal(NamedTuple):
+    """Field-named result for ``renew_claimed_quota_in_session``."""
+
+    settlement: CandidateHealthSettlement
+    observation: ModelCandidateHealthObservation
+
 
 MODEL_CANDIDATE_COOLDOWN = datetime.timedelta(minutes=5)
 MODEL_CANDIDATE_CLAIM_LEASE = datetime.timedelta(minutes=5)
@@ -133,7 +141,7 @@ class ModelCandidateHealthRepository:
         expected_claim_kind: ModelCandidateClaimKind,
         expected_owner_id: str,
         expected_claim_token: str,
-    ) -> tuple[CandidateHealthSettlement, ModelCandidateHealthObservation]:
+    ) -> CandidateHealthRenewal:
         """Renew cooldown only for the exact current claim authority."""
         async with self.session_manager() as session:
             return await self.renew_claimed_quota_in_session(
@@ -154,7 +162,7 @@ class ModelCandidateHealthRepository:
         expected_claim_kind: ModelCandidateClaimKind,
         expected_owner_id: str,
         expected_claim_token: str,
-    ) -> tuple[CandidateHealthSettlement, ModelCandidateHealthObservation]:
+    ) -> CandidateHealthRenewal:
         """Renew an exact claimed quota result inside the caller's transaction."""
         server_time = await self._database_time(session)
         row = (
@@ -184,13 +192,13 @@ class ModelCandidateHealthRepository:
                 RDBModelCandidateHealth,
                 self._primary_key(identity),
             )
-            return (
-                CandidateHealthSettlement.STALE,
-                self._observe(current, server_time=server_time),
+            return CandidateHealthRenewal(
+                settlement=CandidateHealthSettlement.STALE,
+                observation=self._observe(current, server_time=server_time),
             )
-        return (
-            CandidateHealthSettlement.APPLIED,
-            self._observe(row, server_time=server_time),
+        return CandidateHealthRenewal(
+            settlement=CandidateHealthSettlement.APPLIED,
+            observation=self._observe(row, server_time=server_time),
         )
 
     async def claim_foreground_probe(

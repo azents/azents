@@ -2,6 +2,7 @@
 
 import datetime
 import hashlib
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -30,6 +31,13 @@ from azents.repos.runtime_web.data import (
     RuntimeWebRequest,
     derived_operation_key,
 )
+
+
+class RuntimeWebEndpointPage(NamedTuple):
+    """Field-named result for ``list_endpoints``."""
+
+    items: list[RuntimeWebEndpoint]
+    total: int
 
 
 class RuntimeWebRepositoryConflict(ValueError):
@@ -529,7 +537,7 @@ class RuntimeWebRepository:
         agent_session_id: str,
         offset: int,
         limit: int,
-    ) -> tuple[list[RuntimeWebEndpoint], int]:
+    ) -> RuntimeWebEndpointPage:
         """List stable endpoints for one concrete Session."""
         where = RDBRuntimeWebEndpoint.agent_session_id == agent_session_id
         rows = await session.scalars(
@@ -542,7 +550,10 @@ class RuntimeWebRepository:
         total = await session.scalar(
             sa.select(sa.func.count(RDBRuntimeWebEndpoint.id)).where(where)
         )
-        return [self._endpoint(row) for row in rows], total or 0
+        return RuntimeWebEndpointPage(
+            items=[self._endpoint(row) for row in rows],
+            total=total or 0,
+        )
 
     async def current_request(
         self,

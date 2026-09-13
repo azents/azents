@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, NamedTuple, TypeVar
+from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -91,6 +91,11 @@ _MAX_TRANSACTION_ATTEMPTS = 3
 _RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 _EXECUTION_OPTION_IDS = TypeAdapter(list[ModelExecutionOptionId])
 T = TypeVar("T")
+
+
+@runtime_checkable
+class _HasSqlstate(Protocol):
+    sqlstate: object
 
 
 @dataclass(frozen=True)
@@ -1336,10 +1341,10 @@ class ExternalModelSettingsRepository:
     def _retryable(error: DBAPIError) -> bool:
         current: object | None = error
         while current is not None:
-            sqlstate = getattr(current, "sqlstate", None)
+            sqlstate = current.sqlstate if isinstance(current, _HasSqlstate) else None
             if isinstance(sqlstate, str) and sqlstate in _RETRYABLE_SQLSTATES:
                 return True
-            current = getattr(current, "orig", None)
+            current = current.orig if isinstance(current, DBAPIError) else None
         return False
 
     @staticmethod

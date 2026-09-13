@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.result import Success
@@ -68,6 +69,13 @@ from azents.testing.model_selection import (
 
 from .data import RuntimeProfileResolutionUnavailable
 from .service import RuntimeProfileResolutionService
+
+
+class _SelectedAgentFixture(NamedTuple):
+    """Field-named result for ``_seed_selected_agent``."""
+
+    agent_id: str
+    provider_id: str
 
 
 class _LockFreeAgentRepository(AgentRepository):
@@ -297,7 +305,7 @@ async def _seed_selected_agent(
     provider_protocol_version: str,
     workspace_policy: dict[str, object] | None = None,
     strict_network_capabilities: bool = False,
-) -> tuple[str, str]:
+) -> _SelectedAgentFixture:
     workspace_repository = WorkspaceRepository()
     workspace_result = await workspace_repository.create(
         session,
@@ -412,7 +420,10 @@ async def _seed_selected_agent(
     )
     session.add(agent)
     await session.flush()
-    return agent.id, provider.id
+    return _SelectedAgentFixture(
+        agent_id=agent.id,
+        provider_id=provider.id,
+    )
 
 
 def _service(

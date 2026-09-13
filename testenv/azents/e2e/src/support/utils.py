@@ -4,7 +4,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from typing import Any, NamedTuple, TypeVar, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -46,6 +46,30 @@ from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
+
+
+class AuthenticatedUser(NamedTuple):
+    """Field-named result for ``authenticate_user``."""
+
+    access_token: str
+    refresh_token: str
+    email: str
+
+
+class ChatSession(NamedTuple):
+    """Field-named result for ``create_chat_session``."""
+
+    access_token: str
+    session_id: str
+
+
+class AgentChatSession(NamedTuple):
+    """Field-named result for ``create_chat_session_with_agent``."""
+
+    access_token: str
+    session_id: str
+    agent_id: str
+
 
 T = TypeVar("T")
 
@@ -131,7 +155,7 @@ def authenticate_user(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     email: str | None = None,
-) -> tuple[str, str, str]:
+) -> AuthenticatedUser:
     """Create or authenticate a user through the signup-token flow.
 
     :param public_api_client: public API client
@@ -210,10 +234,10 @@ def authenticate_user(
             )
         payload = redeem_response.json()
 
-    return (
-        cast(str, payload["access_token"]),
-        cast(str, payload["refresh_token"]),
-        email,
+    return AuthenticatedUser(
+        access_token=cast(str, payload["access_token"]),
+        refresh_token=cast(str, payload["refresh_token"]),
+        email=email,
     )
 
 
@@ -295,7 +319,7 @@ def create_chat_session(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-) -> tuple[str, str]:
+) -> ChatSession:
     """Create a chat session and return its authentication details.
 
     :param public_api_client: public API client
@@ -308,14 +332,17 @@ def create_chat_session(
         admin_api_client,
         server_url,
     )
-    return token, session_id
+    return ChatSession(
+        access_token=token,
+        session_id=session_id,
+    )
 
 
 def create_chat_session_with_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-) -> tuple[str, str, str]:
+) -> AgentChatSession:
     """Create a chat session with its backing agent.
 
     :param public_api_client: public API client
@@ -328,7 +355,11 @@ def create_chat_session_with_agent(
         admin_api_client,
         server_url,
     )
-    return setup.access_token, setup.session_id, setup.agent_id
+    return AgentChatSession(
+        access_token=setup.access_token,
+        session_id=setup.session_id,
+        agent_id=setup.agent_id,
+    )
 
 
 def create_agent_session_setup(

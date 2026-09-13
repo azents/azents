@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import cast
+from typing import NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -39,6 +39,22 @@ from tests.required.public.test_agent_execution_persistence import (
     json_object_payload,
     list_history,
 )
+
+
+class _XaiAgentFixture(NamedTuple):
+    """Field-named result for ``_setup_xai_agent``."""
+
+    access_token: str
+    agent_id: str
+    session_id: str
+
+
+class _ImageGenerationJournals(NamedTuple):
+    """Field-named result for ``_run_success_scenario``."""
+
+    imagine: list[dict[str, object]]
+    oauth: list[dict[str, object]]
+
 
 _API_KEY_MESSAGE = "xAI API-key image generation"
 _OAUTH_MESSAGE = "xAI OAuth image generation"
@@ -126,7 +142,7 @@ def _setup_xai_agent(
     enabled: bool,
     access_token: str,
     refresh_token: str | None,
-) -> tuple[str, str, str]:
+) -> _XaiAgentFixture:
     """Create one xAI integration, Agent, and primary session via public APIs."""
     uniq = unique()
     token, _, _ = authenticate_user(
@@ -304,7 +320,11 @@ def _setup_xai_agent(
     session_id = session.get("id")
     if not isinstance(session_id, str):
         raise AssertionError(f"Session response did not include id: {session!r}")
-    return token, agent_id, session_id
+    return _XaiAgentFixture(
+        access_token=token,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
 
 
 def _submit(
@@ -488,7 +508,7 @@ def _run_success_scenario(
     refresh_token: str | None,
     message: str,
     completed_message: str,
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+) -> _ImageGenerationJournals:
     """Run one successful xAI image-generation scenario."""
     _clear_journals(proxy_url)
     token, agent_id, session_id = _setup_xai_agent(
@@ -531,9 +551,9 @@ def _run_success_scenario(
         scenario_secrets=scenario_secrets,
     )
     _assert_image_tool_exposure(proxy_url=proxy_url, expected=True)
-    return (
-        _journal(proxy_url, _IMAGINE_JOURNAL_PATH),
-        _journal(proxy_url, _OAUTH_JOURNAL_PATH),
+    return _ImageGenerationJournals(
+        imagine=_journal(proxy_url, _IMAGINE_JOURNAL_PATH),
+        oauth=_journal(proxy_url, _OAUTH_JOURNAL_PATH),
     )
 
 

@@ -4,6 +4,7 @@ import enum
 import hashlib
 import json
 import re
+from typing import Protocol, runtime_checkable
 
 from azents.engine.run.errors import ModelCallError, ModelStreamCallKind
 
@@ -25,6 +26,31 @@ _URL_PATTERN = re.compile(r"https?://\S+", re.I)
 _LONG_IDENTIFIER_PATTERN = re.compile(r"\b[a-f0-9]{16,}\b", re.I)
 _NUMBER_PATTERN = re.compile(r"\b\d+\b")
 _SDK_SERIALIZED_ERROR_PATTERN = re.compile(r"(?i)\berror code:\s*\d+\s*-\s*[\[{]")
+
+
+@runtime_checkable
+class _HasStatusCode(Protocol):
+    status_code: object
+
+
+@runtime_checkable
+class _HasHttpStatus(Protocol):
+    http_status: object
+
+
+@runtime_checkable
+class _HasHttpStatusCode(Protocol):
+    http_status_code: object
+
+
+@runtime_checkable
+class _HasNestedError(Protocol):
+    error: object
+
+
+@runtime_checkable
+class _HasNestedResponse(Protocol):
+    response: object
 
 
 class ModelProviderFailureCategory(enum.StrEnum):
@@ -355,16 +381,23 @@ def extract_provider_http_status_code(*values: object) -> int | None:
                 if status is not None:
                     return status
             continue
-        for attr in ("status_code", "http_status", "http_status_code"):
-            status = _coerce_http_status_code(getattr(value, attr, None))
+        attribute_values = (
+            value.status_code if isinstance(value, _HasStatusCode) else None,
+            value.http_status if isinstance(value, _HasHttpStatus) else None,
+            value.http_status_code if isinstance(value, _HasHttpStatusCode) else None,
+        )
+        for attribute_value in attribute_values:
+            status = _coerce_http_status_code(attribute_value)
             if status is not None:
                 return status
-        nested_error = getattr(value, "error", None)
+        nested_error = value.error if isinstance(value, _HasNestedError) else None
         if nested_error is not None and nested_error is not value:
             status = extract_provider_http_status_code(nested_error)
             if status is not None:
                 return status
-        nested_response = getattr(value, "response", None)
+        nested_response = (
+            value.response if isinstance(value, _HasNestedResponse) else None
+        )
         if nested_response is not None and nested_response is not value:
             status = extract_provider_http_status_code(nested_response)
             if status is not None:

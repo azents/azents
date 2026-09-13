@@ -12,6 +12,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -71,6 +72,15 @@ from tests.required.public.test_runtime_terminal import (
     _TerminalSocket,
     _TerminalWorkspace,
 )
+
+
+class _TlsEdgeFiles(NamedTuple):
+    """Field-named result for ``_write_tls_edge_files``."""
+
+    certificate_path: Path
+    private_key_path: Path
+    config_path: Path
+
 
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_RUNNER_PYTHON = "/workspace/python/apps/azents-runtime-runner/.venv/bin/python"
@@ -443,7 +453,7 @@ def _runtime_web_selenium_container(
     )
 
 
-def _write_tls_edge_files(root: Path) -> tuple[Path, Path, Path]:
+def _write_tls_edge_files(root: Path) -> _TlsEdgeFiles:
     """Write a local certificate and exact reverse-proxy configuration."""
     certificate_path = root / "tls.crt"
     private_key_path = root / "tls.key"
@@ -520,7 +530,11 @@ server {
         + "\n",
         encoding="utf-8",
     )
-    return certificate_path, private_key_path, config_path
+    return _TlsEdgeFiles(
+        certificate_path=certificate_path,
+        private_key_path=private_key_path,
+        config_path=config_path,
+    )
 
 
 @contextmanager
@@ -1017,10 +1031,15 @@ def _wait_for_active_service(
         ):
             return service
         if time.monotonic() >= deadline:
+            request_state = (
+                service.current_request.state
+                if service.current_request is not None
+                else None
+            )
             raise AssertionError(
                 "Runtime Web approval did not reach authoritative active state: "
                 f"active={service.active!r}, "
-                f"request_state={getattr(service.current_request, 'state', None)!r}, "
+                f"request_state={request_state!r}, "
                 f"cycle_present={service.current_cycle is not None!r}"
             )
         time.sleep(0.1)

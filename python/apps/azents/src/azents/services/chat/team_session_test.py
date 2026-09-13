@@ -2,7 +2,7 @@
 
 import datetime
 import logging
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -119,6 +119,14 @@ from .data import (
     RunningSessionArchiveBlocked,
     UpdateGoalStatusInput,
 )
+
+
+class _ScheduledCycleFixture(NamedTuple):
+    """Field-named result for ``_start_scheduled_cycle``."""
+
+    task_id: str
+    cycle_id: str
+    run_id: str
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -261,7 +269,7 @@ async def _start_scheduled_cycle(
     workspace_id: str,
     agent_id: str,
     session_id: str,
-) -> tuple[str, str, str]:
+) -> _ScheduledCycleFixture:
     """Create one started Scheduled cycle and active Run for archive tests."""
     now = datetime.datetime.now(datetime.UTC)
     cycle_id = "c" * 32
@@ -328,7 +336,11 @@ async def _start_scheduled_cycle(
         )
         agent_session.run_state = AgentSessionRunState.RUNNING
         await session.commit()
-        return task.id, cycle_id, run.id
+        return _ScheduledCycleFixture(
+            task_id=task.id,
+            cycle_id=cycle_id,
+            run_id=run.id,
+        )
 
 
 class _RuntimeTargetResolver(RuntimeOperationTargetResolver):

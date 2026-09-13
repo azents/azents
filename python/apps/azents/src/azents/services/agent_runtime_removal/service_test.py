@@ -1,7 +1,7 @@
 """Agent Runtime removal service tests."""
 
 import datetime
-from typing import NoReturn
+from typing import NamedTuple, NoReturn
 from uuid import uuid4
 
 import pytest
@@ -64,6 +64,13 @@ from .data import (
 )
 
 
+class _ManagedAgentFixture(NamedTuple):
+    """Field-named result for ``_seed_managed_agent``."""
+
+    workspace_id: str
+    agent_id: str
+
+
 class _Broker:
     """Record best-effort stop wake-ups."""
 
@@ -79,7 +86,7 @@ async def _seed_managed_agent(
     session: AsyncSession,
     *,
     handle: str,
-) -> tuple[str, str]:
+) -> _ManagedAgentFixture:
     """Create one managed-unconfigured Agent."""
     workspace = RDBWorkspace(name="Runtime removal", handle=handle)
     session.add(workspace)
@@ -102,7 +109,10 @@ async def _seed_managed_agent(
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     await session.flush()
-    return workspace.id, agent.id
+    return _ManagedAgentFixture(
+        workspace_id=workspace.id,
+        agent_id=agent.id,
+    )
 
 
 def _service(

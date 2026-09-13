@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -26,6 +27,14 @@ from tests.required.public.test_agent_execution_persistence import (
     list_history,
 )
 from tests.required.public.test_per_prompt_inference_profile import setup_profile_agent
+
+
+class _ProfileWorkspaceIntegration(NamedTuple):
+    """Field-named result for ``_profile_workspace_and_integration``."""
+
+    workspace_handle: str
+    integration_id: str
+
 
 _PROMPT = "Provider image generation handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
@@ -212,7 +221,7 @@ def _profile_workspace_and_integration(
     *,
     public_api_client: azentspublicclient.ApiClient,
     token: str,
-) -> tuple[str, str]:
+) -> _ProfileWorkspaceIntegration:
     """Resolve the unique workspace and OpenAI integration created by setup."""
     headers = auth_headers(token)
     workspaces = WorkspaceV1Api(public_api_client).workspace_v1_list_workspaces(
@@ -227,7 +236,10 @@ def _profile_workspace_and_integration(
         _headers=headers,
     )
     assert len(integrations.items) == 1
-    return handle, integrations.items[0].id
+    return _ProfileWorkspaceIntegration(
+        workspace_handle=handle,
+        integration_id=integrations.items[0].id,
+    )
 
 
 def _wait_for_image_catalog(
