@@ -271,6 +271,15 @@ Class | Method | HTTP request | Description
 *RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile_default) | **PUT** /runtime-profile/v1/workspaces/{handle}/default | Replace Workspace Runtime Profile Default
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_workspace_runtime_providers**](azentspublicclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_workspace_runtime_providers) | **GET** /runtime-provider/v1/workspaces/{handle}/providers | List Workspace Runtime Providers
+*RuntimeWebV1Api* | [**runtime_web_v1_approve_runtime_web_request**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_approve_runtime_web_request) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/approve | Approve Runtime Web Request
+*RuntimeWebV1Api* | [**runtime_web_v1_cancel_runtime_web_request**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_cancel_runtime_web_request) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/cancel | Cancel Runtime Web Request
+*RuntimeWebV1Api* | [**runtime_web_v1_close_runtime_web_cycle**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_close_runtime_web_cycle) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/cycles/{cycle_id}/close | Close Runtime Web Cycle
+*RuntimeWebV1Api* | [**runtime_web_v1_direct_create_runtime_web_exposure**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_direct_create_runtime_web_exposure) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/direct-create | Direct Create Runtime Web Exposure
+*RuntimeWebV1Api* | [**runtime_web_v1_get_runtime_web_service_projection**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_get_runtime_web_service_projection) | **GET** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port} | Get Runtime Web Service Projection
+*RuntimeWebV1Api* | [**runtime_web_v1_list_runtime_web_services**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_list_runtime_web_services) | **GET** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services | List Runtime Web Services
+*RuntimeWebV1Api* | [**runtime_web_v1_prepare_runtime_web_endpoint**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_prepare_runtime_web_endpoint) | **PUT** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/endpoint | Prepare Runtime Web Endpoint
+*RuntimeWebV1Api* | [**runtime_web_v1_reject_runtime_web_request**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_reject_runtime_web_request) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/reject | Reject Runtime Web Request
+*RuntimeWebV1Api* | [**runtime_web_v1_request_runtime_web_exposure**](azentspublicclient/docs/RuntimeWebV1Api.md#runtime_web_v1_request_runtime_web_exposure) | **POST** /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/requests | Request Runtime Web Exposure
 *ScheduledTaskV1Api* | [**scheduled_task_v1_create_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_create_scheduled_task) | **POST** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks | Create Scheduled Task
 *ScheduledTaskV1Api* | [**scheduled_task_v1_delete_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_delete_scheduled_task) | **DELETE** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id} | Delete Scheduled Task
 *ScheduledTaskV1Api* | [**scheduled_task_v1_get_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_get_scheduled_task) | **GET** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id} | Get Scheduled Task
@@ -737,6 +746,22 @@ Class | Method | HTTP request | Description
  - [RuntimeTerminalSummaryResponse](azentspublicclient/docs/RuntimeTerminalSummaryResponse.md)
  - [RuntimeTerminalTicketResponse](azentspublicclient/docs/RuntimeTerminalTicketResponse.md)
  - [RuntimeTerminalTicketStatus](azentspublicclient/docs/RuntimeTerminalTicketStatus.md)
+ - [RuntimeWebActionErrorDetail](azentspublicclient/docs/RuntimeWebActionErrorDetail.md)
+ - [RuntimeWebActionErrorResponse](azentspublicclient/docs/RuntimeWebActionErrorResponse.md)
+ - [RuntimeWebApprovalRequest](azentspublicclient/docs/RuntimeWebApprovalRequest.md)
+ - [RuntimeWebCloseRequest](azentspublicclient/docs/RuntimeWebCloseRequest.md)
+ - [RuntimeWebCycleEndReason](azentspublicclient/docs/RuntimeWebCycleEndReason.md)
+ - [RuntimeWebCycleResponse](azentspublicclient/docs/RuntimeWebCycleResponse.md)
+ - [RuntimeWebDirectCreateRequest](azentspublicclient/docs/RuntimeWebDirectCreateRequest.md)
+ - [RuntimeWebEndpointResponse](azentspublicclient/docs/RuntimeWebEndpointResponse.md)
+ - [RuntimeWebExpectedRevisionRequest](azentspublicclient/docs/RuntimeWebExpectedRevisionRequest.md)
+ - [RuntimeWebExposureRequest](azentspublicclient/docs/RuntimeWebExposureRequest.md)
+ - [RuntimeWebPrepareRequest](azentspublicclient/docs/RuntimeWebPrepareRequest.md)
+ - [RuntimeWebRequestResponse](azentspublicclient/docs/RuntimeWebRequestResponse.md)
+ - [RuntimeWebRequestState](azentspublicclient/docs/RuntimeWebRequestState.md)
+ - [RuntimeWebRequesterKind](azentspublicclient/docs/RuntimeWebRequesterKind.md)
+ - [RuntimeWebServiceListResponse](azentspublicclient/docs/RuntimeWebServiceListResponse.md)
+ - [RuntimeWebServiceResponse](azentspublicclient/docs/RuntimeWebServiceResponse.md)
  - [ScheduledTaskCreateRequest](azentspublicclient/docs/ScheduledTaskCreateRequest.md)
  - [ScheduledTaskCurrentCycleEnvelope](azentspublicclient/docs/ScheduledTaskCurrentCycleEnvelope.md)
  - [ScheduledTaskCurrentCycleResponse](azentspublicclient/docs/ScheduledTaskCurrentCycleResponse.md)

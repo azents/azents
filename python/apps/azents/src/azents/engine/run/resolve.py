@@ -76,6 +76,7 @@ from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
+from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
@@ -1327,6 +1328,7 @@ async def resolve_agent_tools(
     skill_toolkit_provider: SkillToolkitProvider | None = None,
     subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
     dynamic_worktree_toolkit_provider: DynamicWorktreeToolkitProvider | None = None,
+    runtime_web_toolkit_provider: RuntimeWebToolkitProvider | None = None,
     memory_enabled: bool = True,
     runtime_capability_resolver: RuntimeCapabilityResolver,
 ) -> list[ToolkitBinding]:
@@ -1352,6 +1354,7 @@ async def resolve_agent_tools(
     :param external_channel_toolkit_provider: External Channel root provider
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
     :param dynamic_worktree_toolkit_provider: Dynamic Worktree provider
+    :param runtime_web_toolkit_provider: Runtime-independent web service provider
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
@@ -1753,6 +1756,50 @@ async def resolve_agent_tools(
                 False,
                 None,
                 dynamic_worktree_modes,
+            )
+        )
+
+    # Auto-bound Toolkit: Runtime Web
+    runtime_web_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+    if runtime_web_toolkit_provider is not None and _allows_execution_mode(
+        runtime_web_modes,
+        execution_mode,
+    ):
+        runtime_web_config = RuntimeWebToolkitProvider.validate_config({})
+        runtime_web_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="runtime_web",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            session=None,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        runtime_web_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="runtime_web",
+            provider=runtime_web_toolkit_provider,
+            toolkit_name="runtime_web",
+            resolve=runtime_web_toolkit_provider.resolve(
+                runtime_web_config,
+                runtime_web_context,
+            ),
+        )
+        pending.append(
+            (
+                runtime_web_toolkit_provider,
+                runtime_web_resolved,
+                runtime_web_config,
+                "runtime_web",
+                None,
+                False,
+                None,
+                runtime_web_modes,
             )
         )
 

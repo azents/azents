@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "0c879fdb6720f7ccce212511226351477b64f400359636311fcba3a0e4acb071"
+    "a46601fdfa533088b9fe35bf5a5ee70579710b6cd52808923e639abd6a63aa64"
 )
 
 
@@ -229,6 +229,41 @@ def test_baseline_schema_and_seed_state(
             )
         ).one()
         assert runtime_cutover == (1, True)
+
+        runtime_web_configuration = connection.execute(
+            sa.text(
+                """
+                SELECT enabled, mode, configuration_version, active_epoch,
+                       duration_configuration_revision, active_duration_seconds
+                FROM runtime_web_auth_configuration
+                """
+            )
+        ).one()
+        assert runtime_web_configuration == (
+            False,
+            "separate_domain",
+            1,
+            1,
+            1,
+            7_200,
+        )
+        runtime_web_pointer_constraints = set(
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT conname
+                    FROM pg_constraint
+                    WHERE conrelid = 'runtime_web_endpoints'::regclass
+                      AND contype = 'f'
+                      AND conname LIKE 'fk_runtime_web_endpoints_current_%'
+                    """
+                )
+            ).scalars()
+        )
+        assert runtime_web_pointer_constraints == {
+            "fk_runtime_web_endpoints_current_cycle",
+            "fk_runtime_web_endpoints_current_pending",
+        }
 
 
 def test_up_down_consistency(alembic_runner: MigrationContext) -> None:

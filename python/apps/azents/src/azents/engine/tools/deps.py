@@ -20,6 +20,7 @@ from azents.engine.tools.google_analytics import GoogleAnalyticsToolkitProvider
 from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.engine.tools.notion import NotionToolkitProvider
+from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.sentry import SentryToolkitProvider
 from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
@@ -43,6 +44,10 @@ from azents.services.external_channel.file_transfer import (
 )
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+)
+from azents.services.runtime_web.service import (
+    RuntimeWebService,
+    get_runtime_web_service,
 )
 from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
@@ -209,6 +214,13 @@ def get_goal_toolkit_provider(
 ) -> GoalToolkitProvider:
     """GoalToolkitProvider dependency."""
     return GoalToolkitProvider(store=store)
+
+
+def get_runtime_web_toolkit_provider(
+    service: Annotated[RuntimeWebService, Depends(get_runtime_web_service)],
+) -> RuntimeWebToolkitProvider:
+    """Return the Runtime-independent Runtime Web Toolkit provider."""
+    return RuntimeWebToolkitProvider(service=service)
 
 
 def get_goal_state_store(

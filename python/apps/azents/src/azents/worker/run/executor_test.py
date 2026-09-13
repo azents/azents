@@ -1678,6 +1678,7 @@ def _executor(
         claude_rules_toolkit_provider=object(),
         todo_toolkit_provider=object(),
         goal_toolkit_provider=object(),
+        runtime_web_toolkit_provider=object(),
         scheduled_toolkit_provider=SimpleNamespace(
             channel_service=_ScheduledChannelService()
         ),

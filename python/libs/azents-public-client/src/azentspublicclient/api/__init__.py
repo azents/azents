@@ -15,6 +15,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIn
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
+from azentspublicclient.api.runtime_web_v1_api import RuntimeWebV1Api
 from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api
 from azentspublicclient.api.terminal_v1_api import TerminalV1Api

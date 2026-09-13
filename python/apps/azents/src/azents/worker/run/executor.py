@@ -121,6 +121,7 @@ from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
     get_goal_toolkit_provider,
+    get_runtime_web_toolkit_provider,
     get_scheduled_toolkit_provider,
     get_todo_toolkit_provider,
     get_toolkit_registry,
@@ -132,6 +133,7 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
@@ -498,6 +500,10 @@ class RunExecutor:
     goal_toolkit_provider: Annotated[
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
     ]
+    runtime_web_toolkit_provider: Annotated[
+        RuntimeWebToolkitProvider,
+        Depends(get_runtime_web_toolkit_provider),
+    ]
     scheduled_toolkit_provider: Annotated[
         ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
     ]
@@ -749,6 +755,7 @@ class RunExecutor:
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             dynamic_worktree_toolkit_provider=(self.dynamic_worktree_toolkit_provider),
+            runtime_web_toolkit_provider=self.runtime_web_toolkit_provider,
             memory_enabled=agent.memory_enabled if agent is not None else True,
             runtime_capability_resolver=runtime_capability_resolver,
         )
@@ -1458,6 +1465,7 @@ class RunExecutor:
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             dynamic_worktree_toolkit_provider=(self.dynamic_worktree_toolkit_provider),
+            runtime_web_toolkit_provider=self.runtime_web_toolkit_provider,
             memory_enabled=agent_memory_enabled,
             runtime_capability_resolver=runtime_capability_resolver,
         )
