@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/events/**
@@ -71,7 +72,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-13
-spec_version: 116
+spec_version: 117
 ---
 
 # Toolkit
@@ -84,7 +85,7 @@ This domain covers four feature groups.
 
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by `ToolkitConfig`, Workspace-sharing `ToolkitScope`, and shared attachment `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
-3. **Auto-bound platform capabilities** — Runtime, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
+3. **Auto-bound platform capabilities** — Runtime, Runtime Web, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
 4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
@@ -118,6 +119,13 @@ Toolkit configuration, Agent attachments, toolkit-level OAuth, Workspace LLM int
 tools, and Session/Run capabilities remain available without a User. Authenticated management and
 OAuth setup remain requester-authorized operations and do not leak their requester into runtime
 contexts. User-brought credentials are not a Team capability.
+
+Runtime Web is a Runtime-independent auto-bound Toolkit. Root Agents and subagents
+may prepare or request the same-root Session's numeric loopback service, inspect its
+current projection, and close its current approved cycle. The Toolkit returns only
+recognized endpoint/request/cycle metadata. It cannot approve access, extend a cycle,
+control the application process, expose browser authentication material, or access a
+different root Session.
 
 ## Domain Model
 

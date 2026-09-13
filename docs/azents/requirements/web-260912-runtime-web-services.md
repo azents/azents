@@ -1,13 +1,14 @@
 ---
-title: "Temporary Runtime Web Services Requirements"
+title: "Runtime Web Services Requirements"
 created: 2026-09-12
+implemented: 2026-09-12
 tags: [runtime, web, security, frontend, backend]
 document_role: primary
 document_type: requirements
 snapshot_id: web-260912
 ---
 
-# Temporary Runtime Web Services Requirements
+# Runtime Web Services Requirements
 
 - Snapshot: `web-260912`
 - Document reference: `web-260912/REQ`

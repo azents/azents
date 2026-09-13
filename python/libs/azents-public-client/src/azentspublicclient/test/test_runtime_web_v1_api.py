@@ -33,6 +33,13 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_web_v1_approve_runtime_web_request_by_endpoint_id(self) -> None:
+        """Test case for runtime_web_v1_approve_runtime_web_request_by_endpoint_id
+
+        Approve Runtime Web Request By Endpoint Id
+        """
+        pass
+
     def test_runtime_web_v1_cancel_runtime_web_request(self) -> None:
         """Test case for runtime_web_v1_cancel_runtime_web_request
 
@@ -40,10 +47,24 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_web_v1_cancel_runtime_web_request_by_endpoint_id(self) -> None:
+        """Test case for runtime_web_v1_cancel_runtime_web_request_by_endpoint_id
+
+        Cancel Runtime Web Request By Endpoint Id
+        """
+        pass
+
     def test_runtime_web_v1_close_runtime_web_cycle(self) -> None:
         """Test case for runtime_web_v1_close_runtime_web_cycle
 
         Close Runtime Web Cycle
+        """
+        pass
+
+    def test_runtime_web_v1_close_runtime_web_cycle_by_endpoint_id(self) -> None:
+        """Test case for runtime_web_v1_close_runtime_web_cycle_by_endpoint_id
+
+        Close Runtime Web Cycle By Endpoint Id
         """
         pass
 
@@ -58,6 +79,13 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """Test case for runtime_web_v1_get_runtime_web_service_projection
 
         Get Runtime Web Service Projection
+        """
+        pass
+
+    def test_runtime_web_v1_get_service_by_endpoint_id(self) -> None:
+        """Test case for runtime_web_v1_get_service_by_endpoint_id
+
+        Get Service By Endpoint Id
         """
         pass
 
@@ -107,6 +135,13 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """Test case for runtime_web_v1_reject_runtime_web_request
 
         Reject Runtime Web Request
+        """
+        pass
+
+    def test_runtime_web_v1_reject_runtime_web_request_by_endpoint_id(self) -> None:
+        """Test case for runtime_web_v1_reject_runtime_web_request_by_endpoint_id
+
+        Reject Runtime Web Request By Endpoint Id
         """
         pass
 

@@ -52,6 +52,7 @@ code_paths:
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
@@ -99,7 +100,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-13
-spec_version: 177
+spec_version: 178
 ---
 
 # Agent Execution Loop
@@ -153,6 +154,11 @@ Main steps:
    provider-tool activity snapshots when observed.
 10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+    Runtime Web calls are server-side auto-bound client tools. They may prepare,
+    request, list, or close same-root Session services without waiting for a Runtime
+    application or human decision. Their durable tool result contains only recognized
+    content-free endpoint/request/cycle metadata, which the Web adapter may render as
+    a Runtime Web card.
 12. The adapter computes normalized `needs_follow_up` as the requirement for another model step after
     current client tools complete. The runner always executes admitted client calls first. When the
     field is false, it then observes the terminal `RunComplete` boundary and transitions

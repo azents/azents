@@ -13,6 +13,7 @@ from azents.runtime_web_gateway.policy import (
     parse_target_host,
     reject_service_worker_request,
     require_admitted_browser,
+    require_supported_browser_user_agent,
 )
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
@@ -91,6 +92,24 @@ def test_browser_profile_requires_matching_protected_chromium_evidence() -> None
     assert captured.value.code is RuntimeWebPolicyCode.UPGRADE_REQUIRED
 
 
+def test_supported_browser_user_agent_resolves_profile_without_client_hint() -> None:
+    """A prior protected admission can bind a WebSocket to the UA version."""
+    assert (
+        require_supported_browser_user_agent(
+            {"User-Agent": "Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36"},
+            config=_CONFIG,
+        )
+        == "chromium-152"
+    )
+
+    with pytest.raises(RuntimeWebPolicyError) as captured:
+        require_supported_browser_user_agent(
+            {"User-Agent": "Mozilla/5.0 Chrome/153.0.0.0 Safari/537.36"},
+            config=_CONFIG,
+        )
+    assert captured.value.code is RuntimeWebPolicyCode.UPGRADE_REQUIRED
+
+
 def test_preflight_and_actual_cors_require_an_admitted_source_origin() -> None:
     sources = frozenset(
         {
@@ -132,6 +151,8 @@ def test_header_normalization_strips_platform_authority_and_replaces_security() 
             (b"Authorization", b"Bearer application-token"),
             (b"Origin", b"https://abc.services.example.net"),
             (b"Connection", b"keep-alive"),
+            (b"Sec-WebSocket-Key", b"browser-owned"),
+            (b"Sec-WebSocket-Extensions", b"permessage-deflate"),
         ),
         port=8080,
         target_origin="https://abc.services.example.net",
@@ -160,6 +181,9 @@ def test_header_normalization_strips_platform_authority_and_replaces_security() 
 
     assert (b"host", b"localhost:8080") in request_headers
     assert not any(name == b"cookie" for name, _value in request_headers)
+    assert not any(
+        name.startswith(b"sec-websocket-") for name, _value in request_headers
+    )
     assert (b"authorization", b"Bearer application-token") in request_headers
     assert ("Set-Cookie", "app=value; Path=/") in response_headers
     assert (

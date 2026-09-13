@@ -31,6 +31,7 @@ from azents.runtime.control_protocol.grpc.runner_web_server import (
     AllowInsecureRuntimeWebTrustedPeerAuthenticator,
 )
 from azents.runtime.control_protocol.grpc.runtime_web_proxy_server import (
+    _owner_events,
     add_runtime_web_proxy_servicer,
 )
 from azents.runtime.web_transport_coordinator import RuntimeWebOwnedTunnel
@@ -108,6 +109,39 @@ def _route(now: datetime.datetime) -> RuntimeWebTunnelRoute:
         lease_expires_at=now + datetime.timedelta(seconds=30),
         admission_lease_id="admission-1",
     )
+
+
+async def test_owner_events_survive_gateway_input_half_close() -> None:
+    """HTTP response events remain readable after the request side half-closes."""
+    now = datetime.datetime(2026, 9, 12, 12, tzinfo=datetime.UTC)
+    route = _route(now)
+    registry = RuntimeWebOwnerRegistry(clock=lambda: now)
+    tunnel = await registry.create_owner(route)
+    owned = RuntimeWebOwnedTunnel(route=route, tunnel=tunnel)
+
+    async def input_completed() -> None:
+        return None
+
+    async def send_response() -> None:
+        await asyncio.sleep(0.01)
+        runner = await registry.join_runner(_runner_identity(route))
+        await runner.receive(RunnerWebResponseHead(status=200, headers=()))
+        await runner.receive(RunnerWebStreamEnd(final_sequence=0))
+
+    inbound = asyncio.create_task(input_completed())
+    renewal = asyncio.create_task(asyncio.sleep(60))
+    producer = asyncio.create_task(send_response())
+    try:
+        frames = [frame async for frame in _owner_events(owned, inbound, renewal)]
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, producer, return_exceptions=True)
+        await registry.release(tunnel)
+
+    assert frames == [
+        RunnerWebResponseHead(status=200, headers=()),
+        RunnerWebStreamEnd(final_sequence=0),
+    ]
 
 
 async def test_proxy_streams_http_frames_and_releases_owner() -> None:

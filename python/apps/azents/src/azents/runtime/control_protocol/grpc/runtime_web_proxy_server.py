@@ -270,33 +270,33 @@ async def _owner_events(
 ) -> AsyncIterator[RunnerWebEventFrame]:
     events = owned.tunnel.events().__aiter__()
     inbound_task: asyncio.Task[None] | None = inbound
-    while True:
-        event = asyncio.create_task(_next_event(events))
-        watched: set[asyncio.Task[object]] = {event, renewal}
-        if inbound_task is not None:
-            watched.add(inbound_task)
-        done, _pending = await asyncio.wait(
-            watched,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if event in done:
-            try:
-                yield event.result()
-            except StopAsyncIteration:
+    event = asyncio.create_task(_next_event(events))
+    try:
+        while True:
+            watched: set[asyncio.Task[object]] = {event, renewal}
+            if inbound_task is not None:
+                watched.add(inbound_task)
+            done, _pending = await asyncio.wait(
+                watched,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if event in done:
+                try:
+                    yield event.result()
+                except StopAsyncIteration:
+                    return
+                event = asyncio.create_task(_next_event(events))
+                continue
+            if renewal in done:
+                await renewal
                 return
-            continue
-        if renewal in done:
-            event.cancel()
-            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
-                await event
-            await renewal
-            return
-        if inbound_task is not None and inbound_task in done:
-            event.cancel()
-            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
-                await event
-            await inbound_task
-            inbound_task = None
+            if inbound_task is not None and inbound_task in done:
+                await inbound_task
+                inbound_task = None
+    finally:
+        event.cancel()
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await event
 
 
 async def _next_event(

@@ -15,8 +15,8 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-13 | 77 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-13 | 168 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-13 | 78 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-13 | 169 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-13 | 78 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -24,18 +24,18 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-12 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-13 | 116 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-13 | 16 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-13 | 117 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-13 | 17 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-13 | 83 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 177 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 79 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 48 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 178 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 80 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-12 | 35 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 49 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
@@ -472,7 +472,7 @@ Design documents are accumulated records and are not listed individually in this
 | [PV-less Valkey Recovery Requirements](requirements/valkey-260912-pvless-recovery.md) | valkey-260912 | 2026-09-12 | 2026-09-12 |
 | [Fifteen-Minute Wait Timeout Requirements](requirements/wait-260726-fifteen-minute-timeout.md) | wait-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
-| [Temporary Runtime Web Services Requirements](requirements/web-260912-runtime-web-services.md) | web-260912 | 2026-09-12 | - |
+| [Runtime Web Services Requirements](requirements/web-260912-runtime-web-services.md) | web-260912 | 2026-09-12 | 2026-09-12 |
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
 | [Workspace Settings Hub Requirements](requirements/workspace-260801-settings-hub.md) | workspace-260801 | 2026-08-01 | 2026-08-01 |
 | [Runner-Reported Agent Workspace Requirements](requirements/workspace-260803-runner-reported-agent-workspace.md) | workspace-260803 | 2026-08-03 | 2026-08-03 |
@@ -901,7 +901,7 @@ Design documents are accumulated records and are not listed individually in this
 - [PV-less Valkey Recovery Decisions](adr/valkey-260912-pvless-recovery.md)
 - [Fifteen-Minute Wait Timeout](adr/wait-260726-fifteen-minute-timeout.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
-- [Temporary Runtime Web Services](adr/web-260912-runtime-web-services.md)
+- [Runtime Web Services](adr/web-260912-runtime-web-services.md)
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
 - [Workspace Settings Hub](adr/workspace-260801-settings-hub.md)
 - [Runner-Reported Agent Workspace](adr/workspace-260803-runner-reported-agent-workspace.md)
