@@ -888,17 +888,37 @@ def _configure_agent_model_options(
             "selectable_model_options": [
                 {
                     "label": "Quality",
-                    "model_selection": model_selection(
-                        str(by_identifier["gpt-5.5"]["provider_model_identifier"])
-                    ),
-                    "settings": {"builtin_tools": []},
+                    "candidates": [
+                        {
+                            "model_selection": model_selection(
+                                str(
+                                    by_identifier["gpt-5.5"][
+                                        "provider_model_identifier"
+                                    ]
+                                )
+                            ),
+                            "settings": {"builtin_tools": []},
+                        }
+                    ],
+                    "subagent_enabled": True,
+                    "subagent_guidance": None,
                 },
                 {
                     "label": "Fast",
-                    "model_selection": model_selection(
-                        str(by_identifier["gpt-5.5-mini"]["provider_model_identifier"])
-                    ),
-                    "settings": {"builtin_tools": []},
+                    "candidates": [
+                        {
+                            "model_selection": model_selection(
+                                str(
+                                    by_identifier["gpt-5.5-mini"][
+                                        "provider_model_identifier"
+                                    ]
+                                )
+                            ),
+                            "settings": {"builtin_tools": []},
+                        }
+                    ],
+                    "subagent_enabled": True,
+                    "subagent_guidance": None,
                 },
             ],
             "main_model_label": "Quality",

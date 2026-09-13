@@ -249,25 +249,33 @@ def _setup_xai_agent(
                 "selectable_model_options": [
                     {
                         "label": "Quality",
-                        "model_selection": selection(quality_identifier),
-                        "settings": {
-                            "context_window_tokens": 96_000,
-                            "max_output_tokens": 12_000,
-                            "builtin_tools": image_builtin_tools,
-                            "subagent_enabled": False,
-                            "subagent_guidance": "Use the selected image capability.",
-                        },
+                        "candidates": [
+                            {
+                                "model_selection": selection(quality_identifier),
+                                "settings": {
+                                    "context_window_tokens": 96_000,
+                                    "max_output_tokens": 12_000,
+                                    "builtin_tools": image_builtin_tools,
+                                },
+                            }
+                        ],
+                        "subagent_enabled": False,
+                        "subagent_guidance": "Use the selected image capability.",
                     },
                     {
                         "label": "Fast",
-                        "model_selection": selection(fast_identifier),
-                        "settings": {
-                            "context_window_tokens": 32_000,
-                            "max_output_tokens": 4_000,
-                            "builtin_tools": no_builtin_tools,
-                            "subagent_enabled": False,
-                            "subagent_guidance": "Use for lightweight follow-up.",
-                        },
+                        "candidates": [
+                            {
+                                "model_selection": selection(fast_identifier),
+                                "settings": {
+                                    "context_window_tokens": 32_000,
+                                    "max_output_tokens": 4_000,
+                                    "builtin_tools": no_builtin_tools,
+                                },
+                            }
+                        ],
+                        "subagent_enabled": False,
+                        "subagent_guidance": "Use for lightweight follow-up.",
                     },
                 ],
                 "main_model_label": "Quality",
