@@ -35,6 +35,12 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.selectable_model_candidate_input import (
+    SelectableModelCandidateInput,
+)
+from azentspublicclient.models.selectable_model_option_input import (
+    SelectableModelOptionInput,
+)
 
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
@@ -271,6 +277,20 @@ def model_selection_from_first_candidate(
     )
 
 
+def single_candidate_model_options(
+    model_selection: AgentModelSelectionInput,
+) -> list[SelectableModelOptionInput]:
+    """Build one explicit canonical model label for generated client fixtures."""
+    return [
+        SelectableModelOptionInput(
+            label="default",
+            candidates=[SelectableModelCandidateInput(model_selection=model_selection)],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+    ]
+
+
 def create_chat_session(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -363,8 +383,9 @@ def create_agent_session_setup(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"File Agent {uniq}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=runtime_profile_id,
         ),
@@ -495,8 +516,9 @@ def create_two_member_team_session(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Team Session Agent {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=runtime_profile_id,
         ),

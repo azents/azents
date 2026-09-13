@@ -365,40 +365,48 @@ class TestProviderImageGeneration:
                 "selectable_model_options": [
                     {
                         "label": "Quality",
-                        "model_selection": {
-                            "llm_provider_integration_id": integration_id,
-                            "model_identifier": "gpt-5.5",
-                        },
-                        "settings": {
-                            "context_window_tokens": 96_000,
-                            "max_output_tokens": 12_000,
-                            "builtin_tools": [
-                                {"name": "web_search"},
-                                {
-                                    "name": "image_generation",
-                                    "config": {
-                                        "model": "gpt-image-2.5-flare",
-                                        "quality": "high",
-                                    },
+                        "candidates": [
+                            {
+                                "model_selection": {
+                                    "llm_provider_integration_id": integration_id,
+                                    "model_identifier": "gpt-5.5",
                                 },
-                            ],
-                            "subagent_enabled": False,
-                            "subagent_guidance": "Reserve for complex synthesis.",
-                        },
+                                "settings": {
+                                    "context_window_tokens": 96_000,
+                                    "max_output_tokens": 12_000,
+                                    "builtin_tools": [
+                                        {"name": "web_search"},
+                                        {
+                                            "name": "image_generation",
+                                            "config": {
+                                                "model": "gpt-image-2.5-flare",
+                                                "quality": "high",
+                                            },
+                                        },
+                                    ],
+                                },
+                            }
+                        ],
+                        "subagent_enabled": False,
+                        "subagent_guidance": "Reserve for complex synthesis.",
                     },
                     {
                         "label": "Fast",
-                        "model_selection": {
-                            "llm_provider_integration_id": integration_id,
-                            "model_identifier": "gpt-5.5-mini",
-                        },
-                        "settings": {
-                            "context_window_tokens": 32_000,
-                            "max_output_tokens": 4_000,
-                            "builtin_tools": [],
-                            "subagent_enabled": True,
-                            "subagent_guidance": "Prefer for bounded investigation.",
-                        },
+                        "candidates": [
+                            {
+                                "model_selection": {
+                                    "llm_provider_integration_id": integration_id,
+                                    "model_identifier": "gpt-5.5-mini",
+                                },
+                                "settings": {
+                                    "context_window_tokens": 32_000,
+                                    "max_output_tokens": 4_000,
+                                    "builtin_tools": [],
+                                },
+                            }
+                        ],
+                        "subagent_enabled": True,
+                        "subagent_guidance": "Prefer for bounded investigation.",
                     },
                 ],
                 "main_model_label": "Quality",
@@ -419,8 +427,12 @@ class TestProviderImageGeneration:
             )
             if option.get("label") == "Quality"
         )
+        quality_candidates = json_object_list_payload(
+            quality_option.get("candidates"),
+            label="updated Quality candidates",
+        )
         quality_settings = json_object_payload(
-            quality_option.get("settings"),
+            quality_candidates[0].get("settings"),
             label="updated Quality settings",
         )
         assert json_object_list_payload(

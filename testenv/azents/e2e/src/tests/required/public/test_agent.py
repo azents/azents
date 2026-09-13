@@ -47,6 +47,7 @@ from azentspublicclient.models.secrets import Secrets
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
 )
 
@@ -169,8 +170,9 @@ def _create_agent(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=name or f"Agent {uniq}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=agent_type,
         ),
         _headers={"Authorization": f"Bearer {token}"},
@@ -216,8 +218,11 @@ class TestAgentCrud:
             handle=handle,
             agent_create_request=AgentCreateRequest(
                 name="My Agent",
-                model_selection=model_selection,
-                lightweight_model_selection=model_selection,
+                selectable_model_options=single_candidate_model_options(
+                    model_selection
+                ),
+                main_model_label="default",
+                lightweight_model_label="default",
                 description="test agent",
                 system_prompt="You are a helper.",
                 enabled=True,

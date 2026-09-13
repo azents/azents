@@ -41,6 +41,7 @@ from support.runtime_profiles import (
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
 )
 
@@ -502,8 +503,11 @@ def _create_agent_with_runtime_hook_toolkit(
         handle=workspace.handle,
         agent_create_request=AgentCreateRequest(
             name=f"Runtime Hook QA Agent {toolkit_slug}",
-            model_selection=workspace.model_selection,
-            lightweight_model_selection=workspace.model_selection,
+            selectable_model_options=single_candidate_model_options(
+                workspace.model_selection
+            ),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=workspace.runtime_profile_id,
             tool_search_enabled=tool_search_enabled,

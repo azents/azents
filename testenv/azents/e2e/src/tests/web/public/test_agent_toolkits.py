@@ -39,6 +39,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
 )
 
@@ -198,8 +199,11 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         handle=context.handle,
         agent_create_request=AgentCreateRequest(
             name=f"Agent Toolkit Web {unique()}",
-            model_selection=context.model_selection,
-            lightweight_model_selection=context.model_selection,
+            selectable_model_options=single_candidate_model_options(
+                context.model_selection
+            ),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
         ),
         _headers=_headers(context.owner_token),
