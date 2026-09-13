@@ -1,10 +1,6 @@
 import {
-  externalChannelV1CancelAccountLinkCandidate,
-  externalChannelV1ConfirmAccountLinkCandidate,
-  externalChannelV1CreateAccountLinkCandidate,
   externalChannelV1ExchangeAccountLinkOauth,
-  externalChannelV1GetAccountLinkCandidate,
-  externalChannelV1GetAccountLinkOrigin,
+  externalChannelV1ListAccountLinkProviders,
   externalChannelV1ListAccountLinks,
   externalChannelV1StartAccountLinkOauth,
   externalChannelV1UnlinkAccountLink,
@@ -44,6 +40,19 @@ export const accountLinksRouter = router({
     }
   }),
 
+  listProviders: publicProcedure.query(async ({ ctx }) => {
+    try {
+      markPrivateNoStore(ctx.resHeaders);
+      const { data } = await externalChannelV1ListAccountLinkProviders({
+        client: ctx.apiClient,
+        throwOnError: true,
+      });
+      return data;
+    } catch (error) {
+      throw unexpectedAccountLinkError(error);
+    }
+  }),
+
   startOauth: publicProcedure
     .input(z.object({ provider: z.enum(["slack", "discord"]) }))
     .mutation(async ({ ctx, input }) => {
@@ -54,8 +63,12 @@ export const accountLinksRouter = router({
           path: { provider: input.provider },
           throwOnError: true,
         });
-        return data;
+        return { type: "SUCCESS" as const, data };
       } catch (error) {
+        const reason = accountLinkFailureReason(error);
+        if (reason !== null) {
+          return { type: "FAILURE" as const, reason };
+        }
         throw unexpectedAccountLinkError(error);
       }
     }),
@@ -77,8 +90,12 @@ export const accountLinksRouter = router({
           body: { code: input.code, state: input.state },
           throwOnError: true,
         });
-        return data;
+        return { type: "SUCCESS" as const, data };
       } catch (error) {
+        const reason = accountLinkFailureReason(error);
+        if (reason !== null) {
+          return { type: "FAILURE" as const, reason };
+        }
         throw unexpectedAccountLinkError(error);
       }
     }),
@@ -91,106 +108,6 @@ export const accountLinksRouter = router({
         const { data } = await externalChannelV1UnlinkAccountLink({
           client: ctx.apiClient,
           path: { link_id: input.linkId },
-          throwOnError: true,
-        });
-        return { type: "SUCCESS" as const, data };
-      } catch (error) {
-        const reason = accountLinkFailureReason(error);
-        if (reason !== null) {
-          return { type: "FAILURE" as const, reason };
-        }
-        throw unexpectedAccountLinkError(error);
-      }
-    }),
-
-  getOrigin: publicProcedure
-    .input(z.object({ originId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      try {
-        markPrivateNoStore(ctx.resHeaders);
-        const { data } = await externalChannelV1GetAccountLinkOrigin({
-          client: ctx.apiClient,
-          path: { origin_id: input.originId },
-          throwOnError: true,
-        });
-        return { type: "SUCCESS" as const, data };
-      } catch (error) {
-        const reason = accountLinkFailureReason(error);
-        if (reason !== null) {
-          return { type: "FAILURE" as const, reason };
-        }
-        throw unexpectedAccountLinkError(error);
-      }
-    }),
-
-  createCandidate: publicProcedure
-    .input(z.object({ originId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        markPrivateNoStore(ctx.resHeaders);
-        const { data } = await externalChannelV1CreateAccountLinkCandidate({
-          client: ctx.apiClient,
-          path: { origin_id: input.originId },
-          throwOnError: true,
-        });
-        return { type: "SUCCESS" as const, data };
-      } catch (error) {
-        const reason = accountLinkFailureReason(error);
-        if (reason !== null) {
-          return { type: "FAILURE" as const, reason };
-        }
-        throw unexpectedAccountLinkError(error);
-      }
-    }),
-
-  getCandidate: publicProcedure
-    .input(z.object({ candidateId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      try {
-        markPrivateNoStore(ctx.resHeaders);
-        const { data } = await externalChannelV1GetAccountLinkCandidate({
-          client: ctx.apiClient,
-          path: { candidate_id: input.candidateId },
-          throwOnError: true,
-        });
-        return { type: "SUCCESS" as const, data };
-      } catch (error) {
-        const reason = accountLinkFailureReason(error);
-        if (reason !== null) {
-          return { type: "FAILURE" as const, reason };
-        }
-        throw unexpectedAccountLinkError(error);
-      }
-    }),
-
-  confirmCandidate: publicProcedure
-    .input(z.object({ candidateId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        markPrivateNoStore(ctx.resHeaders);
-        const { data } = await externalChannelV1ConfirmAccountLinkCandidate({
-          client: ctx.apiClient,
-          path: { candidate_id: input.candidateId },
-          throwOnError: true,
-        });
-        return { type: "SUCCESS" as const, data };
-      } catch (error) {
-        const reason = accountLinkFailureReason(error);
-        if (reason !== null) {
-          return { type: "FAILURE" as const, reason };
-        }
-        throw unexpectedAccountLinkError(error);
-      }
-    }),
-
-  cancelCandidate: publicProcedure
-    .input(z.object({ candidateId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        markPrivateNoStore(ctx.resHeaders);
-        const { data } = await externalChannelV1CancelAccountLinkCandidate({
-          client: ctx.apiClient,
-          path: { candidate_id: input.candidateId },
           throwOnError: true,
         });
         return { type: "SUCCESS" as const, data };

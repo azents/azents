@@ -5,6 +5,7 @@ import traceback
 import pytest
 
 import azents.core.external_account_oauth as oauth
+from azents.core.config import Config
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_account_oauth import (
     DiscordIdentityOAuthAdapter,
@@ -13,6 +14,57 @@ from azents.core.external_account_oauth import (
     _discord_identity,
     _slack_identity,
 )
+
+
+def _testenv_config(*, enabled: bool) -> Config:
+    """Build the minimal configuration needed for endpoint selection tests."""
+    return Config.model_construct(
+        testenv_api_enabled=enabled,
+        testenv_slack_oauth_base_url="http://slack-fake:8083",
+        testenv_discord_oauth_base_url="http://discord-fake:8085",
+    )
+
+
+def test_testenv_oauth_endpoint_overrides_require_the_testenv_gate() -> None:
+    """Provider endpoints stay fixed unless testenv overrides are explicitly enabled."""
+    disabled = _testenv_config(enabled=False)
+    enabled = _testenv_config(enabled=True)
+
+    slack_production = oauth.external_account_oauth_endpoints(
+        ExternalChannelProvider.SLACK,
+        disabled,
+    )
+    slack_testenv = oauth.external_account_oauth_endpoints(
+        ExternalChannelProvider.SLACK,
+        enabled,
+    )
+    discord_production = oauth.external_account_oauth_endpoints(
+        ExternalChannelProvider.DISCORD,
+        disabled,
+    )
+    discord_testenv = oauth.external_account_oauth_endpoints(
+        ExternalChannelProvider.DISCORD,
+        enabled,
+    )
+
+    assert slack_production.authorization_url == oauth.SLACK_IDENTITY_AUTHORIZE_URL
+    assert slack_production.token_url == oauth.SLACK_IDENTITY_TOKEN_URL
+    assert slack_production.userinfo_url == oauth.SLACK_IDENTITY_USERINFO_URL
+    assert slack_testenv.authorization_url == ("http://slack-fake:8083/oauth/authorize")
+    assert slack_testenv.token_url == (
+        "http://slack-fake:8083/api/openid.connect.token"
+    )
+    assert slack_testenv.userinfo_url == (
+        "http://slack-fake:8083/api/openid.connect.userInfo"
+    )
+    assert discord_production.authorization_url == oauth.DISCORD_IDENTITY_AUTHORIZE_URL
+    assert discord_production.token_url == oauth.DISCORD_IDENTITY_TOKEN_URL
+    assert discord_production.userinfo_url == oauth.DISCORD_IDENTITY_USERINFO_URL
+    assert discord_testenv.authorization_url == (
+        "http://discord-fake:8085/oauth2/authorize"
+    )
+    assert discord_testenv.token_url == "http://discord-fake:8085/api/oauth2/token"
+    assert discord_testenv.userinfo_url == "http://discord-fake:8085/api/users/@me"
 
 
 def test_slack_authorization_uses_identity_scopes() -> None:

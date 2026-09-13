@@ -1089,7 +1089,7 @@ def _interaction_handler(
         case ExternalChannelInteractionType.OPTIONS:
             return "unsupported"
         case ExternalChannelInteractionType.VIEW_SUBMISSION:
-            if callback_id in {"azents_account_link_code", "azents_model_apply"}:
+            if callback_id == "azents_model_apply":
                 return "native_control"
             if callback_id == SLACK_SELECTOR_VIEW_CALLBACK_ID:
                 return "selector_submission"

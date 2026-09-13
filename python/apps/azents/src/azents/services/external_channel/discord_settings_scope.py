@@ -14,7 +14,6 @@ from azents.core.enums import (
 )
 
 _DISCORD_SETTINGS_PREFIX = "a"
-_DISCORD_ACCOUNT_LINK_PREFIX = "al1"
 _DISCORD_MODEL_SETTINGS_PREFIX = "ms1"
 _DISCORD_SETTINGS_SIGNATURE_BYTES = 16
 
@@ -27,8 +26,6 @@ DiscordSettingsAction = Literal[
     "parent_response_mode",
     "thread_response_mode",
 ]
-
-DiscordAccountLinkAction = Literal["start", "enter_code"]
 
 DiscordModelSettingsAction = Literal[
     "open",
@@ -55,15 +52,6 @@ class DiscordSettingsScope:
     settings_generation: int | None
     binding_id: str | None
     binding_version: str | None
-
-
-@dataclass(frozen=True)
-class DiscordAccountLinkScope:
-    """One signed private account-link control locator."""
-
-    action: DiscordAccountLinkAction
-    origin_interaction_id: str | None
-    origin_id: str | None
 
 
 @dataclass(frozen=True)
@@ -222,63 +210,6 @@ def parse_discord_settings_custom_id(
             binding_version=binding_version,
         )
     raise AssertionError("Discord settings action is not exhaustive.")
-
-
-def build_discord_account_link_custom_id(
-    *,
-    secret: str,
-    action: DiscordAccountLinkAction,
-    origin_interaction_id: str | None,
-    origin_id: str | None,
-) -> str:
-    """Build one signed actor-bound account-link component or modal ID."""
-    if action == "start":
-        value = _identifier(origin_interaction_id)
-        if origin_id is not None:
-            raise ValueError("Discord account-link scope is invalid.")
-        action_code = "s"
-    elif action == "enter_code":
-        value = _identifier(origin_id)
-        if origin_interaction_id is not None:
-            raise ValueError("Discord account-link scope is invalid.")
-        action_code = "e"
-    else:
-        raise AssertionError("Discord account-link action is not exhaustive.")
-    fields = [_DISCORD_ACCOUNT_LINK_PREFIX, action_code, value]
-    custom_id = ":".join((*fields, _signature(secret=secret, fields=fields)))
-    if len(custom_id) > 100:
-        raise ValueError("Discord account-link scope exceeds the component limit.")
-    return custom_id
-
-
-def parse_discord_account_link_custom_id(
-    *,
-    custom_id: str,
-    secret: str,
-) -> DiscordAccountLinkScope:
-    """Verify and parse one private account-link component or modal ID."""
-    fields = custom_id.split(":")
-    if len(fields) != 4 or fields[0] != _DISCORD_ACCOUNT_LINK_PREFIX:
-        raise ValueError("Discord account-link scope is invalid.")
-    unsigned_fields = fields[:-1]
-    if not hmac.compare_digest(
-        fields[-1], _signature(secret=secret, fields=unsigned_fields)
-    ):
-        raise ValueError("Discord account-link scope is invalid.")
-    value = _identifier(fields[2])
-    if fields[1] == "s":
-        return DiscordAccountLinkScope(
-            action="start",
-            origin_interaction_id=value,
-            origin_id=None,
-        )
-    if fields[1] == "e":
-        return DiscordAccountLinkScope(
-            action="enter_code",
-            origin_interaction_id=None,
-            origin_id=value,
-        )
-    raise ValueError("Discord account-link scope is invalid.")
 
 
 def build_discord_model_settings_custom_id(

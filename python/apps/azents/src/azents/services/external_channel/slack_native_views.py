@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 
-from azents.core.external_account_link import ExternalAccountLinkState
 from azents.core.external_model_settings import ExternalModelEditor
 from azents.services.external_channel.slack_events import SlackInteractionView
 from azents.services.external_channel.slack_native_protocol import (
@@ -43,17 +42,14 @@ def private_notice(message: str) -> SlackInteractionView:
 def add_personal_controls(
     view: SlackInteractionView,
     *,
-    metadata: str,
+    connect_url: str | None,
     management_url: str,
-    link_state: ExternalAccountLinkState | None,
+    linked: bool,
     model_metadata: str | None,
 ) -> SlackInteractionView:
-    """Append optional controls without changing the guest form or submission."""
+    """Append direct account URLs without changing the guest form or submission."""
     controls: list[dict[str, object]] = []
-    if link_state in {
-        ExternalAccountLinkState.ACTIVE,
-        ExternalAccountLinkState.INACTIVE,
-    }:
+    if linked:
         controls.append(
             {
                 "type": "button",
@@ -61,26 +57,26 @@ def add_personal_controls(
                 "url": management_url,
             }
         )
-    else:
+    elif connect_url is not None:
         controls.append(
-            _button(
-                "Connect Azents account · optional",
-                "azents_account_link_start",
-                metadata,
-            )
+            {
+                "type": "button",
+                "text": _text("Connect Azents account"),
+                "url": connect_url,
+            }
         )
     if model_metadata is not None:
         controls.append(
             _button("Edit shared model", "azents_model_open", model_metadata)
         )
-    if link_state == ExternalAccountLinkState.ACTIVE:
+    if linked:
         status_text = "Account connected"
-    elif link_state == ExternalAccountLinkState.INACTIVE:
-        status_text = "Account connection inactive. Manage your account in Azents."
-    else:
+    elif connect_url is not None:
         status_text = (
-            "Account linking is optional. Existing guest access stays unchanged."
+            "Connect your account to use your authorized conversation settings."
         )
+    else:
+        status_text = "Slack account connection is currently unavailable."
     return replace(
         view,
         blocks=[
@@ -90,62 +86,8 @@ def add_personal_controls(
                 "type": "context",
                 "elements": [_text(status_text)],
             },
-            {"type": "actions", "elements": controls},
+            *([{"type": "actions", "elements": controls}] if controls else []),
         ],
-    )
-
-
-def link_code_view(
-    *, metadata: str, web_url: str, notice: str | None
-) -> SlackInteractionView:
-    """Collect a code privately; never echo it into modal metadata or labels."""
-    blocks: list[dict[str, object]] = [
-        _section(
-            "Connect your Azents account (optional). Open Azents, check the account "
-            "and Workspace, and create a verification code. Enter that code here "
-            "using this same Slack identity. "
-            "Then return to Azents for final confirmation."
-        ),
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": _text("Open Azents to connect"),
-                    "url": web_url,
-                }
-            ],
-        },
-        {
-            "type": "input",
-            "block_id": "azents_account_link_code",
-            "label": _text("Verification code"),
-            "element": {
-                "type": "plain_text_input",
-                "action_id": "value",
-                "min_length": 1,
-                "max_length": 128,
-            },
-        },
-        {
-            "type": "context",
-            "elements": [
-                _text(
-                    "Linking does not change guest access "
-                    "or shared conversation settings."
-                )
-            ],
-        },
-    ]
-    if notice is not None:
-        blocks.insert(0, _section(notice))
-    return SlackInteractionView(
-        callback_id="azents_account_link_code",
-        title="Connect Azents account",
-        private_metadata=metadata,
-        blocks=blocks,
-        submit_title="Verify code",
-        close_title="Cancel",
     )
 
 

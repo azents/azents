@@ -1,5 +1,7 @@
 """Deterministic Discord REST and Gateway boundary for E2E tests."""
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -10,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import ClassVar, NamedTuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -128,15 +130,361 @@ class _TransientComponent(NamedTuple):
     channel_id: str | None
 
 
-class FakeState:
-    """Thread-safe Discord scenarios and sanitized provider evidence."""
+class _OAuthResponse(NamedTuple):
+    """One fake OAuth HTTP response."""
+
+    status: int
+    payload: dict[str, object] | None
+    redirect: str | None
+
+
+class DiscordOAuthState:
+    """Deterministic Discord OAuth flow with strict PKCE and redacted evidence."""
 
     def __init__(self) -> None:
         self.lock = Lock()
         self.reset()
 
     def reset(self) -> None:
+        """Reset OAuth configuration, one-time credentials, and evidence."""
+        with self.lock:
+            self.client_id = "discord-oauth-client"
+            self.client_secret = "discord-oauth-secret"
+            self.redirect_uri = (
+                "https://azents.example/oauth/external-account/discord/callback"
+            )
+            self.authorize_scenario = "success"
+            self.token_scenario = "success"
+            self.userinfo_scenario = "success"
+            self.delay_seconds = 0
+            self.user_id = "710000000000000001"
+            self.username = "discord-oauth-user"
+            self.global_name = "Discord OAuth User"
+            self.requests: list[dict[str, object]] = []
+            self._codes: dict[str, tuple[str, str]] = {}
+            self._tokens: set[str] = set()
+            self._handoff: dict[str, object] | None = None
+            self._sequence = 0
+
+    def configure(self, payload: dict[str, object]) -> None:
+        """Apply one bounded test-only OAuth configuration."""
+        allowed = {
+            "client_id",
+            "client_secret",
+            "redirect_uri",
+            "authorize_scenario",
+            "token_scenario",
+            "userinfo_scenario",
+            "delay_seconds",
+            "user_id",
+            "username",
+            "global_name",
+        }
+        if set(payload) - allowed:
+            raise ValueError("Unsupported Discord OAuth configuration field.")
+        with self.lock:
+            for name in (
+                "client_id",
+                "client_secret",
+                "redirect_uri",
+                "user_id",
+                "username",
+                "global_name",
+            ):
+                value = payload.get(name)
+                if value is not None:
+                    if not isinstance(value, str) or not value:
+                        raise ValueError(f"OAuth {name} must be a non-empty string.")
+                    setattr(self, name, value)
+            authorize_scenario = payload.get("authorize_scenario")
+            if authorize_scenario is not None:
+                if authorize_scenario not in {
+                    "success",
+                    "cancel",
+                    "provider_error",
+                    "delay",
+                    "malformed",
+                }:
+                    raise ValueError("Unsupported Discord OAuth authorize scenario.")
+                self.authorize_scenario = str(authorize_scenario)
+            for name in ("token_scenario", "userinfo_scenario"):
+                value = payload.get(name)
+                if value is not None:
+                    if value not in {"success", "rejected", "malformed"}:
+                        raise ValueError(f"Unsupported Discord OAuth {name}.")
+                    setattr(self, name, str(value))
+            delay_seconds = payload.get("delay_seconds")
+            if delay_seconds is not None:
+                if (
+                    not isinstance(delay_seconds, int)
+                    or isinstance(delay_seconds, bool)
+                    or not 0 <= delay_seconds <= 5
+                ):
+                    raise ValueError("OAuth delay_seconds must be from 0 to 5.")
+                self.delay_seconds = delay_seconds
+            self.requests = []
+            self._codes = {}
+            self._tokens = set()
+            self._handoff = None
+            self._sequence = 0
+
+    def authorize(self, query: dict[str, list[str]]) -> _OAuthResponse:
+        """Validate Discord authorize input and issue one PKCE-bound callback."""
+        client_id = _query_one(query, "client_id")
+        redirect_uri = _query_one(query, "redirect_uri")
+        state = _query_one(query, "state")
+        challenge = _query_one(query, "code_challenge")
+        client_valid = client_id == self.client_id
+        redirect_valid = redirect_uri == self.redirect_uri
+        scope_valid = _query_one(query, "scope") == "identify"
+        pkce_valid = (
+            isinstance(challenge, str)
+            and bool(challenge)
+            and _query_one(query, "code_challenge_method") == "S256"
+        )
+        valid = (
+            client_valid
+            and redirect_valid
+            and scope_valid
+            and pkce_valid
+            and _query_one(query, "response_type") == "code"
+            and isinstance(state, str)
+            and bool(state)
+        )
+        if not valid:
+            self._record(
+                "authorize",
+                "rejected",
+                client_valid=client_valid,
+                redirect_valid=redirect_valid,
+                scope_valid=scope_valid,
+                state_present=bool(state),
+                pkce_present=challenge is not None,
+                pkce_valid=pkce_valid,
+            )
+            return _OAuthResponse(400, {"error": "invalid_request"}, None)
+        scenario = self.authorize_scenario
+        delay_seconds = self.delay_seconds
+        if scenario == "delay":
+            time.sleep(delay_seconds)
+            scenario = "success"
+        assert redirect_uri is not None
+        assert state is not None
+        assert challenge is not None
+        if scenario == "cancel":
+            callback = _callback_url(
+                redirect_uri,
+                {"error": "access_denied", "state": state},
+            )
+            outcome = "cancelled"
+        elif scenario == "provider_error":
+            callback = _callback_url(
+                redirect_uri,
+                {"error": "server_error", "state": state},
+            )
+            outcome = "provider_error"
+        elif scenario == "malformed":
+            callback = _callback_url(
+                redirect_uri,
+                {"code": "malformed-without-state"},
+            )
+            outcome = "malformed"
+        else:
+            with self.lock:
+                self._sequence += 1
+                code = f"discord-oauth-code-{self._sequence}"
+                self._codes[code] = (redirect_uri, challenge)
+            callback = _callback_url(redirect_uri, {"code": code, "state": state})
+            outcome = "authorized"
+        with self.lock:
+            self._handoff = {"redirect_url": callback}
+        self._record(
+            "authorize",
+            outcome,
+            client_valid=True,
+            redirect_valid=True,
+            scope_valid=True,
+            state_present=True,
+            pkce_present=True,
+            pkce_valid=True,
+        )
+        return _OAuthResponse(302, None, callback)
+
+    def exchange(
+        self,
+        body: dict[str, object],
+        authorization: str,
+    ) -> _OAuthResponse:
+        """Consume one code only when client, redirect, and PKCE all match."""
+        client_id, client_secret = _oauth_client_credentials(body, authorization)
+        code = body.get("code")
+        verifier = body.get("code_verifier")
+        client_valid = client_id == self.client_id
+        secret_valid = client_secret == self.client_secret
+        redirect_valid = body.get("redirect_uri") == self.redirect_uri
+        with self.lock:
+            record = self._codes.pop(code, None) if isinstance(code, str) else None
+        expected_challenge = record[1] if record is not None else None
+        pkce_valid = (
+            isinstance(verifier, str)
+            and expected_challenge is not None
+            and _pkce_challenge(verifier) == expected_challenge
+        )
+        code_valid = (
+            record is not None and record[0] == body.get("redirect_uri") and pkce_valid
+        )
+        valid = client_valid and secret_valid and redirect_valid and code_valid
+        if not valid or self.token_scenario == "rejected":
+            outcome = "rejected"
+            response = _OAuthResponse(400, {"error": "invalid_grant"}, None)
+        elif self.token_scenario == "malformed":
+            outcome = "malformed"
+            response = _OAuthResponse(200, {"token_type": "Bearer"}, None)
+        else:
+            token = f"discord-oauth-token-{self._sequence}"
+            with self.lock:
+                self._tokens.add(token)
+            outcome = "exchanged"
+            response = _OAuthResponse(
+                200,
+                {
+                    "access_token": token,
+                    "token_type": "Bearer",
+                    "scope": "identify",
+                },
+                None,
+            )
+        self._record(
+            "token",
+            outcome,
+            client_valid=client_valid,
+            secret_valid=secret_valid,
+            redirect_valid=redirect_valid,
+            code_present=isinstance(code, str) and bool(code),
+            code_valid=code_valid,
+            pkce_present=isinstance(verifier, str) and bool(verifier),
+            pkce_valid=pkce_valid,
+        )
+        return response
+
+    def userinfo(self, authorization: str) -> _OAuthResponse:
+        """Return one deterministic Discord identity for a valid bearer token."""
+        token = authorization.removeprefix("Bearer ").strip()
+        with self.lock:
+            token_valid = token in self._tokens
+        if not token_valid or self.userinfo_scenario == "rejected":
+            outcome = "rejected"
+            response = _OAuthResponse(401, {"message": "401: Unauthorized"}, None)
+        elif self.userinfo_scenario == "malformed":
+            outcome = "malformed"
+            response = _OAuthResponse(200, {"username": self.username}, None)
+        else:
+            outcome = "identified"
+            response = _OAuthResponse(
+                200,
+                {
+                    "id": self.user_id,
+                    "username": self.username,
+                    "global_name": self.global_name,
+                },
+                None,
+            )
+        self._record(
+            "userinfo",
+            outcome,
+            authorization_present=bool(authorization),
+            token_valid=token_valid,
+        )
+        return response
+
+    def transient_handoff(self) -> dict[str, object] | None:
+        """Return the callback URL only through transient test control state."""
+        with self.lock:
+            return dict(self._handoff) if self._handoff is not None else None
+
+    def evidence(self) -> dict[str, object]:
+        """Return OAuth evidence without codes, state, tokens, or secrets."""
+        with self.lock:
+            return {
+                "requests": list(self.requests),
+                "outstanding_code_count": len(self._codes),
+                "active_token_count": len(self._tokens),
+            }
+
+    def _record(self, operation: str, outcome: str, **metadata: object) -> None:
+        """Record only bounded OAuth request-shape observations."""
+        with self.lock:
+            self.requests.append(
+                {"operation": operation, "outcome": outcome, **metadata}
+            )
+
+
+def _query_one(query: dict[str, list[str]], name: str) -> str | None:
+    """Return one exact OAuth query value or reject duplicate values."""
+    values = query.get(name)
+    if values is None or len(values) != 1:
+        return None
+    return values[0]
+
+
+def _callback_url(redirect_uri: str, parameters: dict[str, str]) -> str:
+    """Build one transient provider callback URL."""
+    separator = "&" if "?" in redirect_uri else "?"
+    return f"{redirect_uri}{separator}{urlencode(parameters)}"
+
+
+def _pkce_challenge(verifier: str) -> str:
+    """Derive one RFC 7636 S256 challenge."""
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _form_body(raw: bytes) -> dict[str, object]:
+    """Decode one bounded OAuth form body."""
+    try:
+        encoded = raw.decode("ascii")
+    except UnicodeDecodeError:
+        return {}
+    return {
+        key: values[0]
+        for key, values in parse_qs(encoded, keep_blank_values=True).items()
+        if len(values) == 1
+    }
+
+
+def _oauth_client_credentials(
+    body: dict[str, object],
+    authorization: str,
+) -> tuple[str | None, str | None]:
+    """Resolve form or Basic client credentials for Authlib exchange."""
+    client_id = body.get("client_id")
+    client_secret = body.get("client_secret")
+    if isinstance(client_id, str) and isinstance(client_secret, str):
+        return client_id, client_secret
+    encoded = authorization.removeprefix("Basic ").strip()
+    if not encoded:
+        return None, None
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except ValueError, UnicodeDecodeError:
+        return None, None
+    basic_client_id, separator, basic_client_secret = decoded.partition(":")
+    if not separator:
+        return None, None
+    return basic_client_id, basic_client_secret
+
+
+class FakeState:
+    """Thread-safe Discord scenarios and sanitized provider evidence."""
+
+    def __init__(self) -> None:
+        self.oauth = DiscordOAuthState()
+        self.lock = Lock()
+        self.reset()
+
+    def reset(self) -> None:
         """Reset all mutable deterministic provider state."""
+        self.oauth.reset()
         with self.lock:
             self.application_id = "100000000000000001"
             self.guild_id = "200000000000000001"
@@ -163,7 +511,6 @@ class FakeState:
             ] = {
                 "selector": [],
                 "settings": [],
-                "account_link": [],
                 "model": [],
             }
             self._transient_interactions: dict[str, dict[str, object]] = {}
@@ -194,6 +541,7 @@ class FakeState:
     def configure(self, payload: dict[str, object]) -> None:
         """Apply bounded fake configuration without retaining evidence bodies."""
         allowed = {
+            "oauth",
             "application_id",
             "guild_id",
             "bot_user_id",
@@ -210,6 +558,13 @@ class FakeState:
         }
         if set(payload) - allowed:
             raise ValueError("Unsupported Discord fake configuration field.")
+        oauth = payload.get("oauth")
+        if oauth is not None:
+            if not isinstance(oauth, dict) or not all(
+                isinstance(key, str) for key in oauth
+            ):
+                raise ValueError("Discord OAuth configuration must be an object.")
+            self.oauth.configure(oauth)
         configured_guild_commands = _configured_guild_commands(
             payload.get("guild_commands")
         )
@@ -278,7 +633,6 @@ class FakeState:
             self._transient_component_custom_ids = {
                 "selector": [],
                 "settings": [],
-                "account_link": [],
                 "model": [],
             }
             self._transient_interactions = {}
@@ -754,10 +1108,6 @@ class FakeState:
                         self._transient_component_custom_ids["settings"].append(
                             _TransientComponent(nested, channel_id)
                         )
-                    elif nested.startswith("al1:"):
-                        self._transient_component_custom_ids["account_link"].append(
-                            _TransientComponent(nested, channel_id)
-                        )
                     elif nested.startswith("ms1:"):
                         self._transient_component_custom_ids["model"].append(
                             _TransientComponent(nested, channel_id)
@@ -1095,6 +1445,7 @@ class FakeState:
                 ),
                 "deliveries": list(self.deliveries),
                 "operations": list(self.operation_evidence),
+                "oauth": self.oauth.evidence(),
                 "gateway": {
                     "connections": self.gateway_connections,
                     "initial_opcodes": list(self.gateway_initial_opcodes),
@@ -1163,6 +1514,21 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             self._json_response(
                 200,
                 self.state.transient_interaction(channel_id=channel_id) or {},
+            )
+            return
+        if parsed.path == "/__testenv/transient-oauth":
+            self._json_response(200, self.state.oauth.transient_handoff() or {})
+            return
+        if parsed.path == "/oauth2/authorize":
+            self._oauth_response(
+                self.state.oauth.authorize(
+                    parse_qs(parsed.query, keep_blank_values=True)
+                )
+            )
+            return
+        if parsed.path == "/api/users/@me":
+            self._oauth_response(
+                self.state.oauth.userinfo(self.headers.get("Authorization", ""))
             )
             return
         if parsed.path == "/__testenv/command-id":
@@ -1238,6 +1604,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/barrier/release":
             self.state.release_delivery_barrier()
             self._json_response(200, {"status": "ok"})
+            return
+        if parsed.path == "/api/oauth2/token":
+            self._oauth_response(
+                self.state.oauth.exchange(
+                    _form_body(self._read_body()),
+                    self.headers.get("Authorization", ""),
+                )
+            )
             return
         if parsed.path == "/__testenv/interactions":
             try:
@@ -2013,6 +2387,16 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         except OSError:
             pass
         self.connection.close()
+
+    def _oauth_response(self, response: _OAuthResponse) -> None:
+        """Write one OAuth response without logging its transient redirect."""
+        if response.redirect is not None:
+            self.send_response(response.status)
+            self.send_header("Location", response.redirect)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._json_response(response.status, response.payload or {})
 
     def _json_body(self) -> dict[str, object]:
         raw = self._read_body()

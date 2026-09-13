@@ -29,6 +29,7 @@ import {
   IconSettings,
   IconX,
 } from "@tabler/icons-react";
+import { ExternalAccountOAuthCards } from "./ExternalAccountOAuthCards";
 import type { SystemSettingsPageContentProps } from "../containers/useSystemSettingsPageContainer";
 import type {
   PlatformGitHubAppCandidateResponse,
@@ -574,6 +575,8 @@ export function SystemSettingsPageContent({
         onOutboundMaxActionMiBChange={onOutboundMaxActionMiBChange}
         onSaveExternalFiles={onSaveExternalFiles}
       />
+
+      <ExternalAccountOAuthCards />
 
       <Paper withBorder p="lg" radius="md">
         <Stack gap="lg">

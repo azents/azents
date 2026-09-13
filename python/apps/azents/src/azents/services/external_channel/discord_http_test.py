@@ -54,8 +54,6 @@ from azents.services.external_channel.discord_settings import (
     DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
-    DiscordAccountLinkScope,
-    build_discord_account_link_custom_id,
     build_discord_model_settings_custom_id,
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
@@ -276,7 +274,6 @@ class _SettingsResponseDouble:
         )
         self.cleanup_plans = cleanup_plans
         self.component_calls: list[dict[str, object]] = []
-        self.account_link_calls: list[dict[str, object]] = []
         self.model_calls: list[dict[str, object]] = []
         self.model_started: asyncio.Event | None = None
         self.model_release: asyncio.Event | None = None
@@ -292,28 +289,6 @@ class _SettingsResponseDouble:
         return SimpleNamespace(
             response={"type": 7, "data": {"content": "Saved.", "components": []}},
             cleanup_plans=self.cleanup_plans,
-        )
-
-    async def account_link_response(self, **kwargs: object) -> object:
-        self.account_link_calls.append(kwargs)
-        code = kwargs["code"]
-        scope = kwargs["scope"]
-        response_type = (
-            9
-            if isinstance(scope, DiscordAccountLinkScope)
-            and scope.action == "enter_code"
-            and code is None
-            else 7
-        )
-        return SimpleNamespace(
-            response={
-                "type": response_type,
-                "data": {
-                    "content": "Private account link control.",
-                    "components": [],
-                },
-            },
-            cleanup_plans=(),
         )
 
     async def model_response(self, **kwargs: object) -> object:
@@ -626,70 +601,6 @@ def _settings_component_body() -> bytes:
     ).encode()
 
 
-def _account_link_component_body(*, enter_code: bool) -> bytes:
-    """Build one signed account-link start or modal-open callback."""
-    custom_id = build_discord_account_link_custom_id(
-        secret="settings-secret",
-        action="enter_code" if enter_code else "start",
-        origin_interaction_id=None if enter_code else "origin-interaction-1",
-        origin_id="account-origin-1" if enter_code else None,
-    )
-    return json.dumps(
-        {
-            "id": "discord-account-link-component-1",
-            "type": 3,
-            "application_id": "app-1",
-            "guild_id": "guild-1",
-            "guild": {"name": "Guild One"},
-            "channel_id": "channel-1",
-            "channel": {"id": "channel-1", "type": 0},
-            "member": {
-                "global_name": "Discord User",
-                "user": {"id": "user-1", "username": "discord-user"},
-            },
-            "token": "request-local-interaction-token",
-            "data": {"custom_id": custom_id},
-        },
-        separators=(",", ":"),
-    ).encode()
-
-
-def _account_link_modal_body() -> bytes:
-    """Build one signed type-5 callback with transient browser code."""
-    custom_id = build_discord_account_link_custom_id(
-        secret="settings-secret",
-        action="enter_code",
-        origin_interaction_id=None,
-        origin_id="account-origin-1",
-    )
-    return json.dumps(
-        {
-            "id": "discord-account-link-modal-1",
-            "type": 5,
-            "application_id": "app-1",
-            "guild_id": "guild-1",
-            "channel_id": "channel-1",
-            "channel": {"id": "channel-1", "type": 0},
-            "member": {"user": {"id": "user-1", "username": "discord-user"}},
-            "token": "request-local-interaction-token",
-            "data": {
-                "custom_id": custom_id,
-                "components": [
-                    {
-                        "components": [
-                            {
-                                "custom_id": "azents_account_link_code",
-                                "value": "browser-secret-code",
-                            }
-                        ]
-                    }
-                ],
-            },
-        },
-        separators=(",", ":"),
-    ).encode()
-
-
 def _model_execution_component_body() -> bytes:
     """Build one multi-select model draft callback."""
     custom_id = build_discord_model_settings_custom_id(
@@ -968,78 +879,6 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
 
 
 @pytest.mark.asyncio
-async def test_account_link_button_opens_type_nine_modal_through_signed_dispatch() -> (
-    None
-):
-    """Keep the browser-code input in Discord's private native interaction."""
-    private_key = Ed25519PrivateKey.generate()
-    admission = _AdmissionDouble()
-    service, _, _ = _service(
-        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
-        admission=admission,
-        scheduled_task_control=SimpleNamespace(),
-        scheduled_task_channel=SimpleNamespace(),
-    )
-    body = _account_link_component_body(enter_code=True)
-    request_signature = _signature(private_key, body)
-
-    result = await service.handle(
-        selector="opaque-selector",
-        raw_body=body,
-        timestamp=request_signature.timestamp,
-        signature=request_signature.value,
-        received_at=_NOW,
-    )
-
-    assert result.response is not None
-    assert result.response["type"] == 9
-    settings_response = cast(
-        _SettingsResponseDouble,
-        service.settings_response_service,
-    )
-    call = settings_response.account_link_calls[0]
-    assert call["code"] is None
-    context = call["context"]
-    assert isinstance(context, DiscordSettingsContext)
-    assert context.provider_display_name == "Discord User"
-    assert context.connection_configuration_generation == 2
-
-
-@pytest.mark.asyncio
-async def test_account_link_modal_code_stays_request_local_after_signed_admission() -> (
-    None
-):
-    """Pass plaintext only to verification and exclude it from durable admission."""
-    private_key = Ed25519PrivateKey.generate()
-    admission = _AdmissionDouble()
-    service, _, _ = _service(
-        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
-        admission=admission,
-        scheduled_task_control=SimpleNamespace(),
-        scheduled_task_channel=SimpleNamespace(),
-    )
-    body = _account_link_modal_body()
-    request_signature = _signature(private_key, body)
-
-    result = await service.handle(
-        selector="opaque-selector",
-        raw_body=body,
-        timestamp=request_signature.timestamp,
-        signature=request_signature.value,
-        received_at=_NOW,
-    )
-
-    settings_response = cast(
-        _SettingsResponseDouble,
-        service.settings_response_service,
-    )
-    assert settings_response.account_link_calls[0]["code"] == "browser-secret-code"
-    create, _ = admission.inputs[0]
-    assert "browser-secret-code" not in repr((create, result))
-    assert admission.finished_interaction_ids == ["interaction-row-1"]
-
-
-@pytest.mark.asyncio
 async def test_model_multiselect_dispatches_complete_request_local_values() -> None:
     """Pass execution selections to the actor-owned draft without guest mutation."""
     private_key = Ed25519PrivateKey.generate()
@@ -1074,58 +913,8 @@ async def test_model_multiselect_dispatches_complete_request_local_values() -> N
 
 
 @pytest.mark.asyncio
-async def test_private_account_start_acknowledges_before_business_work() -> None:
-    """Return type 6 before origin creation or provider response editing."""
-    private_key = Ed25519PrivateKey.generate()
-    admission = _AdmissionDouble()
-    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
-        configuration=configuration,
-        admission=admission,
-        scheduled_task_control=SimpleNamespace(),
-        scheduled_task_channel=SimpleNamespace(),
-    )
-    ingress, resolver = _ingress_service(
-        configuration=configuration,
-        admission=admission,
-        dispatcher=dispatcher,
-    )
-    body = _account_link_component_body(enter_code=False)
-    request_signature = _signature(private_key, body)
-
-    result = await ingress.handle(
-        selector="opaque-selector",
-        raw_body=body,
-        timestamp=request_signature.timestamp,
-        signature=request_signature.value,
-        received_at=_NOW,
-    )
-
-    settings_response = cast(
-        _SettingsResponseDouble,
-        dispatcher.settings_response_service,
-    )
-    assert result.response == {"type": 6}
-    assert result.private_settings_handoff is not None
-    assert resolver.opens == 0
-    assert settings_response.account_link_calls == []
-    assert "request-local-interaction-token" not in repr(result)
-
-    await ingress.run_private_settings_handoff(result.private_settings_handoff)
-
-    assert resolver.opens == 1
-    assert len(settings_response.account_link_calls) == 1
-    interaction_response = cast(
-        _InteractionResponseDouble,
-        dispatcher.interaction_response_client,
-    )
-    assert len(interaction_response.calls) == 1
-    assert interaction_response.calls[0]["response"]["type"] == 7
-
-
-@pytest.mark.asyncio
 async def test_private_completion_delivery_failure_marks_interaction_failed() -> None:
-    """Never fall back publicly when editing the private original response fails."""
+    """Never fall back publicly when editing a private model response fails."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
@@ -1147,7 +936,7 @@ async def test_private_completion_delivery_failure_marks_interaction_failed() ->
         admission=admission,
         dispatcher=dispatcher,
     )
-    body = _account_link_component_body(enter_code=False)
+    body = _model_apply_component_body()
     request_signature = _signature(private_key, body)
     result = await ingress.handle(
         selector="opaque-selector",
@@ -1163,82 +952,6 @@ async def test_private_completion_delivery_failure_marks_interaction_failed() ->
 
     assert admission.finish_records[-1][1] is ExternalChannelInteractionStatus.FAILED
     assert admission.finish_records[-1][2] == "private_settings_component_failed"
-
-
-@pytest.mark.asyncio
-async def test_private_code_modal_open_remains_immediate_type_nine() -> None:
-    """A modal-opening button cannot use a deferred acknowledgement."""
-    private_key = Ed25519PrivateKey.generate()
-    admission = _AdmissionDouble()
-    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
-        configuration=configuration,
-        admission=admission,
-        scheduled_task_control=SimpleNamespace(),
-        scheduled_task_channel=SimpleNamespace(),
-    )
-    ingress, resolver = _ingress_service(
-        configuration=configuration,
-        admission=admission,
-        dispatcher=dispatcher,
-    )
-    body = _account_link_component_body(enter_code=True)
-    request_signature = _signature(private_key, body)
-
-    result = await ingress.handle(
-        selector="opaque-selector",
-        raw_body=body,
-        timestamp=request_signature.timestamp,
-        signature=request_signature.value,
-        received_at=_NOW,
-    )
-
-    assert result.response is not None
-    assert result.response["type"] == 9
-    assert result.private_settings_handoff is None
-    assert resolver.opens == 1
-
-
-@pytest.mark.asyncio
-async def test_private_modal_submit_uses_type_five_ephemeral_deferred_ack() -> None:
-    """Modal submissions defer with type 5, never the component-only type 6."""
-    private_key = Ed25519PrivateKey.generate()
-    admission = _AdmissionDouble()
-    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
-        configuration=configuration,
-        admission=admission,
-        scheduled_task_control=SimpleNamespace(),
-        scheduled_task_channel=SimpleNamespace(),
-    )
-    ingress, resolver = _ingress_service(
-        configuration=configuration,
-        admission=admission,
-        dispatcher=dispatcher,
-    )
-    body = _account_link_modal_body()
-    request_signature = _signature(private_key, body)
-
-    result = await ingress.handle(
-        selector="opaque-selector",
-        raw_body=body,
-        timestamp=request_signature.timestamp,
-        signature=request_signature.value,
-        received_at=_NOW,
-    )
-
-    assert result.response == {"type": 5, "data": {"flags": 64}}
-    assert result.private_settings_handoff is not None
-    assert "browser-secret-code" not in repr(result)
-    assert resolver.opens == 0
-
-    await ingress.run_private_settings_handoff(result.private_settings_handoff)
-
-    settings_response = cast(
-        _SettingsResponseDouble,
-        dispatcher.settings_response_service,
-    )
-    assert settings_response.account_link_calls[0]["code"] == "browser-secret-code"
 
 
 @pytest.mark.asyncio

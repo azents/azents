@@ -1,106 +1,96 @@
 {
   "title": "Comptes externes",
-  "description": "Consultez les identités Slack et Discord associées à votre compte Azents.",
+  "description": "Connectez et gérez les identités Slack et Discord reconnues comme votre compte Azents.",
   "loading": "Chargement des comptes externes...",
   "loadErrorTitle": "Impossible de charger les comptes externes",
   "retry": "Réessayer",
   "elevationLoading": "Chargement des méthodes de vérification disponibles...",
   "elevationErrorTitle": "Impossible de charger les méthodes de vérification",
+  "providerCard": {
+    "title": "Connecter un compte",
+    "description": "Autorisez chaque service externe séparément. La connexion d’une identité n’accorde aucun accès à un Workspace ou à une conversation.",
+    "identity": "Identité du compte"
+  },
+  "providerStatus": {
+    "not_configured": "Non configuré",
+    "incomplete": "Configuration incomplète",
+    "invalid": "Vérification requise",
+    "ready": "Disponible",
+    "unavailable": "Indisponible"
+  },
+  "providerGuidance": {
+    "not_configured": "La connexion de compte {provider} n’a pas encore été configurée par un administrateur.",
+    "incomplete": "La configuration de la connexion {provider} est incomplète. Demandez à un administrateur de la terminer.",
+    "invalid": "La connexion {provider} nécessite l’intervention d’un administrateur avant de pouvoir être utilisée.",
+    "ready": "Connectez une identité {provider} qui vous appartient.",
+    "unavailable": "La connexion {provider} est temporairement indisponible. Réessayez plus tard ou contactez un administrateur."
+  },
+  "connectProvider": "Connecter {provider}",
+  "connectedAccounts": "Identités connectées",
   "emptyTitle": "Aucun compte externe associé",
-  "emptyDescription": "Pour associer un compte, commencez depuis les paramètres privés de la conversation dans Slack ou Discord.",
-  "workspace": "Workspace",
-  "accountContext": "Compte externe",
+  "emptyDescription": "Utilisez une action de connexion disponible ci-dessus pour autoriser une identité Slack ou Discord.",
   "linkedAt": "Associé le",
   "providerTeam": "{provider} · {team}",
   "providers": {
     "slack": "Slack",
     "discord": "Discord"
   },
-  "status": {
-    "active": "Associé",
-    "inactive": "Inactif",
-    "revoked": "Dissocié"
-  },
-  "inactiveDescription": "Votre adhésion au Workspace n’est pas active. Cette association ne peut pas autoriser les paramètres de conversation liés au compte.",
+  "connected": "Connecté",
   "disconnect": "Dissocier",
-  "disconnected": "Dissocié",
   "cancel": "Annuler",
   "elevationDisconnect": "Vérifiez votre identité pour dissocier {account} de votre compte Azents.",
   "disconnectDialog": {
     "title": "Dissocier le compte externe ?",
-    "description": "Dissocier {account} de votre compte Azents.",
+    "description": "Dissocier {account} de votre compte Azents partout.",
     "impact": "Les contrôles qui dépendent de cette identité associée ne fonctionneront plus. Les accès invités, messages, historiques, paramètres partagés, autorisations et blocages existants sont conservés.",
     "confirm": "Dissocier le compte"
   },
-  "candidateStatus": {
-    "pending_provider_proof": "En attente du service externe",
-    "provider_verified": "Service externe vérifié",
-    "connected": "Associé",
-    "cancelled": "Annulé",
-    "expired": "Expiré"
-  },
   "errors": {
-    "membership_required": "Rejoignez ce Workspace ou acceptez une invitation avant d’associer le compte.",
     "elevation_required": "Vérifiez votre identité pour continuer.",
-    "resource_not_found": "Cette confirmation ne correspond plus au compte externe ou à la session du navigateur.",
-    "expired": "Cette confirmation a expiré. Recommencez.",
-    "conflict": "Ce compte externe est déjà associé dans ce Workspace.",
-    "candidate_not_ready": "Saisissez le code dans le service d’origine, puis vérifiez de nouveau l’état.",
-    "candidate_terminal": "Cette confirmation n’est plus utilisable. Créez un nouveau code.",
-    "unavailable": "Cette connexion externe a changé ou n’est plus disponible. Revenez dans Slack ou Discord et rouvrez les paramètres privés.",
-    "busy": "Le service d’association est temporairement occupé. Réessayez."
+    "provider_unavailable": "Ce service externe n’est pas disponible pour la connexion de comptes.",
+    "invalid_attempt": "Cette tentative de connexion est invalide ou doit être redémarrée.",
+    "expired": "Cette tentative de connexion a expiré. Recommencez.",
+    "already_consumed": "Cette tentative est déjà terminée ou ne peut plus être utilisée.",
+    "auth_session_mismatch": "Reconnectez-vous, puis recommencez la connexion du compte.",
+    "provider_mismatch": "Cette tentative appartient à un autre service externe.",
+    "invalid_callback": "Le callback du service externe ne correspond pas à cette tentative.",
+    "configuration_changed": "La configuration du service externe a changé. Recommencez la connexion.",
+    "provider_rejected": "Le service externe n’a pas pu vérifier ce compte. Recommencez.",
+    "resource_not_found": "Ce compte connecté n’existe plus ou n’est pas accessible depuis votre compte.",
+    "conflict": "Cette identité externe ne peut pas être connectée à votre compte.",
+    "unavailable": "Cette identité connectée n’est plus disponible. Rechargez la page et réessayez.",
+    "busy": "La connexion des comptes est temporairement occupée. Réessayez."
   },
-  "confirmation": {
-    "title": "Confirmer le compte externe",
-    "description": "N’associez que des comptes qui vous appartiennent. Vérifiez les deux comptes avant de continuer.",
-    "loading": "Chargement de la confirmation...",
-    "accountPair": "Comptes à associer",
-    "accountPairDescription": "Cette association s’applique uniquement au Workspace ci-dessous.",
+  "oauthResult": {
     "externalAccount": "Compte externe",
-    "providerTeam": "Service externe et équipe",
-    "azentsAccount": "Compte Azents actuel",
-    "beforeCode": "La création d’un code n’associe pas les comptes. Vous devez le saisir dans l’écran privé du service d’origine, puis confirmer ici.",
-    "createCode": "Créer un code de confirmation",
-    "codeTitle": "Code de confirmation à usage unique",
-    "codeExpires": "Expire le {time}",
-    "codeSafety": "Saisissez uniquement ce code affiché dans votre propre écran Azents. Ne saisissez jamais un code envoyé par quelqu’un d’autre.",
-    "copyCode": "Copier le code de confirmation",
-    "copy": "Copier",
-    "copied": "Copié",
-    "enterInProvider": "Revenez à l’écran privé Slack ou Discord d’origine et saisissez ce code. Revenez ensuite ici pour vérifier son état.",
-    "checkStatus": "Vérifier l’état",
-    "providerVerified": "Le compte externe d’origine a saisi ce code. Vérifiez encore une fois les deux comptes avant de les associer.",
-    "confirm": "Associer ces comptes",
-    "startFresh": "Créer une nouvelle confirmation",
-    "switchAccount": "Changer de compte Azents",
-    "elevationCreate": "Vérifiez votre compte Azents actuel avant de créer le code à usage unique.",
-    "elevationConfirm": "Vérifiez votre compte Azents actuel avant l’association finale.",
-    "connectedTitle": "Compte externe associé",
-    "connectedDescription": "{account} est maintenant associé à votre compte Azents dans {workspace}.",
-    "connectedImpact": "Les contrôles liés au compte peuvent maintenant utiliser vos autorisations Azents actuelles. Les autorisations invité et l’historique de la conversation restent inchangés.",
-    "return": "Revenir à Slack ou Discord",
-    "manage": "Gérer les comptes externes",
-    "notFoundTitle": "Confirmation introuvable",
-    "notFoundDescription": "Ce lien n’est pas valide ou n’appartient pas à votre compte et à votre session de navigateur actuels.",
-    "errorTitle": "Impossible de charger la confirmation",
-    "errorDescription": "Réessayez depuis l’écran privé du service d’origine.",
-    "origin": {
-      "cancelled": {
-        "title": "Confirmation annulée",
-        "description": "Démarrez une nouvelle association depuis l’écran privé du service d’origine."
-      },
-      "consumed": {
-        "title": "Confirmation déjà terminée",
-        "description": "Revenez à Slack ou Discord, ou consultez vos comptes externes dans les paramètres du compte."
-      },
-      "expired": {
-        "title": "Confirmation expirée",
-        "description": "Démarrez une nouvelle association depuis l’écran privé du service d’origine."
-      },
-      "unavailable": {
-        "title": "Connexion externe modifiée",
-        "description": "Revenez dans Slack ou Discord et rouvrez les paramètres privés."
-      }
+    "connectedTitle": "Compte {provider} connecté",
+    "connectedDescription": "{account} est maintenant reconnu comme votre compte Azents lorsque cette identité {provider} est utilisée.",
+    "team": "Équipe Slack : {team}",
+    "cancelledTitle": "Connexion {provider} annulée",
+    "cancelledDescription": "Aucun compte n’a été connecté. Vous pouvez relancer l’autorisation {provider} lorsque vous le souhaitez.",
+    "unavailableTitle": "Connexion {provider} indisponible",
+    "failedTitle": "Échec de la connexion du compte",
+    "authRequiredTitle": "Connexion requise",
+    "authRequiredDescription": "Connectez-vous à Azents, puis recommencez depuis Comptes externes.",
+    "manage": "Revenir aux comptes externes",
+    "retryProvider": "Réessayer avec {provider}",
+    "signIn": "Se connecter",
+    "failure": {
+      "elevation_required": "Vérifiez votre identité, puis recommencez la connexion du compte.",
+      "provider_unavailable": "Ce service externe est actuellement indisponible. Consultez son état dans Comptes externes.",
+      "invalid_attempt": "Cette tentative est invalide. Démarrez une nouvelle connexion depuis Comptes externes.",
+      "expired": "Cette tentative a expiré. Démarrez une nouvelle connexion depuis Comptes externes.",
+      "already_consumed": "Cette tentative est déjà terminée ou ne peut plus être utilisée.",
+      "auth_session_mismatch": "Votre session Azents a changé. Reconnectez-vous et démarrez une nouvelle connexion.",
+      "provider_mismatch": "Ce callback appartient à un autre service externe. Relancez la connexion souhaitée.",
+      "configuration_changed": "La configuration du service externe a changé pendant la connexion. Recommencez avec la configuration actuelle.",
+      "provider_rejected": "Le service externe n’a pas pu vérifier ce compte. Vérifiez l’autorisation et réessayez.",
+      "resource_not_found": "Cette tentative n’est plus disponible. Recommencez.",
+      "conflict": "Cette identité externe ne peut pas être connectée. Aucune information sur le propriétaire existant n’a été divulguée.",
+      "unavailable": "Cette tentative n’est plus disponible. Recommencez.",
+      "busy": "La connexion des comptes est temporairement occupée. Réessayez.",
+      "invalid_provider": "Ce service externe n’est pas pris en charge pour la connexion de comptes. Revenez aux comptes externes.",
+      "invalid_callback": "Le callback est incomplet ou invalide. Démarrez une nouvelle connexion depuis Comptes externes."
     }
   }
 }

@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 from dataclasses import replace
+from typing import get_args
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,10 +16,9 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 from azents.core.external_account_link import (
-    ExternalAccountLinkInvalidCode,
     ExternalAccountLinkState,
+    ExternalAccountLinkView,
     ExternalAccountNativeLinkState,
-    ExternalAccountOriginCreated,
     VerifiedExternalAccountActor,
 )
 from azents.core.external_model_settings import (
@@ -40,8 +40,18 @@ from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     list_model_execution_option_definitions,
 )
-from azents.repos.external_channel.data import ExternalChannelConnectionConfiguration
+from azents.repos.external_channel.data import (
+    ExternalChannelBinding,
+    ExternalChannelConnectionConfiguration,
+)
 from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_account_oauth_system_setting.data import (
+    ExternalAccountOAuthDetail,
+    ExternalAccountOAuthEffectiveStatus,
+)
+from azents.services.external_account_oauth_system_setting.service import (
+    ExternalAccountOAuthSystemSettingService,
+)
 from azents.services.external_channel.interaction_test import (
     _catalog,
     _handoff,
@@ -51,6 +61,10 @@ from azents.services.external_channel.interaction_test import (
     _Slack,
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
+from azents.services.external_channel.participation import (
+    ExternalChannelParticipationSessionNavigation,
+    ExternalChannelParticipationSettings,
+)
 from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
@@ -86,7 +100,6 @@ def _scope() -> SlackNativeScope:
         channel_id="C1",
         thread_id="123.456",
         expires_at=_NOW + datetime.timedelta(minutes=10),
-        origin_id="origin-1",
         draft_id="draft-1",
         selection_fingerprint="aaaaaaaaaaaaaaaa",
         offset=0,
@@ -113,7 +126,6 @@ def _control(action: NativeAction) -> SlackNativeControl:
     return SlackNativeControl(
         action=action,
         metadata=sign_native_scope(_scope(), secret=_SECRET),
-        code=None,
         option_id=None,
         reasoning_effort=None,
         execution_options=None,
@@ -180,8 +192,13 @@ def _editor(*, offset: int = 0, options_supported: bool = True) -> ExternalModel
 
 
 def _service() -> SlackNativeSettingsService:
+    oauth_settings = AsyncMock(spec=ExternalAccountOAuthSystemSettingService)
+    oauth_settings.get_detail.return_value = _provider_detail(
+        ExternalAccountOAuthEffectiveStatus.READY
+    )
     return SlackNativeSettingsService(
         linking=AsyncMock(spec=ExternalAccountLinkService),
+        oauth_settings=oauth_settings,
         models=AsyncMock(spec=ExternalModelSettingsService),
         config=_config(),
     )
@@ -199,7 +216,22 @@ def test_signed_scope_rejects_tampering_expiry_and_wrong_secret() -> None:
         )
 
 
-def _code_payload(code: str) -> dict[str, object]:
+def _provider_detail(
+    status: ExternalAccountOAuthEffectiveStatus,
+) -> ExternalAccountOAuthDetail:
+    return ExternalAccountOAuthDetail(
+        section="slack_identity_oauth",
+        provider="slack",
+        schema_version=1,
+        admin_version=1,
+        effective_status=status,
+        callback_url="https://azents.example/oauth/external-account/slack/callback",
+        fields=(),
+        health=None,
+    )
+
+
+def _model_payload() -> dict[str, object]:
     return {
         "type": "view_submission",
         "api_app_id": "app-1",
@@ -207,43 +239,45 @@ def _code_payload(code: str) -> dict[str, object]:
         "user": {"id": "U1"},
         "trigger_id": "transient-trigger",
         "view": {
-            "callback_id": "azents_account_link_code",
+            "callback_id": "azents_model_apply",
             "id": "V1",
             "hash": "hash-1",
             "private_metadata": sign_native_scope(_scope(), secret=_SECRET),
-            "state": {
-                "values": {"azents_account_link_code": {"value": {"value": code}}}
-            },
         },
     }
 
 
-def test_code_is_request_local_and_absent_from_durable_projection() -> None:
-    code = "CODE-MUST-NEVER-PERSIST"
+def test_model_scope_remains_request_local_and_absent_from_projection() -> None:
+    metadata = sign_native_scope(_scope(), secret=_SECRET)
     callback = parse_slack_interaction_payload(
-        payload=_code_payload(code),
+        payload=_model_payload(),
         provider_interaction_key="interaction-1",
         received_at=_NOW,
     )
     assert callback.handler == "native_control"
     assert callback.native_control is not None
-    assert callback.native_control.code == code
-    assert code not in repr(callback)
-    assert code not in repr(callback.native_control)
+    assert callback.native_control.metadata == metadata
+    assert metadata not in repr(callback)
+    assert metadata not in repr(callback.native_control)
     durable = callback.interaction_create(
         connection_id="connection-1", transport=ExternalChannelTransport.HTTP
     )
-    assert code not in repr(durable)
-    assert code not in json.dumps(callback.projection)
+    assert metadata not in repr(durable)
+    assert metadata not in json.dumps(callback.projection)
 
 
-@pytest.mark.parametrize("code", ["", "x" * 129])
-def test_code_validation_errors_do_not_retain_input_in_visible_exception(
-    code: str,
+@pytest.mark.parametrize("metadata", ["", "x" * 3001])
+def test_scope_validation_errors_do_not_retain_input_in_visible_exception(
+    metadata: str,
 ) -> None:
+    payload = _model_payload()
+    payload["view"] = {
+        "callback_id": "azents_model_apply",
+        "private_metadata": metadata,
+    }
     with pytest.raises(SlackHTTPInvalidPayload) as error:
         parse_slack_interaction_payload(
-            payload=_code_payload(code),
+            payload=payload,
             provider_interaction_key="interaction-1",
             received_at=_NOW,
         )
@@ -260,31 +294,156 @@ def test_controls_preserve_guest_submission_and_do_not_inline_model_inputs() -> 
     )
     decorated = add_personal_controls(
         guest,
-        metadata="signed-personal-scope",
+        connect_url="https://azents.example/account/external-accounts/connect/slack",
         management_url="https://azents.example/account/external-accounts",
-        link_state=None,
+        linked=False,
         model_metadata="signed-draft-scope",
     )
     assert decorated.callback_id == guest.callback_id
     assert decorated.private_metadata == guest.private_metadata
     assert decorated.submit_title == "Save"
     assert decorated.blocks[: len(guest.blocks)] == guest.blocks
-    assert "azents_account_link_start" in repr(decorated.blocks)
+    assert "Connect Azents account" in repr(decorated.blocks)
+    assert "optional" not in repr(decorated.blocks)
     assert "azents_model_open" in repr(decorated.blocks)
     assert "azents_model_apply" not in repr(decorated.blocks)
 
 
-def test_inactive_link_retains_private_management_without_model_authority() -> None:
+def test_linked_actor_retains_private_management_without_model_authority() -> None:
     view = add_personal_controls(
         private_notice("Guest controls"),
-        metadata="signed-scope",
+        connect_url=None,
         management_url="https://azents.example/account/external-accounts",
-        link_state=ExternalAccountLinkState.INACTIVE,
+        linked=True,
         model_metadata=None,
     )
-    assert "connection inactive" in repr(view.blocks)
+    assert "Account connected" in repr(view.blocks)
     assert "Manage connected account" in repr(view.blocks)
     assert "azents_model_open" not in repr(view.blocks)
+
+
+@pytest.mark.asyncio
+async def test_linked_management_and_model_controls_ignore_connect_readiness() -> None:
+    service = _service()
+    assert isinstance(service.linking, AsyncMock)
+    service.linking.get_native_link_state.return_value = ExternalAccountNativeLinkState(
+        link=ExternalAccountLinkView(
+            id="link-1",
+            workspace_id=None,
+            workspace_name=None,
+            workspace_handle=None,
+            user_id="user-1",
+            provider=ExternalChannelProvider.SLACK,
+            identity_scope="T1",
+            provider_user_id="U1",
+            provider_tenant_display_label=None,
+            provider_display_label="Private actor",
+            linked_at=_NOW,
+            state=ExternalAccountLinkState.ACTIVE,
+        ),
+        management_path="/account/external-accounts",
+    )
+    assert isinstance(service.oauth_settings, AsyncMock)
+    service.oauth_settings.get_detail.side_effect = AssertionError(
+        "Linked settings must not depend on connection readiness."
+    )
+    assert isinstance(service.models, AsyncMock)
+    service.models.open_editor.return_value = ExternalModelEditorReady(editor=_editor())
+    settings = ExternalChannelParticipationSettings(
+        target="thread",
+        agent_name="Agent",
+        session_navigation=ExternalChannelParticipationSessionNavigation(
+            workspace_handle="workspace", agent_id="agent-1", session_id="session-1"
+        ),
+        setting=None,
+        claim=None,
+        resource=None,
+        binding=ExternalChannelBinding.model_construct(
+            id="binding-1", agent_session_id="session-1"
+        ),
+    )
+    view = await service.decorate(
+        view=private_notice("Guest controls"),
+        actor=_actor(),
+        settings=settings,
+        now=_NOW,
+    )
+    assert "Manage connected account" in repr(view.blocks)
+    assert "azents_model_open" in repr(view.blocks)
+    assert "Connect Azents account" not in repr(view.blocks)
+    assert service.models.open_editor.await_args.kwargs["target"] == (
+        ExternalModelTargetContext(
+            binding_id="binding-1", session_id="session-1", agent_id="agent-1"
+        )
+    )
+    service.oauth_settings.get_detail.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inactive_link_retains_management_without_model_authority() -> None:
+    service = _service()
+    assert isinstance(service.linking, AsyncMock)
+    service.linking.get_native_link_state.return_value = ExternalAccountNativeLinkState(
+        link=ExternalAccountLinkView(
+            id="link-1",
+            workspace_id=None,
+            workspace_name=None,
+            workspace_handle=None,
+            user_id="user-1",
+            provider=ExternalChannelProvider.SLACK,
+            identity_scope="T1",
+            provider_user_id="U1",
+            provider_tenant_display_label=None,
+            provider_display_label="Private actor",
+            linked_at=_NOW,
+            state=ExternalAccountLinkState.INACTIVE,
+        ),
+        management_path="/account/external-accounts",
+    )
+    settings = ExternalChannelParticipationSettings(
+        target="thread",
+        agent_name="Agent",
+        session_navigation=ExternalChannelParticipationSessionNavigation(
+            workspace_handle="workspace", agent_id="agent-1", session_id="session-1"
+        ),
+        setting=None,
+        claim=None,
+        resource=None,
+        binding=ExternalChannelBinding.model_construct(
+            id="binding-1", agent_session_id="session-1"
+        ),
+    )
+
+    view = await service.decorate(
+        view=private_notice("Guest controls"),
+        actor=_actor(),
+        settings=settings,
+        now=_NOW,
+    )
+
+    assert "Manage connected account" in repr(view.blocks)
+    assert "azents_model_open" not in repr(view.blocks)
+    assert isinstance(service.models, AsyncMock)
+    service.models.open_editor.assert_not_awaited()
+
+
+def test_native_callback_schema_accepts_only_model_controls() -> None:
+    assert all(action.startswith("azents_model_") for action in get_args(NativeAction))
+    assert "code" not in SlackNativeControl.model_fields
+    assert "origin_id" not in SlackNativeScope.model_fields
+    payload = _model_payload()
+    payload["view"] = {
+        "callback_id": "retired_private_control",
+        "private_metadata": "must-not-persist",
+        "state": {"values": {"retired": {"value": {"value": "must-not-persist"}}}},
+    }
+    callback = parse_slack_interaction_payload(
+        payload=payload, provider_interaction_key="interaction-1", received_at=_NOW
+    )
+    assert callback.handler == "unsupported"
+    assert callback.native_control is None
+    assert "must-not-persist" not in repr(callback)
+    assert "must-not-persist" not in repr(callback.projection)
 
 
 def test_private_model_view_pages_full_catalog_and_selected_capabilities() -> None:
@@ -314,19 +473,19 @@ async def test_actor_mismatch_does_not_call_domain_or_expose_scope() -> None:
     view = await service.process(
         actor=replace(_actor(), principal_id="wrong-actor"),
         scope=_scope(),
-        control=_control("azents_account_link_start"),
+        control=_control("azents_model_open"),
         now=_NOW,
     )
     assert "unavailable" in repr(view.blocks)
     assert "Private actor" not in repr(view.blocks)
     assert isinstance(service.linking, AsyncMock)
-    service.linking.create_origin.assert_not_awaited()
+    service.linking.get_native_link_state.assert_not_awaited()
     assert isinstance(service.models, AsyncMock)
     service.models.open_editor.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_denied_guest_still_gets_own_optional_link_only_surface() -> None:
+async def test_denied_guest_still_gets_private_direct_connect_surface() -> None:
     service = _service()
     assert isinstance(service.linking, AsyncMock)
     service.linking.get_native_link_state.return_value = ExternalAccountNativeLinkState(
@@ -338,7 +497,8 @@ async def test_denied_guest_still_gets_own_optional_link_only_surface() -> None:
         settings=None,
         now=_NOW,
     )
-    assert "azents_account_link_start" in repr(view.blocks)
+    assert "/account/external-accounts/connect/slack" in repr(view.blocks)
+    assert "optional" not in repr(view.blocks)
     assert "azents_model_open" not in repr(view.blocks)
     assert "session-1" not in repr(view.blocks)
     assert isinstance(service.models, AsyncMock)
@@ -346,58 +506,73 @@ async def test_denied_guest_still_gets_own_optional_link_only_surface() -> None:
 
 
 @pytest.mark.asyncio
-async def test_link_start_and_code_verification_never_apply_models() -> None:
+async def test_direct_connect_has_no_provider_action_or_private_link_metadata() -> None:
     service = _service()
     assert isinstance(service.linking, AsyncMock)
-    service.linking.create_origin.return_value = ExternalAccountOriginCreated(
-        origin_id="origin-new",
-        expires_at=_NOW + datetime.timedelta(minutes=10),
-        web_path="/external-channel/link/origin-new",
-        management_path="/account/external-accounts",
+    service.linking.get_native_link_state.return_value = ExternalAccountNativeLinkState(
+        link=None, management_path="/account/external-accounts"
     )
-    view = await service.process(
+    view = await service.decorate(
+        view=private_notice("Guest controls"),
         actor=_actor(),
-        scope=_scope(),
-        control=_control("azents_account_link_start"),
+        settings=None,
         now=_NOW,
     )
-    assert view.callback_id == "azents_account_link_code"
-    assert (
-        parse_native_scope(view.private_metadata, secret=_SECRET, now=_NOW).origin_id
-        == "origin-new"
-    )
-    control = _control("azents_account_link_code").model_copy(
-        update={"code": "temporary-code"}
-    )
-    verified = await service.process(
-        actor=_actor(), scope=_scope(), control=control, now=_NOW
-    )
-    assert "explicitly confirm" in repr(verified.blocks)
-    assert "temporary-code" not in repr(verified)
-    service.linking.verify_candidate_code.assert_awaited_once_with(
-        actor=_actor(), origin_id="origin-1", code="temporary-code", now=_NOW
-    )
+    assert view.private_metadata == "completed"
+    assert view.submit_title is None
+    assert view.blocks[-1] == {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Connect Azents account",
+                    "emoji": False,
+                },
+                "url": "https://azents.example/account/external-accounts/connect/slack",
+            }
+        ],
+    }
+    assert "action_id" not in repr(view.blocks)
+    assert "value" not in repr(view.blocks)
+    assert isinstance(service.oauth_settings, AsyncMock)
+    service.oauth_settings.get_detail.assert_awaited_once_with("slack")
     assert isinstance(service.models, AsyncMock)
     service.models.apply_draft.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_invalid_code_reopens_blank_private_input() -> None:
+@pytest.mark.parametrize(
+    "status",
+    [
+        ExternalAccountOAuthEffectiveStatus.NOT_CONFIGURED,
+        ExternalAccountOAuthEffectiveStatus.INCOMPLETE,
+        ExternalAccountOAuthEffectiveStatus.INVALID,
+        ExternalAccountOAuthEffectiveStatus.UNAVAILABLE,
+    ],
+)
+async def test_unavailable_provider_keeps_guest_form_without_dead_controls(
+    status: ExternalAccountOAuthEffectiveStatus,
+) -> None:
     service = _service()
     assert isinstance(service.linking, AsyncMock)
-    service.linking.verify_candidate_code.side_effect = ExternalAccountLinkInvalidCode(
-        remaining_attempts=3
+    service.linking.get_native_link_state.return_value = ExternalAccountNativeLinkState(
+        link=None, management_path="/account/external-accounts"
     )
-    control = _control("azents_account_link_code").model_copy(
-        update={"code": "incorrect-code"}
+    assert isinstance(service.oauth_settings, AsyncMock)
+    service.oauth_settings.get_detail.return_value = _provider_detail(status)
+    guest = replace(
+        private_notice("Guest controls"), callback_id="guest-save", submit_title="Save"
     )
-    view = await service.process(
-        actor=_actor(), scope=_scope(), control=control, now=_NOW
-    )
-    assert view.submit_title == "Verify code"
-    assert "3 attempts remain" in repr(view.blocks)
-    assert "incorrect-code" not in repr(view)
-    assert "initial_value" not in repr(view.blocks)
+    view = await service.decorate(view=guest, actor=_actor(), settings=None, now=_NOW)
+    assert view.submit_title == guest.submit_title
+    assert view.callback_id == guest.callback_id
+    assert view.private_metadata == guest.private_metadata
+    assert "currently unavailable" in repr(view.blocks)
+    assert "Connect Azents account" not in repr(view.blocks)
+    assert "actions" not in repr(view.blocks)
+    assert "optional" not in repr(view.blocks)
 
 
 @pytest.mark.asyncio
@@ -678,7 +853,7 @@ async def test_apply_uses_visible_selection_during_pending_update() -> None:
 def test_interaction_display_name_is_bounded_optional_metadata(
     user_fields: dict[str, object], expected: str
 ) -> None:
-    payload = _code_payload("request-local-test-code")
+    payload = _model_payload()
     payload["user"] = {"id": "U1", **user_fields}
     callback = parse_slack_interaction_payload(
         payload=payload, provider_interaction_key="interaction-1", received_at=_NOW
@@ -701,7 +876,7 @@ def test_interaction_display_name_is_bounded_optional_metadata(
 
 def test_interaction_nickname_renders_as_literal_private_text() -> None:
     name = "<@U2> & nickname"
-    payload = _code_payload("request-local-test-code")
+    payload = _model_payload()
     payload["user"] = {"id": "U1", "name": name}
     callback = parse_slack_interaction_payload(
         payload=payload, provider_interaction_key="interaction-1", received_at=_NOW

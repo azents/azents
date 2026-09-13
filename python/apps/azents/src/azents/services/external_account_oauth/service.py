@@ -13,10 +13,14 @@ from fastapi import Depends
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import ExternalChannelProvider
-from azents.core.external_account_oauth import EXTERNAL_ACCOUNT_OAUTH_ATTEMPT_TTL
+from azents.core.external_account_oauth import (
+    EXTERNAL_ACCOUNT_OAUTH_ATTEMPT_TTL,
+    EXTERNAL_ACCOUNT_OAUTH_RETENTION,
+)
 from azents.core.oauth2 import generate_pkce_pair
 from azents.repos.external_account_oauth.data import (
     ExternalAccountOAuthAttempt,
+    ExternalAccountOAuthAttemptCleanupSummary,
     ExternalAccountOAuthAttemptCreate,
 )
 from azents.repos.external_account_oauth.repository import (
@@ -158,3 +162,15 @@ class ExternalAccountOAuthAttemptService:
         if attempt.encrypted_pkce_verifier is None:
             return None
         return self.cipher.decrypt(attempt.encrypted_pkce_verifier)
+
+    async def cleanup_expired(
+        self,
+        *,
+        now: datetime.datetime,
+        limit: int,
+    ) -> ExternalAccountOAuthAttemptCleanupSummary:
+        """Remove one bounded batch outside the OAuth attempt retention window."""
+        return await self.repository.cleanup(
+            cutoff=now - EXTERNAL_ACCOUNT_OAUTH_RETENTION,
+            limit=limit,
+        )

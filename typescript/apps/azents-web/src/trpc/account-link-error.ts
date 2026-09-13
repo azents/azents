@@ -1,13 +1,18 @@
 import { ApiError } from "./api-error.ts";
 
 export const ACCOUNT_LINK_FAILURE_REASONS = [
-  "membership_required",
   "elevation_required",
-  "resource_not_found",
+  "provider_unavailable",
+  "invalid_attempt",
   "expired",
+  "already_consumed",
+  "auth_session_mismatch",
+  "provider_mismatch",
+  "invalid_callback",
+  "configuration_changed",
+  "provider_rejected",
+  "resource_not_found",
   "conflict",
-  "candidate_not_ready",
-  "candidate_terminal",
   "unavailable",
   "busy",
 ] as const;

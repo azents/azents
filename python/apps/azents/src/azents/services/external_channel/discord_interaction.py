@@ -38,9 +38,6 @@ MAX_DISCORD_INTERACTION_BODY_BYTES = 256 * 1024
 DISCORD_INTERACTION_TTL = datetime.timedelta(minutes=15)
 _DISCORD_MESSAGE_COMMAND_TYPE = 3
 _DISCORD_THREAD_CHANNEL_TYPES = {10, 11, 12}
-_DISCORD_ACCOUNT_LINK_MODAL_PREFIX = "al1:e:"
-_DISCORD_ACCOUNT_LINK_CODE_COMPONENT_ID = "azents_account_link_code"
-_MAX_DISCORD_ACCOUNT_LINK_CODE_LENGTH = 128
 
 
 class DiscordInteractionError(ValueError):
@@ -85,13 +82,6 @@ class DiscordApplicationCommand:
 
 
 @dataclass(frozen=True)
-class DiscordAccountLinkCodeSubmission:
-    """One request-local account-link code extracted from a signed modal."""
-
-    code: str = field(repr=False)
-
-
-@dataclass(frozen=True)
 class DiscordInteractionActor:
     """Bounded Discord human identity derived from the signed interaction."""
 
@@ -119,9 +109,6 @@ class DiscordInteractionEnvelope:
     selected_value: str | None
     selected_values: tuple[str, ...]
     modal_custom_id: str | None
-    account_link_code_submission: DiscordAccountLinkCodeSubmission | None = field(
-        repr=False,
-    )
     scheduled_task_edit: ScheduledTaskEditInput | None = field(
         repr=False,
     )
@@ -363,11 +350,6 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         interaction_type=interaction_type,
     )
     actor = _actor_identity(payload)
-    account_link_code_submission = _account_link_code_submission(
-        payload=payload,
-        interaction_type=interaction_type,
-        modal_custom_id=modal_custom_id,
-    )
     scheduled_task_edit = _scheduled_task_edit(
         payload=payload,
         interaction_type=interaction_type,
@@ -390,7 +372,6 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         selected_value=selected_value,
         selected_values=selected_values,
         modal_custom_id=modal_custom_id,
-        account_link_code_submission=account_link_code_submission,
         scheduled_task_edit=scheduled_task_edit,
     )
 
@@ -697,56 +678,6 @@ def _modal_custom_id(
     if not isinstance(custom_id, str) or not custom_id or len(custom_id) > 100:
         raise DiscordInteractionInvalidPayload("Discord modal submission is invalid.")
     return custom_id
-
-
-def _account_link_code_submission(
-    *,
-    payload: dict[str, object],
-    interaction_type: int,
-    modal_custom_id: str | None,
-) -> DiscordAccountLinkCodeSubmission | None:
-    """Decode only the signed account-link modal into a bounded transient code."""
-    if (
-        interaction_type != 5
-        or modal_custom_id is None
-        or not modal_custom_id.startswith(_DISCORD_ACCOUNT_LINK_MODAL_PREFIX)
-    ):
-        return None
-    data = payload.get("data")
-    components = (
-        data.get("components") if is_external_channel_projection(data) else None
-    )
-    if not isinstance(components, list) or len(components) != 1:
-        raise DiscordInteractionInvalidPayload(
-            "Discord account-link submission is invalid."
-        )
-    row = components[0]
-    row_components = (
-        row.get("components") if is_external_channel_projection(row) else None
-    )
-    if not isinstance(row_components, list) or len(row_components) != 1:
-        raise DiscordInteractionInvalidPayload(
-            "Discord account-link submission is invalid."
-        )
-    component = row_components[0]
-    if not is_external_channel_projection(component):
-        raise DiscordInteractionInvalidPayload(
-            "Discord account-link submission is invalid."
-        )
-    custom_id = component.get("custom_id")
-    value = component.get("value")
-    if custom_id != _DISCORD_ACCOUNT_LINK_CODE_COMPONENT_ID or not isinstance(
-        value, str
-    ):
-        raise DiscordInteractionInvalidPayload(
-            "Discord account-link submission is invalid."
-        )
-    code = value.strip()
-    if not code or len(code) > _MAX_DISCORD_ACCOUNT_LINK_CODE_LENGTH:
-        raise DiscordInteractionInvalidPayload(
-            "Discord account-link submission is invalid."
-        )
-    return DiscordAccountLinkCodeSubmission(code=code)
 
 
 def _scheduled_task_edit(

@@ -69,15 +69,21 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
+  - python/apps/azents/src/azents/core/external_account_link.py
+  - python/apps/azents/src/azents/core/external_account_oauth.py
+  - python/apps/azents/src/azents/services/external_account_link.py
+  - python/apps/azents/src/azents/services/external_account_oauth/**
+  - python/apps/azents/src/azents/services/external_account_oauth_system_setting/**
   - python/apps/azents/src/cli/externalchannelgateway.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/support/discord_provider_fake.py
   - testenv/azents/e2e/src/tests/required/public/external_channel_scenarios.py
+  - testenv/azents/e2e/src/tests/required/public/external_account_linking_scenarios.py
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-12
-spec_version: 62
+last_verified_at: 2026-09-13
+spec_version: 63
 ---
 
 # External Channel Provider Ingress
@@ -243,21 +249,21 @@ that scope, interaction expiry, route availability, Workspace boundary, and call
 actor before any selection. Duplicate callbacks reuse the durable interaction claim,
 preserve any selected route, and one interaction can select at most once.
 
-Actor-private account linking and model controls enter only after normal Slack or
+Actor-private account management and model controls enter only after normal Slack or
 Discord signature verification has produced the exact human principal and connection
-generation. Slack extends its private modal operations with signed account-link and
-model actions. Discord parses closed account-link/model component and modal scopes,
-uses type 9 only to open the private code modal, and otherwise acknowledges slow work
-before completing the claimed interaction ephemerally. A denied Discord public
-settings action sends a new type-4 response with the ephemeral flag; type-7 source
-message updates are reserved for interactions whose source is already proven private.
+generation. An unlinked human receives a direct provider-specific Web Connect URL
+only when the administrator-managed OAuth Section is ready. A linked human receives
+the platform-wide Web management URL, and model controls remain available only when
+the exact actor, Session, Binding, and target fences pass. Slack keeps model controls
+inside private modals; Discord keeps model controls inside ephemeral responses. No
+provider-native account-link code, modal, or deferred account-link handoff remains.
 
-Submitted link codes and provider callback credentials remain request-local. The
-durable origin/candidate stores only typed proof metadata and a code hash; private
-model drafts retain only bounded typed options and opaque option IDs. Unsupported
-private operations and processing failures return private current-state/unavailable
-results and never publish personalized account or model data to the conversation,
-DMs, provider history, logs, or durable E2E evidence.
+OAuth state, callback codes, provider tokens, and raw provider responses remain
+request-local. The durable OAuth attempt stores only a state hash, encrypted PKCE
+verifier when required, exact callback/generation fences, lifecycle timestamps, and
+sanitized failure code. Unsupported private operations and processing failures return
+private current-state/unavailable results and never publish personalized account or
+model data to the conversation, DMs, provider history, logs, or durable E2E evidence.
 
 ## Socket Mode Admission
 
@@ -615,6 +621,10 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-09-13** (spec_version 63) — Replaced provider-native account-link
+  code/modal controls with direct authenticated Web OAuth URLs and retained only
+  actor-private model controls after verified provider ingress.
 
 - **2026-09-12** (spec_version 62) — Added signed actor-private Slack and Discord
   account-link/model controls, deferred ephemeral Discord completion, and the rule

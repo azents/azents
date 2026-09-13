@@ -599,7 +599,7 @@ class ExternalChannelInteractionProcessor:
             settings = None
             view = private_notice(
                 "Conversation settings are unavailable to you. "
-                "You can still manage your own optional account connection."
+                "You can still manage your account connection."
             )
         actor = self._native_actor(
             handoff=handoff,

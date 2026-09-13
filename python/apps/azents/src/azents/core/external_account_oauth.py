@@ -8,6 +8,7 @@ from typing import Protocol
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from slack_sdk.web.async_client import AsyncWebClient
 
+from azents.core.config import Config
 from azents.core.enums import ExternalChannelProvider
 from azents.core.oauth2 import build_authorization_url
 
@@ -62,6 +63,16 @@ class ExternalAccountOAuthRuntimeConfiguration:
     redirect_uri: str
 
 
+@dataclass(frozen=True)
+class ExternalAccountOAuthEndpointConfiguration:
+    """Provider endpoint URLs used by one OAuth adapter."""
+
+    authorization_url: str
+    token_url: str
+    userinfo_url: str
+    slack_api_base_url: str | None = None
+
+
 class ExternalAccountOAuthProviderError(Exception):
     """Sanitized provider OAuth failure."""
 
@@ -100,6 +111,9 @@ class SlackIdentityOAuthAdapter:
 
     provider = ExternalChannelProvider.SLACK
 
+    def __init__(self, config: Config | None = None) -> None:
+        self._endpoints = external_account_oauth_endpoints(self.provider, config)
+
     def authorization_url(
         self,
         *,
@@ -111,7 +125,7 @@ class SlackIdentityOAuthAdapter:
         """Build Slack's OpenID authorization URL."""
         del code_challenge
         return build_authorization_url(
-            auth_url=SLACK_IDENTITY_AUTHORIZE_URL,
+            auth_url=self._endpoints.authorization_url,
             client_id=client_id,
             redirect_uri=redirect_uri,
             scopes=["openid", "profile"],
@@ -130,11 +144,19 @@ class SlackIdentityOAuthAdapter:
         """Exchange Slack code through the official Slack SDK."""
         del code_verifier
         try:
-            client = AsyncWebClient(
-                logger=_SDK_LOGGER,
-                retry_handlers=[],
-                timeout=20,
-            )
+            if self._endpoints.slack_api_base_url is None:
+                client = AsyncWebClient(
+                    logger=_SDK_LOGGER,
+                    retry_handlers=[],
+                    timeout=20,
+                )
+            else:
+                client = AsyncWebClient(
+                    base_url=self._endpoints.slack_api_base_url,
+                    logger=_SDK_LOGGER,
+                    retry_handlers=[],
+                    timeout=20,
+                )
             token_response = await client.openid_connect_token(
                 client_id=client_id,
                 client_secret=client_secret,
@@ -147,12 +169,22 @@ class SlackIdentityOAuthAdapter:
             access_token = token_payload.get("access_token")
             if not isinstance(access_token, str) or not access_token:
                 raise ExternalAccountOAuthProviderError("slack_token_missing")
-            user_response = await AsyncWebClient(
-                token=access_token,
-                logger=_SDK_LOGGER,
-                retry_handlers=[],
-                timeout=20,
-            ).openid_connect_userInfo()
+            if self._endpoints.slack_api_base_url is None:
+                user_client = AsyncWebClient(
+                    token=access_token,
+                    logger=_SDK_LOGGER,
+                    retry_handlers=[],
+                    timeout=20,
+                )
+            else:
+                user_client = AsyncWebClient(
+                    token=access_token,
+                    base_url=self._endpoints.slack_api_base_url,
+                    logger=_SDK_LOGGER,
+                    retry_handlers=[],
+                    timeout=20,
+                )
+            user_response = await user_client.openid_connect_userInfo()
             return _slack_identity(user_response.data)
         except ExternalAccountOAuthProviderError:
             raise
@@ -167,6 +199,9 @@ class DiscordIdentityOAuthAdapter:
 
     provider = ExternalChannelProvider.DISCORD
 
+    def __init__(self, config: Config | None = None) -> None:
+        self._endpoints = external_account_oauth_endpoints(self.provider, config)
+
     def authorization_url(
         self,
         *,
@@ -177,7 +212,7 @@ class DiscordIdentityOAuthAdapter:
     ) -> str:
         """Build Discord's identify authorization URL."""
         return build_authorization_url(
-            auth_url=DISCORD_IDENTITY_AUTHORIZE_URL,
+            auth_url=self._endpoints.authorization_url,
             client_id=client_id,
             redirect_uri=redirect_uri,
             scopes=["identify"],
@@ -202,7 +237,7 @@ class DiscordIdentityOAuthAdapter:
                 scope="identify",
             ) as client:
                 token = await client.fetch_token(
-                    DISCORD_IDENTITY_TOKEN_URL,
+                    self._endpoints.token_url,
                     code=code,
                     redirect_uri=redirect_uri,
                     code_verifier=code_verifier,
@@ -210,7 +245,7 @@ class DiscordIdentityOAuthAdapter:
                 access_token = token.get("access_token")
                 if not isinstance(access_token, str) or not access_token:
                     raise ExternalAccountOAuthProviderError("discord_token_missing")
-                response = await client.get(DISCORD_IDENTITY_USERINFO_URL)
+                response = await client.get(self._endpoints.userinfo_url)
                 response.raise_for_status()
                 payload = response.json()
             return _discord_identity(payload)
@@ -220,6 +255,50 @@ class DiscordIdentityOAuthAdapter:
             raise ExternalAccountOAuthProviderError(
                 "discord_identity_exchange_failed"
             ) from None
+
+
+def external_account_oauth_endpoints(
+    provider: ExternalChannelProvider,
+    config: Config | None = None,
+) -> ExternalAccountOAuthEndpointConfiguration:
+    """Resolve fixed provider endpoints with a testenv-only origin override."""
+    if provider is ExternalChannelProvider.SLACK:
+        base_url = (
+            config.testenv_slack_oauth_base_url
+            if config is not None and config.testenv_api_enabled
+            else None
+        )
+        if base_url:
+            base_url = base_url.rstrip("/")
+            return ExternalAccountOAuthEndpointConfiguration(
+                authorization_url=f"{base_url}/oauth/authorize",
+                token_url=f"{base_url}/api/openid.connect.token",
+                userinfo_url=f"{base_url}/api/openid.connect.userInfo",
+                slack_api_base_url=f"{base_url}/api/",
+            )
+        return ExternalAccountOAuthEndpointConfiguration(
+            authorization_url=SLACK_IDENTITY_AUTHORIZE_URL,
+            token_url=SLACK_IDENTITY_TOKEN_URL,
+            userinfo_url=SLACK_IDENTITY_USERINFO_URL,
+        )
+
+    base_url = (
+        config.testenv_discord_oauth_base_url
+        if config is not None and config.testenv_api_enabled
+        else None
+    )
+    if base_url:
+        base_url = base_url.rstrip("/")
+        return ExternalAccountOAuthEndpointConfiguration(
+            authorization_url=f"{base_url}/oauth2/authorize",
+            token_url=f"{base_url}/api/oauth2/token",
+            userinfo_url=f"{base_url}/api/users/@me",
+        )
+    return ExternalAccountOAuthEndpointConfiguration(
+        authorization_url=DISCORD_IDENTITY_AUTHORIZE_URL,
+        token_url=DISCORD_IDENTITY_TOKEN_URL,
+        userinfo_url=DISCORD_IDENTITY_USERINFO_URL,
+    )
 
 
 def _slack_identity(payload: object) -> ExternalAccountOAuthIdentity:

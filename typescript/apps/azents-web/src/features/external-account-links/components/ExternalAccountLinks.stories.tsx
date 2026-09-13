@@ -2,6 +2,7 @@ import { ExternalAccountLinks } from "./ExternalAccountLinks";
 import type {
   ExternalAccountLinkItem,
   ExternalAccountLinksState,
+  ExternalAccountProviderAvailability,
 } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -13,24 +14,25 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const providersReady: ExternalAccountProviderAvailability[] = [
+  { provider: "slack", status: "ready", available: true },
+  { provider: "discord", status: "ready", available: true },
+];
+
 const slackLink: ExternalAccountLinkItem = {
   id: "link-slack",
-  accountContextLabel: "Acme Slack",
   provider: "slack",
   providerTeamLabel: "Acme Slack",
   externalDisplayLabel: "Alex Morgan",
-  linkedAt: "2026-09-12T04:30:00.000Z",
-  status: "active",
+  linkedAt: "2026-09-13T04:30:00.000Z",
 };
 
-const inactiveDiscordLink: ExternalAccountLinkItem = {
+const discordLink: ExternalAccountLinkItem = {
   id: "link-discord",
-  accountContextLabel: "Discord",
   provider: "discord",
-  providerTeamLabel: "Azents Builders",
+  providerTeamLabel: null,
   externalDisplayLabel: "alex_dev",
-  linkedAt: "2026-09-11T22:15:00.000Z",
-  status: "inactive",
+  linkedAt: "2026-09-13T03:15:00.000Z",
 };
 
 const handlers = {
@@ -40,11 +42,12 @@ const handlers = {
   onRetry: (): void => {},
 };
 
-export const Loaded = {
+export const MultipleProviders = {
   args: {
     state: {
       type: "READY",
-      links: [slackLink, inactiveDiscordLink],
+      providers: providersReady,
+      links: [slackLink, discordLink],
       disconnect: { type: "IDLE" },
     } satisfies ExternalAccountLinksState,
     ...handlers,
@@ -55,7 +58,23 @@ export const Empty = {
   args: {
     state: {
       type: "READY",
+      providers: providersReady,
       links: [],
+      disconnect: { type: "IDLE" },
+    } satisfies ExternalAccountLinksState,
+    ...handlers,
+  },
+} satisfies Story;
+
+export const ProviderUnavailable = {
+  args: {
+    state: {
+      type: "READY",
+      providers: [
+        { provider: "slack", status: "ready", available: true },
+        { provider: "discord", status: "incomplete", available: false },
+      ],
+      links: [slackLink],
       disconnect: { type: "IDLE" },
     } satisfies ExternalAccountLinksState,
     ...handlers,
@@ -66,6 +85,7 @@ export const DisconnectConfirmation = {
   args: {
     state: {
       type: "READY",
+      providers: providersReady,
       links: [slackLink],
       disconnect: {
         type: "CONFIRMING",
@@ -77,10 +97,11 @@ export const DisconnectConfirmation = {
   },
 } satisfies Story;
 
-export const DisconnectConflict = {
+export const DisconnectFailure = {
   args: {
     state: {
       type: "READY",
+      providers: providersReady,
       links: [slackLink],
       disconnect: {
         type: "CONFIRMING",
@@ -131,7 +152,7 @@ export const ElevationMethodsError = {
 } satisfies Story;
 
 export const Mobile = {
-  ...Loaded,
+  ...MultipleProviders,
   parameters: {
     viewport: { defaultViewport: "mobile1" },
   },

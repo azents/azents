@@ -1,106 +1,96 @@
 {
   "title": "External accounts",
-  "description": "Review the Slack and Discord identities connected to your Azents account.",
+  "description": "Connect and manage the Slack and Discord identities recognized as your Azents account.",
   "loading": "Loading external accounts...",
   "loadErrorTitle": "Could not load external accounts",
   "retry": "Try again",
   "elevationLoading": "Loading available verification methods...",
   "elevationErrorTitle": "Could not load verification methods",
+  "providerCard": {
+    "title": "Connect an account",
+    "description": "Authorize each external service separately. Connecting an identity does not grant access to any Workspace or conversation.",
+    "identity": "Account identity"
+  },
+  "providerStatus": {
+    "not_configured": "Not configured",
+    "incomplete": "Setup incomplete",
+    "invalid": "Needs attention",
+    "ready": "Available",
+    "unavailable": "Unavailable"
+  },
+  "providerGuidance": {
+    "not_configured": "{provider} account connection has not been configured by an administrator.",
+    "incomplete": "{provider} account connection setup is incomplete. Ask an administrator to finish the configuration.",
+    "invalid": "{provider} account connection needs administrator attention before it can be used.",
+    "ready": "Connect a {provider} identity that you own.",
+    "unavailable": "{provider} account connection is temporarily unavailable. Try again later or contact an administrator."
+  },
+  "connectProvider": "Connect {provider}",
+  "connectedAccounts": "Connected identities",
   "emptyTitle": "No external accounts connected",
-  "emptyDescription": "Start from private Conversation settings in Slack or Discord when you want to connect an account.",
-  "workspace": "Workspace",
-  "accountContext": "Provider account",
+  "emptyDescription": "Use an available Connect action above to authorize a Slack or Discord identity.",
   "linkedAt": "Connected",
   "providerTeam": "{provider} · {team}",
   "providers": {
     "slack": "Slack",
     "discord": "Discord"
   },
-  "status": {
-    "active": "Connected",
-    "inactive": "Inactive",
-    "revoked": "Disconnected"
-  },
-  "inactiveDescription": "Your Workspace membership is not active. This link cannot authorize account-based conversation settings.",
+  "connected": "Connected",
   "disconnect": "Disconnect",
-  "disconnected": "Disconnected",
   "cancel": "Cancel",
   "elevationDisconnect": "Verify your identity to disconnect {account} from your Azents account.",
   "disconnectDialog": {
     "title": "Disconnect external account?",
-    "description": "Disconnect {account} from your Azents account.",
+    "description": "Disconnect {account} from your Azents account everywhere.",
     "impact": "Future controls that rely on this linked identity will stop working. Existing guest access, messages, history, shared settings, grants, and blocks are preserved.",
     "confirm": "Disconnect account"
   },
-  "candidateStatus": {
-    "pending_provider_proof": "Waiting for Slack or Discord",
-    "provider_verified": "External service verified",
-    "connected": "Connected",
-    "cancelled": "Cancelled",
-    "expired": "Expired"
-  },
   "errors": {
-    "membership_required": "Join or accept an invitation to this Workspace before connecting.",
     "elevation_required": "Verify your identity to continue.",
-    "resource_not_found": "This confirmation no longer matches the external account or browser session.",
-    "expired": "This confirmation has expired. Start again.",
-    "conflict": "This external account is already connected in this Workspace.",
-    "candidate_not_ready": "Enter the code in the original external service, then check the status again.",
-    "candidate_terminal": "This confirmation can no longer be used. Create a fresh code.",
-    "unavailable": "This external connection changed or is no longer available. Return to Slack or Discord and open the private settings again.",
-    "busy": "The connection service is temporarily busy. Try again."
+    "provider_unavailable": "This external service is not currently available for account connection.",
+    "invalid_attempt": "This account connection is invalid or must be restarted.",
+    "expired": "This account connection has expired. Start again.",
+    "already_consumed": "This account connection has already been completed or can no longer be used.",
+    "auth_session_mismatch": "Sign in again and restart account connection.",
+    "provider_mismatch": "This account connection belongs to another external service.",
+    "invalid_callback": "The external service callback does not match this account connection.",
+    "configuration_changed": "The external service configuration changed. Start account connection again.",
+    "provider_rejected": "The external service could not verify this account. Start again.",
+    "resource_not_found": "This connected account no longer exists or is not available to your account.",
+    "conflict": "This external identity cannot be connected to your account.",
+    "unavailable": "This connected identity is no longer available. Reload and try again.",
+    "busy": "Account linking is temporarily busy. Try again."
   },
-  "confirmation": {
-    "title": "Confirm external account",
-    "description": "Connect only accounts that belong to you. Review the complete account pair before continuing.",
-    "loading": "Loading confirmation...",
-    "accountPair": "Account pair",
-    "accountPairDescription": "This connection applies only to the Workspace shown below.",
+  "oauthResult": {
     "externalAccount": "External account",
-    "providerTeam": "External service and team",
-    "azentsAccount": "Current Azents account",
-    "beforeCode": "Creating a code does not connect the accounts. You must enter it in the original private Slack or Discord screen and confirm here afterward.",
-    "createCode": "Create confirmation code",
-    "codeTitle": "One-time confirmation code",
-    "codeExpires": "Expires {time}",
-    "codeSafety": "Enter only this code from your own Azents screen. Never enter a code someone else sent you.",
-    "copyCode": "Copy confirmation code",
-    "copy": "Copy",
-    "copied": "Copied",
-    "enterInProvider": "Return to the original private Slack or Discord screen and enter this code. Then come back here and check its status.",
-    "checkStatus": "Check status",
-    "providerVerified": "The original external account entered this code. Review the account pair once more before connecting.",
-    "confirm": "Connect these accounts",
-    "startFresh": "Create a fresh confirmation",
-    "switchAccount": "Switch Azents account",
-    "elevationCreate": "Verify your current Azents account before creating the one-time code.",
-    "elevationConfirm": "Verify your current Azents account before the final connection.",
-    "connectedTitle": "External account connected",
-    "connectedDescription": "{account} is now connected to your Azents account in {workspace}.",
-    "connectedImpact": "Link-dependent controls can now use your current Azents authority. Existing guest permissions and conversation history are unchanged.",
-    "return": "Return to Slack or Discord",
-    "manage": "Manage external accounts",
-    "notFoundTitle": "Confirmation not found",
-    "notFoundDescription": "This link is invalid or does not belong to your current account and browser session.",
-    "errorTitle": "Could not load confirmation",
-    "errorDescription": "Try again from the original private Slack or Discord screen.",
-    "origin": {
-      "cancelled": {
-        "title": "Confirmation cancelled",
-        "description": "Start a new connection from the original private Slack or Discord screen."
-      },
-      "consumed": {
-        "title": "Confirmation already completed",
-        "description": "Return to Slack or Discord, or review your external accounts in Account settings."
-      },
-      "expired": {
-        "title": "Confirmation expired",
-        "description": "Start a new connection from the original private Slack or Discord screen."
-      },
-      "unavailable": {
-        "title": "External connection changed",
-        "description": "Return to Slack or Discord and open the private settings again."
-      }
+    "connectedTitle": "{provider} account connected",
+    "connectedDescription": "{account} is now recognized as your Azents account when this {provider} identity is used.",
+    "team": "Slack team: {team}",
+    "cancelledTitle": "{provider} connection cancelled",
+    "cancelledDescription": "No account was connected. You can restart {provider} authorization when ready.",
+    "unavailableTitle": "{provider} connection unavailable",
+    "failedTitle": "Account connection failed",
+    "authRequiredTitle": "Sign in required",
+    "authRequiredDescription": "Sign in to Azents and restart account connection from External accounts.",
+    "manage": "Return to External accounts",
+    "retryProvider": "Try {provider} again",
+    "signIn": "Sign in",
+    "failure": {
+      "elevation_required": "Verify your identity and restart account connection.",
+      "provider_unavailable": "This external service is not currently available. Return to External accounts to review its status.",
+      "invalid_attempt": "This account connection is invalid. Start a new connection from External accounts.",
+      "expired": "This account connection expired. Start a new connection from External accounts.",
+      "already_consumed": "This account connection has already completed or can no longer be used.",
+      "auth_session_mismatch": "Your Azents sign-in session changed. Sign in again and start a new connection.",
+      "provider_mismatch": "This callback belongs to another external service. Start the intended connection again.",
+      "configuration_changed": "The external service configuration changed while you were connecting. Start again with the current configuration.",
+      "provider_rejected": "The external service could not verify this account. Review the provider authorization and try again.",
+      "resource_not_found": "This account connection is no longer available. Start again.",
+      "conflict": "This external identity cannot be connected. No existing owner information was disclosed.",
+      "unavailable": "This account connection is no longer available. Start again.",
+      "busy": "Account linking is temporarily busy. Try again.",
+      "invalid_provider": "This external service is not supported for account connection. Return to External accounts.",
+      "invalid_callback": "The callback is incomplete or invalid. Start a new connection from External accounts."
     }
   }
 }

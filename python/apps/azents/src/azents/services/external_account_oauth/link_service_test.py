@@ -38,6 +38,8 @@ _NOW = datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC)
 class _FakeSettings:
     """Return one ready provider configuration."""
 
+    config = None
+
     async def resolve_callback_context(
         self,
         provider: ExternalChannelProvider,
@@ -165,7 +167,7 @@ async def test_start_creates_authenticated_pkce_attempt_and_provider_url(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda _: cast(Any, _FakeAdapter()),
+        lambda *_: cast(Any, _FakeAdapter()),
     )
     service = _service(
         attempts,
@@ -204,7 +206,7 @@ async def test_exchange_finalizes_global_link_without_retaining_provider_materia
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda _: cast(Any, _FakeAdapter()),
+        lambda *_: cast(Any, _FakeAdapter()),
     )
     service = _service(
         attempts,
@@ -232,7 +234,7 @@ async def test_provider_failure_is_sanitized_and_attempt_is_failed(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda _: cast(Any, _FakeAdapter(failure=True)),
+        lambda *_: cast(Any, _FakeAdapter(failure=True)),
     )
     service = _service(
         attempts,
@@ -259,7 +261,7 @@ async def test_global_owner_conflict_is_generic(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda _: cast(Any, _FakeAdapter()),
+        lambda *_: cast(Any, _FakeAdapter()),
     )
     service = _service(
         attempts,

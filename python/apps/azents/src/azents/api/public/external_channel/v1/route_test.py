@@ -22,7 +22,7 @@ from azents.services.external_channel.discord_interaction import (
 )
 from azents.services.external_channel.discord_settings import DiscordSettingsContext
 from azents.services.external_channel.discord_settings_scope import (
-    DiscordAccountLinkScope,
+    DiscordModelSettingsScope,
     DiscordSettingsScope,
 )
 from azents.services.external_channel.http_admission import (
@@ -94,7 +94,6 @@ def test_discord_admission_returns_matching_initial_response(
             selected_value=None,
             selected_values=(),
             modal_custom_id=None,
-            account_link_code_submission=None,
             scheduled_task_edit=None,
         ),
         admission=None,
@@ -139,7 +138,6 @@ def test_discord_control_plans_run_after_provider_response() -> None:
             selected_value=None,
             selected_values=(),
             modal_custom_id=None,
-            account_link_code_submission=None,
             scheduled_task_edit=None,
         ),
         admission=None,
@@ -220,7 +218,6 @@ def test_discord_setup_handoff_runs_after_deferred_response() -> None:
             selected_value=None,
             selected_values=(),
             modal_custom_id=None,
-            account_link_code_submission=None,
             scheduled_task_edit=None,
         ),
         admission=None,
@@ -262,13 +259,13 @@ def test_discord_private_handoff_runs_after_ephemeral_deferred_response() -> Non
         interaction_id="interaction-row-1",
         application_id="app-1",
         interaction_token="request-local-token",
-        scope=DiscordAccountLinkScope(
-            action="start",
-            origin_interaction_id="origin-interaction-1",
-            origin_id=None,
+        scope=DiscordModelSettingsScope(
+            action="apply",
+            draft_id="01a03bfcc50a7891a94d3328bdbd8901",
+            offset=0,
+            selection_fingerprint="0123456789abcdef",
         ),
         selected_values=(),
-        account_link_code=None,
         context=context,
         received_at=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
     )
@@ -286,11 +283,10 @@ def test_discord_private_handoff_runs_after_ephemeral_deferred_response() -> Non
             actor_display_name="Discord User",
             command=None,
             message_command_source=None,
-            component_custom_id="al1:s:origin-interaction-1:signature",
+            component_custom_id="ms1:a:draft:0:fingerprint:signature",
             selected_value=None,
             selected_values=(),
             modal_custom_id=None,
-            account_link_code_submission=None,
             scheduled_task_edit=None,
         ),
         admission=None,

@@ -1,32 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  accountLinkStatusColor,
-  candidateNextAction,
   elevationScreenState,
-  isRecoverableWithFreshCandidate,
-  preserveLastSafeOrigin,
+  normalizeProviderAvailability,
 } from "./presentation.ts";
-
-void test("candidate states require explicit status check and final confirmation", () => {
-  assert.equal(candidateNextAction("pending_provider_proof"), "check_status");
-  assert.equal(candidateNextAction("provider_verified"), "confirm");
-  assert.equal(candidateNextAction("connected"), "connected");
-});
-
-void test("terminal candidate states require a fresh candidate", () => {
-  assert.equal(candidateNextAction("cancelled"), "start_fresh");
-  assert.equal(candidateNextAction("expired"), "start_fresh");
-  assert.equal(isRecoverableWithFreshCandidate("expired"), true);
-  assert.equal(isRecoverableWithFreshCandidate("candidate_terminal"), true);
-  assert.equal(isRecoverableWithFreshCandidate("conflict"), false);
-});
-
-void test("link status presentation distinguishes inactive membership", () => {
-  assert.equal(accountLinkStatusColor("active"), "green");
-  assert.equal(accountLinkStatusColor("inactive"), "yellow");
-  assert.equal(accountLinkStatusColor("revoked"), "gray");
-});
 
 void test("elevation waits for the real methods response", () => {
   assert.equal(
@@ -43,9 +20,39 @@ void test("elevation waits for the real methods response", () => {
   );
 });
 
-void test("terminal refetch preserves the last authorized provider return context", () => {
-  const safeOrigin = { id: "origin-1", returnUrl: "https://provider.example" };
+void test("provider availability is ordered and retains independent status", () => {
+  assert.deepEqual(
+    normalizeProviderAvailability([
+      {
+        provider: "discord",
+        status: "unavailable",
+        available: false,
+        callback_url: null,
+      },
+      {
+        provider: "slack",
+        status: "ready",
+        available: true,
+        callback_url: "https://azents.example/callback",
+      },
+    ]),
+    [
+      { provider: "slack", status: "ready", available: true },
+      { provider: "discord", status: "unavailable", available: false },
+    ],
+  );
+});
 
-  assert.strictEqual(preserveLastSafeOrigin(null, safeOrigin), safeOrigin);
-  assert.strictEqual(preserveLastSafeOrigin(safeOrigin, null), safeOrigin);
+void test("missing provider availability is rejected instead of creating a dead control", () => {
+  assert.equal(
+    normalizeProviderAvailability([
+      {
+        provider: "slack",
+        status: "ready",
+        available: true,
+        callback_url: "https://azents.example/callback",
+      },
+    ]),
+    null,
+  );
 });

@@ -12,7 +12,6 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.external_account_link import (
     ExternalAccountLinkError,
-    ExternalAccountLinkInvalidCode,
     ExternalAccountLinkState,
     VerifiedExternalAccountActor,
 )
@@ -23,6 +22,12 @@ from azents.core.external_model_settings import (
     ExternalModelTargetContext,
 )
 from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_account_oauth_system_setting.data import (
+    ExternalAccountOAuthEffectiveStatus,
+)
+from azents.services.external_account_oauth_system_setting.service import (
+    ExternalAccountOAuthSystemSettingService,
+)
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationSettings,
@@ -35,7 +40,6 @@ from azents.services.external_channel.slack_native_protocol import (
 )
 from azents.services.external_channel.slack_native_views import (
     add_personal_controls,
-    link_code_view,
     model_editor_view,
     private_notice,
 )
@@ -61,6 +65,10 @@ class SlackNativeSettingsService:
     """Sequence completed domain operations before actor-private presentation."""
 
     linking: Annotated[ExternalAccountLinkService, Depends(ExternalAccountLinkService)]
+    oauth_settings: Annotated[
+        ExternalAccountOAuthSystemSettingService,
+        Depends(ExternalAccountOAuthSystemSettingService),
+    ]
     models: Annotated[
         ExternalModelSettingsService, Depends(ExternalModelSettingsService)
     ]
@@ -91,7 +99,6 @@ class SlackNativeSettingsService:
             channel_id=actor.provider_channel_id,
             thread_id=actor.provider_thread_id,
             expires_at=now + datetime.timedelta(minutes=15),
-            origin_id=None,
             draft_id=None,
             selection_fingerprint=None,
             offset=0,
@@ -100,13 +107,12 @@ class SlackNativeSettingsService:
             state = await self.linking.get_native_link_state(actor=actor, now=now)
         except ExternalAccountLinkError:
             return view
-        linked = (
-            state.link is not None
-            and state.link.state == ExternalAccountLinkState.ACTIVE
-        )
+        linked = state.link is not None
         model_metadata = None
         if (
             linked
+            and state.link is not None
+            and state.link.state is ExternalAccountLinkState.ACTIVE
             and settings is not None
             and settings.binding is not None
             and settings.session_navigation is not None
@@ -155,11 +161,16 @@ class SlackNativeSettingsService:
             management_url = self.web_url(state.management_path)
         except ValueError:
             return view
+        connect_url = None
+        if not linked:
+            detail = await self.oauth_settings.get_detail("slack")
+            if detail.effective_status is ExternalAccountOAuthEffectiveStatus.READY:
+                connect_url = self.web_url("/account/external-accounts/connect/slack")
         return add_personal_controls(
             view,
-            metadata=sign_native_scope(scope, secret=self.config.auth.jwt.secret_key),
+            connect_url=connect_url,
             management_url=management_url,
-            link_state=state.link.state if state.link is not None else None,
+            linked=linked,
             model_metadata=model_metadata,
         )
 
@@ -171,7 +182,7 @@ class SlackNativeSettingsService:
         control: SlackNativeControl,
         now: datetime.datetime,
     ) -> SlackInteractionView:
-        """Reauthorize every action; proof stays exclusively request-local."""
+        """Reauthorize every provider-native model action."""
         if (
             scope.connection_id != actor.connection_id
             or scope.principal_id != actor.principal_id
@@ -179,74 +190,7 @@ class SlackNativeSettingsService:
             return private_notice(
                 "This private control is unavailable. Reopen your own settings."
             )
-        if control.action.startswith("azents_account_link"):
-            return await self._link(actor=actor, scope=scope, control=control, now=now)
         return await self._model(actor=actor, scope=scope, control=control, now=now)
-
-    async def _link(
-        self,
-        *,
-        actor: VerifiedExternalAccountActor,
-        scope: SlackNativeScope,
-        control: SlackNativeControl,
-        now: datetime.datetime,
-    ) -> SlackInteractionView:
-        try:
-            if control.action == "azents_account_link_start":
-                origin = await self.linking.create_origin(actor=actor, now=now)
-                scope = scope.model_copy(
-                    update={
-                        "origin_id": origin.origin_id,
-                        "expires_at": origin.expires_at,
-                    }
-                )
-                return link_code_view(
-                    metadata=sign_native_scope(
-                        scope, secret=self.config.auth.jwt.secret_key
-                    ),
-                    web_url=self.web_url(origin.web_path),
-                    notice=None,
-                )
-            if scope.origin_id is None:
-                return private_notice(
-                    "This connection request is unavailable. Reopen settings."
-                )
-            if control.action == "azents_account_link_code_open":
-                return link_code_view(
-                    metadata=sign_native_scope(
-                        scope, secret=self.config.auth.jwt.secret_key
-                    ),
-                    web_url=self.web_url(f"/external-channel/link/{scope.origin_id}"),
-                    notice=None,
-                )
-            if control.action != "azents_account_link_code" or control.code is None:
-                return private_notice(
-                    "This connection request is unavailable. Reopen settings."
-                )
-            await self.linking.verify_candidate_code(
-                actor=actor, origin_id=scope.origin_id, code=control.code, now=now
-            )
-            return private_notice(
-                "Slack identity verified. Return to Azents, check the account and "
-                "Workspace, and explicitly confirm the connection. "
-                "Shared settings have not changed."
-            )
-        except ExternalAccountLinkInvalidCode as error:
-            return link_code_view(
-                metadata=sign_native_scope(
-                    scope, secret=self.config.auth.jwt.secret_key
-                ),
-                web_url=self.web_url(f"/external-channel/link/{scope.origin_id}"),
-                notice=(
-                    "The code could not be verified. "
-                    f"{error.remaining_attempts} attempts remain."
-                ),
-            )
-        except ExternalAccountLinkError:
-            return private_notice(
-                "This connection request is unavailable or expired. "
-                "Reopen settings to try again. Existing guest access is unchanged."
-            )
 
     async def _model(
         self,

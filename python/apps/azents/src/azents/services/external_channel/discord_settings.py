@@ -37,14 +37,16 @@ from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_account_oauth_system_setting.data import (
+    ExternalAccountOAuthEffectiveStatus,
+)
+from azents.services.external_account_oauth_system_setting.service import (
+    ExternalAccountOAuthSystemSettingService,
+)
 from azents.services.external_channel.discord_account_link import (
     DiscordAccountLinkPresentation,
-    discord_account_link_code_modal,
-    discord_account_link_error_response,
     discord_account_link_presentation,
-    discord_account_link_started_response,
     discord_account_link_state_unavailable,
-    discord_account_link_verified_response,
 )
 from azents.services.external_channel.discord_model_settings import (
     DiscordModelSettingsPresentation,
@@ -57,7 +59,6 @@ from azents.services.external_channel.discord_model_settings import (
     parse_reasoning_effort,
 )
 from azents.services.external_channel.discord_settings_scope import (
-    DiscordAccountLinkScope,
     DiscordModelSettingsScope,
     DiscordSettingsScope,
     build_discord_settings_custom_id,
@@ -137,6 +138,10 @@ class DiscordSettingsResponseService:
         ExternalAccountLinkService,
         Depends(ExternalAccountLinkService),
     ]
+    account_oauth_settings: Annotated[
+        ExternalAccountOAuthSystemSettingService,
+        Depends(ExternalAccountOAuthSystemSettingService),
+    ]
     model_settings_service: Annotated[
         ExternalModelSettingsService,
         Depends(ExternalModelSettingsService),
@@ -152,7 +157,6 @@ class DiscordSettingsResponseService:
     ) -> DiscordSettingsResponse:
         """Render guest controls and actor-private personal settings."""
         account_state, account = await self._account_presentation(
-            origin_interaction_id=origin_interaction_id,
             context=context,
             now=now,
         )
@@ -235,7 +239,6 @@ class DiscordSettingsResponseService:
                         response_type=4,
                         personal=await self._private_presentations(
                             settings=settings,
-                            origin_interaction_id=scope.origin_interaction_id,
                             context=context,
                             now=now,
                         ),
@@ -261,7 +264,6 @@ class DiscordSettingsResponseService:
             raise AssertionError("Discord settings action is not exhaustive.")
         except ExternalChannelParticipationError:
             _, account = await self._account_presentation(
-                origin_interaction_id=interaction_id,
                 context=context,
                 now=now,
             )
@@ -269,61 +271,6 @@ class DiscordSettingsResponseService:
                 response=_link_only_response(account=account, response_type=4),
                 cleanup_plans=(),
             )
-
-    async def account_link_response(
-        self,
-        *,
-        scope: DiscordAccountLinkScope,
-        code: str | None,
-        context: DiscordSettingsContext,
-        now: datetime.datetime,
-    ) -> DiscordSettingsResponse:
-        """Run an account-link control without conversation authority."""
-        try:
-            actor = _account_actor(context)
-            if scope.action == "start":
-                if code is not None or scope.origin_interaction_id is None:
-                    raise ValueError("Discord account-link control is invalid.")
-                await self._validate_origin_interaction(
-                    origin_interaction_id=scope.origin_interaction_id,
-                    context=context,
-                )
-                created = await self.account_link_service.create_origin(
-                    actor=actor,
-                    now=now,
-                )
-                response = discord_account_link_started_response(
-                    created=created,
-                    secret=self.config.auth.jwt.secret_key,
-                    web_url=self.config.web_url,
-                )
-            elif scope.action == "enter_code":
-                if scope.origin_id is None:
-                    raise ValueError("Discord account-link control is invalid.")
-                if code is None:
-                    response = discord_account_link_code_modal(
-                        origin_id=scope.origin_id,
-                        secret=self.config.auth.jwt.secret_key,
-                    )
-                else:
-                    proof = await self.account_link_service.verify_candidate_code(
-                        actor=actor,
-                        origin_id=scope.origin_id,
-                        code=code,
-                        now=now,
-                    )
-                    response = discord_account_link_verified_response(
-                        result=proof,
-                        origin_id=scope.origin_id,
-                        web_url=self.config.web_url,
-                    )
-            else:
-                raise AssertionError("Discord account-link action is not exhaustive.")
-        except ExternalAccountLinkError as error:
-            response = discord_account_link_error_response(error)
-        except ExternalChannelParticipationError, ValueError:
-            response = _private_control_unavailable_response()
-        return DiscordSettingsResponse(response=response, cleanup_plans=())
 
     async def model_response(
         self,
@@ -452,7 +399,6 @@ class DiscordSettingsResponseService:
                 response_type=4,
                 personal=await self._private_presentations(
                     settings=settings,
-                    origin_interaction_id=interaction_id,
                     context=context,
                     now=now,
                 ),
@@ -553,7 +499,6 @@ class DiscordSettingsResponseService:
                 response_type=7,
                 personal=await self._private_presentations(
                     settings=mutation.settings,
-                    origin_interaction_id=scope.origin_interaction_id,
                     context=context,
                     now=now,
                 ),
@@ -606,7 +551,6 @@ class DiscordSettingsResponseService:
                 response_type=7,
                 personal=await self._private_presentations(
                     settings=mutation.settings,
-                    origin_interaction_id=scope.origin_interaction_id,
                     context=context,
                     now=now,
                 ),
@@ -668,7 +612,6 @@ class DiscordSettingsResponseService:
     async def _account_presentation(
         self,
         *,
-        origin_interaction_id: str,
         context: DiscordSettingsContext,
         now: datetime.datetime,
     ) -> _DiscordAccountPresentationResult:
@@ -681,12 +624,17 @@ class DiscordSettingsResponseService:
             return _DiscordAccountPresentationResult(
                 state=None, presentation=discord_account_link_state_unavailable()
             )
+        provider_status: ExternalAccountOAuthEffectiveStatus | None = None
+        if state.link is None:
+            detail = await self.account_oauth_settings.get_detail(
+                ExternalChannelProvider.DISCORD.value
+            )
+            provider_status = detail.effective_status
         return _DiscordAccountPresentationResult(
             state=state,
             presentation=discord_account_link_presentation(
                 state=state,
-                origin_interaction_id=origin_interaction_id,
-                secret=self.config.auth.jwt.secret_key,
+                provider_status=provider_status,
                 web_url=self.config.web_url,
             ),
         )
@@ -695,12 +643,10 @@ class DiscordSettingsResponseService:
         self,
         *,
         settings: ExternalChannelParticipationSettings,
-        origin_interaction_id: str,
         context: DiscordSettingsContext,
         now: datetime.datetime,
     ) -> DiscordPrivatePresentations:
         account_state, account = await self._account_presentation(
-            origin_interaction_id=origin_interaction_id,
             context=context,
             now=now,
         )

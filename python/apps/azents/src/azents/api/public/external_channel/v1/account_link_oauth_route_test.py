@@ -11,6 +11,7 @@ from azents.core.enums import ExternalChannelProvider
 from azents.core.external_account_link import (
     ExternalAccountLinkConflict,
     ExternalAccountLinkState,
+    ExternalAccountLinkUnavailable,
     ExternalAccountLinkView,
 )
 from azents.services.external_account_link import ExternalAccountLinkService
@@ -33,6 +34,8 @@ _NOW = datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC)
 class _LinkService:
     """Return one active global link for list and unlink tests."""
 
+    unavailable = False
+
     async def list_links(self, **_: object) -> list[ExternalAccountLinkView]:
         return [
             ExternalAccountLinkView(
@@ -52,6 +55,8 @@ class _LinkService:
         ]
 
     async def unlink(self, **_: object) -> ExternalAccountLinkView:
+        if self.unavailable:
+            raise ExternalAccountLinkUnavailable
         return (await self.list_links())[0]
 
 
@@ -174,21 +179,48 @@ def test_oauth_conflict_is_nondisclosing() -> None:
     }
 
 
-def test_legacy_origin_and_candidate_routes_are_deprecated_in_openapi() -> None:
-    """Phase 2 keeps legacy clients compiling until Phase 3 removes the flow."""
+def test_unlink_unavailable_is_a_stable_conflict_response() -> None:
+    """A session/authority race remains an expected non-5xx API failure."""
+    link_service = _LinkService()
+    link_service.unavailable = True
+    app = FastAPI()
+    app.include_router(router, prefix="/external-channel/v1")
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="user-1",
+        session_id="session-1",
+        elevated=True,
+    )
+    app.dependency_overrides[ExternalAccountLinkService] = lambda: cast(
+        Any,
+        link_service,
+    )
+    app.dependency_overrides[ExternalAccountOAuthService] = lambda: cast(
+        Any,
+        _OAuthService(),
+    )
+    app.dependency_overrides[ExternalAccountOAuthSystemSettingService] = lambda: cast(
+        Any,
+        _SettingsService(),
+    )
+
+    response = TestClient(app).delete(
+        "/external-channel/v1/account-links/link-1",
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": {
+            "code": "unavailable",
+            "message": "The account link scope is no longer available.",
+        }
+    }
+
+
+def test_legacy_origin_and_candidate_routes_are_absent_from_openapi() -> None:
+    """Phase 3 exposes only the provider OAuth replacement flow."""
     client, _ = _client()
     paths = cast(Any, client.app).openapi()["paths"]
 
-    assert (
-        paths["/external-channel/v1/account-link-origins/{origin_id}"]["get"][
-            "deprecated"
-        ]
-        is True
-    )
-    assert (
-        paths["/external-channel/v1/account-link-candidates/{candidate_id}"]["get"][
-            "deprecated"
-        ]
-        is True
-    )
+    assert not any("account-link-origins" in path for path in paths)
+    assert not any("account-link-candidates" in path for path in paths)
     assert "/external-channel/v1/account-links/oauth/{provider}/start" in paths

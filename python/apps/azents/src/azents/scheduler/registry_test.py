@@ -6,11 +6,15 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from azents.core.external_account_link import ExternalAccountLinkCleanupSummary
+from azents.repos.external_account_oauth.data import (
+    ExternalAccountOAuthAttemptCleanupSummary,
+)
 from azents.scheduler import registry
 from azents.scheduler.types import TaskContext
 from azents.services.chat import ChatSessionService
-from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_account_oauth.service import (
+    ExternalAccountOAuthAttemptService,
+)
 from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
@@ -62,15 +66,15 @@ class _ScheduledTaskDispatchContainer:
         return self.dispatcher
 
 
-class _ExternalAccountLinkCleanupContainer:
-    """Container double for external account proof cleanup."""
+class _OAuthCleanupContainer:
+    """Container test double that resolves the OAuth attempt service."""
 
-    def __init__(self, service: ExternalAccountLinkService) -> None:
+    def __init__(self, service: ExternalAccountOAuthAttemptService) -> None:
         self.service = service
 
     async def solve(self, target: type[object]) -> object:
-        """Return the configured account link service."""
-        assert target is ExternalAccountLinkService
+        """Return the configured OAuth attempt service."""
+        assert target is ExternalAccountOAuthAttemptService
         return self.service
 
 
@@ -162,41 +166,6 @@ def test_user_scheduled_task_dispatch_is_registered_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_external_account_link_cleanup_handler_is_bounded() -> None:
-    """The registered proof cleanup delegates one bounded retained-row pass."""
-    service = cast(Any, Mock())
-    service.cleanup_expired = AsyncMock(
-        return_value=ExternalAccountLinkCleanupSummary(
-            deleted_origin_count=3,
-            deleted_candidate_count=4,
-        )
-    )
-    now = datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC)
-    context = TaskContext(
-        task_key="external_account_link_cleanup",
-        attempt_started_at=now,
-        lease_owner="scheduler-1",
-        deadline=now + datetime.timedelta(minutes=2),
-        manual_triggered=False,
-        container=cast(Any, _ExternalAccountLinkCleanupContainer(service)),
-    )
-
-    result = await registry.external_account_link_cleanup_handler(context)
-
-    service.cleanup_expired.assert_awaited_once_with(now=now, limit=500)
-    assert result.summary == {
-        "task_key": "external_account_link_cleanup",
-        "attempt_started_at": now.isoformat(),
-        "manual_triggered": False,
-        "deleted_origin_count": 3,
-        "deleted_candidate_count": 4,
-    }
-    assert registry.EXTERNAL_ACCOUNT_LINK_CLEANUP_TASK in (
-        registry.get_task_definitions()
-    )
-
-
-@pytest.mark.asyncio
 async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,3 +217,53 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         },
     )
     service.cleanup_once.assert_awaited_once_with(lease_owner="scheduler-1")
+
+
+@pytest.mark.asyncio
+async def test_external_account_oauth_cleanup_handler_returns_batch_summary() -> None:
+    """OAuth cleanup uses the scheduler timestamp and a bounded batch."""
+    summary = ExternalAccountOAuthAttemptCleanupSummary(deleted_count=7)
+    service = cast(Any, Mock())
+    service.cleanup_expired = AsyncMock(return_value=summary)
+    now = datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="external_account_oauth_cleanup",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=2),
+        manual_triggered=True,
+        container=cast(
+            Any,
+            _OAuthCleanupContainer(service),
+        ),
+    )
+
+    result = await registry.external_account_oauth_cleanup_handler(context)
+
+    assert result.summary == {
+        "task_key": "external_account_oauth_cleanup",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": True,
+        "deleted_count": 7,
+    }
+    service.cleanup_expired.assert_awaited_once_with(now=now, limit=500)
+
+
+def test_external_account_oauth_cleanup_is_registered_with_a_distinct_key() -> None:
+    """OAuth attempt retention has its own hourly scheduler definition."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "external_account_oauth_cleanup"
+    ]
+
+    assert matches == [registry.EXTERNAL_ACCOUNT_OAUTH_CLEANUP_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(hours=1)
+    assert definition.timeout == datetime.timedelta(minutes=2)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is True
+    assert all(
+        definition.key != "external_account_link_cleanup" for definition in definitions
+    )

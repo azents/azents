@@ -1,106 +1,96 @@
 {
   "title": "外部アカウント",
-  "description": "Azents アカウントに連携されている Slack と Discord の外部アカウントを確認します。",
+  "description": "Azents アカウントとして認識する Slack と Discord のアカウントを連携・管理します。",
   "loading": "外部アカウントを読み込んでいます...",
   "loadErrorTitle": "外部アカウントを読み込めませんでした",
   "retry": "再試行",
   "elevationLoading": "利用可能な本人確認方法を読み込んでいます...",
   "elevationErrorTitle": "本人確認方法を読み込めませんでした",
+  "providerCard": {
+    "title": "アカウントを連携",
+    "description": "外部サービスごとに個別に認証します。アカウントを連携しても、Workspace や会話へのアクセス権は付与されません。",
+    "identity": "アカウント ID"
+  },
+  "providerStatus": {
+    "not_configured": "未設定",
+    "incomplete": "設定未完了",
+    "invalid": "確認が必要",
+    "ready": "利用可能",
+    "unavailable": "利用不可"
+  },
+  "providerGuidance": {
+    "not_configured": "管理者が {provider} のアカウント連携をまだ設定していません。",
+    "incomplete": "{provider} のアカウント連携設定が未完了です。管理者に設定の完了を依頼してください。",
+    "invalid": "{provider} のアカウント連携を利用するには、管理者による設定の確認が必要です。",
+    "ready": "ご自身が所有する {provider} アカウントを連携します。",
+    "unavailable": "現在 {provider} のアカウント連携を利用できません。後でもう一度試すか、管理者にお問い合わせください。"
+  },
+  "connectProvider": "{provider} を連携",
+  "connectedAccounts": "連携済みアカウント",
   "emptyTitle": "連携済みの外部アカウントはありません",
-  "emptyDescription": "アカウントを連携するには、Slack または Discord の非公開の会話設定から開始してください。",
-  "workspace": "Workspace",
-  "accountContext": "外部アカウント",
+  "emptyDescription": "上の利用可能な連携ボタンから Slack または Discord アカウントを認証してください。",
   "linkedAt": "連携日時",
   "providerTeam": "{provider} · {team}",
   "providers": {
     "slack": "Slack",
     "discord": "Discord"
   },
-  "status": {
-    "active": "連携済み",
-    "inactive": "無効",
-    "revoked": "連携解除済み"
-  },
-  "inactiveDescription": "Workspace のメンバーシップが有効ではありません。この連携ではアカウントに基づく会話設定を操作できません。",
+  "connected": "連携済み",
   "disconnect": "連携を解除",
-  "disconnected": "連携解除済み",
   "cancel": "キャンセル",
   "elevationDisconnect": "Azents アカウントから {account} の連携を解除するには、本人確認が必要です。",
   "disconnectDialog": {
     "title": "外部アカウントの連携を解除しますか？",
-    "description": "Azents アカウントから {account} の連携を解除します。",
+    "description": "Azents アカウントと {account} の連携をすべての場所で解除します。",
     "impact": "この連携済み外部アカウントを必要とする操作を今後利用できなくなります。既存のゲストアクセス、メッセージ、履歴、共有設定、許可、ブロックは保持されます。",
     "confirm": "アカウントの連携を解除"
   },
-  "candidateStatus": {
-    "pending_provider_proof": "外部サービスでの入力待ち",
-    "provider_verified": "外部サービスで確認済み",
-    "connected": "連携済み",
-    "cancelled": "キャンセル済み",
-    "expired": "期限切れ"
-  },
   "errors": {
-    "membership_required": "連携する前に、この Workspace に参加するか招待を承認してください。",
     "elevation_required": "続行するには本人確認が必要です。",
-    "resource_not_found": "この確認は、現在の外部アカウントまたはブラウザーセッションと一致しなくなりました。",
-    "expired": "この確認は期限切れです。最初からやり直してください。",
-    "conflict": "この外部アカウントは、この Workspace ですでに連携されています。",
-    "candidate_not_ready": "元の外部サービスにコードを入力してから、もう一度状態を確認してください。",
-    "candidate_terminal": "この確認はもう使用できません。新しいコードを作成してください。",
-    "unavailable": "外部サービスの接続が変更されたか、利用できなくなりました。Slack または Discord に戻り、非公開設定を開き直してください。",
-    "busy": "連携サービスが一時的に混み合っています。もう一度お試しください。"
+    "provider_unavailable": "現在、この外部サービスではアカウントを連携できません。",
+    "invalid_attempt": "このアカウント連携は無効であるか、最初からやり直す必要があります。",
+    "expired": "アカウント連携の有効期限が切れました。最初からやり直してください。",
+    "already_consumed": "このアカウント連携はすでに完了しているか、もう使用できません。",
+    "auth_session_mismatch": "もう一度ログインして、アカウント連携を最初からやり直してください。",
+    "provider_mismatch": "このアカウント連携は別の外部サービスのものです。",
+    "invalid_callback": "外部サービスからの callback がこのアカウント連携と一致しません。",
+    "configuration_changed": "外部サービスの設定が変更されました。アカウント連携をやり直してください。",
+    "provider_rejected": "外部サービスでこのアカウントを確認できませんでした。もう一度お試しください。",
+    "resource_not_found": "連携済みアカウントが存在しないか、現在のアカウントでは利用できません。",
+    "conflict": "この外部アカウントは現在のアカウントに連携できません。",
+    "unavailable": "この連携済みアカウントは利用できなくなりました。再読み込みしてお試しください。",
+    "busy": "アカウント連携が一時的に混み合っています。もう一度お試しください。"
   },
-  "confirmation": {
-    "title": "外部アカウントの確認",
-    "description": "ご自身が所有するアカウントだけを連携してください。続行する前に、連携する両方のアカウントを確認してください。",
-    "loading": "確認情報を読み込んでいます...",
-    "accountPair": "連携するアカウント",
-    "accountPairDescription": "この連携は、以下の Workspace にのみ適用されます。",
+  "oauthResult": {
     "externalAccount": "外部アカウント",
-    "providerTeam": "外部サービスとチーム",
-    "azentsAccount": "現在の Azents アカウント",
-    "beforeCode": "コードを作成しただけではアカウントは連携されません。元の Slack または Discord の非公開画面にコードを入力し、その後ここで確認する必要があります。",
-    "createCode": "確認コードを作成",
-    "codeTitle": "1 回限りの確認コード",
-    "codeExpires": "有効期限: {time}",
-    "codeSafety": "ご自身の Azents 画面に表示されたこのコードだけを入力してください。他の人から送られたコードは入力しないでください。",
-    "copyCode": "確認コードをコピー",
-    "copy": "コピー",
-    "copied": "コピーしました",
-    "enterInProvider": "元の Slack または Discord の非公開画面に戻り、このコードを入力してください。その後ここに戻って状態を確認してください。",
-    "checkStatus": "状態を確認",
-    "providerVerified": "元の外部アカウントでコードが入力されました。連携する前に両方のアカウントをもう一度確認してください。",
-    "confirm": "このアカウントを連携",
-    "startFresh": "新しい確認を作成",
-    "switchAccount": "Azents アカウントを切り替え",
-    "elevationCreate": "1 回限りのコードを作成する前に、現在の Azents アカウントで本人確認を行ってください。",
-    "elevationConfirm": "最終的な連携の前に、現在の Azents アカウントで本人確認を行ってください。",
-    "connectedTitle": "外部アカウントを連携しました",
-    "connectedDescription": "{workspace} で {account} を Azents アカウントに連携しました。",
-    "connectedImpact": "連携に基づく操作で、現在の Azents 権限を利用できるようになりました。既存のゲスト権限と会話履歴は変更されません。",
-    "return": "Slack または Discord に戻る",
-    "manage": "外部アカウントを管理",
-    "notFoundTitle": "確認が見つかりません",
-    "notFoundDescription": "このリンクは無効であるか、現在のアカウントとブラウザーセッションのものではありません。",
-    "errorTitle": "確認情報を読み込めませんでした",
-    "errorDescription": "元の Slack または Discord の非公開画面からもう一度お試しください。",
-    "origin": {
-      "cancelled": {
-        "title": "確認はキャンセルされました",
-        "description": "元の Slack または Discord の非公開画面から新しい連携を開始してください。"
-      },
-      "consumed": {
-        "title": "この確認はすでに完了しています",
-        "description": "Slack または Discord に戻るか、アカウント設定で外部アカウントを確認してください。"
-      },
-      "expired": {
-        "title": "確認の有効期限が切れました",
-        "description": "元の Slack または Discord の非公開画面から新しい連携を開始してください。"
-      },
-      "unavailable": {
-        "title": "外部サービスの接続が変更されました",
-        "description": "Slack または Discord に戻り、非公開設定を開き直してください。"
-      }
+    "connectedTitle": "{provider} アカウントを連携しました",
+    "connectedDescription": "今後 {provider} で {account} を使用すると、Azents アカウントとして認識されます。",
+    "team": "Slack チーム: {team}",
+    "cancelledTitle": "{provider} の連携をキャンセルしました",
+    "cancelledDescription": "アカウントは連携されていません。準備ができたら {provider} の認証をやり直せます。",
+    "unavailableTitle": "{provider} の連携は利用できません",
+    "failedTitle": "アカウントを連携できませんでした",
+    "authRequiredTitle": "ログインが必要です",
+    "authRequiredDescription": "Azents にログインして、外部アカウントから連携をやり直してください。",
+    "manage": "外部アカウントに戻る",
+    "retryProvider": "{provider} をもう一度試す",
+    "signIn": "ログイン",
+    "failure": {
+      "elevation_required": "本人確認後、アカウント連携をやり直してください。",
+      "provider_unavailable": "現在この外部サービスは利用できません。外部アカウントで状態を確認してください。",
+      "invalid_attempt": "アカウント連携が無効です。外部アカウントから新しい連携を開始してください。",
+      "expired": "アカウント連携の有効期限が切れました。外部アカウントから新しい連携を開始してください。",
+      "already_consumed": "このアカウント連携はすでに完了しているか、もう使用できません。",
+      "auth_session_mismatch": "Azents のログインセッションが変わりました。もう一度ログインして新しい連携を開始してください。",
+      "provider_mismatch": "この callback は別の外部サービスのものです。目的の連携をやり直してください。",
+      "configuration_changed": "連携中に外部サービスの設定が変更されました。現在の設定でやり直してください。",
+      "provider_rejected": "外部サービスでこのアカウントを確認できませんでした。認証内容を確認してもう一度お試しください。",
+      "resource_not_found": "このアカウント連携は利用できなくなりました。やり直してください。",
+      "conflict": "この外部アカウントは連携できません。既存の所有者情報は公開されていません。",
+      "unavailable": "このアカウント連携は利用できなくなりました。やり直してください。",
+      "busy": "アカウント連携が一時的に混み合っています。もう一度お試しください。",
+      "invalid_provider": "この外部サービスはアカウント連携に対応していません。外部アカウントに戻ってください。",
+      "invalid_callback": "Callback が不完全または無効です。外部アカウントから新しい連携を開始してください。"
     }
   }
 }

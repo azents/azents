@@ -1,8 +1,11 @@
 """Deterministic Discord provider fake contract tests."""
 
+import base64
+import hashlib
 import threading
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
@@ -129,32 +132,6 @@ class _DeferredInteractionHandler(_SignedInteractionHandler):
         )
         self.received_bodies.append(body)
         response = b'{"type":6}'
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(response)))
-        self.end_headers()
-        self.wfile.write(response)
-
-
-class _AccountLinkModalInteractionHandler(_SignedInteractionHandler):
-    """Return a code modal while keeping signed IDs and copy request-local."""
-
-    def do_POST(self) -> None:
-        """Verify the signed request and return one bounded text input modal."""
-        length = int(self.headers["Content-Length"])
-        body = self.rfile.read(length)
-        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
-        timestamp = self.headers["X-Signature-Timestamp"].encode()
-        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
-            signature, timestamp + body
-        )
-        self.received_bodies.append(body)
-        response = (
-            b'{"type":9,"data":{"custom_id":"al1:e:origin:signature",'
-            b'"title":"Connect account","components":[{"type":1,"components":['
-            b'{"type":4,"custom_id":"azents_account_link_code","style":1,'
-            b'"label":"Private confirmation code","required":true}]}]}}'
-        )
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
@@ -735,78 +712,220 @@ def test_discord_fake_correlates_transient_components_by_channel(
     assert first.json() == {"custom_id": first_custom_id}
 
 
-def test_discord_fake_keeps_account_link_modal_controls_transient(
+def test_discord_fake_oauth_success_pkce_replay_and_redaction(
     discord_fake_urls: tuple[str, str],
 ) -> None:
-    """Expose modal callback IDs without retaining proof copy or entered codes."""
+    """Exchange one PKCE-bound identity and reject authorization-code replay."""
     discord_fake_url, _ = discord_fake_urls
-    callback_server = ThreadingHTTPServer(
-        ("127.0.0.1", 0),
-        _AccountLinkModalInteractionHandler,
+    client_id = "private-discord-client"
+    client_secret = "private-discord-secret"
+    redirect_uri = "https://azents.example/oauth/external-account/discord/callback"
+    state = "private-discord-state"
+    verifier = "private-discord-pkce-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode("ascii")
     )
-    callback_thread = threading.Thread(
-        target=callback_server.serve_forever,
-        kwargs={"poll_interval": _SERVER_POLL_INTERVAL_SECONDS},
-        daemon=True,
-    )
-    callback_thread.start()
-    try:
-        callback_url = (
-            f"http://{callback_server.server_address[0]}:"
-            f"{callback_server.server_address[1]}"
-        )
-        _configure_interaction_endpoint(
-            discord_fake_url, callback_url
-        ).raise_for_status()
-        delivered = requests.post(
-            f"{discord_fake_url}/__testenv/interactions",
-            json={
-                "id": "interaction-link-modal",
-                "type": 3,
-                "token": "private-interaction-token",
-                "channel_id": "400000000000000011",
-            },
-            timeout=5,
-        )
-        delivered.raise_for_status()
-    finally:
-        callback_server.shutdown()
-        callback_server.server_close()
-        callback_thread.join(timeout=5)
-
-    transient = requests.get(
-        f"{discord_fake_url}/__testenv/transient-interaction",
-        params={"channel_id": "400000000000000011"},
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "oauth": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "user_id": "720000000000000001",
+                "username": "private-discord-user",
+                "global_name": "Private Discord Person",
+            }
+        },
         timeout=5,
-    ).json()
-    assert transient == {
-        "response_type": 9,
-        "ephemeral": False,
-        "custom_ids": [
-            "al1:e:origin:signature",
-            "azents_account_link_code",
-        ],
-        "input_custom_ids": ["azents_account_link_code"],
-        "option_values": {},
-        "option_labels": {},
-        "link_paths": [],
+    ).raise_for_status()
+
+    authorize = requests.get(
+        f"{discord_fake_url}/oauth2/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "identify",
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    assert authorize.status_code == 302
+    callback = authorize.headers["Location"]
+    callback_query = parse_qs(urlparse(callback).query)
+    code = callback_query["code"][0]
+    assert callback_query["state"] == [state]
+    transient = requests.get(
+        f"{discord_fake_url}/__testenv/transient-oauth",
+        timeout=5,
+    )
+    transient.raise_for_status()
+    assert transient.json() == {"redirect_url": callback}
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    token = requests.post(
+        f"{discord_fake_url}/api/oauth2/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        },
+        headers={"Authorization": f"Basic {basic}"},
+        timeout=5,
+    )
+    token.raise_for_status()
+    access_token = token.json()["access_token"]
+    userinfo = requests.get(
+        f"{discord_fake_url}/api/users/@me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=5,
+    )
+    assert userinfo.json() == {
+        "id": "720000000000000001",
+        "username": "private-discord-user",
+        "global_name": "Private Discord Person",
     }
+    replay = requests.post(
+        f"{discord_fake_url}/api/oauth2/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        },
+        headers={"Authorization": f"Basic {basic}"},
+        timeout=5,
+    )
+    assert replay.status_code == 400
+
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    assert evidence["interactions"] == [
-        {
-            "interaction_id": "interaction-link-modal",
-            "interaction_type": 3,
-            "response_status": 200,
-            "response_type": 9,
-            "component_count": 1,
-            "modal_input_count": 1,
-            "has_content": False,
-        }
+    assert [item["outcome"] for item in evidence["oauth"]["requests"]] == [
+        "authorized",
+        "exchanged",
+        "identified",
+        "rejected",
     ]
     rendered = str(evidence)
-    assert "private-interaction-token" not in rendered
-    assert "al1:e:origin:signature" not in rendered
-    assert "Private confirmation code" not in rendered
+    for secret in (client_secret, state, verifier, challenge, code, access_token):
+        assert secret not in rendered
+
+
+def test_discord_fake_oauth_rejects_missing_or_wrong_pkce(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Require S256 at authorization and the matching verifier at exchange."""
+    discord_fake_url, _ = discord_fake_urls
+    missing = requests.get(
+        f"{discord_fake_url}/oauth2/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "discord-oauth-client",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/discord/callback"
+            ),
+            "scope": "identify",
+            "state": "private-missing-pkce",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    assert missing.status_code == 400
+    verifier = "correct-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    authorize = requests.get(
+        f"{discord_fake_url}/oauth2/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "discord-oauth-client",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/discord/callback"
+            ),
+            "scope": "identify",
+            "state": "private-wrong-verifier",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    code = parse_qs(urlparse(authorize.headers["Location"]).query)["code"][0]
+    wrong = requests.post(
+        f"{discord_fake_url}/api/oauth2/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "discord-oauth-client",
+            "client_secret": "discord-oauth-secret",
+            "code": code,
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/discord/callback"
+            ),
+            "code_verifier": "wrong-verifier",
+        },
+        timeout=5,
+    )
+    assert wrong.status_code == 400
+    assert (
+        requests.get(
+            f"{discord_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()["oauth"]["requests"][-1]["pkce_valid"]
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    ("configuration", "expected_outcome"),
+    [
+        ({"authorize_scenario": "cancel"}, "cancelled"),
+        ({"authorize_scenario": "provider_error"}, "provider_error"),
+        ({"authorize_scenario": "malformed"}, "malformed"),
+    ],
+)
+def test_discord_fake_oauth_controls_authorization_failures(
+    discord_fake_urls: tuple[str, str],
+    configuration: dict[str, object],
+    expected_outcome: str,
+) -> None:
+    """Control cancellation and malformed/provider authorization callbacks."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"oauth": configuration},
+        timeout=5,
+    ).raise_for_status()
+    response = requests.get(
+        f"{discord_fake_url}/oauth2/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "discord-oauth-client",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/discord/callback"
+            ),
+            "scope": "identify",
+            "state": "private-failure-state",
+            "code_challenge": "private-challenge",
+            "code_challenge_method": "S256",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    assert response.status_code == 302
+    evidence = requests.get(
+        f"{discord_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["oauth"]["requests"][0]["outcome"] == expected_outcome
+    assert "private-failure-state" not in str(evidence)
 
 
 def test_discord_fake_keeps_ephemeral_model_controls_transient(
