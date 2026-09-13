@@ -834,8 +834,12 @@ def _configure_agent_model_options(
             timeout=10,
         )
     )
-    selection = agent.get("model_selection")
-    assert isinstance(selection, dict)
+    options = _list(agent.get("selectable_model_options"))
+    assert options
+    first_option = _object(options[0])
+    candidates = _list(first_option.get("candidates"))
+    assert candidates
+    selection = _object(_object(candidates[0]).get("model_selection"))
     integration_id = selection.get("llm_provider_integration_id")
     assert isinstance(integration_id, str)
     entries_url = (
