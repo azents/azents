@@ -68,6 +68,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
+  - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
@@ -1015,6 +1016,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 117) — Added Runtime Web as a
+  Runtime-independent auto-bound Toolkit with same-root Session and human-approval
+  boundaries, and mapped its service implementation.
 - **2026-09-13** (spec_version 116) — Rejects incomplete merged Kubernetes
   credentials before persistence and preserves explicit empty editable credential
   collections such as GitHub App installation removals.

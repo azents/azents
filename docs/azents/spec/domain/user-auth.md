@@ -70,8 +70,12 @@ code_paths:
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/features/security/**
   - typescript/apps/azents-web/src/config/server.ts
+  - typescript/apps/azents-web/src/app/(app)/api/chat/upload/route.ts
+  - typescript/apps/azents-web/src/app/(app)/api/trpc/**
   - typescript/apps/azents-web/src/app/(app)/runtime-web/auth/**
   - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
+  - typescript/apps/azents-web/src/shared/lib/cookies.ts
+  - typescript/apps/azents-web/src/shared/lib/getInitialAuthState.ts
   - typescript/apps/azents-web/src/shared/lib/request-origin*
   - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
   - python/apps/azents/src/azents/services/runtime_web/gateway_auth*
@@ -81,6 +85,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/components/AppBar.tsx
   - typescript/apps/azents-web/src/shared/lib/admin-access.ts
   - typescript/apps/azents-web/src/shared/lib/login-redirect.ts
+  - typescript/apps/azents-web/src/trpc/context.ts
+  - typescript/apps/azents-web/src/trpc/routers/_app.ts
   - typescript/apps/azents-web/src/trpc/routers/auth.ts
   - typescript/apps/azents-web/src/trpc/routers/user.ts
   - infra/charts/azents/templates/admin-web/**

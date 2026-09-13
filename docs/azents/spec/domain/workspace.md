@@ -64,6 +64,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
+  - typescript/apps/azents-web/src/app/globals.css
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/**
   - python/apps/azents/src/azents/repos/agent_runtime/**

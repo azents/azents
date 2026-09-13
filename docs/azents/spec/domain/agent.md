@@ -26,6 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/rdb/models/model_candidate_health.py
+  - python/apps/azents/src/azents/rdb/models/model_candidate_chain_cutover.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
@@ -36,7 +37,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
+  - python/apps/azents/src/azents/repos/model_candidate_chain_cutover/**
   - python/apps/azents/src/azents/services/model_availability.py
+  - python/apps/azents/src/azents/services/model_candidate_selection.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
