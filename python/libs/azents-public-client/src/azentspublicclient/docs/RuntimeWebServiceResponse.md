@@ -11,7 +11,6 @@ Name | Type | Description | Notes
 **current_cycle** | [**RuntimeWebCycleResponse**](RuntimeWebCycleResponse.md) |  | 
 **active** | **bool** |  | 
 **duration_seconds** | **int** |  | 
-**duration_configuration_revision** | **int** |  | 
 **observed_at** | **datetime** |  | 
 
 ## Example

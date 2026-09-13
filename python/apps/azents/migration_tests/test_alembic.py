@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "06880a303de454d8192ae22f6c730bd76e90e2531518ee3ee306760a51b5de9a"
+    "b47e3e0c72c111a4c4d115908cae07c6c39e8f66b1e5f855b740f4330e916ce0"
 )
 
 
@@ -233,8 +233,7 @@ def test_baseline_schema_and_seed_state(
         runtime_web_configuration = connection.execute(
             sa.text(
                 """
-                SELECT enabled, mode, configuration_version, active_epoch,
-                       duration_configuration_revision, active_duration_seconds
+                SELECT enabled, mode, active_duration_seconds
                 FROM runtime_web_auth_configuration
                 """
             )
@@ -242,9 +241,6 @@ def test_baseline_schema_and_seed_state(
         assert runtime_web_configuration == (
             False,
             "separate_domain",
-            1,
-            1,
-            1,
             7_200,
         )
         runtime_web_pointer_constraints = set(

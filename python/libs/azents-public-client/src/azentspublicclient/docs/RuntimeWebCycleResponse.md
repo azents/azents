@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **request_id** | **str** |  | 
 **duration_seconds** | **int** |  | 
-**duration_configuration_revision** | **int** |  | 
 **approved_at** | **datetime** |  | 
 **expires_at** | **datetime** |  | 
 **close_barrier** | **int** |  | 

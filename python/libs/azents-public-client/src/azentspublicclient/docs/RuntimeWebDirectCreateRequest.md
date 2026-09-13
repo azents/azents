@@ -8,7 +8,6 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** |  | 
 **duration_seconds** | **int** |  | 
-**duration_configuration_revision** | **int** |  | 
 **operation_key** | **str** |  | 
 
 ## Example

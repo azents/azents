@@ -468,7 +468,6 @@ async def approve_runtime_web_request_by_endpoint_id(
         expected_revision=request_body.expected_revision,
         operation=_operation(request_body.operation_key),
         duration_seconds=request_body.duration_seconds,
-        duration_configuration_revision=(request_body.duration_configuration_revision),
     )
     match result:
         case Success(value):
@@ -652,7 +651,6 @@ async def direct_create_runtime_web_exposure(
         actor=_user_actor(member),
         operation=_operation(request_body.operation_key),
         duration_seconds=request_body.duration_seconds,
-        duration_configuration_revision=(request_body.duration_configuration_revision),
     )
     match result:
         case Success(value):
@@ -688,7 +686,6 @@ async def approve_runtime_web_request(
         expected_revision=request_body.expected_revision,
         operation=_operation(request_body.operation_key),
         duration_seconds=request_body.duration_seconds,
-        duration_configuration_revision=(request_body.duration_configuration_revision),
     )
     match result:
         case Success(value):

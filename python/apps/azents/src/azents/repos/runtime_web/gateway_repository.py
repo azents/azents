@@ -38,15 +38,15 @@ class RuntimeWebGatewayCapacityExceeded(ValueError):
 
 
 class RuntimeWebGatewayRepository:
-    """Own all Runtime Web identity, binding, ticket, and epoch transactions."""
+    """Own all Runtime Web identity, binding, ticket, and configuration transactions."""
 
     async def synchronize_configuration(
         self,
         session: AsyncSession,
         *,
         desired: RuntimeWebDesiredConfiguration,
-    ) -> int:
-        """Install a monotonic configuration and return its active epoch."""
+    ) -> None:
+        """Install the current configuration and invalidate stale browser auth."""
         configuration = await session.scalar(
             sa.select(RDBRuntimeWebAuthConfiguration)
             .where(RDBRuntimeWebAuthConfiguration.id == 1)
@@ -56,50 +56,30 @@ class RuntimeWebGatewayRepository:
             configuration = RDBRuntimeWebAuthConfiguration(
                 enabled=desired.enabled,
                 mode=desired.mode,
-                configuration_version=desired.configuration_version,
                 fingerprint=desired.fingerprint,
-                active_epoch=1,
-                duration_configuration_revision=1,
                 active_duration_seconds=desired.active_duration_seconds,
             )
             session.add(configuration)
             await session.flush()
-            return configuration.active_epoch
-        if desired.configuration_version < configuration.configuration_version:
-            raise RuntimeWebRepositoryConflict(
-                "Runtime Web configuration version regressed"
-            )
-        if desired.configuration_version == configuration.configuration_version:
-            if (
-                desired.fingerprint != configuration.fingerprint
-                or desired.enabled != configuration.enabled
-                or desired.mode is not configuration.mode
-                or desired.active_duration_seconds
-                != configuration.active_duration_seconds
-            ):
-                raise RuntimeWebRepositoryConflict(
-                    "Runtime Web configuration changed without a version advance"
-                )
-            return configuration.active_epoch
+            return
         security_changed = (
             desired.fingerprint != configuration.fingerprint
             or desired.enabled != configuration.enabled
             or desired.mode is not configuration.mode
         )
-        duration_changed = (
-            desired.active_duration_seconds != configuration.active_duration_seconds
-        )
         configuration.enabled = desired.enabled
         configuration.mode = desired.mode
-        configuration.configuration_version = desired.configuration_version
         configuration.fingerprint = desired.fingerprint
         configuration.active_duration_seconds = desired.active_duration_seconds
         if security_changed:
-            configuration.active_epoch += 1
-        if duration_changed:
-            configuration.duration_configuration_revision += 1
+            await session.execute(
+                sa.update(RDBRuntimeWebGatewayIdentity)
+                .where(RDBRuntimeWebGatewayIdentity.revoked_at.is_(None))
+                .values(revoked_at=sa.func.now())
+            )
+            await session.execute(sa.delete(RDBRuntimeWebAuthTicket))
+            await session.execute(sa.delete(RDBRuntimeWebAuthBinding))
         await session.flush()
-        return configuration.active_epoch
 
     async def create_identity(
         self,
@@ -112,7 +92,7 @@ class RuntimeWebGatewayRepository:
         issued_at: datetime.datetime,
         expires_at: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity:
-        """Create one identity under the current enabled mode and epoch."""
+        """Create one identity under the current enabled mode."""
         configuration = await self._locked_enabled_configuration(session)
         if configuration.mode is not RuntimeWebAuthMode.SHARED_COOKIE:
             raise RuntimeWebRepositoryConflict(
@@ -129,7 +109,6 @@ class RuntimeWebGatewayRepository:
             user_id=user_id,
             auth_session_id=auth_session_id,
             mode=configuration.mode,
-            epoch=configuration.active_epoch,
             browser_profile=browser_profile,
             issued_at=issued_at,
             expires_at=expires_at,
@@ -146,7 +125,7 @@ class RuntimeWebGatewayRepository:
         browser_profile: str,
         now: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity | None:
-        """Validate identity, auth Session, mode, epoch, profile, and deadlines."""
+        """Validate identity, auth Session, mode, profile, and deadlines."""
         row = await session.execute(
             sa.select(RDBRuntimeWebGatewayIdentity, RDBSession, RDBUser)
             .join(
@@ -174,7 +153,6 @@ class RuntimeWebGatewayRepository:
             configuration is None
             or not configuration.enabled
             or identity.mode is not configuration.mode
-            or identity.epoch != configuration.active_epoch
         ):
             return None
         return self._identity(identity)
@@ -187,7 +165,6 @@ class RuntimeWebGatewayRepository:
         user_id: str,
         auth_session_id: str,
         browser_profile: str,
-        epoch: int,
         now: datetime.datetime,
     ) -> bool:
         """Revalidate an admitted identity without retaining its opaque secret."""
@@ -208,7 +185,6 @@ class RuntimeWebGatewayRepository:
                 RDBRuntimeWebGatewayIdentity.user_id == user_id,
                 RDBRuntimeWebGatewayIdentity.auth_session_id == auth_session_id,
                 RDBRuntimeWebGatewayIdentity.browser_profile == browser_profile,
-                RDBRuntimeWebGatewayIdentity.epoch == epoch,
                 RDBRuntimeWebGatewayIdentity.revoked_at.is_(None),
                 RDBRuntimeWebGatewayIdentity.expires_at > now,
                 RDBSession.user_id == user_id,
@@ -216,7 +192,6 @@ class RuntimeWebGatewayRepository:
                 RDBSession.expires_at > now,
                 RDBUser.access_disabled_at.is_(None),
                 RDBRuntimeWebAuthConfiguration.enabled.is_(True),
-                RDBRuntimeWebAuthConfiguration.active_epoch == epoch,
                 RDBRuntimeWebAuthConfiguration.mode
                 == RDBRuntimeWebGatewayIdentity.mode,
             )
@@ -280,7 +255,6 @@ class RuntimeWebGatewayRepository:
             user_id=user_id,
             auth_session_id=auth_session_id,
             endpoint_id=endpoint_id,
-            epoch=configuration.active_epoch,
             expires_at=expires_at,
         )
         session.add(rdb)
@@ -376,14 +350,13 @@ class RuntimeWebGatewayRepository:
             )
             .with_for_update()
         )
-        configuration = await self._locked_enabled_configuration(session)
+        await self._locked_enabled_configuration(session)
         if (
             binding is None
             or binding.expires_at <= issued_at
             or binding.settled_at is not None
             or binding.broker_bound_at is None
             or binding.broker_binding_hash is None
-            or binding.epoch != configuration.active_epoch
         ):
             raise RuntimeWebRepositoryConflict("Runtime Web binding is unavailable")
         await self._require_active_auth_session(
@@ -398,7 +371,6 @@ class RuntimeWebGatewayRepository:
             user_id=binding.user_id,
             auth_session_id=binding.auth_session_id,
             endpoint_id=binding.endpoint_id,
-            epoch=binding.epoch,
             issued_at=issued_at,
             expires_at=expires_at,
         )
@@ -446,8 +418,6 @@ class RuntimeWebGatewayRepository:
             or binding.broker_bound_at is None
             or ticket.consumed_at is not None
             or ticket.expires_at <= now
-            or ticket.epoch != configuration.active_epoch
-            or binding.epoch != configuration.active_epoch
             or ticket.endpoint_id != binding.endpoint_id
             or ticket.auth_session_id != binding.auth_session_id
             or ticket.user_id != binding.user_id
@@ -464,7 +434,6 @@ class RuntimeWebGatewayRepository:
             user_id=ticket.user_id,
             auth_session_id=ticket.auth_session_id,
             mode=configuration.mode,
-            epoch=configuration.active_epoch,
             browser_profile=browser_profile,
             issued_at=now,
             expires_at=identity_expires_at,
@@ -636,7 +605,6 @@ class RuntimeWebGatewayRepository:
             user_id=identity.user_id,
             auth_session_id=identity.auth_session_id,
             mode=identity.mode,
-            epoch=identity.epoch,
             browser_profile=identity.browser_profile,
             issued_at=identity.issued_at,
             expires_at=identity.expires_at,
@@ -650,7 +618,6 @@ class RuntimeWebGatewayRepository:
             user_id=binding.user_id,
             auth_session_id=binding.auth_session_id,
             endpoint_id=binding.endpoint_id,
-            epoch=binding.epoch,
             expires_at=binding.expires_at,
             broker_bound=binding.broker_bound_at is not None,
             settled=binding.settled_at is not None,

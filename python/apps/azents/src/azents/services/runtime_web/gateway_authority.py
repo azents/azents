@@ -328,7 +328,6 @@ class RuntimeWebGatewayAuthorityService:
                 user_id=authority.identity.user_id,
                 auth_session_id=authority.identity.auth_session_id,
                 browser_profile=authority.identity.browser_profile,
-                epoch=authority.identity.epoch,
                 now=now,
             )
             if not current:

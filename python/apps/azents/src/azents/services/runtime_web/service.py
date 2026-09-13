@@ -197,7 +197,6 @@ class RuntimeWebService:
         actor: RuntimeWebActor,
         operation: RuntimeWebOperation,
         duration_seconds: int,
-        duration_configuration_revision: int,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
         """Create and approve one user-confirmed exposure atomically."""
         if (
@@ -231,7 +230,6 @@ class RuntimeWebService:
                     requester_user_id=user_id,
                     requester_call_id=actor.call_id,
                     duration_seconds=duration_seconds,
-                    duration_configuration_revision=duration_configuration_revision,
                     operation=operation_identity(actor, operation),
                     endpoint_limit=_ENDPOINT_LIMIT,
                     active_session_limit=_ACTIVE_SESSION_LIMIT,
@@ -257,7 +255,6 @@ class RuntimeWebService:
         expected_revision: int,
         operation: RuntimeWebOperation,
         duration_seconds: int,
-        duration_configuration_revision: int,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
         """Approve an exact pending request."""
         if actor.kind is not RuntimeWebRequesterKind.USER or actor.actor_id != user_id:
@@ -286,7 +283,6 @@ class RuntimeWebService:
                     expected_revision=expected_revision,
                     approver_user_id=user_id,
                     duration_seconds=duration_seconds,
-                    duration_configuration_revision=duration_configuration_revision,
                     operation=operation_identity(actor, operation),
                     active_session_limit=_ACTIVE_SESSION_LIMIT,
                     active_agent_limit=_ACTIVE_AGENT_LIMIT,
@@ -683,9 +679,6 @@ class RuntimeWebService:
                 cycle is not None and cycle.ended_at is None and cycle.expires_at > now
             ),
             duration_seconds=configuration.active_duration_seconds,
-            duration_configuration_revision=(
-                configuration.duration_configuration_revision
-            ),
             observed_at=now,
         )
 

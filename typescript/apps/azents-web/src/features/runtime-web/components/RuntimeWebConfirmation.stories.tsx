@@ -31,7 +31,6 @@ const pendingService: RuntimeWebServiceResponse = {
   current_cycle: null,
   active: false,
   duration_seconds: 3600,
-  duration_configuration_revision: 2,
   observed_at: "2026-09-12T00:05:00Z",
 };
 
@@ -83,7 +82,6 @@ export const Active = {
           id: "cycle00000000000000000000000000",
           request_id: "request0000000000000000000000000",
           duration_seconds: 3600,
-          duration_configuration_revision: 2,
           approved_at: "2026-09-12T00:10:00Z",
           expires_at: "2026-09-12T01:10:00Z",
           close_barrier: 0,

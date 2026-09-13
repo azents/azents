@@ -37,14 +37,12 @@ class TestRuntimeWebDirectCreateRequest(unittest.TestCase):
             return RuntimeWebDirectCreateRequest(
                 label = '',
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 operation_key = '0'
             )
         else:
             return RuntimeWebDirectCreateRequest(
                 label = '',
                 duration_seconds = 300.0,
-                duration_configuration_revision = 1.0,
                 operation_key = '0',
         )
         """

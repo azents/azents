@@ -77,7 +77,6 @@ def _projection(
         current_cycle=None,
         active=False,
         duration_seconds=7200,
-        duration_configuration_revision=4,
         observed_at=_NOW,
     )
 
@@ -185,7 +184,6 @@ def test_approve_and_reject_use_authenticated_session_idempotency_scope() -> Non
         json={
             "expected_revision": 1,
             "duration_seconds": 7200,
-            "duration_configuration_revision": 4,
             "operation_key": "approve-operation",
         },
     )
@@ -219,7 +217,6 @@ def test_endpoint_id_routes_reauthorize_and_preserve_exact_revision() -> None:
         json={
             "expected_revision": 1,
             "duration_seconds": 7200,
-            "duration_configuration_revision": 4,
             "operation_key": "approve-endpoint-operation",
         },
     )

@@ -58,10 +58,10 @@ class RuntimeWebGatewayAuthService:
     async def synchronize_configuration(
         self,
         desired: RuntimeWebDesiredConfiguration,
-    ) -> int:
-        """Install one monotonic Gateway authentication configuration."""
+    ) -> None:
+        """Install the current Gateway authentication configuration."""
         async with self.session_manager() as session:
-            return await self.repository.synchronize_configuration(
+            await self.repository.synchronize_configuration(
                 session,
                 desired=desired,
             )

@@ -1228,7 +1228,6 @@
             "replicas",
             "port",
             "authMode",
-            "authConfigurationVersion",
             "mainWebOrigin",
             "brokerOrigin",
             "serviceSuffix",
@@ -1265,10 +1264,6 @@
                 "shared_cookie",
                 "separate_domain"
               ]
-            },
-            "authConfigurationVersion": {
-              "type": "integer",
-              "minimum": 1
             },
             "mainWebOrigin": {
               "type": "string"

@@ -1437,7 +1437,6 @@ export function useWorkspacePanelContainer({
       port: preparedRuntimeService.endpoint.port,
       label: preparedRuntimeService.endpoint.label,
       durationSeconds: preparedRuntimeService.duration_seconds,
-      durationRevision: preparedRuntimeService.duration_configuration_revision,
     });
   }, [directCreateServiceMutation, preparedRuntimeService, servicesInput]);
 
@@ -1452,7 +1451,6 @@ export function useWorkspacePanelContainer({
         requestId: request.id,
         expectedRevision: request.revision,
         durationSeconds: service.duration_seconds,
-        durationRevision: service.duration_configuration_revision,
       });
     },
     [approveServiceMutation, servicesInput],

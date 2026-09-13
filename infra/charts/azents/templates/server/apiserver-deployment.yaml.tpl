@@ -50,8 +50,6 @@ spec:
               value: {{ .Values.server.runtimeWebGateway.enabled | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE
               value: {{ .Values.server.runtimeWebGateway.authMode | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION
-              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.authConfigurationVersion) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN
               value: {{ .Values.server.runtimeWebGateway.mainWebOrigin | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN

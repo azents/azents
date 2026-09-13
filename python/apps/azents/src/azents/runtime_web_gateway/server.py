@@ -246,7 +246,6 @@ async def runtime_web_gateway_lifespan(
     desired_configuration = RuntimeWebDesiredConfiguration(
         enabled=True,
         mode=config.auth_mode,
-        configuration_version=config.configuration_version,
         fingerprint=settings.security_fingerprint(),
         active_duration_seconds=settings.runtime_web_gateway_active_duration_seconds,
     )
@@ -302,7 +301,6 @@ async def runtime_web_gateway_lifespan(
         extra={
             "port": settings.runtime_web_gateway_port,
             "auth_mode": config.auth_mode.value,
-            "configuration_version": config.configuration_version,
             "service_suffix": config.service_suffix,
         },
     )
@@ -336,7 +334,6 @@ async def _ready(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ready": True,
-            "configuration_version": state.config.configuration_version,
             "auth_mode": state.config.auth_mode.value,
         },
         headers=_security_headers(state.config),

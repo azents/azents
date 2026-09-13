@@ -298,7 +298,6 @@ async def test_endpoint_request_cycle_and_rerequest_are_orthogonal(
         expected_revision=pending.request.revision,
         approver_user_id=user_id,
         duration_seconds=7_200,
-        duration_configuration_revision=1,
         operation=_operation("approve", actor_id=user_id),
         active_session_limit=4,
         active_agent_limit=16,
@@ -334,10 +333,10 @@ async def test_endpoint_request_cycle_and_rerequest_are_orthogonal(
     assert closed.request.id == rerequest.request.id
 
 
-async def test_stale_duration_revision_and_endpoint_quota_fail_closed(
+async def test_stale_duration_and_endpoint_quota_fail_closed(
     rdb_session: AsyncSession,
 ) -> None:
-    """Reject stale approval configuration and bounded endpoint overflow."""
+    """Reject stale displayed duration and bounded endpoint overflow."""
     workspace_id, agent_id, session_id, user_id = await _authority_fixture(rdb_session)
     repository = RuntimeWebRepository()
     prepared = await repository.prepare_endpoint(
@@ -368,8 +367,7 @@ async def test_stale_duration_revision_and_endpoint_quota_fail_closed(
             request_id=pending.request.id,
             expected_revision=pending.request.revision,
             approver_user_id=user_id,
-            duration_seconds=7_200,
-            duration_configuration_revision=2,
+            duration_seconds=3_600,
             operation=_operation("approve-stale", actor_id=user_id),
             active_session_limit=4,
             active_agent_limit=16,
@@ -412,8 +410,7 @@ async def test_direct_create_is_atomic_and_replays_completed_result(
             label="Failed preview",
             requester_user_id=user_id,
             requester_call_id=None,
-            duration_seconds=7_200,
-            duration_configuration_revision=2,
+            duration_seconds=3_600,
             operation=stale_operation,
             endpoint_limit=16,
             active_session_limit=4,
@@ -439,7 +436,6 @@ async def test_direct_create_is_atomic_and_replays_completed_result(
         requester_user_id=user_id,
         requester_call_id=None,
         duration_seconds=7_200,
-        duration_configuration_revision=1,
         operation=operation,
         endpoint_limit=16,
         active_session_limit=4,
@@ -455,7 +451,6 @@ async def test_direct_create_is_atomic_and_replays_completed_result(
         requester_user_id=user_id,
         requester_call_id=None,
         duration_seconds=7_200,
-        duration_configuration_revision=1,
         operation=operation,
         endpoint_limit=16,
         active_session_limit=4,
@@ -504,7 +499,6 @@ async def test_stale_close_does_not_terminate_current_cycle(
         expected_revision=pending.request.revision,
         approver_user_id=user_id,
         duration_seconds=7_200,
-        duration_configuration_revision=1,
         operation=_operation("approve", actor_id=user_id),
         active_session_limit=4,
         active_agent_limit=16,

@@ -103,7 +103,6 @@ export function RuntimeWebServiceRequestCardContainer({
       requestId,
       expectedRevision: request.revision,
       durationSeconds: service.duration_seconds,
-      durationRevision: service.duration_configuration_revision,
     });
   }, [approve, endpointId, query.data, requestId]);
 

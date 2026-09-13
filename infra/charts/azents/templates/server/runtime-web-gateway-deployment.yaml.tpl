@@ -53,8 +53,6 @@ spec:
               value: {{ printf "%d" (int64 $gateway.port) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE
               value: {{ $gateway.authMode | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION
-              value: {{ printf "%d" (int64 $gateway.authConfigurationVersion) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN
               value: {{ required "server.runtimeWebGateway.mainWebOrigin is required" $gateway.mainWebOrigin | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN

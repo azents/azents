@@ -32,14 +32,13 @@ class RuntimeWebCycleResponse(BaseModel):
     id: StrictStr
     request_id: StrictStr
     duration_seconds: Annotated[int, Field(le=28800, strict=True, ge=300)]
-    duration_configuration_revision: Annotated[int, Field(strict=True, ge=1)]
     approved_at: datetime
     expires_at: datetime
     close_barrier: Annotated[int, Field(strict=True, ge=0)]
     ended_at: Optional[datetime]
     end_reason: Optional[RuntimeWebCycleEndReason]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "request_id", "duration_seconds", "duration_configuration_revision", "approved_at", "expires_at", "close_barrier", "ended_at", "end_reason"]
+    __properties: ClassVar[List[str]] = ["id", "request_id", "duration_seconds", "approved_at", "expires_at", "close_barrier", "ended_at", "end_reason"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -112,7 +111,6 @@ class RuntimeWebCycleResponse(BaseModel):
             "id": obj.get("id"),
             "request_id": obj.get("request_id"),
             "duration_seconds": obj.get("duration_seconds"),
-            "duration_configuration_revision": obj.get("duration_configuration_revision"),
             "approved_at": obj.get("approved_at"),
             "expires_at": obj.get("expires_at"),
             "close_barrier": obj.get("close_barrier"),

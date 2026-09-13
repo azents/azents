@@ -47,8 +47,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-12
-spec_version: 35
+last_verified_at: 2026-09-13
+spec_version: 36
 ---
 
 # Agent Runtime Persistence
@@ -89,9 +89,11 @@ exists. Coordination loss ends the Terminal path without changing durable Runtim
 Session, Project, or Agent Workspace state.
 
 Runtime Web persists stable Session-and-port endpoints, exposure requests, approved
-cycles, configuration epochs, browser-identity hashes, broker/ticket hashes, route
-leases, and shared admission leases only where those records own authority or bounded
-recovery. Plaintext browser secrets are returned once and never stored. Application
+cycles, current authentication configuration, browser-identity hashes, broker/ticket
+hashes, route leases, and shared admission leases only where those records own
+authority or bounded recovery. Security configuration changes revoke existing browser
+identities and discard pending broker bindings and tickets. Plaintext browser secrets
+are returned once and never stored. Application
 HTTP, SSE, and WebSocket bytes, full paths and queries, headers, cookies, and upstream
 errors are never written to PostgreSQL, Redis, object storage, events, Chat history,
 or Runtime configuration history. A transport or coordination loss therefore ends
@@ -427,6 +429,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-13 (spec_version=36)** — Removed Runtime Web configuration versions,
+  epochs, and duration revisions in favor of current configuration plus explicit
+  browser authentication invalidation.
 - **2026-09-03 (spec_version=34)** — Added the non-persistent Terminal
   ticket/attachment/replay/PTY boundary and mapped Terminal policy plus Runtime
   removal authority.

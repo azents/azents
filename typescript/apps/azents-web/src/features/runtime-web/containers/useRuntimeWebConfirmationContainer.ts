@@ -98,7 +98,6 @@ export function useRuntimeWebConfirmationContainer({
       requestId: request.id,
       expectedRevision: request.revision,
       durationSeconds: service.duration_seconds,
-      durationRevision: service.duration_configuration_revision,
     });
   }, [approve, endpointId, query.data]);
 

@@ -69,7 +69,6 @@ def _projection(
         current_cycle=None,
         active=False,
         duration_seconds=7200,
-        duration_configuration_revision=1,
         observed_at=_NOW,
     )
 

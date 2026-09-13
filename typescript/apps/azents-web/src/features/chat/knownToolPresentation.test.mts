@@ -1174,7 +1174,6 @@ void test("specializes a strict Runtime Web request from matching metadata", () 
     cycle: null,
     active: false,
     duration_seconds: 3600,
-    duration_configuration_revision: 1,
     observed_at: "2026-09-12T00:00:00Z",
   };
   const result = knownToolPresentation(

@@ -38,7 +38,7 @@ def _operation(agent_id: str) -> RuntimeWebOperationIdentity:
     )
 
 
-async def test_separate_domain_ticket_is_bound_single_use_and_epoch_fenced(
+async def test_separate_domain_ticket_is_bound_and_single_use(
     rdb_session: AsyncSession,
 ) -> None:
     """A broker ticket settles exactly one protected Gateway identity."""
@@ -70,12 +70,11 @@ async def test_separate_domain_ticket_is_bound_single_use_and_epoch_fenced(
         endpoint_limit=16,
     )
     repository = RuntimeWebGatewayRepository()
-    epoch = await repository.synchronize_configuration(
+    await repository.synchronize_configuration(
         rdb_session,
         desired=RuntimeWebDesiredConfiguration(
             enabled=True,
             mode=RuntimeWebAuthMode.SEPARATE_DOMAIN,
-            configuration_version=2,
             fingerprint="a" * 64,
             active_duration_seconds=3_600,
         ),
@@ -128,7 +127,6 @@ async def test_separate_domain_ticket_is_bound_single_use_and_epoch_fenced(
         now=now,
     )
 
-    assert epoch == 2
     assert broker.binding.broker_bound is False
     assert ticket.endpoint_id == endpoint.endpoint.id
     assert identity.secret == "identity-secret"
@@ -154,36 +152,47 @@ async def test_separate_domain_ticket_is_bound_single_use_and_epoch_fenced(
             now=now,
         )
 
+    await repository.synchronize_configuration(
+        rdb_session,
+        desired=RuntimeWebDesiredConfiguration(
+            enabled=False,
+            mode=RuntimeWebAuthMode.SEPARATE_DOMAIN,
+            fingerprint="b" * 64,
+            active_duration_seconds=3_600,
+        ),
+    )
+    assert (
+        await repository.authenticate_identity(
+            rdb_session,
+            secret_hash="g" * 64,
+            browser_profile="chromium-152",
+            now=now,
+        )
+        is None
+    )
 
-async def test_configuration_requires_monotonic_version_for_security_change(
+
+async def test_configuration_change_applies_without_a_version(
     rdb_session: AsyncSession,
 ) -> None:
     repository = RuntimeWebGatewayRepository()
     configured = await RuntimeWebRepository().get_configuration(rdb_session)
     assert configured is not None
-    current = await repository.synchronize_configuration(
+
+    await repository.synchronize_configuration(
         rdb_session,
         desired=RuntimeWebDesiredConfiguration(
-            enabled=configured.enabled,
+            enabled=not configured.enabled,
             mode=configured.mode,
-            configuration_version=configured.configuration_version,
-            fingerprint=configured.fingerprint,
+            fingerprint="1" * 64,
             active_duration_seconds=configured.active_duration_seconds,
         ),
     )
-    assert current == configured.active_epoch
 
-    with pytest.raises(RuntimeWebRepositoryConflict):
-        await repository.synchronize_configuration(
-            rdb_session,
-            desired=RuntimeWebDesiredConfiguration(
-                enabled=not configured.enabled,
-                mode=configured.mode,
-                configuration_version=configured.configuration_version,
-                fingerprint="1" * 64,
-                active_duration_seconds=configured.active_duration_seconds,
-            ),
-        )
+    updated = await RuntimeWebRepository().get_configuration(rdb_session)
+    assert updated is not None
+    assert updated.enabled is not configured.enabled
+    assert updated.fingerprint == "1" * 64
 
 
 async def test_gateway_admission_enforces_and_releases_shared_scope_limits(

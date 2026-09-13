@@ -360,7 +360,6 @@ def _projection_payload(
         ),
         "active": projection.active,
         "duration_seconds": projection.duration_seconds,
-        "duration_configuration_revision": (projection.duration_configuration_revision),
         "observed_at": projection.observed_at.isoformat(),
     }
 

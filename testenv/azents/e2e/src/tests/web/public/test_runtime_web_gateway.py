@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import itertools
 import json
 import logging
 import subprocess
@@ -83,7 +82,6 @@ _SEPARATE_COOKIE_DOMAIN = _SERVICE_SUFFIX
 _TERMINAL_ORIGIN = "https://azents-web-gateway:8443"
 _SIGNUP_PASSWORD = "TestPass123!"
 _CHROMIUM_MAJOR_VERSION = "149"
-_CONFIGURATION_REVISIONS = itertools.count(10_000)
 logger = logging.getLogger(__name__)
 
 
@@ -278,7 +276,6 @@ def _runtime_web_gateway_container(
     postgres: PostgresContainer,
     credential_encryption_key: str,
     mode: str,
-    configuration_revision: int,
 ) -> DockerContainer:
     """Create the enabled Gateway process for one authentication mode."""
     cookie_domain = (
@@ -301,10 +298,6 @@ def _runtime_web_gateway_container(
         .with_env("AZ_RUNTIME_WEB_GATEWAY_ENABLED", "true")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_PORT", "8040")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE", mode)
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION",
-            str(configuration_revision),
-        )
         .with_env("AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN", _MAIN_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN", _BROKER_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX", _SERVICE_SUFFIX)
@@ -334,7 +327,6 @@ def _runtime_web_public_api_container(
     auth_jwt_secret_key: str,
     system_bootstrap_setup_token: str,
     mode: str,
-    configuration_revision: int,
 ) -> DockerContainer:
     """Create the Public API process with the matching Gateway configuration."""
     cookie_domain = (
@@ -370,10 +362,6 @@ def _runtime_web_public_api_container(
         .with_env("AZ_WEB_URL", _MAIN_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_ENABLED", "true")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE", mode)
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_AUTH_CONFIGURATION_VERSION",
-            str(configuration_revision),
-        )
         .with_env("AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN", _MAIN_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN", _BROKER_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX", _SERVICE_SUFFIX)
@@ -551,7 +539,6 @@ def _runtime_web_stack(
     s3_secret_key: str,
 ) -> Generator[_RuntimeWebStack, None, None]:
     """Start two-Control relay, Gateway, Main Web, and TLS edge."""
-    configuration_revision = next(_CONFIGURATION_REVISIONS)
     with tempfile.TemporaryDirectory(prefix="runtime-web-e2e-") as temporary_root:
         certificate_path, private_key_path, config_path = _write_tls_edge_files(
             Path(temporary_root)
@@ -572,7 +559,6 @@ def _runtime_web_stack(
             postgres=postgres,
             credential_encryption_key=credential_encryption_key,
             mode=mode,
-            configuration_revision=configuration_revision,
         )
         public_api = _runtime_web_public_api_container(
             image=server_image,
@@ -582,7 +568,6 @@ def _runtime_web_stack(
             auth_jwt_secret_key=auth_jwt_secret_key,
             system_bootstrap_setup_token=system_bootstrap_setup_token,
             mode=mode,
-            configuration_revision=configuration_revision,
         )
         main_web = _runtime_web_main_container(
             image=web_image,
@@ -1213,9 +1198,6 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                     runtime_web_approval_request=RuntimeWebApprovalRequest(
                         expected_revision=replacement.current_request.revision + 1,
                         duration_seconds=replacement.duration_seconds,
-                        duration_configuration_revision=(
-                            replacement.duration_configuration_revision
-                        ),
                         operation_key=f"stale-approve-{unique()}",
                     ),
                     _headers=_headers(workspace.token),
@@ -1230,9 +1212,6 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 runtime_web_approval_request=RuntimeWebApprovalRequest(
                     expected_revision=replacement.current_request.revision,
                     duration_seconds=replacement.duration_seconds,
-                    duration_configuration_revision=(
-                        replacement.duration_configuration_revision
-                    ),
                     operation_key=f"approve-replacement-{unique()}",
                 ),
                 _headers=_headers(workspace.token),

@@ -30,8 +30,8 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 178 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 80 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-12 | 35 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 81 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-13 | 36 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 49 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
