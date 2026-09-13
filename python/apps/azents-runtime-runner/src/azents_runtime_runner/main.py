@@ -29,6 +29,7 @@ from azents_runtime_control.runner import (
 from azents_runtime_control.runner_terminal import (
     RUNNER_TERMINAL_CAPABILITY,
 )
+from azents_runtime_control.runner_web import RUNNER_WEB_CAPABILITY
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
@@ -55,6 +56,7 @@ from azents_runtime_runner.terminal import (
 from azents_runtime_runner.terminal_stream import RunnerTerminalStreamManager
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.trust import prepare_runner_trust_environment
+from azents_runtime_runner.web import RunnerWebTransportManager
 from azents_runtime_runner.workspace import Workspace
 
 _PROTOCOL_VERSION = RUNNER_TRANSFER_PROTOCOL_VERSION
@@ -79,6 +81,7 @@ _CAPABILITIES = (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_SYSTEM_METRICS_CAPABILITY,
     RUNNER_TERMINAL_CAPABILITY,
+    RUNNER_WEB_CAPABILITY,
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -292,6 +295,14 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 environment=inherited_environment,
                 accepted_generation=accepted_generation,
             )
+            web_manager = RunnerWebTransportManager.from_endpoint(
+                endpoint=endpoint,
+                runner_auth_token=runner_auth_token,
+                tls=control_tls,
+                allow_insecure=allow_insecure_control,
+                runtime_id=runtime_id,
+                accepted_generation=accepted_generation,
+            )
             transfer_manager = RunnerTransferManager(
                 control=client,
                 transfer=transfer_client,
@@ -306,6 +317,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 client.set_terminal_terminate_intent_handler(
                     terminal_manager.handle_terminate
                 )
+                client.set_web_open_intent_handler(web_manager.handle_open)
+                client.set_web_cancel_intent_handler(web_manager.handle_cancel)
                 _LOGGER.info(
                     "Runtime Runner connecting to Control",
                     extra={
@@ -374,6 +387,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                             name=f"runner-terminal-cleanup:{runtime_id}",
                         )
                 await transfer_manager.close()
+                await web_manager.close()
                 await transfer_client.close()
                 await operations.close()
                 try:

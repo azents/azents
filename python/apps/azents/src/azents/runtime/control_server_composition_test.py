@@ -93,7 +93,10 @@ class _Cleanup:
 def _settings() -> RuntimeControlSettings:
     return RuntimeControlSettings(
         runtime_control_allow_insecure=True,
+        runtime_control_web_transport_enabled=True,
         runtime_control_port=0,
+        runtime_control_trusted_port=0,
+        runtime_control_trusted_advertise_address="127.0.0.1:0",
         runtime_control_transfer_backend="memory",
         runtime_control_workspace_s3_bucket="transfer-bucket",
         runtime_control_workspace_s3_access_key_id="access-key",
@@ -126,6 +129,21 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         control_server,
         "add_runtime_runner_control_servicer",
         lambda _server, **kwargs: registrations.append(("runner", kwargs)),
+    )
+    monkeypatch.setattr(
+        control_server,
+        "add_runtime_runner_web_servicer",
+        lambda _server, **kwargs: registrations.append(("runner-web", kwargs)),
+    )
+    monkeypatch.setattr(
+        control_server,
+        "add_runtime_web_proxy_servicer",
+        lambda _server, **kwargs: registrations.append(("web-proxy", kwargs)),
+    )
+    monkeypatch.setattr(
+        control_server,
+        "add_runtime_web_relay_servicer",
+        lambda _server, **kwargs: registrations.append(("web-relay", kwargs)),
     )
     monkeypatch.setattr(
         control_server,
@@ -173,13 +191,27 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
 
     async with runtime_control_server_lifespan(_settings()):
         names = [name for name, _kwargs in registrations]
-        assert names == ["provider", "runner", "transfer", "coordinator"]
+        assert names == [
+            "provider",
+            "runner",
+            "runner-web",
+            "transfer",
+            "coordinator",
+            "web-proxy",
+            "web-relay",
+        ]
         transfer = dict(registrations)["transfer"]
         runner = dict(registrations)["runner"]
+        runner_web = dict(registrations)["runner-web"]
+        web_proxy = dict(registrations)["web-proxy"]
+        web_relay = dict(registrations)["web-relay"]
         assert transfer["object_store"] is s3
         assert transfer["bucket"] == "transfer-bucket"
         assert transfer["object_prefix"] == "v1/runtime-transfer"
         assert runner["transfer_result_sink"] is not None
+        assert runner_web["broker"] is not None
+        assert web_proxy["coordinator"] is web_relay["coordinator"]
+        assert web_relay["registry"] is not None
         assert "secret-key" not in repr(registrations)
 
     assert redis.closed

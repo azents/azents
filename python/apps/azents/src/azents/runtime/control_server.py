@@ -5,6 +5,7 @@ import dataclasses
 import logging
 import signal
 import time
+import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -53,6 +54,9 @@ from azents.repos.runtime_provider_control.repository import (
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
+from azents.repos.runtime_web.transport_repository import (
+    RuntimeWebTransportRepository,
+)
 from azents.runtime.control_protocol.grpc.auth import (
     RuntimeTransferCoordinatorCredentialGrpcAuth,
 )
@@ -70,6 +74,21 @@ from azents.runtime.control_protocol.grpc.runner_terminal_server import (
 )
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     add_runtime_runner_transfer_servicer,
+)
+from azents.runtime.control_protocol.grpc.runner_web_registry import (
+    RuntimeWebOwnerRegistry,
+)
+from azents.runtime.control_protocol.grpc.runner_web_server import (
+    AllowInsecureRuntimeWebTrustedPeerAuthenticator,
+    GrpcRuntimeWebRelayConnector,
+    MtlsRuntimeWebTrustedPeerAuthenticator,
+    RuntimeRunnerWebBroker,
+    RuntimeWebTrustedPeerAuthenticator,
+    add_runtime_runner_web_servicer,
+    add_runtime_web_relay_servicer,
+)
+from azents.runtime.control_protocol.grpc.runtime_web_proxy_server import (
+    add_runtime_web_proxy_servicer,
 )
 from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
@@ -120,6 +139,8 @@ from azents.runtime.transfer.object_store import (
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
 )
+from azents.runtime.web_transport_coordinator import RuntimeWebTransportCoordinator
+from azents.runtime.web_transport_dispatcher import RuntimeWebTransportDispatcher
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrationService,
     RuntimeRunnerConnectionRegistrationService,
@@ -210,6 +231,13 @@ class RuntimeControlSettings(BaseSettings):
     sentry_dsn: str | None = None
     redis_url: str = "redis://localhost:6379"
     runtime_control_port: int = _DEFAULT_PORT
+    runtime_control_web_transport_enabled: bool = False
+    runtime_control_trusted_port: int = 8032
+    runtime_control_trusted_advertise_address: str = ""
+    runtime_control_trusted_gateway_peer_identities: str = ""
+    runtime_control_trusted_control_peer_identities: str = ""
+    runtime_control_web_route_lease_seconds: float = 10.0
+    runtime_control_web_max_active_connections: int = 128
     runtime_control_instance_id: str = "azents-runtime-control-local"
     runtime_control_reconcile_interval_seconds: float = (
         _DEFAULT_RECONCILE_INTERVAL_SECONDS
@@ -277,12 +305,22 @@ class _RuntimeControlTransport:
     allow_insecure: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeWebTrustedTransport:
+    """Mutually authenticated Gateway/Control transport configuration."""
+
+    server_credentials: grpc.ServerCredentials | None
+    channel_credentials: grpc.ChannelCredentials | None
+    allow_insecure: bool
+
+
 @asynccontextmanager
 async def runtime_control_server_lifespan(
     settings: RuntimeControlSettings,
 ) -> AsyncGenerator[grpc.aio.Server]:
     """Manage runtime-control gRPC server resources."""
     validate_runtime_control_transfer_settings(settings)
+    validate_runtime_control_web_settings(settings)
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
     clock = _utc_now
@@ -426,6 +464,55 @@ async def runtime_control_server_lifespan(
             settings.testenv_runtime_control_heartbeat_interval_seconds
         ),
     )
+    web_registry: RuntimeWebOwnerRegistry | None = None
+    web_coordinator: RuntimeWebTransportCoordinator | None = None
+    web_broker: RuntimeRunnerWebBroker | None = None
+    trusted_authenticator: RuntimeWebTrustedPeerAuthenticator | None = None
+    trusted_transport: _RuntimeWebTrustedTransport | None = None
+    if settings.runtime_control_web_transport_enabled:
+        web_registry = RuntimeWebOwnerRegistry(clock=clock)
+        web_dispatcher = RuntimeWebTransportDispatcher(
+            control_protocol=control_protocol,
+            coordination_store=coordination_store,
+        )
+        web_coordinator = RuntimeWebTransportCoordinator(
+            session_manager=session_manager,
+            repository=RuntimeWebTransportRepository(),
+            registry=web_registry,
+            dispatcher=web_dispatcher,
+            owner_replica_id=settings.runtime_control_instance_id,
+            owner_boot_id=uuid.uuid4().hex,
+            owner_address=settings.runtime_control_trusted_advertise_address,
+            lease_seconds=settings.runtime_control_web_route_lease_seconds,
+            maximum_active_connections=(
+                settings.runtime_control_web_max_active_connections
+            ),
+            clock=clock,
+        )
+        trusted_transport = runtime_web_trusted_transport(settings)
+        relay_connector = GrpcRuntimeWebRelayConnector(
+            channel_factory=lambda endpoint: _runtime_web_relay_channel(
+                endpoint,
+                transport=trusted_transport,
+            )
+        )
+        web_broker = RuntimeRunnerWebBroker(
+            coordinator=web_coordinator,
+            registry=web_registry,
+            relay_connector=relay_connector,
+        )
+        trusted_authenticator = (
+            AllowInsecureRuntimeWebTrustedPeerAuthenticator()
+            if trusted_transport.allow_insecure
+            else MtlsRuntimeWebTrustedPeerAuthenticator(
+                gateway_identities=_peer_identities(
+                    settings.runtime_control_trusted_gateway_peer_identities
+                ),
+                control_identities=_peer_identities(
+                    settings.runtime_control_trusted_control_peer_identities
+                ),
+            )
+        )
     reconciler = RuntimeLifecycleReconciler(
         agent_repository=agent_repository,
         runtime_repository=runtime_repository,
@@ -503,6 +590,9 @@ async def runtime_control_server_lifespan(
         name="runtime-terminal-repair",
     )
     server = grpc.aio.server()
+    trusted_server: grpc.aio.Server | None = None
+    if settings.runtime_control_web_transport_enabled:
+        trusted_server = grpc.aio.server()
     add_runtime_provider_control_servicer(
         server,
         control_protocol=control_protocol,
@@ -527,6 +617,12 @@ async def runtime_control_server_lifespan(
         connection_registrar=runner_connection_registrar,
         transfer_result_sink=transfer_result_coordinator,
     )
+    if web_broker is not None:
+        add_runtime_runner_web_servicer(
+            server,
+            broker=web_broker,
+            runner_authenticator=runner_authenticator,
+        )
     add_runtime_runner_terminal_servicer(
         server,
         broker=CoordinatedRuntimeRunnerTerminalBroker(
@@ -561,17 +657,49 @@ async def runtime_control_server_lifespan(
             coordinator_credential_verifier
         ),
     )
+    if (
+        trusted_server is not None
+        and web_coordinator is not None
+        and web_registry is not None
+        and trusted_authenticator is not None
+    ):
+        add_runtime_web_proxy_servicer(
+            trusted_server,
+            coordinator=web_coordinator,
+            trusted_authenticator=trusted_authenticator,
+        )
+        add_runtime_web_relay_servicer(
+            trusted_server,
+            coordinator=web_coordinator,
+            registry=web_registry,
+            trusted_authenticator=trusted_authenticator,
+        )
     listen_address = f"0.0.0.0:{settings.runtime_control_port}"
     if transport.server_credentials is None:
         server.add_insecure_port(listen_address)
     else:
         server.add_secure_port(listen_address, transport.server_credentials)
+    if trusted_server is not None and trusted_transport is not None:
+        trusted_listen_address = f"0.0.0.0:{settings.runtime_control_trusted_port}"
+        if trusted_transport.server_credentials is None:
+            trusted_server.add_insecure_port(trusted_listen_address)
+        else:
+            trusted_server.add_secure_port(
+                trusted_listen_address,
+                trusted_transport.server_credentials,
+            )
     await server.start()
+    if trusted_server is not None:
+        await trusted_server.start()
     _LOGGER.info(
         "Runtime Control gRPC server started",
         extra={
             "instance_id": settings.runtime_control_instance_id,
             "port": settings.runtime_control_port,
+            "trusted_port": settings.runtime_control_trusted_port,
+            "trusted_advertise_address": (
+                settings.runtime_control_trusted_advertise_address
+            ),
             "reconcile_interval_seconds": (
                 settings.runtime_control_reconcile_interval_seconds
             ),
@@ -581,6 +709,11 @@ async def runtime_control_server_lifespan(
             ),
             "runner_authentication": "runtime_bound_credential",
             "tls_enabled": transport.server_credentials is not None,
+            "web_transport_enabled": settings.runtime_control_web_transport_enabled,
+            "trusted_tls_enabled": (
+                trusted_transport is not None
+                and trusted_transport.server_credentials is not None
+            ),
         },
     )
     try:
@@ -604,6 +737,8 @@ async def runtime_control_server_lifespan(
             await terminal_repair_task
         except asyncio.CancelledError:
             pass
+        if trusted_server is not None:
+            await trusted_server.stop(grace=5)
         await server.stop(grace=5)
         if kubernetes_api_client is not None:
             await kubernetes_api_client.close()
@@ -889,6 +1024,26 @@ def validate_runtime_control_transfer_settings(
         raise ValueError("Runtime transfer process buffers exceed the configured bound")
 
 
+def validate_runtime_control_web_settings(
+    settings: RuntimeControlSettings,
+) -> None:
+    """Reject unsafe or ambiguous Runtime Web owner transport settings."""
+    if not settings.runtime_control_web_transport_enabled:
+        return
+    if not 1 <= settings.runtime_control_web_route_lease_seconds <= 60:
+        raise ValueError("Runtime Web route lease must be within 1 to 60 seconds")
+    if not 1 <= settings.runtime_control_web_max_active_connections <= 512:
+        raise ValueError("Runtime Web active connection limit must be within 1 to 512")
+    address = settings.runtime_control_trusted_advertise_address.strip()
+    if not address or "://" in address or ":" not in address:
+        raise ValueError("Runtime Web trusted advertise address must be host:port")
+    if settings.runtime_control_trusted_port < 0:
+        raise ValueError("Runtime Web trusted port must not be negative")
+    if not settings.runtime_control_allow_insecure:
+        _peer_identities(settings.runtime_control_trusted_gateway_peer_identities)
+        _peer_identities(settings.runtime_control_trusted_control_peer_identities)
+
+
 def _utc_now() -> datetime:
     """Return the Runtime Control process clock."""
     return datetime.now(UTC)
@@ -926,6 +1081,69 @@ def runtime_control_transport(
         ca_pem=ca_pem,
         allow_insecure=False,
     )
+
+
+def runtime_web_trusted_transport(
+    settings: RuntimeControlSettings,
+) -> _RuntimeWebTrustedTransport:
+    """Build the isolated mutually authenticated Gateway/Control transport."""
+    if settings.runtime_control_allow_insecure:
+        return _RuntimeWebTrustedTransport(
+            server_credentials=None,
+            channel_credentials=None,
+            allow_insecure=True,
+        )
+    certificate_path = _required_tls_path(
+        settings.runtime_control_tls_certificate_file,
+        "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE",
+    )
+    private_key_path = _required_tls_path(
+        settings.runtime_control_tls_private_key_file,
+        "AZ_RUNTIME_CONTROL_TLS_PRIVATE_KEY_FILE",
+    )
+    ca_path = _required_tls_path(
+        settings.runtime_control_tls_ca_file,
+        "AZ_RUNTIME_CONTROL_TLS_CA_FILE",
+    )
+    certificate = certificate_path.read_bytes()
+    private_key = private_key_path.read_bytes()
+    ca = ca_path.read_bytes()
+    if not certificate.strip() or not private_key.strip() or not ca.strip():
+        raise RuntimeError("Runtime Web trusted TLS files must not be empty")
+    return _RuntimeWebTrustedTransport(
+        server_credentials=grpc.ssl_server_credentials(
+            [(private_key, certificate)],
+            root_certificates=ca,
+            require_client_auth=True,
+        ),
+        channel_credentials=grpc.ssl_channel_credentials(
+            root_certificates=ca,
+            private_key=private_key,
+            certificate_chain=certificate,
+        ),
+        allow_insecure=False,
+    )
+
+
+def _runtime_web_relay_channel(
+    endpoint: str,
+    *,
+    transport: _RuntimeWebTrustedTransport,
+) -> grpc.aio.Channel:
+    if not endpoint.strip():
+        raise ValueError("Runtime Web owner address must not be empty")
+    if transport.channel_credentials is not None:
+        return grpc.aio.secure_channel(endpoint, transport.channel_credentials)
+    if transport.allow_insecure:
+        return grpc.aio.insecure_channel(endpoint)
+    raise RuntimeError("Runtime Web relay transport is not configured")
+
+
+def _peer_identities(value: str) -> frozenset[str]:
+    identities = frozenset(item.strip() for item in value.split(",") if item.strip())
+    if not identities:
+        raise ValueError("Runtime Web trusted peer identities must not be empty")
+    return identities
 
 
 def _required_tls_path(value: str | None, env_name: str) -> Path:

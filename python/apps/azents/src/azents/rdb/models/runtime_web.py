@@ -831,3 +831,182 @@ class RDBRuntimeWebAuthTicket(RDBModel):
     )
 
     __table_args__ = (CK_DEADLINE, UQ_SECRET_HASH, IX_EXPIRY)
+
+
+class RDBRuntimeWebTunnelRoute(RDBModel):
+    """Short-lived owner route for one exact Runtime Web tunnel."""
+
+    __tablename__ = "runtime_web_tunnel_routes"
+
+    CK_REVISIONS = sa.CheckConstraint(
+        "endpoint_authority_revision >= 0 AND close_barrier >= 0 "
+        "AND lease_generation >= 1",
+        name="ck_runtime_web_tunnel_routes_revisions",
+    )
+    CK_GENERATIONS = sa.CheckConstraint(
+        "desired_generation >= 1 AND runner_generation >= 1",
+        name="ck_runtime_web_tunnel_routes_generations",
+    )
+    CK_PORT = sa.CheckConstraint(
+        "port >= 1 AND port <= 65535",
+        name="ck_runtime_web_tunnel_routes_port",
+    )
+    CK_DEADLINES = sa.CheckConstraint(
+        "registration_deadline_at <= transport_deadline_at "
+        "AND lease_expires_at <= transport_deadline_at",
+        name="ck_runtime_web_tunnel_routes_deadlines",
+    )
+    UQ_JOIN_NONCE = sa.UniqueConstraint(
+        "join_nonce",
+        name="uq_runtime_web_tunnel_routes_join_nonce",
+    )
+    UQ_ROUTE_LEASE = sa.UniqueConstraint(
+        "route_lease_id",
+        name="uq_runtime_web_tunnel_routes_route_lease",
+    )
+    IX_OWNER_LEASE = sa.Index(
+        "ix_runtime_web_tunnel_routes_owner_lease",
+        "owner_boot_id",
+        "lease_expires_at",
+    )
+    IX_RUNTIME_GENERATION = sa.Index(
+        "ix_runtime_web_tunnel_routes_runtime_generation",
+        "runtime_id",
+        "runner_generation",
+        "lease_expires_at",
+    )
+
+    tunnel_id: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    endpoint_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    cycle_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_web_cycles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    endpoint_authority_revision: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        nullable=False,
+    )
+    close_barrier: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    runtime_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    desired_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    runner_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    port: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    join_nonce: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    owner_replica_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    owner_boot_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    owner_address: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    route_lease_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    registration_deadline_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    approval_deadline_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    transport_deadline_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    lease_expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        CK_REVISIONS,
+        CK_GENERATIONS,
+        CK_PORT,
+        CK_DEADLINES,
+        UQ_JOIN_NONCE,
+        UQ_ROUTE_LEASE,
+        IX_OWNER_LEASE,
+        IX_RUNTIME_GENERATION,
+    )
+
+
+class RDBRuntimeWebAdmissionLease(RDBModel):
+    """Shared connection admission lease for one Runtime Web tunnel."""
+
+    __tablename__ = "runtime_web_admission_leases"
+
+    CK_LEASE = sa.CheckConstraint(
+        "lease_generation >= 1 AND reserved_bytes >= 0 "
+        "AND lease_expires_at > created_at",
+        name="ck_runtime_web_admission_leases_lease",
+    )
+    UQ_TUNNEL = sa.UniqueConstraint(
+        "tunnel_id",
+        name="uq_runtime_web_admission_leases_tunnel",
+    )
+    IX_EXPIRY = sa.Index(
+        "ix_runtime_web_admission_leases_expiry",
+        "lease_expires_at",
+    )
+    IX_OWNER = sa.Index(
+        "ix_runtime_web_admission_leases_owner",
+        "owner_boot_id",
+        "lease_expires_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    tunnel_id: Mapped[str] = mapped_column(
+        sa.String(128),
+        sa.ForeignKey("runtime_web_tunnel_routes.tunnel_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_boot_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    lease_expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    reserved_bytes: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (CK_LEASE, UQ_TUNNEL, IX_EXPIRY, IX_OWNER)

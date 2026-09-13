@@ -20,6 +20,10 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferIntent,
     RunnerTransferResult,
 )
+from azents_runtime_control.runner_web import (
+    RunnerWebCancelIntentHandler,
+    RunnerWebOpenIntentHandler,
+)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     validate_runtime_configuration_evidence,
@@ -215,6 +219,20 @@ class RunnerControlClient(Protocol):
         handler: RunnerTerminalTerminateIntentHandler,
     ) -> None:
         """Set the direct metadata-only Terminal termination handler."""
+        ...
+
+    def set_web_open_intent_handler(
+        self,
+        handler: RunnerWebOpenIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Runtime Web admission handler."""
+        ...
+
+    def set_web_cancel_intent_handler(
+        self,
+        handler: RunnerWebCancelIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only Runtime Web cancellation handler."""
         ...
 
     async def register_runner(

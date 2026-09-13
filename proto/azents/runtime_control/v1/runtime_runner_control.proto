@@ -6,6 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "runtime_configuration.proto";
 import "runtime_runner_terminal.proto";
 import "runtime_runner_transfer.proto";
+import "runtime_web_transport.proto";
 
 // Runtime-internal Runners open this outbound stream to Runtime Control.
 service RuntimeRunnerControl {
@@ -42,6 +43,8 @@ message RunnerControlMessage {
     RunnerTransferCancel transfer_cancel = 24;
     RunnerTerminalOpenIntent terminal_open_intent = 25;
     RunnerTerminalTerminateIntent terminal_terminate_intent = 26;
+    RunnerWebOpenIntent web_open_intent = 27;
+    RunnerWebCancelIntent web_cancel_intent = 28;
     RunnerError error = 40;
   }
 }
