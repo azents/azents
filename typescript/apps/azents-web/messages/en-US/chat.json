@@ -16,6 +16,7 @@
   "selectAgent": "Select an agent to\nstart a new chat",
   "loadingHistory": "Loading conversation history…",
   "startConversation": "Send a message to start the conversation",
+  "inputLabel": "Chat message",
   "inputPlaceholder": "Type a message…",
   "inputPlaceholderDesktop": "Type a message… (Shift+Enter for newline)",
   "inputDisabledPlaceholder": "Direct input is disabled for this session.",

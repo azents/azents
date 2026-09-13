@@ -16,6 +16,7 @@
   "selectAgent": "Sélectionnez un agent pour\ndémarrer une nouvelle conversation",
   "loadingHistory": "Chargement de l'historique…",
   "startConversation": "Envoyez un message pour démarrer la conversation",
+  "inputLabel": "Message de conversation",
   "inputPlaceholder": "Saisissez un message…",
   "inputPlaceholderDesktop": "Saisissez un message… (Maj+Entrée pour un saut de ligne)",
   "inputDisabledPlaceholder": "La saisie directe est désactivée pour cette session.",
