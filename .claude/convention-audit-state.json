@@ -1,6 +1,6 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-09-12T22:19:47Z",
+    "checked_at": "2026-09-13T22:34:20Z",
     "checked_ruleset_revisions": [
       "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
       "4a479f485555c3db64112b8892b6197298114771f2b1cf0078dcf192dd701a78",
@@ -9,7 +9,7 @@
       "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
       "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0"
     ],
-    "checked_through_commit": "10276c062677911654c2d96d8fc3335114aa756b"
+    "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -733,34 +733,34 @@
       "checked_through_commit": "10276c062677911654c2d96d8fc3335114aa756b"
     },
     "typescript/apps/azents-admin-web/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-admin-web/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-site/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-site/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-site/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-site/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-09-13T22:34:20Z",
+      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
+      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
     },
     "typescript/apps/azents-site/**::bucket-5-of-8": {
       "checked_at": null,
