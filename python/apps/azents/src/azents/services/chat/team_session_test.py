@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -46,6 +47,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -1404,6 +1406,81 @@ class TestChatSessionTeamSessions:
         assert repaired.applied_inference_profile is not None
         assert repaired.applied_inference_profile.model_target_label == "default"
         assert repaired.applied_inference_profile.enabled_execution_options == []
+
+    async def test_team_session_read_does_not_repair_private_user_session(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A Team reader cannot rewrite another User's private Session intent."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-private-read-repair",
+        )
+        team_user_id = await _create_user(
+            rdb_session,
+            "team-session-private-read-repair@example.com",
+        )
+        private_user_id = await _create_user(
+            rdb_session,
+            "team-session-private-owner@example.com",
+        )
+        for user_id in (team_user_id, private_user_id):
+            await _add_workspace_user(
+                rdb_session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-session-private-read-repair-agent",
+        )
+        team_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        private_session = await AgentSessionRepository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                product_mode=AgentSessionProductMode.USER,
+                associated_user_id=private_user_id,
+            ),
+        )
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id.in_([team_session.id, private_session.id]))
+            .values(
+                applied_model_target_label="removed",
+                applied_reasoning_effort=None,
+                applied_enabled_execution_options=[],
+            )
+        )
+        await rdb_session.commit()
+
+        result = await _service(rdb_session_manager).get_agent_session(
+            agent_id=agent_id,
+            session_id=team_session.id,
+            user_id=team_user_id,
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.applied_inference_profile is not None
+        assert result.value.applied_inference_profile.model_target_label == "default"
+        async with rdb_session_manager() as verify_session:
+            private_after = await AgentSessionRepository().get_by_id(
+                verify_session,
+                private_session.id,
+            )
+        assert private_after is not None
+        assert private_after.applied_inference_profile is not None
+        assert private_after.applied_inference_profile.model_target_label == "removed"
 
     async def test_session_reads_preserve_valid_applied_model_profile(
         self,

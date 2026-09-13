@@ -550,28 +550,6 @@ class ChatSessionService:
             )
             return Success(agent_session)
 
-    async def _repair_stale_profiles_for_agent(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-    ) -> None:
-        """Repair active Session intents after locking the Agent parent first."""
-        agent = await self.agent_repository.lock_by_id(session, agent_id)
-        if agent is None or not agent.selectable_model_options:
-            return
-        model_target_label, reasoning_effort = _session_profile_fallback(agent)
-        await self.agent_session_repository.replace_stale_applied_inference_profiles(
-            session,
-            agent_id=agent_id,
-            valid_model_target_labels=[
-                option.label for option in agent.selectable_model_options
-            ],
-            model_target_label=model_target_label,
-            reasoning_effort=reasoning_effort,
-            enabled_execution_options=[],
-        )
-
     async def _repair_session_profile_for_read(
         self,
         session: AsyncSession,
@@ -582,15 +560,31 @@ class ChatSessionService:
         agent = await self.agent_repository.get_by_id(session, agent_session.agent_id)
         if agent is None or not _session_profile_is_stale(agent, agent_session):
             return agent_session
-        await self._repair_stale_profiles_for_agent(
+        locked_agent = await self.agent_repository.lock_by_id(
             session,
-            agent_id=agent_session.agent_id,
+            agent_session.agent_id,
         )
-        refreshed = await self.agent_session_repository.get_by_id(
+        if locked_agent is None or not locked_agent.selectable_model_options:
+            return agent_session
+        locked_session = await self.agent_session_repository.lock_by_id(
             session,
             agent_session.id,
         )
-        return refreshed or agent_session
+        if (
+            locked_session is None
+            or locked_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return agent_session
+        if not _session_profile_is_stale(locked_agent, locked_session):
+            return locked_session
+        model_target_label, reasoning_effort = _session_profile_fallback(locked_agent)
+        return await self.agent_session_repository.set_applied_inference_profile(
+            session,
+            session_id=locked_session.id,
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+            enabled_execution_options=[],
+        )
 
     async def get_agent_session(
         self,
@@ -815,11 +809,16 @@ class ChatSessionService:
                 session,
                 agent_id,
             )
-            if any(_session_profile_is_stale(agent, item) for item in sessions):
-                await self._repair_stale_profiles_for_agent(
+            stale_sessions = sorted(
+                (item for item in sessions if _session_profile_is_stale(agent, item)),
+                key=lambda item: item.id,
+            )
+            for item in stale_sessions:
+                await self._repair_session_profile_for_read(
                     session,
-                    agent_id=agent_id,
+                    agent_session=item,
                 )
+            if stale_sessions:
                 sessions = await self.agent_session_repository.list_active_by_agent_id(
                     session,
                     agent_id,
@@ -853,11 +852,20 @@ class ChatSessionService:
                     auto_archive_ttl_days=agent.auto_archive_ttl_days,
                 )
             )
-            if any(_session_profile_is_stale(agent, item.session) for item in sessions):
-                await self._repair_stale_profiles_for_agent(
+            stale_sessions = sorted(
+                (
+                    item.session
+                    for item in sessions
+                    if _session_profile_is_stale(agent, item.session)
+                ),
+                key=lambda item: item.id,
+            )
+            for item in stale_sessions:
+                await self._repair_session_profile_for_read(
                     session,
-                    agent_id=agent_id,
+                    agent_session=item,
                 )
+            if stale_sessions:
                 sessions = await (
                     self.agent_session_repository.list_active_unread_by_agent_id(
                         session,
@@ -894,11 +902,16 @@ class ChatSessionService:
                     associated_user_id=user_id,
                 )
             )
-            if any(_session_profile_is_stale(agent, item) for item in sessions):
-                await self._repair_stale_profiles_for_agent(
+            stale_sessions = sorted(
+                (item for item in sessions if _session_profile_is_stale(agent, item)),
+                key=lambda item: item.id,
+            )
+            for item in stale_sessions:
+                await self._repair_session_profile_for_read(
                     session,
-                    agent_id=agent_id,
+                    agent_session=item,
                 )
+            if stale_sessions:
                 list_user_sessions = (
                     self.agent_session_repository.list_active_user_by_agent_and_user
                 )
@@ -943,14 +956,20 @@ class ChatSessionService:
                     offset=offset,
                     limit=limit,
                 )
-                if any(
-                    _session_profile_is_stale(agent, item.session)
-                    for item in page.items
-                ):
-                    await self._repair_stale_profiles_for_agent(
+                stale_sessions = sorted(
+                    (
+                        item.session
+                        for item in page.items
+                        if _session_profile_is_stale(agent, item.session)
+                    ),
+                    key=lambda item: item.id,
+                )
+                for item in stale_sessions:
+                    await self._repair_session_profile_for_read(
                         session,
-                        agent_id=agent_id,
+                        agent_session=item,
                     )
+                if stale_sessions:
                     page = await list_active_page(
                         session,
                         agent_id,
@@ -1014,14 +1033,20 @@ class ChatSessionService:
                 auto_archive_ttl_days=agent.auto_archive_ttl_days,
                 recent_limit=recent_limit,
             )
-            if any(
-                _session_profile_is_stale(agent, item.session)
-                for item in [*summary.pinned, *summary.recent]
-            ):
-                await self._repair_stale_profiles_for_agent(
+            stale_sessions = sorted(
+                (
+                    item.session
+                    for item in [*summary.pinned, *summary.recent]
+                    if _session_profile_is_stale(agent, item.session)
+                ),
+                key=lambda item: item.id,
+            )
+            for item in stale_sessions:
+                await self._repair_session_profile_for_read(
                     session,
-                    agent_id=agent_id,
+                    agent_session=item,
                 )
+            if stale_sessions:
                 summary = await get_sidebar_summary(
                     session,
                     agent_id,
@@ -2064,19 +2089,22 @@ class ChatSessionService:
                 if (agent := await self.agent_repository.get_by_id(session, agent_id))
                 is not None
             }
-            stale_agent_ids = {
-                item.agent_id
-                for item in sessions
-                if item.status is AgentSessionStatus.ACTIVE
-                and (agent := agents.get(item.agent_id)) is not None
-                and _session_profile_is_stale(agent, item)
-            }
-            for agent_id in stale_agent_ids:
-                await self._repair_stale_profiles_for_agent(
+            stale_sessions = sorted(
+                (
+                    item
+                    for item in sessions
+                    if item.status is AgentSessionStatus.ACTIVE
+                    and (agent := agents.get(item.agent_id)) is not None
+                    and _session_profile_is_stale(agent, item)
+                ),
+                key=lambda item: (item.agent_id, item.id),
+            )
+            for item in stale_sessions:
+                await self._repair_session_profile_for_read(
                     session,
-                    agent_id=agent_id,
+                    agent_session=item,
                 )
-            if stale_agent_ids:
+            if stale_sessions:
                 sessions = await self.agent_session_repository.list_by_workspace(
                     session, workspace_id=workspace_id
                 )

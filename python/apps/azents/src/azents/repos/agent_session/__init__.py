@@ -1191,6 +1191,7 @@ class AgentSessionRepository:
             # ``FOR NO KEY UPDATE``. Admission updates only non-key columns
             # such as run_state while allowing FK KEY SHARE references.
             .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
@@ -1292,6 +1293,7 @@ class AgentSessionRepository:
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
             .with_for_update(key_share=True, nowait=True)
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         return None if rdb is None else self._build(rdb)

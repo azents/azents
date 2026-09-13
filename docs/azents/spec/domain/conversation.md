@@ -308,8 +308,9 @@ and automatic-archive projections; archived rows retain archive time, purge dead
 immutable retention snapshot. `GET /chat/v1/agents/{agent_id}/sessions/sidebar` returns every pinned
 active Team root session plus at most 20 distinct recent non-pinned active Team root sessions in
 separate `pinned` and `recent` arrays; it never returns User, archived, or subagent sessions. Both
-reads validate Agent membership and are side-effect free: they never ensure or create a Team-primary
-Session and never wait for Runtime state. Each session item includes `run_state` so azents-web can
+reads validate Agent membership and do not create Sessions or wait for Runtime state; they may
+perform an idempotent applied-model-profile repair for the returned active rows. They never ensure
+or create a Team-primary Session. Each session item includes `run_state` so azents-web can
 mark running sessions in the Agent rail session list. `POST
 /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The current request
 shape is `existing_project_paths` plus ordered `setup_actions`.
