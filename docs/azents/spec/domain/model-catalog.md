@@ -39,8 +39,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-10
-spec_version: 24
+last_verified_at: 2026-09-13
+spec_version: 25
 ---
 
 # Model Catalog Domain Spec
@@ -253,7 +253,15 @@ System catalog sync is not user-triggered from the public picker. It is invoked 
 
 ## Submit normalization
 
-Agent creation/update and Workspace model settings update accept selectable model option entries. Each entry contains a label, a model selection input with an LLM provider integration id and provider model identifier, and optional model-scoped settings. During submit normalization, services resolve every option entry through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot, then the option settings are defaulted and validated against that snapshot's implemented capabilities. Omitted built-in tool intent enables every supported implemented tool; an explicit empty list preserves all-off intent.
+Agent creation/update and Workspace model settings update accept selectable semantic labels with one
+to five ordered physical candidates. Each candidate contains a model selection input with an LLM
+provider integration ID and provider model identifier plus optional model-scoped settings. During
+submit normalization, services resolve every candidate through the stored catalog read service. The
+resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot,
+then that candidate's settings are defaulted and validated against its implemented capabilities.
+Omitted built-in tool intent enables every supported implemented tool; an explicit empty list
+preserves all-off intent. The first candidate is Primary, and Primary capabilities alone define the
+label's normal Composer effort and execution-option controls.
 
 An enabled `image_generation` setting additionally validates its complete config
 against the selected conversation snapshot and the selected integration. An
@@ -264,7 +272,9 @@ selectable entry. Agent and Workspace save paths share this validation, and
 Workspace defaults copy the complete built-in configuration into newly created
 Agents.
 
-Transition compatibility direct model selection inputs use the same normalization path. If no selectable stored catalog entry matches a requested integration and model identifier, the service rejects the selection. Submit normalization must not refetch a dynamic provider listing as a fallback.
+If no selectable stored catalog entry matches a requested candidate integration and model identifier,
+the service rejects the candidate. Public mutation has no direct singular model-selection
+compatibility field. Submit normalization must not refetch a dynamic provider listing as a fallback.
 
 ## Snapshot semantics
 
@@ -305,6 +315,8 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-13 | 25 | Normalized every candidate in an ordered label-local chain, made Primary capabilities drive label controls, and removed singular public mutation compatibility. |
+
 | 2026-09-10 | 24 | Hid image-model selection controls for providers that support maintained-default image generation only. |
 | 2026-09-10 | 23 | Added purpose-separated image-generation catalogs, OpenAI registry-and-credential intersection, generation fencing, maintained-default semantics, owner sync, save/runtime authority, and stored-catalog UI behavior. |
 | 2026-08-27 | 21 | Added provider-neutral default and maximum input context capabilities, maximum-only fallback, and split-aware picker and Agent settings presentation |

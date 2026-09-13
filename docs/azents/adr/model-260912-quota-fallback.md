@@ -48,6 +48,7 @@ Redis is optional volatile coordination and cannot own cooldown or probe correct
 - [x] `model-260912/ADR-D5` — Session one-shot Primary reservation and live availability contract.
 - [x] `model-260912/ADR-D6` — Main, compaction, and title execution integration with existing retry boundaries.
 - [x] `model-260912/ADR-D7` — Provenance, diagnostics, metrics, and deterministic verification authority.
+- [x] `model-260912/ADR-D8` — Required verification allocation by observable boundary.
 
 ### Agent-owned implementation details
 
@@ -423,6 +424,59 @@ optional diagnostics only.
   reason.
 - The deterministic provider fake needs explicit attempt/barrier evidence without becoming a second
   product behavior implementation.
+
+### model-260912/ADR-D8: Allocate required verification by observable boundary
+
+**Affected requirements:** `model-260912/REQ-8`
+
+**Accepted on:** 2026-09-13 by the delegated autonomous technical decision owner.
+
+Required verification remains credential-free, deterministic, E2E-first, and mandatory in CI, but
+each behavior is assigned to the lowest test layer that can exercise its authoritative boundary
+without replacing product behavior.
+
+Required E2E owns user-visible and representative cross-boundary behavior through public API,
+Worker/provider execution, durable state, and browser presentation. This includes chain
+configuration and migrated-state consumption, a real Primary-quota-to-fallback response,
+request-intent preservation, representative Workspace cooldown sharing, Primary reservation API
+behavior, terminal exhaustion and applied provenance, representative compaction/title fallback
+outcomes, and desktop/mobile recovery presentation.
+
+Deterministic repository, service, and Worker integration tests own exact internal interleavings
+whose contract is PostgreSQL state, generation fencing, ownership recovery, or transaction ordering.
+These include half-open claim CAS, single-flight contention, lease expiry, stale completion,
+newer-quota reservation revocation, transaction rollback, operation-state handover, compaction
+stale-plan races, title-generation ownership races, and Redis-empty reconstruction. Such tests use
+real production repositories and execution owners with explicit barriers or authoritative state,
+not mocked reimplementations of the concurrency contract.
+
+Every `REQ-8` verification scenario remains mapped to at least one required CI test. Representative
+E2E proves that the integrated product path reaches the internal authorities; deterministic
+integration tests prove exhaustive timing-sensitive outcomes. Moving a race from E2E to integration
+cannot make it optional, remove its assertion, replace real PostgreSQL semantics, or use fixed sleeps
+for ordering. Live-provider tests remain optional diagnostics only.
+
+**Rejected alternatives:**
+
+- Requiring every race, crash, and fencing permutation as browser or full-stack E2E was rejected
+  because it duplicates internal fault injection, lengthens required CI, and makes exact ordering
+  less deterministic without adding product-boundary evidence.
+- Using only integration tests was rejected because API contracts, generated clients,
+  Worker/provider wiring, durable response behavior, and desktop/mobile presentation require real
+  product-path E2E.
+- Making internal race tests optional after retaining one happy-path E2E was rejected because
+  `REQ-8` requires automated coverage of recovery and concurrency behavior.
+- Live quota tests were rejected as required evidence because they cannot deterministically control
+  provider state, timing, or credentials.
+
+**Risks:**
+
+- Layered coverage can develop gaps unless the Design test matrix names one primary required
+  evidence owner for every acceptance scenario.
+- Integration tests must exercise actual repositories, transactions, and Worker/service boundaries;
+  pure mocks are insufficient for PostgreSQL fencing claims.
+- Representative E2E must continue to cross the real public API and execution path so lower-level
+  tests do not hide wiring regressions.
 
 ## Consequences
 

@@ -3,6 +3,117 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Quota fallback uses secondary candidate",
+        "systemMessage": "Create a brief title from the request"
+      },
+      "response": {
+        "content": "{\"title\":\"Quota fallback\"}"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "The Primary candidate has insufficient quota.",
+          "type": "insufficient_quota",
+          "code": "insufficient_quota"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Secondary candidate completed the request."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback desktop uses secondary candidate",
+        "systemMessage": "Create a brief title from the request"
+      },
+      "response": {
+        "content": "{\"title\":\"Desktop quota fallback\"}"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback desktop uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "The desktop Primary candidate has insufficient quota.",
+          "type": "insufficient_quota",
+          "code": "insufficient_quota"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback desktop uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Secondary candidate completed the request."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback mobile uses secondary candidate",
+        "systemMessage": "Create a brief title from the request"
+      },
+      "response": {
+        "content": "{\"title\":\"Mobile quota fallback\"}"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback mobile uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "The mobile Primary candidate has insufficient quota.",
+          "type": "insufficient_quota",
+          "code": "insufficient_quota"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Quota fallback mobile uses secondary candidate",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Secondary candidate completed the request."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Watchdog session title timeout",
         "systemMessage": "Create a brief title from the request"
       },

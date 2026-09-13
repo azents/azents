@@ -24,6 +24,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Divider,
   Group,
   Modal,
   NumberInput,
@@ -36,17 +37,28 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { IconGripVertical, IconSettings, IconTrash } from "@tabler/icons-react";
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconCopy,
+  IconGripVertical,
+  IconPlus,
+  IconSettings,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ModelCatalogPickerContainer } from "../containers/ModelCatalogPickerContainer";
 import {
+  copyCompatiblePrimarySettings,
+  createSelectableModelCandidateFormValue,
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
   hasInvalidImageGenerationSelections,
   imageGenerationModelAvailability,
   imageGenerationModelIdentifier,
   imageGenerationModelSelectionVisible,
+  MAX_SELECTABLE_MODEL_CANDIDATES,
   MAX_SELECTABLE_MODEL_OPTIONS,
   MAX_SUBAGENT_GUIDANCE_LENGTH,
   resolveModelContextRange,
@@ -56,8 +68,10 @@ import {
 import classes from "./SelectableModelOptionsEditor.module.css";
 import type {
   ImageGenerationCatalogState,
+  PrimarySettingsCopyResult,
   ProviderIntegrationOption,
   SelectableModelCandidate,
+  SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
 import type { DragEndEvent } from "@dnd-kit/core";
@@ -86,21 +100,13 @@ export interface SelectableModelOptionsEditorProps {
   onChangeLightweightModelLabel: (label: string | null) => void;
 }
 
-interface SelectableModelRowProps {
-  option: SelectableModelOptionFormValue;
-  duplicate: boolean;
-  canEdit: boolean;
-  canRemove: boolean;
-  showValidationErrors: boolean;
-  labelInputRef: (node: HTMLInputElement | null) => void;
-  onChangeLabel: (value: string) => void;
-  onChangeModel: () => void;
-  onOpenSettings: () => void;
-  onRemove: () => void;
+interface CandidateTarget {
+  optionId: string;
+  candidateId: string;
 }
 
-function createOptionId(): string {
-  return `option-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function createEditorId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function optionModelValue(
@@ -126,6 +132,20 @@ function rowHasDuplicateLabel(
   );
 }
 
+function candidateHasDuplicateModel(
+  option: SelectableModelOptionFormValue,
+  candidateIndex: number,
+): boolean {
+  const value = option.candidates[candidateIndex]?.model_selection_value;
+  if (value == null) {
+    return false;
+  }
+  return option.candidates.some(
+    (candidate, index) =>
+      index !== candidateIndex && candidate.model_selection_value === value,
+  );
+}
+
 function updateOption(
   options: SelectableModelOptionFormValue[],
   id: string,
@@ -136,104 +156,163 @@ function updateOption(
   return options.map((option) => (option.id === id ? update(option) : option));
 }
 
-function SelectableModelRow({
-  option,
+function updateCandidate(
+  options: SelectableModelOptionFormValue[],
+  target: CandidateTarget,
+  update: (
+    candidate: SelectableModelCandidateFormValue,
+  ) => SelectableModelCandidateFormValue,
+): SelectableModelOptionFormValue[] {
+  return updateOption(options, target.optionId, (option) => ({
+    ...option,
+    candidates: option.candidates.map((candidate) =>
+      candidate.id === target.candidateId ? update(candidate) : candidate,
+    ),
+  }));
+}
+
+function findCandidate(
+  options: SelectableModelOptionFormValue[],
+  target: CandidateTarget | null,
+): {
+  option: SelectableModelOptionFormValue;
+  candidate: SelectableModelCandidateFormValue;
+  candidateIndex: number;
+} | null {
+  if (target == null) {
+    return null;
+  }
+  const option = options.find((item) => item.id === target.optionId);
+  if (option == null) {
+    return null;
+  }
+  const candidateIndex = option.candidates.findIndex(
+    (candidate) => candidate.id === target.candidateId,
+  );
+  const candidate = option.candidates[candidateIndex];
+  return candidate == null ? null : { option, candidate, candidateIndex };
+}
+
+interface CandidateRowProps {
+  candidate: SelectableModelCandidateFormValue;
+  index: number;
+  duplicate: boolean;
+  canEdit: boolean;
+  canRemove: boolean;
+  canMoveDown: boolean;
+  showValidationErrors: boolean;
+  onChangeModel: () => void;
+  onOpenSettings: () => void;
+  onCopyPrimarySettings: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}
+
+function CandidateRow({
+  candidate,
+  index,
   duplicate,
   canEdit,
   canRemove,
+  canMoveDown,
   showValidationErrors,
-  labelInputRef,
-  onChangeLabel,
   onChangeModel,
   onOpenSettings,
+  onCopyPrimarySettings,
+  onMoveUp,
+  onMoveDown,
   onRemove,
-}: SelectableModelRowProps): React.ReactElement {
+}: CandidateRowProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
-  const {
-    attributes,
-    isDragging,
-    listeners,
-    setActivatorNodeRef,
-    setNodeRef,
-    transform,
-    transition,
-  } = useSortable({ disabled: !canEdit, id: option.id });
-
+  const missing = candidate.model_selection_value == null;
   return (
-    <Box
-      ref={setNodeRef}
-      className={classes.row}
-      style={{
-        opacity: isDragging ? 0.6 : 1,
-        transform: CSS.Transform.toString(transform),
-        transition,
-      }}
-    >
-      <Box className={classes.dragHandle}>
-        <Tooltip label={t("dragHandleLabel")}>
-          <ActionIcon
-            ref={setActivatorNodeRef}
-            aria-label={t("dragHandleLabel")}
-            color="gray"
-            disabled={!canEdit}
-            variant="subtle"
-            {...attributes}
-            {...listeners}
-          >
-            <IconGripVertical size="1rem" />
-          </ActionIcon>
-        </Tooltip>
-      </Box>
-      <Box className={classes.label}>
-        <TextInput
-          ref={labelInputRef}
-          aria-label={t("optionLabel")}
-          value={option.label}
-          disabled={!canEdit}
-          error={
-            showValidationErrors
-              ? option.label.trim() === ""
-                ? t("emptyLabel")
-                : duplicate
-                  ? t("duplicateLabel")
-                  : null
-              : null
-          }
-          onChange={(event) => onChangeLabel(event.currentTarget.value)}
-        />
-      </Box>
-      <Stack className={classes.model} gap={0}>
-        <Text className={classes.modelText} fw={600} size="sm">
-          {option.model_display_name ?? t("noModelSelected")}
-        </Text>
-        <Text className={classes.modelText} size="sm" c="dimmed">
-          {option.model_identifier ?? t("chooseModel")}
-        </Text>
-      </Stack>
-      <Box className={classes.actions}>
+    <Box className={classes.candidateRow}>
+      <Group gap="xs" wrap="nowrap" className={classes.candidateIdentity}>
+        <Badge size="sm" variant={index === 0 ? "filled" : "light"}>
+          {index === 0
+            ? t("primary")
+            : t("fallbackOrdinal", { ordinal: index })}
+        </Badge>
+        <Stack gap={0} className={classes.model}>
+          <Text className={classes.modelText} fw={600} size="sm">
+            {candidate.model_display_name ?? t("noModelSelected")}
+          </Text>
+          <Text className={classes.modelText} size="xs" c="dimmed">
+            {candidate.model_identifier ?? t("chooseModel")}
+          </Text>
+          {showValidationErrors && missing ? (
+            <Text size="xs" c="red">
+              {t("missingCandidateModel")}
+            </Text>
+          ) : null}
+          {showValidationErrors && duplicate ? (
+            <Text size="xs" c="red">
+              {t("duplicateCandidate")}
+            </Text>
+          ) : null}
+        </Stack>
+      </Group>
+      <Box className={classes.candidateActions}>
         <Button
-          className={classes.changeModel}
           variant="light"
+          size="compact-sm"
           disabled={!canEdit}
           onClick={onChangeModel}
         >
-          {t("changeModel")}
+          {candidate.model_selection_value == null
+            ? t("chooseCandidate")
+            : t("changeModel")}
         </Button>
+        {index > 0 ? (
+          <Tooltip label={t("copyPrimarySettings")}>
+            <ActionIcon
+              aria-label={t("copyPrimarySettings")}
+              color="gray"
+              disabled={!canEdit || candidate.model_selection_value == null}
+              variant="subtle"
+              onClick={onCopyPrimarySettings}
+            >
+              <IconCopy size="1rem" />
+            </ActionIcon>
+          </Tooltip>
+        ) : null}
         <Tooltip label={t("settingsAction")}>
           <ActionIcon
             aria-label={t("settingsAction")}
             color="gray"
-            disabled={!canEdit || option.model_selection_value == null}
+            disabled={!canEdit || candidate.model_selection_value == null}
             variant="subtle"
             onClick={onOpenSettings}
           >
             <IconSettings size="1rem" />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label={t("remove")}>
+        <Tooltip label={t("moveCandidateUp")}>
           <ActionIcon
-            className={classes.remove}
-            aria-label={t("remove")}
+            aria-label={t("moveCandidateUp")}
+            color="gray"
+            disabled={!canEdit || index === 0}
+            variant="subtle"
+            onClick={onMoveUp}
+          >
+            <IconArrowUp size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label={t("moveCandidateDown")}>
+          <ActionIcon
+            aria-label={t("moveCandidateDown")}
+            color="gray"
+            disabled={!canEdit || !canMoveDown}
+            variant="subtle"
+            onClick={onMoveDown}
+          >
+            <IconArrowDown size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label={t("removeCandidate")}>
+          <ActionIcon
+            aria-label={t("removeCandidate")}
             color="red"
             disabled={!canEdit || !canRemove}
             variant="subtle"
@@ -247,16 +326,170 @@ function SelectableModelRow({
   );
 }
 
+interface OptionCardProps {
+  option: SelectableModelOptionFormValue;
+  duplicateLabel: boolean;
+  canEdit: boolean;
+  canRemove: boolean;
+  showValidationErrors: boolean;
+  labelInputRef: (node: HTMLInputElement | null) => void;
+  onChangeLabel: (value: string) => void;
+  onOpenLabelSettings: () => void;
+  onAddCandidate: () => void;
+  onChangeCandidateModel: (candidateId: string) => void;
+  onOpenCandidateSettings: (candidateId: string) => void;
+  onCopyPrimarySettings: (candidateId: string) => void;
+  onMoveCandidate: (candidateId: string, direction: -1 | 1) => void;
+  onRemoveCandidate: (candidateId: string) => void;
+  onRemoveOption: () => void;
+}
+
+function OptionCard({
+  option,
+  duplicateLabel,
+  canEdit,
+  canRemove,
+  showValidationErrors,
+  labelInputRef,
+  onChangeLabel,
+  onOpenLabelSettings,
+  onAddCandidate,
+  onChangeCandidateModel,
+  onOpenCandidateSettings,
+  onCopyPrimarySettings,
+  onMoveCandidate,
+  onRemoveCandidate,
+  onRemoveOption,
+}: OptionCardProps): React.ReactElement {
+  const t = useTranslations("workspace.agents.selectableModelOptions");
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ disabled: !canEdit, id: option.id });
+  return (
+    <Box
+      ref={setNodeRef}
+      className={classes.optionCard}
+      style={{
+        opacity: isDragging ? 0.6 : 1,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <Box className={classes.optionHeader}>
+        <Tooltip label={t("dragHandleLabel")}>
+          <ActionIcon
+            ref={setActivatorNodeRef}
+            aria-label={t("dragHandleLabel")}
+            color="gray"
+            disabled={!canEdit}
+            variant="subtle"
+            {...attributes}
+            {...listeners}
+          >
+            <IconGripVertical size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+        <TextInput
+          ref={labelInputRef}
+          className={classes.labelInput}
+          aria-label={t("optionLabel")}
+          value={option.label}
+          disabled={!canEdit}
+          error={
+            showValidationErrors
+              ? option.label.trim() === ""
+                ? t("emptyLabel")
+                : duplicateLabel
+                  ? t("duplicateLabel")
+                  : null
+              : null
+          }
+          onChange={(event) => onChangeLabel(event.currentTarget.value)}
+        />
+        <Tooltip label={t("labelSettingsAction")}>
+          <ActionIcon
+            aria-label={t("labelSettingsAction")}
+            color="gray"
+            disabled={!canEdit}
+            variant="subtle"
+            onClick={onOpenLabelSettings}
+          >
+            <IconSettings size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label={t("removeLabel")}>
+          <ActionIcon
+            aria-label={t("removeLabel")}
+            color="red"
+            disabled={!canEdit || !canRemove}
+            variant="subtle"
+            onClick={onRemoveOption}
+          >
+            <IconTrash size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+      </Box>
+      <Stack gap="xs" className={classes.candidateList}>
+        {option.candidates.map((candidate, index) => (
+          <CandidateRow
+            key={candidate.id}
+            candidate={candidate}
+            index={index}
+            duplicate={candidateHasDuplicateModel(option, index)}
+            canEdit={canEdit}
+            canRemove={option.candidates.length > 1}
+            canMoveDown={index < option.candidates.length - 1}
+            showValidationErrors={showValidationErrors}
+            onChangeModel={() => onChangeCandidateModel(candidate.id)}
+            onOpenSettings={() => onOpenCandidateSettings(candidate.id)}
+            onCopyPrimarySettings={() => onCopyPrimarySettings(candidate.id)}
+            onMoveUp={() => onMoveCandidate(candidate.id, -1)}
+            onMoveDown={() => onMoveCandidate(candidate.id, 1)}
+            onRemove={() => onRemoveCandidate(candidate.id)}
+          />
+        ))}
+      </Stack>
+      <Group justify="flex-start">
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          leftSection={<IconPlus size="1rem" />}
+          disabled={
+            !canEdit ||
+            option.candidates.length >= MAX_SELECTABLE_MODEL_CANDIDATES
+          }
+          onClick={onAddCandidate}
+        >
+          {t("addFallbackCandidate")}
+        </Button>
+        <Text size="xs" c="dimmed">
+          {t("candidateCount", {
+            count: option.candidates.length,
+            max: MAX_SELECTABLE_MODEL_CANDIDATES,
+          })}
+        </Text>
+      </Group>
+    </Box>
+  );
+}
+
 interface SelectableModelSettingsModalProps {
   opened: boolean;
-  option: SelectableModelOptionFormValue;
+  label: string;
+  candidate: SelectableModelCandidateFormValue;
   imageGenerationCatalogStates: ReadonlyMap<
     string,
     ImageGenerationCatalogState
   >;
   canSyncImageCatalog: boolean;
   onClose: () => void;
-  onChange: (option: SelectableModelOptionFormValue) => void;
+  onChange: (candidate: SelectableModelCandidateFormValue) => void;
   onSyncImageCatalog: (integrationId: string) => Promise<void>;
 }
 
@@ -264,7 +497,8 @@ const IMAGE_GENERATION_DEFAULT_VALUE = "__azents_default_image_model__";
 
 function SelectableModelSettingsModal({
   opened,
-  option,
+  label,
+  candidate,
   imageGenerationCatalogStates,
   canSyncImageCatalog,
   onClose,
@@ -274,15 +508,16 @@ function SelectableModelSettingsModal({
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const format = useFormatter();
   const context = resolveModelContextRange(
-    option.normalized_capabilities?.context_window,
+    candidate.normalized_capabilities?.context_window,
   );
   const outputLimit =
-    option.normalized_capabilities?.context_window?.max_output_tokens ?? null;
+    candidate.normalized_capabilities?.context_window?.max_output_tokens ??
+    null;
   const supportedTools =
-    option.normalized_capabilities?.built_in_tools?.supported ?? [];
+    candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
   const imageGenerationEnabled =
-    option.builtin_tools.includes("image_generation");
-  const integrationId = option.model_provider_integration_id;
+    candidate.builtin_tools.includes("image_generation");
+  const integrationId = candidate.model_provider_integration_id;
   const imageCatalogState =
     integrationId == null
       ? null
@@ -290,7 +525,8 @@ function SelectableModelSettingsModal({
   const imageModelSelectionVisible =
     imageGenerationEnabled &&
     imageGenerationModelSelectionVisible(imageCatalogState);
-  const selectedImageModelIdentifier = imageGenerationModelIdentifier(option);
+  const selectedImageModelIdentifier =
+    imageGenerationModelIdentifier(candidate);
   const selectedImageModelValue =
     selectedImageModelIdentifier ?? IMAGE_GENERATION_DEFAULT_VALUE;
   const loadedCatalog =
@@ -311,10 +547,7 @@ function SelectableModelSettingsModal({
     (entry) => entry.provider_model_identifier === selectedImageModelIdentifier,
   );
   const imageModelData = [
-    {
-      value: IMAGE_GENERATION_DEFAULT_VALUE,
-      label: t("imageModelDefault"),
-    },
+    { value: IMAGE_GENERATION_DEFAULT_VALUE, label: t("imageModelDefault") },
     ...selectableImageEntries.map((entry) => ({
       value: entry.provider_model_identifier,
       label: entry.display_name,
@@ -343,24 +576,12 @@ function SelectableModelSettingsModal({
     selectedImageModelIdentifier == null
       ? t("imageModelDefaultDescription")
       : (selectedImageEntry?.description ?? t("imageModelPinnedDescription"));
-  const savedImageModelNotice =
-    selectedImageModelAvailability === "UNAVAILABLE" ? (
-      <Alert color="orange" title={t("imageModelUnavailableTitle")}>
-        {t("imageModelUnavailableDescription")}
-      </Alert>
-    ) : selectedImageModelAvailability === "UNVERIFIED" ? (
-      <Alert color="orange" title={t("imageModelUnverifiedTitle")}>
-        {t("imageModelUnverifiedDescription")}
-      </Alert>
-    ) : null;
   const syncImageCatalogButton =
     integrationId != null && canSyncImageCatalog ? (
       <Button
         size="xs"
         variant="light"
-        onClick={() => {
-          void onSyncImageCatalog(integrationId);
-        }}
+        onClick={() => void onSyncImageCatalog(integrationId)}
       >
         {t("imageCatalogSync")}
       </Button>
@@ -372,85 +593,74 @@ function SelectableModelSettingsModal({
         {t("imageCatalogUnavailableDescription")}
       </Alert>
     );
-  } else {
-    switch (imageCatalogState.type) {
-      case "LOADING":
-        imageCatalogNotice = (
-          <Alert color="blue" title={t("imageCatalogLoadingTitle")}>
-            {t("imageCatalogLoadingDescription")}
-          </Alert>
-        );
-        break;
-      case "ERROR":
-        imageCatalogNotice = (
-          <Alert color="orange" title={t("imageCatalogErrorTitle")}>
-            <Stack gap="xs">
-              <Text size="sm">{t("imageCatalogErrorDescription")}</Text>
-              {syncImageCatalogButton}
-            </Stack>
-          </Alert>
-        );
-        break;
-      case "UNSUPPORTED":
-        break;
-      case "LOADED": {
-        const catalog = imageCatalogState.data;
-        if (!catalog.default_available) {
-          imageCatalogNotice = (
-            <Alert color="red" title={t("imageDefaultUnavailableTitle")}>
-              {t("imageDefaultUnavailableDescription")}
-            </Alert>
-          );
-        } else if (!catalog.generation_current) {
-          imageCatalogNotice = (
-            <Alert color="orange" title={t("imageCatalogChangedTitle")}>
-              <Stack gap="xs">
-                <Text size="sm">{t("imageCatalogChangedDescription")}</Text>
-                {syncImageCatalogButton}
-              </Stack>
-            </Alert>
-          );
-        } else if (catalog.snapshot_id == null) {
-          imageCatalogNotice = (
-            <Alert color="blue" title={t("imageCatalogNeverSyncedTitle")}>
-              <Stack gap="xs">
-                <Text size="sm">{t("imageCatalogNeverSyncedDescription")}</Text>
-                {syncImageCatalogButton}
-              </Stack>
-            </Alert>
-          );
-        } else if (catalog.latest_attempt?.status === "failed") {
-          imageCatalogNotice = (
-            <Alert color="yellow" title={t("imageCatalogLastSyncFailedTitle")}>
-              <Stack gap="xs">
-                <Text size="sm">
-                  {t("imageCatalogLastSyncFailedDescription")}
-                </Text>
-                {syncImageCatalogButton}
-              </Stack>
-            </Alert>
-          );
-        } else if (catalog.stale) {
-          imageCatalogNotice = (
-            <Alert color="yellow" title={t("imageCatalogStaleTitle")}>
-              <Stack gap="xs">
-                <Text size="sm">{t("imageCatalogStaleDescription")}</Text>
-                {syncImageCatalogButton}
-              </Stack>
-            </Alert>
-          );
-        } else if (catalog.entries.length === 0) {
-          imageCatalogNotice = (
-            <Alert color="blue" title={t("imageCatalogEmptyTitle")}>
-              <Stack gap="xs">
-                <Text size="sm">{t("imageCatalogEmptyDescription")}</Text>
-                {syncImageCatalogButton}
-              </Stack>
-            </Alert>
-          );
-        }
-        break;
-      }
+  } else if (imageCatalogState.type === "LOADING") {
+    imageCatalogNotice = (
+      <Alert color="blue" title={t("imageCatalogLoadingTitle")}>
+        {t("imageCatalogLoadingDescription")}
+      </Alert>
+    );
+  } else if (imageCatalogState.type === "ERROR") {
+    imageCatalogNotice = (
+      <Alert color="orange" title={t("imageCatalogErrorTitle")}>
+        <Stack gap="xs">
+          <Text size="sm">{t("imageCatalogErrorDescription")}</Text>
+          {syncImageCatalogButton}
+        </Stack>
+      </Alert>
+    );
+  } else if (imageCatalogState.type === "LOADED") {
+    const catalog = imageCatalogState.data;
+    if (!catalog.default_available) {
+      imageCatalogNotice = (
+        <Alert color="red" title={t("imageDefaultUnavailableTitle")}>
+          {t("imageDefaultUnavailableDescription")}
+        </Alert>
+      );
+    } else if (!catalog.generation_current) {
+      imageCatalogNotice = (
+        <Alert color="orange" title={t("imageCatalogChangedTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogChangedDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
+    } else if (catalog.snapshot_id == null) {
+      imageCatalogNotice = (
+        <Alert color="blue" title={t("imageCatalogNeverSyncedTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogNeverSyncedDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
+    } else if (catalog.latest_attempt?.status === "failed") {
+      imageCatalogNotice = (
+        <Alert color="yellow" title={t("imageCatalogLastSyncFailedTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogLastSyncFailedDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
+    } else if (catalog.stale) {
+      imageCatalogNotice = (
+        <Alert color="yellow" title={t("imageCatalogStaleTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogStaleDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
+    } else if (catalog.entries.length === 0) {
+      imageCatalogNotice = (
+        <Alert color="blue" title={t("imageCatalogEmptyTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogEmptyDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
     }
   }
   const formatToolLabel = (tool: string): string => {
@@ -463,13 +673,13 @@ function SelectableModelSettingsModal({
         return tool;
     }
   };
-
   return (
     <Modal
       opened={opened}
       onClose={onClose}
       title={t("settingsTitle", {
-        label: option.label || t("newOption"),
+        label,
+        model: candidate.model_display_name ?? t("noModelSelected"),
       })}
       centered
     >
@@ -497,10 +707,10 @@ function SelectableModelSettingsModal({
           step={1}
           allowDecimal={false}
           allowNegative={false}
-          value={option.context_window_tokens ?? ""}
+          value={candidate.context_window_tokens ?? ""}
           onChange={(value) =>
             onChange({
-              ...option,
+              ...candidate,
               context_window_tokens: typeof value === "number" ? value : null,
             })
           }
@@ -517,10 +727,10 @@ function SelectableModelSettingsModal({
           step={1}
           allowDecimal={false}
           allowNegative={false}
-          value={option.max_output_tokens ?? ""}
+          value={candidate.max_output_tokens ?? ""}
           onChange={(value) =>
             onChange({
-              ...option,
+              ...candidate,
               max_output_tokens: typeof value === "number" ? value : null,
             })
           }
@@ -535,10 +745,10 @@ function SelectableModelSettingsModal({
             </Text>
           ) : (
             <Checkbox.Group
-              value={option.builtin_tools}
+              value={candidate.builtin_tools}
               onChange={(builtinTools) => {
                 const builtinToolConfigs = {
-                  ...option.builtin_tool_configs,
+                  ...candidate.builtin_tool_configs,
                 };
                 for (const toolName of Object.keys(builtinToolConfigs)) {
                   if (!builtinTools.includes(toolName)) {
@@ -546,7 +756,7 @@ function SelectableModelSettingsModal({
                   }
                 }
                 onChange({
-                  ...option,
+                  ...candidate,
                   builtin_tools: builtinTools,
                   builtin_tool_configs: builtinToolConfigs,
                 });
@@ -563,7 +773,7 @@ function SelectableModelSettingsModal({
               </Stack>
             </Checkbox.Group>
           )}
-          {imageModelSelectionVisible && (
+          {imageModelSelectionVisible ? (
             <Box ml="xl">
               <Stack gap="xs">
                 <Select
@@ -573,40 +783,6 @@ function SelectableModelSettingsModal({
                   value={selectedImageModelValue}
                   allowDeselect={false}
                   error={imageModelError}
-                  renderOption={({ option: imageModelOption }) => (
-                    <Group
-                      gap="sm"
-                      justify="space-between"
-                      wrap="nowrap"
-                      w="100%"
-                    >
-                      <Stack gap={0}>
-                        <Text size="sm">{imageModelOption.label}</Text>
-                        <Text c="dimmed" size="xs">
-                          {imageModelOption.value ===
-                          IMAGE_GENERATION_DEFAULT_VALUE
-                            ? t("imageModelDefaultDescription")
-                            : (selectableImageEntries.find(
-                                (entry) =>
-                                  entry.provider_model_identifier ===
-                                  imageModelOption.value,
-                              )?.description ??
-                              t("imageModelUnavailableDescription"))}
-                        </Text>
-                      </Stack>
-                      {(imageModelOption.value ===
-                        IMAGE_GENERATION_DEFAULT_VALUE ||
-                        selectableImageEntries.find(
-                          (entry) =>
-                            entry.provider_model_identifier ===
-                            imageModelOption.value,
-                        )?.recommendation_rank === 1) && (
-                        <Badge size="xs" variant="light">
-                          {t("imageModelRecommended")}
-                        </Badge>
-                      )}
-                    </Group>
-                  )}
                   onChange={(imageGenerationModel) => {
                     if (imageGenerationModel == null) {
                       return;
@@ -615,7 +791,7 @@ function SelectableModelSettingsModal({
                       imageGenerationModel === IMAGE_GENERATION_DEFAULT_VALUE
                     ) {
                       onChange(
-                        withImageGenerationModelIdentifier(option, null),
+                        withImageGenerationModelIdentifier(candidate, null),
                       );
                       return;
                     }
@@ -628,7 +804,7 @@ function SelectableModelSettingsModal({
                     ) {
                       onChange(
                         withImageGenerationModelIdentifier(
-                          option,
+                          candidate,
                           imageGenerationModel,
                         ),
                       );
@@ -638,48 +814,19 @@ function SelectableModelSettingsModal({
                 <Text c="dimmed" size="xs">
                   {imageModelDescription}
                 </Text>
-                {savedImageModelNotice}
+                {selectedImageModelAvailability === "UNAVAILABLE" ? (
+                  <Alert color="orange" title={t("imageModelUnavailableTitle")}>
+                    {t("imageModelUnavailableDescription")}
+                  </Alert>
+                ) : selectedImageModelAvailability === "UNVERIFIED" ? (
+                  <Alert color="orange" title={t("imageModelUnverifiedTitle")}>
+                    {t("imageModelUnverifiedDescription")}
+                  </Alert>
+                ) : null}
                 {imageCatalogNotice}
               </Stack>
             </Box>
-          )}
-        </Stack>
-        <Stack gap="xs">
-          <Text fw={500} size="sm">
-            {t("subagentsSectionLabel")}
-          </Text>
-          <Switch
-            label={t("subagentEnabledLabel")}
-            description={t("subagentEnabledDescription")}
-            checked={option.subagent_enabled}
-            onChange={(event) =>
-              onChange({
-                ...option,
-                subagent_enabled: event.currentTarget.checked,
-              })
-            }
-          />
-          <Text c="dimmed" size="sm">
-            {t("subagentInheritanceDescription")}
-          </Text>
-          <Textarea
-            label={t("subagentGuidanceLabel")}
-            description={t("subagentGuidanceDescription", {
-              max: MAX_SUBAGENT_GUIDANCE_LENGTH,
-            })}
-            placeholder={t("subagentGuidancePlaceholder")}
-            value={option.subagent_guidance ?? ""}
-            disabled={!option.subagent_enabled}
-            maxLength={MAX_SUBAGENT_GUIDANCE_LENGTH}
-            autosize
-            minRows={3}
-            onChange={(event) =>
-              onChange({
-                ...option,
-                subagent_guidance: event.currentTarget.value || null,
-              })
-            }
-          />
+          ) : null}
         </Stack>
         <Group justify="flex-end">
           <Button variant="light" onClick={onClose}>
@@ -689,6 +836,76 @@ function SelectableModelSettingsModal({
       </Stack>
     </Modal>
   );
+}
+
+interface LabelSettingsModalProps {
+  option: SelectableModelOptionFormValue;
+  opened: boolean;
+  onClose: () => void;
+  onChange: (option: SelectableModelOptionFormValue) => void;
+}
+
+function LabelSettingsModal({
+  option,
+  opened,
+  onClose,
+  onChange,
+}: LabelSettingsModalProps): React.ReactElement {
+  const t = useTranslations("workspace.agents.selectableModelOptions");
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={t("labelSettingsTitle", { label: option.label || t("newOption") })}
+      centered
+    >
+      <Stack gap="md">
+        <Switch
+          label={t("subagentEnabledLabel")}
+          description={t("subagentEnabledDescription")}
+          checked={option.subagent_enabled}
+          onChange={(event) =>
+            onChange({
+              ...option,
+              subagent_enabled: event.currentTarget.checked,
+            })
+          }
+        />
+        <Text c="dimmed" size="sm">
+          {t("subagentInheritanceDescription")}
+        </Text>
+        <Textarea
+          label={t("subagentGuidanceLabel")}
+          description={t("subagentGuidanceDescription", {
+            max: MAX_SUBAGENT_GUIDANCE_LENGTH,
+          })}
+          placeholder={t("subagentGuidancePlaceholder")}
+          value={option.subagent_guidance ?? ""}
+          disabled={!option.subagent_enabled}
+          maxLength={MAX_SUBAGENT_GUIDANCE_LENGTH}
+          autosize
+          minRows={3}
+          onChange={(event) =>
+            onChange({
+              ...option,
+              subagent_guidance: event.currentTarget.value || null,
+            })
+          }
+        />
+        <Group justify="flex-end">
+          <Button variant="light" onClick={onClose}>
+            {t("settingsDone")}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function copyNoticeKey(
+  omitted: PrimarySettingsCopyResult["omitted"],
+): "copyPrimaryComplete" | "copyPrimaryPartial" {
+  return omitted.length === 0 ? "copyPrimaryComplete" : "copyPrimaryPartial";
 }
 
 export function SelectableModelOptionsEditor({
@@ -711,8 +928,19 @@ export function SelectableModelOptionsEditor({
   onChangeLightweightModelLabel,
 }: SelectableModelOptionsEditorProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
-  const [pickerOptionId, setPickerOptionId] = useState<string | null>(null);
-  const [settingsOptionId, setSettingsOptionId] = useState<string | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<CandidateTarget | null>(
+    null,
+  );
+  const [settingsTarget, setSettingsTarget] = useState<CandidateTarget | null>(
+    null,
+  );
+  const [labelSettingsOptionId, setLabelSettingsOptionId] = useState<
+    string | null
+  >(null);
+  const [copyNotice, setCopyNotice] = useState<{
+    key: "copyPrimaryComplete" | "copyPrimaryPartial";
+    omitted: string;
+  } | null>(null);
   const [pendingFocusOptionId, setPendingFocusOptionId] = useState<
     string | null
   >(null);
@@ -724,7 +952,6 @@ export function SelectableModelOptionsEditor({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-
   const enabledProviderOptions = useMemo(
     () => providerOptions.filter((option) => !option.disabled),
     [providerOptions],
@@ -737,10 +964,10 @@ export function SelectableModelOptionsEditor({
     () => options.map((option) => option.id),
     [options],
   );
-  const activeOption =
-    options.find((option) => option.id === pickerOptionId) ?? null;
-  const settingsOption =
-    options.find((option) => option.id === settingsOptionId) ?? null;
+  const picker = findCandidate(options, pickerTarget);
+  const settings = findCandidate(options, settingsTarget);
+  const labelSettingsOption =
+    options.find((option) => option.id === labelSettingsOptionId) ?? null;
   const mainLabelValue = fallbackSelectableModelLabel(mainModelLabel, options);
   const lightweightLabelValue = fallbackSelectableModelLabel(
     lightweightModelLabel,
@@ -748,10 +975,19 @@ export function SelectableModelOptionsEditor({
   );
   const hasEmptyLabels = options.some((option) => option.label.trim() === "");
   const hasMissingModels = options.some(
-    (option) => option.model_selection_value == null,
+    (option) =>
+      option.candidates.length === 0 ||
+      option.candidates.some(
+        (candidate) => candidate.model_selection_value == null,
+      ),
   );
   const hasDuplicateLabels = options.some((_, index) =>
     rowHasDuplicateLabel(options, index),
+  );
+  const hasDuplicateCandidates = options.some((option) =>
+    option.candidates.some((_, index) =>
+      candidateHasDuplicateModel(option, index),
+    ),
   );
   const hasInvalidImageGenerationSelection =
     hasInvalidImageGenerationSelections(options, imageGenerationCatalogStates);
@@ -784,10 +1020,9 @@ export function SelectableModelOptionsEditor({
     if (options.length >= MAX_SELECTABLE_MODEL_OPTIONS) {
       return;
     }
-    const id = createOptionId();
-    const nextOptions = [...options, createSelectableModelOptionFormValue(id)];
+    const id = createEditorId("option");
     setPendingFocusOptionId(id);
-    handleChangeOptions(nextOptions);
+    handleChangeOptions([...options, createSelectableModelOptionFormValue(id)]);
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
@@ -795,14 +1030,42 @@ export function SelectableModelOptionsEditor({
     if (over == null || active.id === over.id) {
       return;
     }
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    const activeIndex = options.findIndex((option) => option.id === activeId);
-    const overIndex = options.findIndex((option) => option.id === overId);
-    if (activeIndex === -1 || overIndex === -1) {
+    const activeIndex = options.findIndex(
+      (option) => option.id === String(active.id),
+    );
+    const overIndex = options.findIndex(
+      (option) => option.id === String(over.id),
+    );
+    if (activeIndex >= 0 && overIndex >= 0) {
+      handleChangeOptions(arrayMove(options, activeIndex, overIndex));
+    }
+  };
+
+  const handleCopyPrimarySettings = (
+    option: SelectableModelOptionFormValue,
+    candidateId: string,
+  ): void => {
+    const primary = option.candidates[0];
+    const target = option.candidates.find(
+      (candidate) => candidate.id === candidateId,
+    );
+    if (primary == null || target == null || primary.id === target.id) {
       return;
     }
-    handleChangeOptions(arrayMove(options, activeIndex, overIndex));
+    const copied = copyCompatiblePrimarySettings(primary, target);
+    handleChangeOptions(
+      updateCandidate(
+        options,
+        { optionId: option.id, candidateId },
+        () => copied.candidate,
+      ),
+    );
+    setCopyNotice({
+      key: copyNoticeKey(copied.omitted),
+      omitted: copied.omitted
+        .map((item) => t(`copyOmitted.${item}`))
+        .join(", "),
+    });
   };
 
   return (
@@ -812,59 +1075,69 @@ export function SelectableModelOptionsEditor({
         <Text size="sm" c="dimmed">
           {description}
         </Text>
-        {showValidationErrors && options.length === 0 && (
+        {showValidationErrors && options.length === 0 ? (
           <Alert color="red">{t("emptyList")}</Alert>
-        )}
-        {options.length >= MAX_SELECTABLE_MODEL_OPTIONS && (
+        ) : null}
+        {options.length >= MAX_SELECTABLE_MODEL_OPTIONS ? (
           <Alert color="blue">{t("maxOptions")}</Alert>
-        )}
-        {showValidationErrors && hasEmptyLabels && (
+        ) : null}
+        {showValidationErrors && hasEmptyLabels ? (
           <Alert color="red">{t("emptyLabel")}</Alert>
-        )}
-        {showValidationErrors && hasDuplicateLabels && (
+        ) : null}
+        {showValidationErrors && hasDuplicateLabels ? (
           <Alert color="red">{t("duplicateLabel")}</Alert>
-        )}
-        {showValidationErrors && hasMissingModels && (
+        ) : null}
+        {showValidationErrors && hasMissingModels ? (
           <Alert color="red">{t("missingModel")}</Alert>
-        )}
-        {showValidationErrors && hasInvalidImageGenerationSelection && (
+        ) : null}
+        {showValidationErrors && hasDuplicateCandidates ? (
+          <Alert color="red">{t("duplicateCandidate")}</Alert>
+        ) : null}
+        {showValidationErrors && hasInvalidImageGenerationSelection ? (
           <Alert color="red">{t("invalidImageModel")}</Alert>
-        )}
+        ) : null}
+        {copyNotice != null ? (
+          <Alert
+            color="blue"
+            withCloseButton
+            onClose={() => setCopyNotice(null)}
+          >
+            {t(copyNotice.key, { omitted: copyNotice.omitted })}
+          </Alert>
+        ) : null}
       </Stack>
 
-      {activeOption != null && (
+      {picker != null ? (
         <ModelCatalogPickerContainer
-          opened={pickerOptionId != null}
+          opened={pickerTarget != null}
           title={t("selectModelTitle", {
-            label: activeOption.label || t("newOption"),
+            label: picker.option.label || t("newOption"),
           })}
           handle={handle}
           integrations={enabledProviderOptions}
-          selectedIntegrationId={activeOption.model_provider_integration_id}
-          selectedValue={activeOption.model_selection_value}
-          onClose={() => setPickerOptionId(null)}
+          selectedIntegrationId={picker.candidate.model_provider_integration_id}
+          selectedValue={picker.candidate.model_selection_value}
+          onClose={() => setPickerTarget(null)}
           onSelectIntegration={(integrationId) => {
+            if (pickerTarget == null) {
+              return;
+            }
             handleChangeOptions(
-              updateOption(options, activeOption.id, (option) => ({
-                ...option,
+              updateCandidate(options, pickerTarget, (candidate) => ({
+                ...createSelectableModelCandidateFormValue(candidate.id),
                 model_provider_integration_id: integrationId,
-                model_selection_value: null,
-                model_display_name: null,
-                model_identifier: null,
-                normalized_capabilities: null,
-                context_window_tokens: null,
-                max_output_tokens: null,
-                builtin_tools: [],
-                builtin_tool_configs: {},
               })),
             );
           }}
           onSelectModel={(model) => {
+            if (pickerTarget == null) {
+              return;
+            }
             handleChangeOptions(
-              updateOption(options, activeOption.id, (option) => ({
-                ...option,
+              updateCandidate(options, pickerTarget, (candidate) => ({
+                ...candidate,
                 model_selection_value: optionModelValue(
-                  option.model_provider_integration_id,
+                  candidate.model_provider_integration_id,
                   model,
                 ),
                 model_display_name: model.model_display_name,
@@ -882,23 +1155,38 @@ export function SelectableModelOptionsEditor({
           }}
           onSyncCatalog={onSyncCatalog}
         />
-      )}
+      ) : null}
 
-      {settingsOption != null && (
+      {settings != null ? (
         <SelectableModelSettingsModal
-          opened={settingsOptionId != null}
-          option={settingsOption}
+          opened={settingsTarget != null}
+          label={settings.option.label || t("newOption")}
+          candidate={settings.candidate}
           imageGenerationCatalogStates={imageGenerationCatalogStates}
           canSyncImageCatalog={canSyncImageCatalog}
-          onClose={() => setSettingsOptionId(null)}
-          onChange={(nextOption) => {
+          onClose={() => setSettingsTarget(null)}
+          onChange={(candidate) => {
+            if (settingsTarget == null) {
+              return;
+            }
             handleChangeOptions(
-              updateOption(options, nextOption.id, () => nextOption),
+              updateCandidate(options, settingsTarget, () => candidate),
             );
           }}
           onSyncImageCatalog={onSyncImageCatalog}
         />
-      )}
+      ) : null}
+
+      {labelSettingsOption != null ? (
+        <LabelSettingsModal
+          opened={labelSettingsOptionId != null}
+          option={labelSettingsOption}
+          onClose={() => setLabelSettingsOptionId(null)}
+          onChange={(option) =>
+            handleChangeOptions(updateOption(options, option.id, () => option))
+          }
+        />
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Stack gap="sm">
@@ -932,7 +1220,7 @@ export function SelectableModelOptionsEditor({
         </Button>
       </Group>
 
-      {options.length > 0 && (
+      {options.length > 0 ? (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -942,20 +1230,12 @@ export function SelectableModelOptionsEditor({
             items={optionIds}
             strategy={verticalListSortingStrategy}
           >
-            <Box className={classes.optionsList}>
-              <Box className={classes.header}>
-                <Box />
-                <Text size="sm">{t("modelLabelColumn")}</Text>
-                <Text size="sm">{t("selectedModelColumn")}</Text>
-                <Text className={classes.actionsHeader} size="sm">
-                  {t("actionsColumn")}
-                </Text>
-              </Box>
+            <Stack gap="sm">
               {options.map((option, index) => (
-                <SelectableModelRow
+                <OptionCard
                   key={option.id}
                   option={option}
-                  duplicate={rowHasDuplicateLabel(options, index)}
+                  duplicateLabel={rowHasDuplicateLabel(options, index)}
                   canEdit={canEdit}
                   canRemove={options.length > 1}
                   showValidationErrors={showValidationErrors}
@@ -966,27 +1246,92 @@ export function SelectableModelOptionsEditor({
                       labelInputRefs.current.set(option.id, node);
                     }
                   }}
-                  onChangeLabel={(value) => {
+                  onChangeLabel={(label) =>
                     handleChangeOptions(
                       updateOption(options, option.id, (current) => ({
                         ...current,
-                        label: value,
+                        label,
+                      })),
+                    )
+                  }
+                  onOpenLabelSettings={() =>
+                    setLabelSettingsOptionId(option.id)
+                  }
+                  onAddCandidate={() => {
+                    if (
+                      option.candidates.length >=
+                      MAX_SELECTABLE_MODEL_CANDIDATES
+                    ) {
+                      return;
+                    }
+                    const candidate = createSelectableModelCandidateFormValue(
+                      createEditorId(`${option.id}-candidate`),
+                    );
+                    handleChangeOptions(
+                      updateOption(options, option.id, (current) => ({
+                        ...current,
+                        candidates: [...current.candidates, candidate],
+                      })),
+                    );
+                    setPickerTarget({
+                      optionId: option.id,
+                      candidateId: candidate.id,
+                    });
+                  }}
+                  onChangeCandidateModel={(candidateId) =>
+                    setPickerTarget({ optionId: option.id, candidateId })
+                  }
+                  onOpenCandidateSettings={(candidateId) =>
+                    setSettingsTarget({ optionId: option.id, candidateId })
+                  }
+                  onCopyPrimarySettings={(candidateId) =>
+                    handleCopyPrimarySettings(option, candidateId)
+                  }
+                  onMoveCandidate={(candidateId, direction) => {
+                    const candidateIndex = option.candidates.findIndex(
+                      (candidate) => candidate.id === candidateId,
+                    );
+                    const targetIndex = candidateIndex + direction;
+                    if (
+                      candidateIndex < 0 ||
+                      targetIndex < 0 ||
+                      targetIndex >= option.candidates.length
+                    ) {
+                      return;
+                    }
+                    handleChangeOptions(
+                      updateOption(options, option.id, (current) => ({
+                        ...current,
+                        candidates: arrayMove(
+                          current.candidates,
+                          candidateIndex,
+                          targetIndex,
+                        ),
                       })),
                     );
                   }}
-                  onChangeModel={() => setPickerOptionId(option.id)}
-                  onOpenSettings={() => setSettingsOptionId(option.id)}
-                  onRemove={() => {
+                  onRemoveCandidate={(candidateId) =>
+                    handleChangeOptions(
+                      updateOption(options, option.id, (current) => ({
+                        ...current,
+                        candidates: current.candidates.filter(
+                          (candidate) => candidate.id !== candidateId,
+                        ),
+                      })),
+                    )
+                  }
+                  onRemoveOption={() =>
                     handleChangeOptions(
                       options.filter((item) => item.id !== option.id),
-                    );
-                  }}
+                    )
+                  }
                 />
               ))}
-            </Box>
+            </Stack>
           </SortableContext>
         </DndContext>
-      )}
+      ) : null}
+      <Divider />
     </Stack>
   );
 }

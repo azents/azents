@@ -16,6 +16,7 @@ import {
   chatV1ArchiveAgentSession,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
+  chatV1CancelAgentSessionPrimaryModelReservation,
   chatV1CleanupSessionGitWorktree,
   chatV1CreateAgentWorkspaceDirectory,
   chatV1CreateInput,
@@ -28,6 +29,7 @@ import {
   chatV1EditMessage,
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
+  chatV1GetAgentSessionModelAvailability,
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentSessionSidebar,
   chatV1GetAgentWorkspace,
@@ -48,6 +50,7 @@ import {
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
   chatV1ReplaceSessionModelProfile,
+  chatV1ReserveAgentSessionPrimaryModel,
   chatV1RestoreAgentSession,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
@@ -111,6 +114,90 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getAgentSessionModelAvailability: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetAgentSessionModelAvailability({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  reserveAgentSessionPrimaryModel: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        semanticLabel: z.string().min(1),
+        primary: z.object({
+          llm_provider_integration_id: z.string().min(1),
+          model_identifier: z.string().min(1),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ReserveAgentSessionPrimaryModel({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          body: {
+            semantic_label: input.semanticLabel,
+            primary: input.primary,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  cancelAgentSessionPrimaryModelReservation: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        reservationGeneration: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CancelAgentSessionPrimaryModelReservation({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          body: {
+            reservation_generation: input.reservationGeneration,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

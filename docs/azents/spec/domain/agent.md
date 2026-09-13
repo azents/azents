@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_execution_options.py
+  - python/apps/azents/src/azents/core/model_availability.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_capabilities.py
   - python/apps/azents/src/azents/rdb/models/agent.py
@@ -24,6 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
+  - python/apps/azents/src/azents/rdb/models/model_candidate_health.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
@@ -33,6 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
+  - python/apps/azents/src/azents/repos/model_candidate_health/**
+  - python/apps/azents/src/azents/services/model_availability.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
@@ -100,8 +104,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-12
-spec_version: 76
+last_verified_at: 2026-09-13
+spec_version: 77
 ---
 
 # Agent Domain Spec
@@ -119,7 +123,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `workspace_id` | owning Workspace. restrictive parent FK prevents Workspace deletion from bypassing Agent lifecycle |
 | `lifecycle_status` | `active` or `decommissioning`; decommissioning fences new session and runtime activity |
 | `name`, `description` | display name and description |
-| `selectable_model_options` | ordered JSONB array of selectable model options. Each option has a unique label, resolved `AgentModelSelection` snapshot, and model-scoped runtime settings |
+| `selectable_model_options` | ordered JSONB array of selectable semantic labels. Each option has a unique label, label-scoped subagent policy, and one to five ordered physical candidates; each candidate owns a resolved `AgentModelSelection` snapshot and model-scoped runtime settings |
 | `main_model_label` | selected label from `selectable_model_options` for normal model turns |
 | `lightweight_model_label` | selected label from `selectable_model_options` for compaction/lightweight model turns |
 | `model_selection` | denormalized effective main runtime model selection snapshot resolved from `main_model_label`. required for every Agent |
@@ -206,23 +210,25 @@ automatically.
 - labels are trimmed, non-empty, case-sensitive, and unique within the list;
 - labels are at most 80 characters;
 - selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option;
-- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, complete `settings.builtin_tools` name/config entries, `settings.subagent_enabled`, and `settings.subagent_guidance` independently;
-- nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that option;
+- every option stores one to five ordered candidates, where candidate 1 is Primary and later candidates are fallbacks;
+- the same integration/model identity cannot appear twice inside one label, while separate labels may reuse it;
+- every candidate stores `settings.context_window_tokens`, `settings.max_output_tokens`, and complete `settings.builtin_tools` name/config entries independently;
+- nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that candidate;
 - built-in configuration is scoped by semantic tool name. `image_generation` omits `config.model` for the maintained provider default and stores an exact provider identifier for an explicit pin; changing that field preserves unrelated configuration keys, while disabling the tool removes its complete entry;
-- `subagent_enabled` defaults to true and controls only whether the label is available as an explicit `spawn_agent` model target;
-- `subagent_guidance` is nullable parent-model routing guidance, is trimmed with blank input normalized to null, and is limited to 500 characters.
+- option-level `subagent_enabled` defaults to true and controls only whether the label is available as an explicit `spawn_agent` model target;
+- option-level `subagent_guidance` is nullable parent-model routing guidance, is trimmed with blank input normalized to null, and is limited to 500 characters.
 
 `model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets. They are effective runtime snapshots owned by Agent service consistency logic:
 
-- `model_selection = selectable_model_options[main_model_label].model_selection`
-- `lightweight_model_selection = selectable_model_options[lightweight_model_label].model_selection`
+- `model_selection = selectable_model_options[main_model_label].candidates[0].model_selection`
+- `lightweight_model_selection = selectable_model_options[lightweight_model_label].candidates[0].model_selection`
 
-The denormalized snapshots remain the Agent defaults. They are fallback inputs only when a Session
-has no applied model profile; an applied Session label takes precedence for future implicit turns.
-Normal human inputs may instead request one label from the same Agent-owned option list for a single
-run. At run activation, the worker resolves that label against the current Agent snapshot without
-querying Workspace defaults or model catalogs. Clients never submit provider, integration, model,
-capability, or token-limit snapshots as run intent.
+The denormalized snapshots are internal derived mirrors and are not public response fields. A Session
+without an applied label uses the Agent main label; an applied Session label takes precedence for
+future implicit turns. Normal human inputs may instead request one label from the same Agent-owned
+option list for a single run. At fresh operation preparation, the worker freezes that label's current
+ordered candidates without querying Workspace defaults or model catalogs. Clients never submit
+provider, integration, model, capability, or token-limit snapshots as run intent.
 
 Required snapshot fields:
 
@@ -261,7 +267,27 @@ Rules:
 - Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
 - New Agents copy each Workspace option's model snapshot and complete model-scoped settings, including built-in tool configs; later Workspace changes do not change existing Agent options or effective snapshots.
-- During the direct-model transition, explicit legacy `default_model_selection` inputs are still accepted and converted into an equivalent default selectable option list.
+- Public Workspace mutation accepts only the nested default candidate-chain contract. The
+  denormalized default snapshots remain internal derived mirrors.
+
+### 1.2.1 Workspace candidate health and Session Primary reservation
+
+`model_candidate_health` is the PostgreSQL authority for short-lived availability of one physical
+candidate identity inside a Workspace. Identity is the Workspace, provider integration, and provider
+model identifier. A normalized quota or billing failure advances its health generation, starts a
+five-minute cooldown, and revokes any older foreground probe or Session reservation authority.
+
+After cooldown, one foreground operation may claim a generation-fenced half-open probe. Other
+operations observe `probe_busy` and continue to later compatible candidates. Probe success clears
+cooldown only when its claim generation is still current; quota failure starts a new cooldown at a
+new generation. Lease expiry permits a later claimant, and stale completions cannot overwrite newer
+health.
+
+One root Session may store a bounded Primary-next reservation for its currently applied semantic
+label and exact Primary identity. Reservation create, transfer to the next foreground operation,
+cancel, success, and renewed quota are fenced by candidate health generation and reservation
+generation. A stale identity or generation is not projected as `primary_next`. PostgreSQL remains
+authoritative when Redis is unavailable or restored empty.
 
 ### 1.3 Provider integration and model listing
 
@@ -298,37 +324,45 @@ Create/update requests accept selectable model options as the current model cont
   "selectable_model_options": [
     {
       "label": "default",
-      "model_selection": {
-        "llm_provider_integration_id": "int_...",
-        "model_identifier": "gpt-5"
-      },
-      "settings": {
-        "context_window_tokens": 128000,
-        "max_output_tokens": 8192,
-        "builtin_tools": [
-          {"name": "web_search"},
-          {
-            "name": "image_generation",
-            "config": {"model": "gpt-image-2.5-flare"}
+      "candidates": [
+        {
+          "model_selection": {
+            "llm_provider_integration_id": "int_...",
+            "model_identifier": "gpt-5"
+          },
+          "settings": {
+            "context_window_tokens": 128000,
+            "max_output_tokens": 8192,
+            "builtin_tools": [
+              {"name": "web_search"},
+              {
+                "name": "image_generation",
+                "config": {"model": "gpt-image-2.5-flare"}
+              }
+            ]
           }
-        ],
-        "subagent_enabled": false,
-        "subagent_guidance": "Reserve for complex synthesis tasks."
-      }
+        }
+      ],
+      "subagent_enabled": false,
+      "subagent_guidance": "Reserve for complex synthesis tasks."
     },
     {
       "label": "lightweight",
-      "model_selection": {
-        "llm_provider_integration_id": "int_...",
-        "model_identifier": "gpt-5.5-mini"
-      },
-      "settings": {
-        "context_window_tokens": null,
-        "max_output_tokens": 4096,
-        "builtin_tools": [],
-        "subagent_enabled": true,
-        "subagent_guidance": "Prefer for bounded investigation."
-      }
+      "candidates": [
+        {
+          "model_selection": {
+            "llm_provider_integration_id": "int_...",
+            "model_identifier": "gpt-5.5-mini"
+          },
+          "settings": {
+            "context_window_tokens": null,
+            "max_output_tokens": 4096,
+            "builtin_tools": []
+          }
+        }
+      ],
+      "subagent_enabled": true,
+      "subagent_guidance": "Prefer for bounded investigation."
     }
   ],
   "main_model_label": "default",
@@ -345,14 +379,13 @@ Create/update requests accept selectable model options as the current model cont
 ```
 
 - `selectable_model_options` omitted on create: copy Workspace default selectable model options into Agent.
-- `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time, and its settings are normalized against that resolved option capability.
-- Omitted option settings default to null token caps, every supported implemented built-in tool enabled, explicit subagent targeting enabled, and null subagent guidance. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
+- `selectable_model_options` supplied: whole-list replacement. Every candidate is resolved through stored catalog projection at submit time, and its settings are normalized against that candidate capability.
+- Omitted candidate settings default to null token caps and every supported implemented built-in tool enabled. Option-level subagent targeting defaults to enabled with null guidance. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
 - Subagent guidance is trimmed and blank input becomes null. Guidance longer than 500 characters is rejected.
-- Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per option. Image-generation defaults and explicit pins are also validated against the selected model capability, enabled provider integration, reviewed registry, and current stored image catalog before save.
-- Empty lists, more than 10 entries, empty labels, duplicate labels, and unresolved model selections are rejected.
+- Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per candidate. Image-generation defaults and explicit pins are also validated against the selected candidate capability, enabled provider integration, reviewed registry, and current stored image catalog before save.
+- Empty lists, more than 10 labels, labels with zero or more than five candidates, empty labels, duplicate labels, duplicate physical identities within a label, and unresolved model selections are rejected.
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
-- Effective `model_selection` and `lightweight_model_selection` are recomputed from the final labels and returned in responses.
-- During transition, legacy direct `model_selection` and `lightweight_model_selection` inputs remain accepted. They are converted into compatible selectable model options and effective snapshots. These fields are compatibility for the direct snapshot API, not the removed `ModelConfig` API.
+- Internal effective `model_selection` and `lightweight_model_selection` mirrors are recomputed from each final label's Primary candidate. Public requests and responses expose only the nested chains and selected labels.
 - `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
 - `runtime_profile_id` omitted or null on create produces a Runtime-free Agent and does not copy the
@@ -366,7 +399,7 @@ Create/update requests accept selectable model options as the current model cont
   clear writes `unconfigured/runtime_profile_required`, clears desired Provider/Runner
   acknowledgement evidence, and preserves any applied incarnation. Current lifecycle guards decide
   whether explicit recreation is required.
-- Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
+- Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
 
@@ -382,23 +415,27 @@ PUT accepts Workspace default selectable model options and labels:
   "default_selectable_model_options": [
     {
       "label": "default",
-      "model_selection": {
-        "llm_provider_integration_id": "int_...",
-        "model_identifier": "gpt-5"
-      },
-      "settings": {
-        "context_window_tokens": null,
-        "max_output_tokens": null,
-        "builtin_tools": [
-          {"name": "web_search"},
-          {
-            "name": "image_generation",
-            "config": {"model": "gpt-image-2.5-flare"}
+      "candidates": [
+        {
+          "model_selection": {
+            "llm_provider_integration_id": "int_...",
+            "model_identifier": "gpt-5"
+          },
+          "settings": {
+            "context_window_tokens": null,
+            "max_output_tokens": null,
+            "builtin_tools": [
+              {"name": "web_search"},
+              {
+                "name": "image_generation",
+                "config": {"model": "gpt-image-2.5-flare"}
+              }
+            ]
           }
-        ],
-        "subagent_enabled": true,
-        "subagent_guidance": null
-      }
+        }
+      ],
+      "subagent_enabled": true,
+      "subagent_guidance": null
     }
   ],
   "default_main_model_label": "default",
@@ -410,8 +447,9 @@ PUT accepts Workspace default selectable model options and labels:
 - Once configured, the Workspace default list cannot be cleared to empty.
 - Labels, option count, model-scoped settings defaults, and per-option validation use the same invariants as Agent selectable model options.
 - Default labels normalize to the first option when omitted, null, or absent from the final list.
-- Response returns default selectable options, default labels, and denormalized effective default snapshots.
-- During transition, legacy direct `default_model_selection` and `default_lightweight_model_selection` inputs remain accepted and are converted into compatible default selectable options.
+- Response returns default selectable candidate chains and default labels. Denormalized effective
+  default snapshots are internal derived mirrors; legacy direct model-selection mutation fields are
+  not accepted.
 
 ### 2.3 LLM provider integration models
 
@@ -420,6 +458,24 @@ GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{
 ```
 
 After verifying integration ownership and enabled state, returns normalized model candidate list. This endpoint is picker source for Agent/Workspace settings UI.
+
+### 2.3.1 Breaking-change upgrade guidance
+
+The candidate-chain release is a coordinated clean-v1 cutover. Database migration converts every
+existing label into one `candidates` entry while preserving its physical model, settings, selected
+main/lightweight labels, and Workspace-to-new-Agent copy behavior. Deployments must stop old
+readers/writers, apply the migration, and then start the complete new Server, Worker, Web, and
+generated-client set.
+
+Clients must replace singular option-level `model_selection` / `settings` with
+`candidates[].model_selection` / `candidates[].settings`. Agent and Workspace public mutation no
+longer accepts direct main/lightweight physical-selection fields, and public responses no longer
+return denormalized effective-selection mirrors. Callers select main and lightweight behavior by
+semantic label and treat the first candidate as Primary.
+
+Before new-format writes, rollback requires the old application and database downgrade together.
+After new-format writes, automatic downgrade is not a safe configuration collapse; restore by
+roll-forward repair or an explicit operator-approved conversion that accepts candidate loss.
 
 ### 2.4 Automatic root Session Projects
 
@@ -623,6 +679,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-13** (spec_version 77) — Replaced flat selectable labels and legacy direct public model
+  fields with ordered one-to-five candidate chains, Primary-derived internal mirrors, Workspace
+  cooldown/probe authority, and generation-fenced Session Primary reservations.
 - **2026-09-12** (spec_version 76) — Made automatic model-call retry attempts
   freshly resolve current Session-applied inference intent after backoff while
   preserving the failed attempt snapshot.

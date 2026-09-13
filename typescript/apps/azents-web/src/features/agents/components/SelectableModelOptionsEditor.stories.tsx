@@ -6,6 +6,7 @@ import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
   ProviderIntegrationOption,
+  SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
 import type { ModelCapabilities } from "@azents/public-client";
@@ -89,9 +90,8 @@ const loadedImageCatalogStates = new Map<string, ImageGenerationCatalogState>([
   ["integration-main", { type: "LOADED", data: imageCatalogData }],
 ]);
 
-const defaultOption: SelectableModelOptionFormValue = {
-  id: "default",
-  label: "default",
+const defaultCandidate: SelectableModelCandidateFormValue = {
+  id: "default-primary",
   model_provider_integration_id: "integration-main",
   model_selection_value: "integration-main:gpt-5.5",
   model_display_name: "GPT 5.5",
@@ -104,23 +104,33 @@ const defaultOption: SelectableModelOptionFormValue = {
     web_search: {},
     image_generation: {},
   },
+};
+
+const defaultOption: SelectableModelOptionFormValue = {
+  id: "default",
+  label: "default",
+  candidates: [defaultCandidate],
   subagent_enabled: true,
   subagent_guidance: "Use for complex synthesis tasks.",
 };
 
-const explicitImageOption: SelectableModelOptionFormValue = {
-  ...defaultOption,
+const explicitImageCandidate: SelectableModelCandidateFormValue = {
+  ...defaultCandidate,
   builtin_tool_configs: {
-    ...defaultOption.builtin_tool_configs,
+    ...defaultCandidate.builtin_tool_configs,
     image_generation: {
       model: "gpt-image-2.5-flare",
     },
   },
 };
 
-const lightweightOption: SelectableModelOptionFormValue = {
-  id: "lightweight",
-  label: "lightweight",
+const explicitImageOption: SelectableModelOptionFormValue = {
+  ...defaultOption,
+  candidates: [explicitImageCandidate],
+};
+
+const lightweightCandidate: SelectableModelCandidateFormValue = {
+  id: "lightweight-primary",
   model_provider_integration_id: "integration-main",
   model_selection_value: "integration-main:gpt-5.5-mini",
   model_display_name: "GPT 5.5 mini",
@@ -134,6 +144,12 @@ const lightweightOption: SelectableModelOptionFormValue = {
   max_output_tokens: null,
   builtin_tools: [],
   builtin_tool_configs: {},
+};
+
+const lightweightOption: SelectableModelOptionFormValue = {
+  id: "lightweight",
+  label: "lightweight",
+  candidates: [lightweightCandidate],
   subagent_enabled: false,
   subagent_guidance: "Prefer for repository exploration.",
 };
@@ -205,6 +221,35 @@ type Story = StoryObj<typeof meta>;
 
 export const Default = {} satisfies Story;
 
+export const OrderedFallbackCandidates = {
+  args: {
+    options: [
+      {
+        ...defaultOption,
+        candidates: [
+          defaultCandidate,
+          {
+            ...lightweightCandidate,
+            id: "default-fallback",
+          },
+        ],
+      },
+    ],
+    lightweightModelLabel: "default",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Primary")).toBeVisible();
+    await expect(canvas.getByText("Fallback 1")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Copy Primary settings" }),
+    );
+    await expect(
+      canvas.getByText(/Compatible Primary settings copied/),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const AddModelFocusesEmptyLabel = {
   render: () => <SelectableModelOptionsEditorHarness />,
   play: async ({ canvasElement }) => {
@@ -233,7 +278,7 @@ export const SettingsModal = {
     );
     const body = within(document.body);
     await expect(
-      body.getByRole("dialog", { name: "Settings for default" }),
+      body.getByRole("dialog", { name: "default · GPT 5.5 settings" }),
     ).toBeVisible();
     await expect(
       body.getByText(
@@ -283,10 +328,15 @@ export const ImageGenerationModelUnavailable = {
     options: [
       {
         ...defaultOption,
-        builtin_tool_configs: {
-          ...defaultOption.builtin_tool_configs,
-          image_generation: { model: "gpt-image-2" },
-        },
+        candidates: [
+          {
+            ...defaultCandidate,
+            builtin_tool_configs: {
+              ...defaultCandidate.builtin_tool_configs,
+              image_generation: { model: "gpt-image-2" },
+            },
+          },
+        ],
       },
     ],
     lightweightModelLabel: "default",
@@ -407,7 +457,7 @@ export const SubagentPolicyInteraction = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
-      canvas.getByRole("button", { name: "Model settings" }),
+      canvas.getByRole("button", { name: "Label settings" }),
     );
     const body = within(document.body);
     const enabledSwitch = body.getByRole("checkbox", {
@@ -434,7 +484,7 @@ export const ExplicitSubagentSelectionDisabled = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
-      canvas.getByRole("button", { name: "Model settings" }),
+      canvas.getByRole("button", { name: "Label settings" }),
     );
     const body = within(document.body);
     await expect(
@@ -469,15 +519,20 @@ export const PendingNewModel = {
       {
         id: "option-1",
         label: "",
-        model_provider_integration_id: null,
-        model_selection_value: null,
-        model_display_name: null,
-        model_identifier: null,
-        normalized_capabilities: null,
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        builtin_tool_configs: {},
+        candidates: [
+          {
+            id: "option-1-primary",
+            model_provider_integration_id: null,
+            model_selection_value: null,
+            model_display_name: null,
+            model_identifier: null,
+            normalized_capabilities: null,
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+            builtin_tool_configs: {},
+          },
+        ],
         subagent_enabled: true,
         subagent_guidance: null,
       },
@@ -491,10 +546,15 @@ export const MissingModel = {
     options: [
       {
         ...defaultOption,
-        model_selection_value: null,
-        model_display_name: null,
-        model_identifier: null,
-        normalized_capabilities: null,
+        candidates: [
+          {
+            ...defaultCandidate,
+            model_selection_value: null,
+            model_display_name: null,
+            model_identifier: null,
+            normalized_capabilities: null,
+          },
+        ],
       },
     ],
     lightweightModelLabel: "default",

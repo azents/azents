@@ -8,6 +8,7 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
+  - python/apps/azents/src/azents/core/model_availability.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
@@ -24,6 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/session_agent.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
+  - python/apps/azents/src/azents/rdb/models/model_candidate_health.py
   - python/apps/azents/src/azents/rdb/models/agent_run_input_event.py
   - python/apps/azents/src/azents/rdb/models/inference_profile_types.py
   - python/apps/azents/src/azents/rdb/models/event.py
@@ -47,6 +49,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
   - python/apps/azents/src/azents/repos/session_model_profile/**
+  - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
@@ -59,6 +62,7 @@ code_paths:
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/session_title.py
+  - python/apps/azents/src/azents/services/model_availability.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/runtime/terminal_coordination/**
@@ -114,6 +118,9 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /chat/v1/sessions/{session_id}/title
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
@@ -126,8 +133,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-12
-spec_version: 167
+last_verified_at: 2026-09-13
+spec_version: 168
 ---
 
 # Conversation & Events
@@ -256,6 +263,7 @@ Runtime lifecycle lock or wait condition.
 | `current_model_selection` / `current_model_settings`                                            | JSONB \| null         | Complete prepared physical model and model-scoped settings snapshot for the current call.                                                          |
 | `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null           | Effective limits stored with the prepared physical snapshot.                                                                                         |
 | `current_inference_resolved_at`                                                                  | timestamptz \| null   | Resolution time for the complete prepared-turn snapshot.                                                                                            |
+| `primary_model_reservation`                                                                      | JSONB \| null         | Generation-fenced one-shot Primary reservation for the next eligible foreground operation.                                                         |
 | `session_kind`                                                                                   | enum                  | `root` or `subagent`; ordinary session lists include only `root` sessions                                                         |
 | `status`                                                                                         | enum                  | `active` or `archived`                                                                                                            |
 | `primary_kind`                                                                                   | enum \| null          | `team_primary` marks the agent's default Team conversation. User Sessions always store `null` and never become Team primary.      |
@@ -406,16 +414,18 @@ External Channel root Session may instead use only the creation-marked human
 results are ineligible. Its title text is limited to the authorized body and bounded safe attachment
 names and media types without reading attachment contents. The worker then immediately schedules
 best-effort lightweight model title generation from that exact initial prompt without waiting for the
-first run to complete. The Agent's saved lightweight-model snapshot selects the response envelope:
-`strict_json_schema = true` uses only a strict one-field Structured Output contract, `false` uses only
-title-only plain text, and `null` starts with Structured Output. The unknown branch changes once to
-plain text only when a typed provider parameter or code identifies that output contract as unsupported
-or unroutable, or when a successful response cannot be decoded as the required title object.
-Authentication, rate limiting, timeout, transport, provider availability, and other operational
-failures retain the active mode and existing provider retry policy. Every request keeps the same saved
-provider integration and model. Shared instructions preserve request-named products, tools, filenames,
-and technical terms and tell the model to ignore platform markup used only to address the Agent
-without rewriting the canonical input.
+first run to complete. The title operation freezes the Agent's saved Lightweight label candidates and
+owns an independent cursor and candidate-local retry counter. Each candidate's saved
+`strict_json_schema` snapshot selects its response envelope: `true` uses only a strict one-field
+Structured Output contract, `false` uses only title-only plain text, and `null` starts with Structured
+Output. The unknown branch changes once to plain text only when a typed provider parameter or code
+identifies that output contract as unsupported or unroutable, or when a successful response cannot be
+decoded as the required title object. A normalized `quota_or_billing` failure shares Workspace
+cooldown and advances to the next candidate; authentication, ordinary rate limiting, timeout,
+transport, provider availability, and other operational failures retain the active candidate and its
+existing retry policy. Shared instructions preserve request-named products, tools, filenames, and
+technical terms and tell the model to ignore platform markup used only to address the Agent without
+rewriting the canonical input.
 
 The resulting concise `auto_generated` title only replaces the deterministic title while
 `title_source = auto_initial` and `title_generation_event_id` still points at the same initial prompt
@@ -668,6 +678,7 @@ before destructive cleanup can remove a path or branch.
 | `requested_reasoning_effort`    | enum \| null            | Nullable requested effort paired with the activation label; it does not store resolved physical model state.                                                 |
 | `active_tool_calls`             | JSONB array             | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation`                                                                     |
 | `retry_state`                   | JSONB \| null           | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition                                                  |
+| `model_operation_state`         | JSONB \| null           | Frozen foreground and compaction candidate chains, cursors, attempted identities, candidate outcomes, and transferred probe/reservation claims for recovery. |
 | `vfs_projection`                | JSONB \| null           | Self-contained immutable `azents://` source and file snapshot authorized for this run. It is ensured before input promotion and reused by recovery.           |
 | `parent_agent_run_id`           | FK `agent_runs` \| null | Parent run lineage for a subagent's first run                                                                                                                |
 | `last_completed_event_id`       | `str(32)` \| null       | Terminal run boundary event id when available                                                                                                                |
@@ -683,18 +694,27 @@ before destructive cleanup can remove a path or branch.
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
 `normalizing_output`, `executing_tools`, `appending_events`, `compacting`, and `stopping`.
 
-`retry_state` is the source of truth for the current model turn's failed-run retry progress. While
-present, the run remains `running` and live run state exposes the active retry cycle during backoff
-and the in-flight retry attempt. Successful model output admission clears `retry_state` in the same
-transaction that appends the output, so a later model turn starts with a fresh retry budget and REST
-resync cannot recover an earlier turn's error. Terminal run updates also clear `retry_state`
-defensively so retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled
-runs. Classified provider-attributed retry state may retain only the closed category, diagnostic
-retryability, bounded redacted provider message, safe code/type/status/retry hint, internal
-provider/model/integration identifiers, and stable safe fingerprint. Every classified provider
-category uses the complete failed-run budget; diagnostic `non_retryable` does not short-circuit a
-typed provider failure. An unclassified provider outcome does not create provider retry state and
-instead follows the ordinary internal-error path.
+`model_operation_state` contains independent foreground and compaction slots. A fresh operation
+freezes the selected semantic label's ordered candidates and compatible settings. Each slot records
+its current cursor, quota-attempted identities, transferred probe or Primary reservation claim, and
+one bounded outcome per candidate. Recovery and Worker handover resume this state rather than
+re-reading or restarting an in-flight chain. A fresh manual failed-run retry creates a new Run and
+resolves the current Agent chain.
+
+`retry_state` is the source of truth for the current physical candidate's non-quota failed-run retry
+progress. While present, the run remains `running` and live run state exposes the active retry cycle
+during backoff and the in-flight retry attempt. Successful model output admission clears
+`retry_state` in the same transaction that appends the output, so a later model turn starts with a
+fresh retry budget and REST resync cannot recover an earlier turn's error. Terminal run updates also
+clear `retry_state` defensively so retry progress cannot leak into completed, stopped, failed,
+interrupted, or cancelled runs. Classified provider-attributed retry state may retain only the closed
+category, diagnostic retryability, bounded redacted provider message, safe code/type/status/retry
+hint, internal provider/model/integration identifiers, and stable safe fingerprint. Every classified
+provider category except `quota_or_billing` uses the complete failed-run budget; diagnostic
+`non_retryable` does not short-circuit a typed provider failure. A normalized quota or billing
+failure is recorded in the operation slot and advances immediately to the next eligible candidate
+before generic retry publication. An unclassified provider outcome does not create provider retry
+state and instead follows the ordinary internal-error path.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
 `agent_run_input_events`. Normal mailbox-item input resolves its requested profile before activation, then
@@ -870,20 +890,26 @@ event-list APIs:
   projection includes nested nodes, canonical paths, linked child `agent_session_id` values for
   detail routes, projected status, latest task/message preview, latest run metadata, terminal result
   preview, and unread terminal result indicator.
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability` returns the
+  PostgreSQL-derived projection for the Session's applied semantic label: exact Primary public
+  identity/display, `available | cooldown | probing | primary_next`, deadline, server time, first
+  compatible usable fallback display, and current reservation. Reserve and cancel routes use exact
+  identity plus generation fencing and return the same projection, including user-safe `409`
+  convergence state on a stale request.
 
 Durable human `user_message` events preserve their immutable requested profile intent. They do not
 embed an associated AgentRun summary and do not change when later run provenance changes. Pending mailbox items likewise expose only requested intent and source-safe presentation data. The dedicated live Run projection carries the current
 Session inference snapshot's allowlisted physical provenance; clients never infer it from Composer or
 Agent defaults.
 
-Each `turn_marker` with provider usage copies the exact Session inference snapshot applied to that
-model call. The immutable public provenance consists only of the Agent-owned target label, raw
-nullable reasoning effort, nullable user-facing model display name, effective context window, and
-effective automatic-compaction threshold. `run_id` remains the marker-to-AgentRun link. Historical
-markers without these nullable fields remain valid, and readers report provenance as unavailable
-instead of borrowing the current Session, Agent, Composer, or live Run profile. Physical provider and
-model identifiers, integration selection, credentials, and the full resolved selection are not stored
-in the public marker payload.
+Each `turn_marker` with provider usage copies the exact Session inference snapshot and applied
+physical route for that completed logical operation. Immutable provenance separates the requested
+semantic label, effort, and execution options from operation ID/kind, candidate ordinal,
+`primary | fallback` role, provider/integration/model identity, public model display, and allowlisted
+effective limits. `run_id` remains the marker-to-AgentRun link. Historical markers without route
+fields remain valid, and readers report provenance as unavailable instead of borrowing the current
+Session, Agent, Composer, or live Run profile. Credentials, raw provider payloads, and arbitrary
+provider diagnostics are never stored in the public marker payload.
 
 The frontend retains raw durable events and raw live partial events separately from rendered
 `ChatMessage` view models. Projection identity is semantic rather than event-kind-global: assistant
@@ -1255,7 +1281,11 @@ remain as an unbounded raw tail or storage JSON dump.
 - Native artifacts are opaque same-native replay optimizations, never canonical event state.
 - Every durable provider-tool call carries bounded provider-neutral semantic input, output, and references; model-visible consumers do not parse native artifacts.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
-- Classified provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every classified category receives the complete configured retry budget, while unclassified provider outcomes are internal errors and do not enter provider retry state.
+- Classified provider failures retain only bounded redacted diagnostics through operation outcomes,
+  retry state, and terminal failed-run history. `quota_or_billing` advances the frozen chain before
+  generic retry; other classified categories retain the configured retry budget.
+- PostgreSQL candidate health and Session reservation generations remain authoritative when Redis is
+  unavailable or restored empty.
 - User Stop is terminal, clears retry and live-operation state, and never creates a stopped-Run recovery or replay source.
 - Public chat UI state is restored from `/history`, `/live`, the dedicated Subagent Tree API, and event WebSocket actions, including session todo, action execution state, and subagent tree invalidations.
 - Existing transcript/session data migration is not required for the private service cutover.
@@ -1344,6 +1374,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-13** — v168. Added frozen foreground/compaction candidate operation state,
+  quota-before-retry progression, PostgreSQL-derived Session availability and Primary reservation
+  APIs, and immutable actual-candidate turn provenance.
 - **2026-09-12** — v167. Added the repository-owned applied-profile replacement
   boundary and monotonic generation used to reject stale external native drafts
   while preserving web idempotency and already-prepared model calls.

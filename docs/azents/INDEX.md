@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-12 | 76 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-12 | 167 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-13 | 77 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-13 | 168 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-12 | 78 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-10 | 24 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-13 | 25 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-12 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
@@ -32,12 +32,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-12 | 176 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 177 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-12 | 79 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-10 | 34 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-12 | 48 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 49 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-12 | 40 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-12 | 26 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
@@ -47,9 +47,9 @@ Design documents are accumulated records and are not listed individually in this
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-12 | 19 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-12 | 35 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-12 | 21 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-12 | 58 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 36 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-13 | 59 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
 
@@ -279,7 +279,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Deliver the OpenAI HTTP Migration as One Revertible Change Historical Requirements Reconstruction](requirements/migration-260716-openai-http-migration-as-revertible-change.md) | migration-260716 | 2026-07-16 | - |
 | [Legacy Snapshot Identifier Migration Requirements](requirements/migration-260721-legacy-snapshot-identifier-migration.md) | migration-260721 | 2026-07-21 | 2026-07-21 |
 | [Session Model Change Requirements](requirements/model-260819-session-model-change.md) | model-260819 | 2026-08-19 | 2026-08-19 |
-| [Model Quota Fallback Requirements](requirements/model-260912-quota-fallback.md) | model-260912 | 2026-09-12 | - |
+| [Model Quota Fallback Requirements](requirements/model-260912-quota-fallback.md) | model-260912 | 2026-09-12 | 2026-09-13 |
 | [Multi-Active AgentSession Migration Overview Historical Requirements Reconstruction](requirements/multi-260625-multi-active-sessions-overview.md) | multi-260625 | 2026-06-25 | - |
 | [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
 | [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |

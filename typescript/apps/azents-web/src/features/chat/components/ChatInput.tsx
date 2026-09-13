@@ -2,6 +2,7 @@
 
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Divider,
@@ -28,7 +29,9 @@ import {
 import { memo } from "react";
 import { AttachmentPreviewBarContainer } from "../containers/AttachmentPreviewBarContainer";
 import { useChatInputContainer } from "../containers/useChatInputContainer";
+import { modelAvailabilityBadge } from "../modelAvailability";
 import classes from "./ChatInput.module.css";
+import { ModelAvailabilityControl } from "./ModelAvailabilityControl";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import { TokenUsageDetails, TokenUsageIndicator } from "./TokenUsageIndicator";
 import type {
@@ -82,6 +85,14 @@ function ChatInputView({
     contextUsageEnabled,
     contextUsage,
     contextUsageActiveRun,
+    modelAvailability,
+    modelAvailabilityObservedAtMs,
+    modelAvailabilityClockMs,
+    modelAvailabilityActionError,
+    modelAvailabilityActionPending,
+    refreshModelAvailability,
+    reservePrimaryModel,
+    cancelPrimaryModelReservation,
     onApplyInferenceProfile,
     selectableExecutionOptions,
     isUploading,
@@ -152,6 +163,30 @@ function ChatInputView({
     handleDesktopProfileOptionKeyDown,
     handleProfileTriggerKeyDown,
   } = view;
+  const availabilityBadgeKind = modelAvailabilityBadge(
+    modelAvailability,
+    inferenceProfile.model_target_label,
+  );
+  const availabilityBadge =
+    availabilityBadgeKind === "primary_next"
+      ? t("composerProfile.primaryNextBadge")
+      : availabilityBadgeKind === "fallback"
+        ? t("composerProfile.fallbackBadge")
+        : null;
+  const modelAvailabilityDetails =
+    modelAvailability.type === "UNAVAILABLE" ? null : (
+      <ModelAvailabilityControl
+        state={modelAvailability}
+        activeSemanticLabel={inferenceProfile.model_target_label}
+        actionPending={modelAvailabilityActionPending}
+        actionError={modelAvailabilityActionError}
+        observedAtMs={modelAvailabilityObservedAtMs}
+        nowMs={modelAvailabilityClockMs}
+        onRefresh={refreshModelAvailability}
+        onReservePrimary={reservePrimaryModel}
+        onCancelPrimary={cancelPrimaryModelReservation}
+      />
+    );
   const profileTrigger = (
     <Button
       variant="light"
@@ -200,11 +235,18 @@ function ChatInputView({
         minHeight: rem(36),
       }}
     >
-      <Text size="sm" truncate style={{ maxWidth: "20ch", minWidth: 0 }}>
-        {selectableEfforts.length > 0
-          ? `${selectedModelLabel} · ${selectedEffortLabel}`
-          : selectedModelLabel}
-      </Text>
+      <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+        <Text size="sm" truncate style={{ maxWidth: "20ch", minWidth: 0 }}>
+          {selectableEfforts.length > 0
+            ? `${selectedModelLabel} · ${selectedEffortLabel}`
+            : selectedModelLabel}
+        </Text>
+        {availabilityBadge != null ? (
+          <Badge size="xs" variant="light" style={{ flexShrink: 0 }}>
+            {availabilityBadge}
+          </Badge>
+        ) : null}
+      </Group>
     </Button>
   );
   const executionOptionControls = selectableExecutionOptions.map(
@@ -324,14 +366,9 @@ function ChatInputView({
         }}
       >
         <Group gap="sm" justify="space-between" wrap="nowrap">
-          <Stack gap={rem(1)} style={{ minWidth: 0 }}>
-            <Text size="sm" fw={600} lh={rem(18)} truncate>
-              {option.label}
-            </Text>
-            <Text size="xs" c="dimmed" lh={rem(16)} truncate>
-              {option.candidates[0]?.model_selection.model_identifier}
-            </Text>
-          </Stack>
+          <Text size="sm" fw={600} lh={rem(18)} truncate>
+            {option.label}
+          </Text>
           {selected && (
             <IconCheck
               aria-hidden="true"
@@ -395,6 +432,7 @@ function ChatInputView({
   });
   const mobileProfilePickerContent = (
     <Stack gap="md">
+      {modelAvailabilityDetails}
       {inferenceProfileSelectionEnabled ? (
         <>
           <Stack
@@ -471,6 +509,14 @@ function ChatInputView({
         style={{ maxHeight: "70dvh", overflowY: "auto" }}
       >
         <Stack gap={rem(2)}>
+          {modelAvailabilityDetails != null ? (
+            <>
+              <Box px={rem(10)} pb={rem(6)}>
+                {modelAvailabilityDetails}
+              </Box>
+              <Divider my="xs" />
+            </>
+          ) : null}
           {contextUsageEnabled ? (
             <>
               <Box ref={contextUsageDetailsRef} px={rem(10)} pb={rem(6)}>

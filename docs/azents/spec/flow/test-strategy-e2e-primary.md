@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-12
-spec_version: 58
+last_verified_at: 2026-09-13
+spec_version: 59
 ---
 
 # E2E Primary Test Strategy
@@ -136,6 +136,22 @@ Consumer policy:
 E2E and fixture/prerequisite diagnostic read only snapshot during test and do not run doctor again.
 
 E2E tests reproduce product behavior through user-facing UI, public/internal test APIs, slash commands, OAuth flow, or documented fixture/prerequisite setup. They must not insert, update, or delete product rows directly to manufacture feature state. Cleanup SQL is allowed only in explicitly scoped reset helpers, not inside feature scenario tests.
+
+E2E-first does not require every exact internal race permutation to become a browser or full-stack
+cross-product. Required product-path E2E owns user-visible journeys and representative cross-boundary
+integration through public API, Worker/provider execution, durable state, and browser presentation.
+Required repository, service, and Worker integration tests own exact interleavings whose authority is
+PostgreSQL CAS, generation fencing, ownership recovery, transaction rollback, or stale-completion
+ordering. Those tests must exercise production repositories and execution owners with explicit
+barriers or authoritative state; pure mock reimplementations and fixed-sleep ordering are not
+acceptance evidence. Each feature Design maps every required scenario to one primary required CI
+owner and keeps live-provider tests diagnostic only.
+
+Model quota fallback follows this allocation. Credential-free API/browser E2E verifies clean
+candidate-chain consumption, a real quota-to-fallback response, immutable route provenance,
+availability and reservation behavior, and desktop/mobile recovery presentation. Migration,
+candidate-health half-open claims, reservation generation races, operation handover, compaction/title
+ordering, and Redis-empty recovery use deterministic production repository/Worker integration tests.
 
 Scheduled Task required E2E creates Workspace, Agent, Runtime, Session, and Task
 state through Public/Admin APIs and generated clients. A credential-free
@@ -450,6 +466,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
+- **2026-09-13** (spec_version 59) — Defined E2E-first layered verification: product-visible and
+  representative cross-boundary E2E plus required production repository/Worker integration tests
+  for exact concurrency, fencing, recovery, and rollback interleavings.
 - **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
   cache saves unique per workflow attempt while retaining SHA-scoped pull request
   history and rolling `main` restore fallback.

@@ -3,13 +3,13 @@
 import { z } from "zod/v4";
 import {
   isSubagentGuidanceWithinLimit,
+  MAX_SELECTABLE_MODEL_CANDIDATES,
   MAX_SELECTABLE_MODEL_OPTIONS,
 } from "./model-selection";
 import type { ModelCapabilities } from "@azents/public-client";
 
-const selectableModelOptionFormValueSchema = z.object({
+const selectableModelCandidateFormValueSchema = z.object({
   id: z.string().min(1),
-  label: z.string(),
   model_provider_integration_id: z.string().nullable(),
   model_selection_value: z.string().nullable(),
   model_display_name: z.string().nullable(),
@@ -19,6 +19,15 @@ const selectableModelOptionFormValueSchema = z.object({
   max_output_tokens: z.number().int().positive().nullable(),
   builtin_tools: z.array(z.string()),
   builtin_tool_configs: z.record(z.string(), z.record(z.string(), z.unknown())),
+});
+
+const selectableModelOptionFormValueSchema = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+  candidates: z
+    .array(selectableModelCandidateFormValueSchema)
+    .min(1, "Add at least one candidate")
+    .max(MAX_SELECTABLE_MODEL_CANDIDATES, "Add at most 5 candidates"),
   subagent_enabled: z.boolean(),
   subagent_guidance: z
     .string()
@@ -72,12 +81,36 @@ export const agentFormSchema = z
         });
       }
       labels.add(label);
-      if (option.model_selection_value == null) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["selectable_model_options", index, "model_selection_value"],
-          message: "Choose a model for this option",
-        });
+      const candidateIdentities = new Set<string>();
+      for (const [candidateIndex, candidate] of option.candidates.entries()) {
+        if (candidate.model_selection_value == null) {
+          ctx.addIssue({
+            code: "custom",
+            path: [
+              "selectable_model_options",
+              index,
+              "candidates",
+              candidateIndex,
+              "model_selection_value",
+            ],
+            message: "Choose a model for this candidate",
+          });
+          continue;
+        }
+        if (candidateIdentities.has(candidate.model_selection_value)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [
+              "selectable_model_options",
+              index,
+              "candidates",
+              candidateIndex,
+              "model_selection_value",
+            ],
+            message: "Candidate models must be unique within a label",
+          });
+        }
+        candidateIdentities.add(candidate.model_selection_value);
       }
     }
   });
