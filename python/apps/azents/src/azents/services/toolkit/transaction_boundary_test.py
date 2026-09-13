@@ -20,6 +20,7 @@ from azents.services.github_platform_system_setting.runtime import (
 )
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import (
+    InvalidConfig,
     InvalidCredentials,
     ToolkitCreateInput,
     ToolkitUpdateInput,
@@ -311,3 +312,81 @@ async def test_update_maps_final_platform_revalidation_failure() -> None:
     assert isinstance(result.error, InvalidCredentials)
     assert result.error.detail == "GitHub Platform App reconnect is required."
     operations.get_oauth_summary.assert_not_awaited()
+
+
+async def test_kubernetes_config_update_rejects_missing_replacement_credentials() -> (
+    None
+):
+    """Reject Kubernetes config changes that would persist incomplete credentials."""
+    existing = ToolkitConfig(
+        owner_agent_id=None,
+        id="toolkit-1",
+        workspace_id="workspace-1",
+        toolkit_type="kubernetes",
+        slug="kubernetes",
+        name="Kubernetes",
+        config={
+            "clusters": [
+                {"name": "production", "auth_type": "token"},
+            ]
+        },
+        credentials=json.dumps(
+            {
+                "clusters": {
+                    "production": {
+                        "type": "token",
+                        "token": "stored-token",
+                    }
+                }
+            }
+        ),
+        enabled=True,
+        always_expose_tools=False,
+        revision=1,
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    operations = MagicMock()
+    operations.load_update_context = AsyncMock(return_value=Success(existing))
+    operations.update = AsyncMock(return_value=Success(existing))
+    operations.get_oauth_summary = AsyncMock()
+    service = ToolkitService(
+        owned_operations=AsyncMock(spec=AgentToolkitOperationsRepository),
+        operations_repository=operations,
+        toolkit_registry={},
+        github_runtime=MagicMock(),
+    )
+
+    result = await service.update_by_id(
+        "toolkit-1",
+        {
+            "config": {
+                "clusters": [
+                    {"name": "production", "auth_type": "token"},
+                    {"name": "staging", "auth_type": "token"},
+                ]
+            }
+        },
+        workspace_id="workspace-1",
+        user_id="user-1",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, InvalidConfig)
+
+    result = await service.update_by_id(
+        "toolkit-1",
+        {
+            "config": {
+                "clusters": [
+                    {"name": "production", "auth_type": "kubeconfig"},
+                ]
+            }
+        },
+        workspace_id="workspace-1",
+        user_id="user-1",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, InvalidConfig)
+    operations.update.assert_not_awaited()

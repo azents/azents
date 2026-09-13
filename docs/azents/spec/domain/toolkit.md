@@ -71,7 +71,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-13
-spec_version: 115
+spec_version: 116
 ---
 
 # Toolkit
@@ -152,9 +152,14 @@ erDiagram
   replacement fields merge into the matching stored cluster credential, untouched
   clusters retain their stored credentials, clusters removed from `config.clusters`
   lose their credentials, and an authentication-method change cannot reuse secrets
-  from the previous method. Connection tests use the same merge before provider
-  validation. AWS, GCP, and Google Analytics edit forms allow Connection test with
-  stored credentials even though the browser only receives `has_credentials`.
+  from the previous method. The merged map must satisfy the selected
+  authentication schema, so adding a cluster or changing its authentication method
+  without replacement credentials is rejected instead of being persisted.
+  Connection tests use the same merge before provider validation. AWS, GCP, and
+  Google Analytics edit forms allow Connection test with stored credentials even
+  though the browser only receives `has_credentials`. Explicit empty editable
+  collections such as GitHub App `installations: []` remain submitted as removals
+  rather than being treated as redacted placeholders.
 
   `github` toolkit has `inject_runtime_environment: bool` config option. When enabled, token resolved at runtime is exposed to Runtime Runner environment variables. PAT credentials expose `GH_TOKEN` and `GITHUB_TOKEN`. GitHub App credentials store `installations[]` targets with installation ID and account login metadata. For a single GitHub App installation, Runtime also exposes `GH_TOKEN` and `GITHUB_TOKEN`; for multiple installations, Runtime exposes `GITHUB_INSTALLATION_MAP` plus `GITHUB_TOKEN_INSTALLATION_<installation_id>` variables. The git credential helper installed in agent-runtime image (`/usr/local/bin/azents-git-credential`) reads the repository owner from Git credential protocol input and chooses the matching installation token. GitHub CLI commands are not wrapped; agents must explicitly select the desired installation token at command time, for example `GH_TOKEN=$GITHUB_TOKEN_INSTALLATION_<installation_id> gh ...`. Token TTL cache defaults to 55 minutes. See [github-toolkit-shell-env design](../../design/github-260424-github-toolkit-shell-env-2026.md) and [github-toolkit-multi-installation design](../../design/github-260621-github-toolkit-multi-installation.md).
 - `ToolkitScopeType` — `workspace` StrEnum. ([`core/enums.py`](../../../../python/apps/azents/src/azents/core/enums.py))
@@ -1002,6 +1007,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 116) — Rejects incomplete merged Kubernetes
+  credentials before persistence and preserves explicit empty editable credential
+  collections such as GitHub App installation removals.
 - **2026-09-13** (spec_version 115) — Made blank redacted credential edits and
   Connection tests reuse stored values, including config-aware Kubernetes
   per-cluster merge and removal semantics.

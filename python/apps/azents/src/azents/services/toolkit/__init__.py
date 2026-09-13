@@ -14,6 +14,7 @@ from azents.core.mcp_credentials import McpSecrets
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.engine.tools.envvar import EnvVarToolkitSecrets
+from azents.engine.tools.kubernetes_auth import KubernetesCredentials
 from azents.repos.toolkit.data import (
     DuplicateAgentToolkit,
     DuplicateScope,
@@ -341,6 +342,12 @@ class ToolkitService:
                 None,
                 update["config"],
             )
+            credential_error = self._validate_credentials(
+                existing.toolkit_type,
+                normalized_credentials,
+            )
+            if credential_error is not None:
+                return Failure(credential_error)
             provider_error = await self._validate_provider_credentials(
                 existing.toolkit_type,
                 normalized_credentials,
@@ -742,7 +749,7 @@ class ToolkitService:
         toolkit_type: str,
         credentials: dict[str, object] | None,
     ) -> InvalidConfig | None:
-        """Validate common MCP and GitHub credential shapes."""
+        """Validate credential shapes for toolkits with structured secrets."""
         if credentials is None:
             return None
         try:
@@ -757,6 +764,11 @@ class ToolkitService:
         if typed_toolkit == ToolkitType.GITHUB:
             try:
                 _github_secrets_adapter.validate_python(credentials)
+            except ValidationError as error:
+                return InvalidConfig(toolkit_type=toolkit_type, detail=str(error))
+        if typed_toolkit == ToolkitType.KUBERNETES:
+            try:
+                KubernetesCredentials.model_validate(credentials)
             except ValidationError as error:
                 return InvalidConfig(toolkit_type=toolkit_type, detail=str(error))
         return None
@@ -1217,6 +1229,12 @@ class ToolkitService:
                 None,
                 update["config"],
             )
+            credential_error = self._validate_credentials(
+                existing.toolkit_type,
+                normalized_credentials,
+            )
+            if credential_error is not None:
+                return Failure(credential_error)
             provider_error = await self._validate_provider_credentials(
                 existing.toolkit_type,
                 normalized_credentials,

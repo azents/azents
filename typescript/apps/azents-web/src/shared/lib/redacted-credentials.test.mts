@@ -42,3 +42,12 @@ void test("keeps non-secret credential selections", () => {
 
   assert.equal(normalizeCredentialEdits(credentials), credentials);
 });
+
+void test("keeps empty editable credential selections", () => {
+  const credentials = {
+    type: "github_app_platform",
+    installations: [],
+  };
+
+  assert.equal(normalizeCredentialEdits(credentials), credentials);
+});
