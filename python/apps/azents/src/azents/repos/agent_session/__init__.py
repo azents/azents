@@ -1182,7 +1182,11 @@ class AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Lock one AgentSession after its referenced Agent in stable FK order."""
-        if not await self.lock_agent_parent_for_session(session, agent_session_id):
+        if not await self._lock_agent_parent_for_session_strong(
+            session,
+            agent_session_id,
+            nowait=False,
+        ):
             return None
         result = await session.execute(
             sa.select(RDBAgentSession)
@@ -1191,6 +1195,7 @@ class AgentSessionRepository:
             # ``FOR NO KEY UPDATE``. Admission updates only non-key columns
             # such as run_state while allowing FK KEY SHARE references.
             .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
@@ -1283,18 +1288,42 @@ class AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Try to lock one Session and its Agent parent without waiting."""
-        if not await self.lock_agent_parent_for_session_nowait(
+        if not await self._lock_agent_parent_for_session_strong(
             session,
             agent_session_id,
+            nowait=True,
         ):
             return None
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
             .with_for_update(key_share=True, nowait=True)
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         return None if rdb is None else self._build(rdb)
+
+    async def _lock_agent_parent_for_session_strong(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+        *,
+        nowait: bool,
+    ) -> bool:
+        """Lock the Session's Agent parent with a strong row lock."""
+        agent_id = await session.scalar(
+            sa.select(RDBAgentSession.agent_id).where(
+                RDBAgentSession.id == agent_session_id
+            )
+        )
+        if agent_id is None:
+            return False
+        locked_agent_id = await session.scalar(
+            sa.select(RDBAgent.id)
+            .where(RDBAgent.id == agent_id)
+            .with_for_update(nowait=nowait)
+        )
+        return locked_agent_id is not None
 
     async def lock_agent_parent_for_session(
         self,

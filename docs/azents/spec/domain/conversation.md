@@ -266,7 +266,7 @@ Runtime lifecycle lock or wait condition.
 | `id`                                                                                             | `str(32)`             | UUID7 hex                                                                                                                         |
 | `handle`                                                                                         | string                | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths.             |
 | `workspace_id` / `agent_id`                                                                      | FK                    | Workspace and agent boundary                                                                                                      |
-| `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. Active Session labels removed by an Agent option update are replaced with the Agent main label and fallback-safe intent. |
+| `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. Active Session labels removed by an Agent option update are replaced with the Agent main label and fallback-safe intent; authorized active Session reads repair stale rows before returning them. |
 | `applied_profile_generation`                                                                     | bigint                | Monotonic generation incremented by every accepted applied-profile replacement; private external drafts use it to reject stale or ABA saves. |
 | `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Prepared-turn label and effort for the immutable current provider call or retry/recovery; this is not the public applied intent.                    |
 | `current_model_selection` / `current_model_settings`                                            | JSONB \| null         | Complete prepared physical model and model-scoped settings snapshot for the current call.                                                          |
@@ -308,8 +308,9 @@ and automatic-archive projections; archived rows retain archive time, purge dead
 immutable retention snapshot. `GET /chat/v1/agents/{agent_id}/sessions/sidebar` returns every pinned
 active Team root session plus at most 20 distinct recent non-pinned active Team root sessions in
 separate `pinned` and `recent` arrays; it never returns User, archived, or subagent sessions. Both
-reads validate Agent membership and are side-effect free: they never ensure or create a Team-primary
-Session and never wait for Runtime state. Each session item includes `run_state` so azents-web can
+reads validate Agent membership and do not create Sessions or wait for Runtime state; they may
+perform an idempotent applied-model-profile repair for the returned active rows. They never ensure
+or create a Team-primary Session. Each session item includes `run_state` so azents-web can
 mark running sessions in the Agent rail session list. `POST
 /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The current request
 shape is `existing_project_paths` plus ordered `setup_actions`.
@@ -1139,7 +1140,10 @@ to the path agent and is visible to the requester; session missing, agent/sessio
 denied all return 404. The response includes the root `product_mode` (`team` or `user`, or null for
 subagent rows) so clients can resolve Team/My navigation scope from an authorized detail response.
 Child subagent sessions are directly readable through this route and through history/live routes, but
-they are read-only for human chat writes.
+they are read-only for human chat writes. Before returning an authorized active Session detail or
+list/sidebar projection, the service reconciles any applied model label absent from the current
+Agent option list to the Agent main option and clears fallback-incompatible intent; this repair is
+idempotent and does not alter a prepared current-turn snapshot.
 `POST /chat/v1/sessions/{session_id}/inputs` accepts one composer input for an existing root
 Session. An input without an action appends a user message, a command action creates an idle-only
 pending command, and other typed actions enter the turn-action flow. The route rejects
@@ -1175,8 +1179,11 @@ retain enabled IDs independently. Requested/applied provenance survives REST, li
 and reload. Input admission rejects a label that is already absent from the current Agent options. If
 an accepted label becomes unavailable before preparation because the Agent options changed, the
 worker falls back to the current Agent main label, replaces the active Session intent, and clears
-fallback-incompatible effort and execution-option intent. A failed model-call attempt retains its
-original selection, while its next automatic retry attempt freshly resolves the latest
+fallback-incompatible effort and execution-option intent. Authorized active Session detail, list,
+and sidebar reads perform the same idempotent applied-intent repair before returning a projection,
+so an idle Session does not retain stale UI state until its next worker execution. Read repair never
+changes `current_*` inference state or an active Run's prepared snapshot. A failed model-call attempt
+retains its original selection, while its next automatic retry attempt freshly resolves the latest
 Session-applied model, effort, and execution-option intent after backoff. Historical missing option
 state is all-off, and non-empty persisted option intent requires a corresponding model target.
 
@@ -1362,6 +1369,7 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-13** — v169. Added authorized active Session read-time repair for stale applied model labels, including list/sidebar projections, without changing prepared current-turn snapshots.
 - **2026-09-13** — v168. Replaced active stale Session model labels when Agent options change and added execution-boundary fallback for already accepted labels that become unavailable.
 - **2026-09-12** — v167. Added the repository-owned applied-profile replacement
   boundary and monotonic generation used to reject stale external native drafts

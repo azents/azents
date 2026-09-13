@@ -617,6 +617,71 @@ class TestAgentSessionRepository:
 
         assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
 
+    async def test_lock_by_id_uses_strong_agent_parent_lock(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Session locks wait behind an existing Agent key-share lock."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repository = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"session-strong-parent-lock-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"session-strong-parent-lock-{suffix}",
+            )
+            created = await repository.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            await setup_session.commit()
+
+        competing_started = asyncio.Event()
+
+        async def lock_session() -> str:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as competing_session:
+                competing_started.set()
+                locked = await repository.lock_by_id(competing_session, created.id)
+                assert locked is not None
+                await competing_session.commit()
+                return locked.id
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as agent_holder:
+            locked_agent_id = await agent_holder.scalar(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id == agent_id)
+                .with_for_update(read=True, key_share=True)
+            )
+            assert locked_agent_id == agent_id
+            competing_lock = asyncio.create_task(lock_session())
+            await asyncio.wait_for(competing_started.wait(), timeout=5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(competing_lock),
+                    timeout=0.1,
+                )
+            await agent_holder.commit()
+
+        assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
+
     async def test_root_context_rejects_runtime_removing(
         self,
         rdb_session: AsyncSession,
