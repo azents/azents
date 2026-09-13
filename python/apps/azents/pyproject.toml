@@ -62,6 +62,7 @@ dependencies = [
     "websockets==15.0.1",
     "discord-py==2.7.1",
     "slack-sdk==3.44.1",
+    "authlib==1.8.0",
 ]
 
 [project.scripts]

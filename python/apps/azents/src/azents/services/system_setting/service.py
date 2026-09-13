@@ -19,11 +19,6 @@ from azents.core.deps import (
     get_credential_cipher,
     get_credential_encryption_config,
 )
-from azents.core.external_channel_file_system_setting import (
-    get_external_channel_files_definition,
-)
-from azents.core.github_system_setting import get_platform_github_app_definition
-from azents.core.platform_runtime_system_setting import get_platform_runtime_definition
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingActivationMode,
@@ -47,6 +42,7 @@ from azents.core.system_setting import (
     SystemSettingValidationStatus,
     SystemSettingVersionConflict,
 )
+from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.system_setting.data import (
@@ -100,17 +96,6 @@ class _SystemSettingBasePayload(NamedTuple):
     secrets: BaseModel
 
 
-def get_system_setting_registry() -> SystemSettingRegistry:
-    """Return the compiled System Settings Section registry."""
-    return SystemSettingRegistry(
-        definitions=(
-            get_external_channel_files_definition(),
-            get_platform_github_app_definition(),
-            get_platform_runtime_definition(),
-        ),
-    )
-
-
 def get_system_setting_environment() -> SystemSettingEnvironment:
     """Return the process environment overlay view."""
     return SystemSettingEnvironment(values=os.environ)
@@ -153,6 +138,16 @@ class SystemSettingsService:
         definition = self.registry.get(section)
         async with self.session_manager() as session:
             current = await self.repository.get_current(session, section=section)
+        return self._resolve_current(definition=definition, current=current)
+
+    async def resolve_in_session(
+        self,
+        session: AsyncSession,
+        section: SystemSettingSection,
+    ) -> ResolvedSystemSetting:
+        """Resolve one Section using the caller's transaction and locks."""
+        definition = self.registry.get(section)
+        current = await self.repository.get_current(session, section=section)
         return self._resolve_current(definition=definition, current=current)
 
     async def mutate(

@@ -5,12 +5,15 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**system_settings_v1_cancel_platform_github_app_candidate**](SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
+[**system_settings_v1_check_external_account_oauth_health**](SystemSettingsV1Api.md#system_settings_v1_check_external_account_oauth_health) | **POST** /system-setting/v1/sections/external-account-oauth/{provider}/health-check | Check External Account Oauth Health
 [**system_settings_v1_check_platform_github_app_health**](SystemSettingsV1Api.md#system_settings_v1_check_platform_github_app_health) | **POST** /system-setting/v1/sections/platform-github-app/health-check | Check Platform Github App Health
 [**system_settings_v1_confirm_platform_github_app_candidate**](SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
+[**system_settings_v1_get_external_account_oauth_setting**](SystemSettingsV1Api.md#system_settings_v1_get_external_account_oauth_setting) | **GET** /system-setting/v1/sections/external-account-oauth/{provider} | Get External Account Oauth Setting
 [**system_settings_v1_get_external_channel_files_setting**](SystemSettingsV1Api.md#system_settings_v1_get_external_channel_files_setting) | **GET** /system-setting/v1/sections/external-channel-files | Get External Channel Files Setting
 [**system_settings_v1_get_platform_github_app_setting**](SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
 [**system_settings_v1_list_system_setting_audit_events**](SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
 [**system_settings_v1_list_system_setting_sections**](SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
+[**system_settings_v1_patch_external_account_oauth_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_external_account_oauth_setting) | **PATCH** /system-setting/v1/sections/external-account-oauth/{provider} | Patch External Account Oauth Setting
 [**system_settings_v1_patch_external_channel_files_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_external_channel_files_setting) | **PATCH** /system-setting/v1/sections/external-channel-files | Patch External Channel Files Setting
 [**system_settings_v1_patch_platform_github_app_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
 [**system_settings_v1_validate_platform_github_app_candidate**](SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
@@ -88,6 +91,85 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **system_settings_v1_check_external_account_oauth_health**
+> ExternalAccountOAuthDetailResponse system_settings_v1_check_external_account_oauth_health(provider)
+
+Check External Account Oauth Health
+
+Run a local health check for one provider OAuth Section.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.external_account_o_auth_detail_response import ExternalAccountOAuthDetailResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
+    provider = 'provider_example' # str | 
+
+    try:
+        # Check External Account Oauth Health
+        api_response = api_instance.system_settings_v1_check_external_account_oauth_health(provider)
+        print("The response of SystemSettingsV1Api->system_settings_v1_check_external_account_oauth_health:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemSettingsV1Api->system_settings_v1_check_external_account_oauth_health: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider** | **str**|  | 
+
+### Return type
+
+[**ExternalAccountOAuthDetailResponse**](ExternalAccountOAuthDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -235,6 +317,85 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **system_settings_v1_get_external_account_oauth_setting**
+> ExternalAccountOAuthDetailResponse system_settings_v1_get_external_account_oauth_setting(provider)
+
+Get External Account Oauth Setting
+
+Return one redacted provider OAuth Section.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.external_account_o_auth_detail_response import ExternalAccountOAuthDetailResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
+    provider = 'provider_example' # str | 
+
+    try:
+        # Get External Account Oauth Setting
+        api_response = api_instance.system_settings_v1_get_external_account_oauth_setting(provider)
+        print("The response of SystemSettingsV1Api->system_settings_v1_get_external_account_oauth_setting:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemSettingsV1Api->system_settings_v1_get_external_account_oauth_setting: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider** | **str**|  | 
+
+### Return type
+
+[**ExternalAccountOAuthDetailResponse**](ExternalAccountOAuthDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 ### HTTP response details
@@ -546,6 +707,88 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **system_settings_v1_patch_external_account_oauth_setting**
+> ExternalAccountOAuthDetailResponse system_settings_v1_patch_external_account_oauth_setting(provider, external_account_o_auth_patch_request)
+
+Patch External Account Oauth Setting
+
+Patch one provider OAuth Section with optimistic concurrency.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.external_account_o_auth_detail_response import ExternalAccountOAuthDetailResponse
+from azentsadminclient.models.external_account_o_auth_patch_request import ExternalAccountOAuthPatchRequest
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
+    provider = 'provider_example' # str | 
+    external_account_o_auth_patch_request = azentsadminclient.ExternalAccountOAuthPatchRequest() # ExternalAccountOAuthPatchRequest | 
+
+    try:
+        # Patch External Account Oauth Setting
+        api_response = api_instance.system_settings_v1_patch_external_account_oauth_setting(provider, external_account_o_auth_patch_request)
+        print("The response of SystemSettingsV1Api->system_settings_v1_patch_external_account_oauth_setting:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemSettingsV1Api->system_settings_v1_patch_external_account_oauth_setting: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider** | **str**|  | 
+ **external_account_o_auth_patch_request** | [**ExternalAccountOAuthPatchRequest**](ExternalAccountOAuthPatchRequest.md)|  | 
+
+### Return type
+
+[**ExternalAccountOAuthDetailResponse**](ExternalAccountOAuthDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
