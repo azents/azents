@@ -230,7 +230,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Define the OpenAI HTTP Migration by Semantic Parity Historical Requirements Reconstruction](requirements/http-260716-openai-http-migration-by-semantic-parity.md) | http-260716 | 2026-07-16 | - |
 | [azents-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
 | [Idempotent Sandbox Lifecycle State Historical Requirements Reconstruction](requirements/idempotent-260524-idempotent-sandbox-lifecycle.md) | idempotent-260524 | 2026-05-24 | - |
-| [Provider Account Linking Requirements](requirements/identity-260913-provider-account-linking.md) | identity-260913 | 2026-09-13 | - |
+| [Provider Account Linking Requirements](requirements/identity-260913-provider-account-linking.md) | identity-260913 | 2026-09-13 | 2026-09-13 |
 | [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
 | [Image Generation Model Selection Requirements](requirements/image-260910-generation-model-selection.md) | image-260910 | 2026-09-10 | 2026-09-10 |
 | [Todo-Owned Slack Activity Indicator Requirements](requirements/indicator-260723-todo-owned-progress.md) | indicator-260723 | 2026-07-23 | - |

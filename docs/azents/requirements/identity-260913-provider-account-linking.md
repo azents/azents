@@ -2,6 +2,7 @@
 title: "Provider Account Linking Requirements"
 created: 2026-09-13
 updated: 2026-09-13
+implemented: 2026-09-13
 tags: [external-channel, identity, oauth, security]
 document_role: primary
 document_type: requirements
