@@ -2,7 +2,7 @@
   "retry": "再試行",
   "auth": {
     "title": "Web サービスに接続しています",
-    "description": "Runtime アプリケーションを開く前に、ブラウザーと Azents のサインインを確認しています。",
+    "description": "Runtime アプリケーションを開く前に、Azents のサインインを確認しています。",
     "errorDescription": "Web サービスに安全に接続できませんでした。",
     "invalidResponse": "認証応答が無効です。",
     "failed": "Runtime Web 認証に失敗しました。"
@@ -50,7 +50,7 @@
     "expired": "期限切れ",
     "closed": "公開終了",
     "unconfigured": "セットアップが必要",
-    "unavailable": "アプリケーションに接続できません"
+    "runtimeUnavailable": "Runtime を利用できないため、アプリケーションへの接続状態は確認されていません"
   },
   "actions": {
     "approve": "承認",

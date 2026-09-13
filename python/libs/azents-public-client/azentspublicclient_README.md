@@ -767,7 +767,6 @@ Class | Method | HTTP request | Description
  - [RuntimeWebActionErrorDetail](azentspublicclient/docs/RuntimeWebActionErrorDetail.md)
  - [RuntimeWebActionErrorResponse](azentspublicclient/docs/RuntimeWebActionErrorResponse.md)
  - [RuntimeWebApprovalRequest](azentspublicclient/docs/RuntimeWebApprovalRequest.md)
- - [RuntimeWebBrowserProfileRequest](azentspublicclient/docs/RuntimeWebBrowserProfileRequest.md)
  - [RuntimeWebCloseRequest](azentspublicclient/docs/RuntimeWebCloseRequest.md)
  - [RuntimeWebCycleEndReason](azentspublicclient/docs/RuntimeWebCycleEndReason.md)
  - [RuntimeWebCycleResponse](azentspublicclient/docs/RuntimeWebCycleResponse.md)

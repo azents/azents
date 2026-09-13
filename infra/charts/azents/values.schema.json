@@ -1235,7 +1235,6 @@
             "identityCookieName",
             "identityLifetimeSeconds",
             "activeDurationSeconds",
-            "chromium",
             "request",
             "connectionLimits",
             "permissionsPolicy",
@@ -1290,24 +1289,6 @@
               "type": "integer",
               "minimum": 300,
               "maximum": 28800
-            },
-            "chromium": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "minVersion",
-                "maxVersion"
-              ],
-              "properties": {
-                "minVersion": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "maxVersion": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
             },
             "request": {
               "type": "object",

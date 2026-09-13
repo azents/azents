@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-09-13
-spec_version: 49
+spec_version: 50
 ---
 
 # Chat Session Resync
@@ -114,6 +114,13 @@ pending request is explicitly stale and read-only; it cannot approve, reject, ca
 or close newer authority. Unknown or malformed metadata remains on the generic tool
 presentation path. Runtime Web secrets, URLs carrying secrets, application bodies,
 and transport diagnostics are not reconstructed from Chat history.
+
+Services is a first-class Session supporting-panel destination. The canonical
+`page=services` query restores it after navigation or reload, the same destination is
+available in desktop and mobile panel navigation, and current service polling runs
+only while the panel is open on Services. Its Workspace panel remains mounted for the
+external Session navigation path, so Runtime absence does not remove the management
+entry point.
 
 ## 5. REST History Contract
 
@@ -527,6 +534,8 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-13** — v50. Restored Services as a URL-addressable desktop/mobile
+  Session supporting-panel destination with visible-only current-projection polling.
 - **2026-09-13** — v49. Added semantic-label-only Composer availability, desktop/mobile
   fallback and Primary-next controls, terminal Run query convergence, and a server-time-anchored
   cooldown countdown.

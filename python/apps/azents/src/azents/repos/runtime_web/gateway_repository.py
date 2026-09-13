@@ -88,7 +88,6 @@ class RuntimeWebGatewayRepository:
         secret_hash: str,
         user_id: str,
         auth_session_id: str,
-        browser_profile: str,
         issued_at: datetime.datetime,
         expires_at: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity:
@@ -109,7 +108,6 @@ class RuntimeWebGatewayRepository:
             user_id=user_id,
             auth_session_id=auth_session_id,
             mode=configuration.mode,
-            browser_profile=browser_profile,
             issued_at=issued_at,
             expires_at=expires_at,
         )
@@ -122,10 +120,9 @@ class RuntimeWebGatewayRepository:
         session: AsyncSession,
         *,
         secret_hash: str,
-        browser_profile: str,
         now: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity | None:
-        """Validate identity, auth Session, mode, profile, and deadlines."""
+        """Validate identity, auth Session, mode, and deadlines."""
         row = await session.execute(
             sa.select(RDBRuntimeWebGatewayIdentity, RDBSession, RDBUser)
             .join(
@@ -137,7 +134,6 @@ class RuntimeWebGatewayRepository:
                 RDBRuntimeWebGatewayIdentity.secret_hash == secret_hash,
                 RDBRuntimeWebGatewayIdentity.revoked_at.is_(None),
                 RDBRuntimeWebGatewayIdentity.expires_at > now,
-                RDBRuntimeWebGatewayIdentity.browser_profile == browser_profile,
                 RDBSession.user_id == RDBRuntimeWebGatewayIdentity.user_id,
                 RDBSession.revoked_at.is_(None),
                 RDBSession.expires_at > now,
@@ -164,7 +160,6 @@ class RuntimeWebGatewayRepository:
         identity_id: str,
         user_id: str,
         auth_session_id: str,
-        browser_profile: str,
         now: datetime.datetime,
     ) -> bool:
         """Revalidate an admitted identity without retaining its opaque secret."""
@@ -184,7 +179,6 @@ class RuntimeWebGatewayRepository:
                 RDBRuntimeWebGatewayIdentity.id == identity_id,
                 RDBRuntimeWebGatewayIdentity.user_id == user_id,
                 RDBRuntimeWebGatewayIdentity.auth_session_id == auth_session_id,
-                RDBRuntimeWebGatewayIdentity.browser_profile == browser_profile,
                 RDBRuntimeWebGatewayIdentity.revoked_at.is_(None),
                 RDBRuntimeWebGatewayIdentity.expires_at > now,
                 RDBSession.user_id == user_id,
@@ -390,7 +384,6 @@ class RuntimeWebGatewayRepository:
         broker_binding_hash: str,
         identity_hash: str,
         identity_secret: str,
-        browser_profile: str,
         identity_expires_at: datetime.datetime,
         now: datetime.datetime,
     ) -> RuntimeWebRedeemedIdentity:
@@ -434,7 +427,6 @@ class RuntimeWebGatewayRepository:
             user_id=ticket.user_id,
             auth_session_id=ticket.auth_session_id,
             mode=configuration.mode,
-            browser_profile=browser_profile,
             issued_at=now,
             expires_at=identity_expires_at,
         )
@@ -605,7 +597,6 @@ class RuntimeWebGatewayRepository:
             user_id=identity.user_id,
             auth_session_id=identity.auth_session_id,
             mode=identity.mode,
-            browser_profile=identity.browser_profile,
             issued_at=identity.issued_at,
             expires_at=identity.expires_at,
         )

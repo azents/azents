@@ -1,5 +1,6 @@
 export const sessionPanelViews = [
   "files",
+  "services",
   "context",
   "subagents",
   "channels",

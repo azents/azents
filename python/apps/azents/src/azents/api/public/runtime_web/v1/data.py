@@ -218,16 +218,6 @@ class RuntimeWebActionErrorResponse(_ClosedModel):
     detail: RuntimeWebActionErrorDetail
 
 
-class RuntimeWebBrowserProfileRequest(_ClosedModel):
-    """Trusted Main Web proof for the admitted browser profile."""
-
-    browser_profile: str = Field(
-        pattern=r"^chromium-[0-9]+$",
-        min_length=10,
-        max_length=32,
-    )
-
-
 class RuntimeWebIdentitySecretResponse(_ClosedModel):
     """Opaque identity secret for a trusted cookie-setting response."""
 

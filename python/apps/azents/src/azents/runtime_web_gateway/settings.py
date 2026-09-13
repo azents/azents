@@ -45,8 +45,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
         ge=300,
         le=28_800,
     )
-    runtime_web_gateway_chromium_min_version: int = Field(default=152, ge=1)
-    runtime_web_gateway_chromium_max_version: int = Field(default=152, ge=1)
     runtime_web_gateway_control_endpoint: str | None = None
     runtime_web_gateway_control_allow_insecure: bool = False
     runtime_web_gateway_control_tls_ca_file: Path | None = None
@@ -127,11 +125,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
             raise ValueError(
                 "Runtime Web Gateway requires " + ", ".join(sorted(missing))
             )
-        if (
-            self.runtime_web_gateway_chromium_min_version
-            > self.runtime_web_gateway_chromium_max_version
-        ):
-            raise ValueError("Runtime Web Chromium version range is invalid")
         if self.runtime_web_gateway_identity_cookie_name != _IDENTITY_COOKIE_NAME:
             raise ValueError("Runtime Web identity cookie name is reserved")
         main = _exact_origin(self.runtime_web_gateway_main_web_origin)
@@ -188,8 +181,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
             service_suffix=self.runtime_web_gateway_service_suffix,
             cookie_domain=self.runtime_web_gateway_cookie_domain,
             identity_cookie_name=self.runtime_web_gateway_identity_cookie_name,
-            chromium_min_version=self.runtime_web_gateway_chromium_min_version,
-            chromium_max_version=self.runtime_web_gateway_chromium_max_version,
         )
 
 
@@ -202,8 +193,6 @@ def runtime_web_security_fingerprint(
     service_suffix: str | None,
     cookie_domain: str | None,
     identity_cookie_name: str,
-    chromium_min_version: int,
-    chromium_max_version: int,
 ) -> str:
     """Return the canonical security digest shared by API and Gateway."""
     material = {
@@ -214,8 +203,6 @@ def runtime_web_security_fingerprint(
         "service_suffix": service_suffix,
         "cookie_domain": cookie_domain,
         "identity_cookie_name": identity_cookie_name,
-        "chromium_min_version": chromium_min_version,
-        "chromium_max_version": chromium_max_version,
     }
     encoded = json.dumps(
         material,
@@ -236,8 +223,6 @@ class RuntimeWebGatewayConfig(BaseModel):
     cookie_domain: str
     identity_cookie_name: str
     identity_lifetime_seconds: int
-    chromium_min_version: int
-    chromium_max_version: int
     request_header_bytes: int
     request_body_bytes: int
     frame_bytes: int
@@ -270,8 +255,6 @@ class RuntimeWebGatewayConfig(BaseModel):
             identity_lifetime_seconds=(
                 settings.runtime_web_gateway_identity_lifetime_seconds
             ),
-            chromium_min_version=settings.runtime_web_gateway_chromium_min_version,
-            chromium_max_version=settings.runtime_web_gateway_chromium_max_version,
             request_header_bytes=settings.runtime_web_gateway_request_header_bytes,
             request_body_bytes=settings.runtime_web_gateway_request_body_bytes,
             frame_bytes=settings.runtime_web_gateway_frame_bytes,

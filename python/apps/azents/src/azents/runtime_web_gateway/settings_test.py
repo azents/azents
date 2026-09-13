@@ -65,7 +65,7 @@ def test_shared_cookie_mode_accepts_one_parent_domain_for_main_and_services() ->
         {"runtime_web_gateway_cookie_domain": "example.net"},
         {"runtime_web_gateway_control_tls_private_key_file": None},
         {"runtime_web_gateway_identity_cookie_name": "__Secure-unsafe"},
-        {"runtime_web_gateway_chromium_min_version": 153},
+        {"runtime_web_gateway_request_header_bytes": 1},
     ],
 )
 def test_enabled_gateway_rejects_incomplete_security_configuration(

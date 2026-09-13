@@ -122,7 +122,6 @@ async def test_separate_domain_ticket_is_bound_and_single_use(
         broker_binding_hash="b" * 64,
         identity_hash="g" * 64,
         identity_secret="identity-secret",
-        browser_profile="chromium-152",
         identity_expires_at=now + timedelta(minutes=30),
         now=now,
     )
@@ -134,7 +133,6 @@ async def test_separate_domain_ticket_is_bound_and_single_use(
         await repository.authenticate_identity(
             rdb_session,
             secret_hash="g" * 64,
-            browser_profile="chromium-152",
             now=now,
         )
         is not None
@@ -147,7 +145,6 @@ async def test_separate_domain_ticket_is_bound_and_single_use(
             broker_binding_hash="b" * 64,
             identity_hash="h" * 64,
             identity_secret="second-identity",
-            browser_profile="chromium-152",
             identity_expires_at=now + timedelta(minutes=30),
             now=now,
         )
@@ -165,7 +162,6 @@ async def test_separate_domain_ticket_is_bound_and_single_use(
         await repository.authenticate_identity(
             rdb_session,
             secret_hash="g" * 64,
-            browser_profile="chromium-152",
             now=now,
         )
         is None

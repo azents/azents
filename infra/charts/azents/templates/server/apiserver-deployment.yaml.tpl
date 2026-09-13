@@ -64,10 +64,6 @@ spec:
               value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.identityLifetimeSeconds) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_ACTIVE_DURATION_SECONDS
               value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.activeDurationSeconds) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION
-              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.chromium.minVersion) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION
-              value: {{ printf "%d" (int64 .Values.server.runtimeWebGateway.chromium.maxVersion) | quote }}
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}

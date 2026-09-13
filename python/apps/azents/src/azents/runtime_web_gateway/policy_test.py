@@ -12,8 +12,6 @@ from azents.runtime_web_gateway.policy import (
     normalize_response_headers,
     parse_target_host,
     reject_service_worker_request,
-    require_admitted_browser,
-    require_supported_browser_user_agent,
 )
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
@@ -26,8 +24,6 @@ _CONFIG = RuntimeWebGatewayConfig(
     cookie_domain="services.example.net",
     identity_cookie_name="__Http-Azents-Runtime-Web",
     identity_lifetime_seconds=1_800,
-    chromium_min_version=152,
-    chromium_max_version=152,
     request_header_bytes=32 * 1024,
     request_body_bytes=64 * 1024 * 1024,
     frame_bytes=64 * 1024,
@@ -62,51 +58,6 @@ def test_service_worker_requests_are_rejected() -> None:
         with pytest.raises(RuntimeWebPolicyError) as captured:
             reject_service_worker_request(headers)
         assert captured.value.code is RuntimeWebPolicyCode.FORBIDDEN
-
-
-def test_browser_profile_requires_matching_protected_chromium_evidence() -> None:
-    profile = require_admitted_browser(
-        {
-            "Sec-CH-UA": '"Not A Brand";v="99", "Chromium";v="152"',
-            "User-Agent": "Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Dest": "document",
-        },
-        config=_CONFIG,
-    )
-    assert profile == "chromium-152"
-
-    with pytest.raises(RuntimeWebPolicyError) as captured:
-        require_admitted_browser(
-            {
-                "Sec-CH-UA": '"Chromium";v="152"',
-                "User-Agent": "Mozilla/5.0 Chrome/153.0.0.0",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Dest": "document",
-            },
-            config=_CONFIG,
-        )
-    assert captured.value.code is RuntimeWebPolicyCode.UPGRADE_REQUIRED
-
-
-def test_supported_browser_user_agent_resolves_profile_without_client_hint() -> None:
-    """A prior protected admission can bind a WebSocket to the UA version."""
-    assert (
-        require_supported_browser_user_agent(
-            {"User-Agent": "Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36"},
-            config=_CONFIG,
-        )
-        == "chromium-152"
-    )
-
-    with pytest.raises(RuntimeWebPolicyError) as captured:
-        require_supported_browser_user_agent(
-            {"User-Agent": "Mozilla/5.0 Chrome/153.0.0.0 Safari/537.36"},
-            config=_CONFIG,
-        )
-    assert captured.value.code is RuntimeWebPolicyCode.UPGRADE_REQUIRED
 
 
 def test_preflight_and_actual_cors_require_an_admitted_source_origin() -> None:

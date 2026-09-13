@@ -102,7 +102,7 @@ export const Pending = {
       page.getByRole("heading", { name: "Review web service access" }),
     ).toBeVisible();
     await userEvent.click(
-      page.getByRole("button", { name: "Approve for 60 minutes" }),
+      await page.findByRole("button", { name: "Approve for 60 minutes" }),
     );
     await expect(args.onApprove).toHaveBeenCalled();
   },
@@ -206,6 +206,50 @@ export const CreateConfirmation = {
     await expect(
       page.getByRole("heading", { name: "Expose this service?" }),
     ).toBeVisible();
+  },
+} satisfies Story;
+
+export const ApprovalFailureState = {
+  args: {
+    ...Pending.args,
+    mutationError: "Approval failed.",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Approve" }));
+    await userEvent.click(
+      await page.findByRole("button", { name: "Approve for 60 minutes" }),
+    );
+    const dialog = page.getByRole("dialog");
+    await expect(
+      within(dialog).getByRole("heading", {
+        name: "Review web service access",
+      }),
+    ).toBeVisible();
+    await expect(within(dialog).getByText("Approval failed.")).toBeVisible();
+  },
+} satisfies Story;
+
+export const CreateFailureState = {
+  args: {
+    ...CreateConfirmation.args,
+    mutationError: "Creation failed.",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Create service" }),
+    );
+    await userEvent.click(
+      await page.findByRole("button", { name: "Approve for 60 minutes" }),
+    );
+    const dialog = page.getByRole("dialog");
+    await expect(
+      within(dialog).getByRole("heading", { name: "Expose this service?" }),
+    ).toBeVisible();
+    await expect(within(dialog).getByText("Creation failed.")).toBeVisible();
   },
 } satisfies Story;
 

@@ -2,7 +2,7 @@
   "retry": "Réessayer",
   "auth": {
     "title": "Connexion à ce service web",
-    "description": "Vérification du navigateur et de la connexion Azents avant d’ouvrir l’application Runtime.",
+    "description": "Vérification de la connexion Azents avant d’ouvrir l’application Runtime.",
     "errorDescription": "La connexion sécurisée au service web a échoué.",
     "invalidResponse": "La réponse d’authentification est invalide.",
     "failed": "L’authentification Runtime Web a échoué."
@@ -50,7 +50,7 @@
     "expired": "Expiré",
     "closed": "Fermé",
     "unconfigured": "Installation non prête",
-    "unavailable": "Application indisponible"
+    "runtimeUnavailable": "Runtime indisponible ; l’accessibilité de l’application n’a pas été vérifiée"
   },
   "actions": {
     "approve": "Approuver",

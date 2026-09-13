@@ -992,7 +992,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **runtime_web_v1_issue_runtime_web_shared_identity**
-> RuntimeWebIdentitySecretResponse runtime_web_v1_issue_runtime_web_shared_identity(runtime_web_browser_profile_request)
+> RuntimeWebIdentitySecretResponse runtime_web_v1_issue_runtime_web_shared_identity()
 
 Issue Runtime Web Shared Identity
 
@@ -1004,7 +1004,6 @@ Mint one opaque Gateway identity for a trusted Main Web response.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.runtime_web_browser_profile_request import RuntimeWebBrowserProfileRequest
 from azentspublicclient.models.runtime_web_identity_secret_response import RuntimeWebIdentitySecretResponse
 from azentspublicclient.rest import ApiException
 from pprint import pprint
@@ -1029,11 +1028,10 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.RuntimeWebV1Api(api_client)
-    runtime_web_browser_profile_request = azentspublicclient.RuntimeWebBrowserProfileRequest() # RuntimeWebBrowserProfileRequest | 
 
     try:
         # Issue Runtime Web Shared Identity
-        api_response = api_instance.runtime_web_v1_issue_runtime_web_shared_identity(runtime_web_browser_profile_request)
+        api_response = api_instance.runtime_web_v1_issue_runtime_web_shared_identity()
         print("The response of RuntimeWebV1Api->runtime_web_v1_issue_runtime_web_shared_identity:\n")
         pprint(api_response)
     except Exception as e:
@@ -1044,10 +1042,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **runtime_web_browser_profile_request** | [**RuntimeWebBrowserProfileRequest**](RuntimeWebBrowserProfileRequest.md)|  | 
+This endpoint does not need any parameter.
 
 ### Return type
 
@@ -1059,7 +1054,7 @@ Name | Type | Description  | Notes
 
 ### HTTP request headers
 
- - **Content-Type**: application/json
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 ### HTTP response details
@@ -1068,7 +1063,6 @@ Name | Type | Description  | Notes
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
 **409** | The authentication exchange or installation changed. |  -  |
-**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

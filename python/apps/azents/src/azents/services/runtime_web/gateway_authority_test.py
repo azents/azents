@@ -62,7 +62,6 @@ def test_http_tunnel_preserves_approval_beyond_transport_deadline() -> None:
             user_id="u" * 32,
             auth_session_id="h" * 32,
             mode=RuntimeWebAuthMode.SHARED_COOKIE,
-            browser_profile="chromium-149",
             issued_at=now,
             expires_at=cycle_expires_at,
         ),

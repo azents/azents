@@ -79,7 +79,6 @@ class RuntimeWebGatewayAuthorityService:
         *,
         hostname_key: str,
         identity_secret: str,
-        browser_profile: str,
         protocol: RunnerWebProtocol,
     ) -> RuntimeWebGatewayAuthority:
         """Authorize identity, Session membership, approval, and current Runtime."""
@@ -88,7 +87,6 @@ class RuntimeWebGatewayAuthorityService:
             identity = await self.gateway_repository.authenticate_identity(
                 session,
                 secret_hash=hashlib.sha256(identity_secret.encode()).hexdigest(),
-                browser_profile=browser_profile,
                 now=now,
             )
             if identity is None:
@@ -327,7 +325,6 @@ class RuntimeWebGatewayAuthorityService:
                 identity_id=authority.identity.id,
                 user_id=authority.identity.user_id,
                 auth_session_id=authority.identity.auth_session_id,
-                browser_profile=authority.identity.browser_profile,
                 now=now,
             )
             if not current:

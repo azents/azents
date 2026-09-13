@@ -456,7 +456,6 @@ __all__ = [
     "RuntimeWebActionErrorDetail",
     "RuntimeWebActionErrorResponse",
     "RuntimeWebApprovalRequest",
-    "RuntimeWebBrowserProfileRequest",
     "RuntimeWebCloseRequest",
     "RuntimeWebCycleEndReason",
     "RuntimeWebCycleResponse",
@@ -1025,7 +1024,6 @@ from azentspublicclient.models.runtime_terminal_ticket_status import RuntimeTerm
 from azentspublicclient.models.runtime_web_action_error_detail import RuntimeWebActionErrorDetail as RuntimeWebActionErrorDetail
 from azentspublicclient.models.runtime_web_action_error_response import RuntimeWebActionErrorResponse as RuntimeWebActionErrorResponse
 from azentspublicclient.models.runtime_web_approval_request import RuntimeWebApprovalRequest as RuntimeWebApprovalRequest
-from azentspublicclient.models.runtime_web_browser_profile_request import RuntimeWebBrowserProfileRequest as RuntimeWebBrowserProfileRequest
 from azentspublicclient.models.runtime_web_close_request import RuntimeWebCloseRequest as RuntimeWebCloseRequest
 from azentspublicclient.models.runtime_web_cycle_end_reason import RuntimeWebCycleEndReason as RuntimeWebCycleEndReason
 from azentspublicclient.models.runtime_web_cycle_response import RuntimeWebCycleResponse as RuntimeWebCycleResponse

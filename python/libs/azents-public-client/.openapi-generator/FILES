@@ -446,7 +446,6 @@ azentspublicclient/docs/RuntimeTerminalTicketStatus.md
 azentspublicclient/docs/RuntimeWebActionErrorDetail.md
 azentspublicclient/docs/RuntimeWebActionErrorResponse.md
 azentspublicclient/docs/RuntimeWebApprovalRequest.md
-azentspublicclient/docs/RuntimeWebBrowserProfileRequest.md
 azentspublicclient/docs/RuntimeWebCloseRequest.md
 azentspublicclient/docs/RuntimeWebCycleEndReason.md
 azentspublicclient/docs/RuntimeWebCycleResponse.md
@@ -987,7 +986,6 @@ azentspublicclient/models/runtime_terminal_ticket_status.py
 azentspublicclient/models/runtime_web_action_error_detail.py
 azentspublicclient/models/runtime_web_action_error_response.py
 azentspublicclient/models/runtime_web_approval_request.py
-azentspublicclient/models/runtime_web_browser_profile_request.py
 azentspublicclient/models/runtime_web_close_request.py
 azentspublicclient/models/runtime_web_cycle_end_reason.py
 azentspublicclient/models/runtime_web_cycle_response.py
@@ -1531,7 +1529,6 @@ azentspublicclient/test/test_runtime_terminal_ticket_status.py
 azentspublicclient/test/test_runtime_web_action_error_detail.py
 azentspublicclient/test/test_runtime_web_action_error_response.py
 azentspublicclient/test/test_runtime_web_approval_request.py
-azentspublicclient/test/test_runtime_web_browser_profile_request.py
 azentspublicclient/test/test_runtime_web_close_request.py
 azentspublicclient/test/test_runtime_web_cycle_end_reason.py
 azentspublicclient/test/test_runtime_web_cycle_response.py

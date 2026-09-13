@@ -472,7 +472,6 @@ class RuntimeWebRepository:
         now = await self._database_now(session)
         endpoint.close_barrier += 1
         endpoint.authority_revision += 1
-        endpoint.current_cycle_id = None
         cycle.ended_at = now
         cycle.end_reason = RuntimeWebCycleEndReason.CLOSED
         await session.flush()

@@ -1,23 +1,3 @@
-const chromiumBrand = /"(?:Chromium|Google Chrome)";v="([0-9]+)"/;
-
-export function admittedBrowserProfile(request: Request): string | null {
-  const clientHint = request.headers.get("sec-ch-ua");
-  const userAgent = request.headers.get("user-agent");
-  if (clientHint === null || userAgent === null) {
-    return null;
-  }
-  const clientHintVersion = chromiumBrand.exec(clientHint)?.[1];
-  const userAgentVersion = /(?:Chrome|Chromium)\/([0-9]+)/.exec(userAgent)?.[1];
-  if (
-    clientHintVersion == null ||
-    userAgentVersion == null ||
-    clientHintVersion !== userAgentVersion
-  ) {
-    return null;
-  }
-  return `chromium-${clientHintVersion}`;
-}
-
 export function encodeMainBinding(
   initiationId: string,
   secret: string,

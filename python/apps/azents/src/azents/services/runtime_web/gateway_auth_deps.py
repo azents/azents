@@ -50,8 +50,6 @@ class RuntimeWebGatewayAuthSettings(BaseSettings):
         ge=300,
         le=28_800,
     )
-    runtime_web_gateway_chromium_min_version: int = Field(default=152, ge=1)
-    runtime_web_gateway_chromium_max_version: int = Field(default=152, ge=1)
 
 
 def get_runtime_web_gateway_auth_service(
@@ -85,8 +83,6 @@ def get_runtime_web_gateway_auth_service(
             service_suffix=settings.runtime_web_gateway_service_suffix,
             cookie_domain=settings.runtime_web_gateway_cookie_domain,
             identity_cookie_name=settings.runtime_web_gateway_identity_cookie_name,
-            chromium_min_version=(settings.runtime_web_gateway_chromium_min_version),
-            chromium_max_version=(settings.runtime_web_gateway_chromium_max_version),
         ),
         active_duration_seconds=(settings.runtime_web_gateway_active_duration_seconds),
     )
@@ -99,6 +95,4 @@ def get_runtime_web_gateway_auth_service(
             seconds=settings.runtime_web_gateway_identity_lifetime_seconds
         ),
         desired_configuration=desired,
-        chromium_min_version=settings.runtime_web_gateway_chromium_min_version,
-        chromium_max_version=settings.runtime_web_gateway_chromium_max_version,
     )

@@ -40,7 +40,6 @@ from azents.utils.fastapi.route import RouteMounter
 from .data import (
     RuntimeWebActionErrorResponse,
     RuntimeWebApprovalRequest,
-    RuntimeWebBrowserProfileRequest,
     RuntimeWebCloseRequest,
     RuntimeWebDirectCreateRequest,
     RuntimeWebExpectedRevisionRequest,
@@ -145,7 +144,6 @@ def _raise_auth_conflict() -> NoReturn:
     responses=_AUTH_ERROR_RESPONSES,
 )
 async def issue_runtime_web_shared_identity(
-    request_body: RuntimeWebBrowserProfileRequest,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     service: Annotated[
         RuntimeWebGatewayAuthService,
@@ -157,7 +155,6 @@ async def issue_runtime_web_shared_identity(
         issued = await service.issue_shared_identity(
             user_id=current_user.user_id,
             auth_session_id=current_user.session_id,
-            browser_profile=request_body.browser_profile,
             now=datetime.now(UTC),
         )
     except RuntimeWebRepositoryConflict:

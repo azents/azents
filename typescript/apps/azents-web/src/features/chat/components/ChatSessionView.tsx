@@ -32,6 +32,7 @@ import {
   IconRobot,
   IconSettings,
   IconTerminal2,
+  IconWorld,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -82,6 +83,11 @@ export function ChatSessionView({
       id: "context",
       label: tAgentDetail("tabs.context"),
       icon: <IconChartBar size={rem(16)} />,
+    },
+    {
+      id: "services",
+      label: t("workspacePanel.servicesTab"),
+      icon: <IconWorld size={rem(16)} />,
     },
     {
       id: "subagents",
@@ -135,6 +141,7 @@ export function ChatSessionView({
   ];
   const workspaceSelected =
     panel.activeView === "files" ||
+    panel.activeView === "services" ||
     panel.activeView === "runtime" ||
     panel.activeView === "metrics";
   const activePanelLabel =
@@ -165,7 +172,9 @@ export function ChatSessionView({
               ? "settings"
               : panel.activeView === "metrics"
                 ? "metrics"
-                : "workspace"
+                : panel.activeView === "services"
+                  ? "services"
+                  : "workspace"
           }
         />
       </Box>

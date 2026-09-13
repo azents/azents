@@ -3,17 +3,12 @@ import { cookies } from "next/headers";
 import { getServerConfig } from "@/config/server";
 
 export {
-  admittedBrowserProfile,
   decodeMainBinding,
   encodeMainBinding,
 } from "./runtime-web-auth-policy";
 
 export const RUNTIME_WEB_MAIN_BINDING_COOKIE =
   "__Host-Azents-Runtime-Web-Binding";
-export const RUNTIME_WEB_ORDINARY_PROBE_COOKIE =
-  "Azents-Runtime-Web-Cookie-Probe";
-export const RUNTIME_WEB_HTTP_PROBE_COOKIE =
-  "__Http-Azents-Runtime-Web-Cookie-Probe";
 
 export function runtimeWebConfiguration():
   | {

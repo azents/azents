@@ -16,6 +16,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthConfiguration,
+    RuntimeWebCycleEndReason,
     RuntimeWebRequesterKind,
     RuntimeWebRequestState,
 )
@@ -337,6 +338,10 @@ async def test_endpoint_request_cycle_and_rerequest_are_orthogonal(
     assert closed.cycle.ended_at is not None
     assert closed.request is not None
     assert closed.request.id == rerequest.request.id
+    current_cycle = await repository.current_cycle(rdb_session, closed.endpoint)
+    assert current_cycle is not None
+    assert current_cycle.id == closed.cycle.id
+    assert current_cycle.end_reason is RuntimeWebCycleEndReason.CLOSED
 
 
 async def test_stale_duration_and_endpoint_quota_fail_closed(

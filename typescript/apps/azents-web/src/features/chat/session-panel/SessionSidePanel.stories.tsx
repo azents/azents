@@ -46,6 +46,17 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Desktop = {} satisfies Story;
+export const ServicesDesktop = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("tab", { name: "services" }));
+    await expect(canvas.getByRole("tab", { name: "services" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(canvas.getByText("services")).toBeVisible();
+  },
+} satisfies Story;
 export const Mobile = {
   args: { mobile: true },
   play: async ({ canvasElement }) => {
@@ -59,6 +70,10 @@ export const Mobile = {
     await userEvent.keyboard("{Home}");
     await expect(files).toHaveAttribute("aria-selected", "true");
   },
+} satisfies Story;
+export const ServicesMobile = {
+  args: { mobile: true },
+  play: ServicesDesktop.play,
 } satisfies Story;
 export const LongLabels = {
   args: {

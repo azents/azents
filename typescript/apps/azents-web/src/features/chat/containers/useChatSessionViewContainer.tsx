@@ -157,6 +157,7 @@ export function useChatSessionViewContainer(
     autoRefreshVisible:
       panel.opened &&
       (panel.activeView === "files" ||
+        panel.activeView === "services" ||
         panel.activeView === "runtime" ||
         panel.activeView === "metrics"),
   });

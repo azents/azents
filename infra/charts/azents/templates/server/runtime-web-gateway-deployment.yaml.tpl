@@ -67,10 +67,6 @@ spec:
               value: {{ printf "%d" (int64 $gateway.identityLifetimeSeconds) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_ACTIVE_DURATION_SECONDS
               value: {{ printf "%d" (int64 $gateway.activeDurationSeconds) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION
-              value: {{ printf "%d" (int64 $gateway.chromium.minVersion) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION
-              value: {{ printf "%d" (int64 $gateway.chromium.maxVersion) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_REQUEST_HEADER_BYTES
               value: {{ printf "%d" (int64 $gateway.request.headerBytes) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_REQUEST_BODY_BYTES

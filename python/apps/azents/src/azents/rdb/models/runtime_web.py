@@ -624,7 +624,6 @@ class RDBRuntimeWebGatewayIdentity(RDBModel):
         runtime_web_auth_mode_enum,
         nullable=False,
     )
-    browser_profile: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     issued_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         nullable=False,
