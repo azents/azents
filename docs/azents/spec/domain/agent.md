@@ -232,13 +232,15 @@ The denormalized snapshots remain the Agent defaults. They are fallback inputs o
 has no applied model profile; an applied Session label takes precedence for future implicit turns.
 When an Agent option update removes an applied label, the same transaction replaces that active
 Session intent with the Agent's current main label and clears fallback-incompatible effort and
-execution-option intent. The current prepared turn snapshot remains authoritative until its next
-model boundary. Normal human inputs may instead request one label from the same Agent-owned option
-list for a single run. At run activation, the worker resolves that label against the current Agent
-snapshot without querying Workspace defaults or model catalogs. A label accepted before an Agent
-option update that becomes stale before preparation is normalized to the current Agent main label
-and persisted on the Session. Clients never submit provider, integration, model, capability, or
-token-limit snapshots as run intent.
+execution-option intent. Authorized active Session detail, list, and sidebar reads repeat the same
+idempotent reconciliation for stale rows that predate the update transaction or were otherwise
+left behind; this read repair changes only the applied next-turn intent. The current prepared turn
+snapshot remains authoritative until its next model boundary. Normal human inputs may instead
+request one label from the same Agent-owned option list for a single run. At run activation, the
+worker resolves that label against the current Agent snapshot without querying Workspace defaults or
+model catalogs. A label accepted before an Agent option update that becomes stale before preparation
+is normalized to the current Agent main label and persisted on the Session. Clients never submit
+provider, integration, model, capability, or token-limit snapshots as run intent.
 
 Required snapshot fields:
 
@@ -639,6 +641,7 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-13** (spec_version 78) — Added authorized active Session read-time reconciliation for stale model intents left behind by Agent option changes, while preserving prepared turn snapshots.
 - **2026-09-13** (spec_version 77) — Reconciled active Session model intents when Agent options remove their labels and added execution-boundary fallback for already accepted stale labels.
 - **2026-09-12** (spec_version 76) — Made automatic model-call retry attempts
   freshly resolve current Session-applied inference intent after backoff while
