@@ -80,7 +80,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-13
-spec_version: 81
+spec_version: 82
 ---
 
 # Agent Runtime Control
@@ -193,6 +193,15 @@ is nonblocking. Human approval binds the exact pending request revision and disp
 duration. Repeated or stale decisions fail with conflict
 instead of mutating the newer projection.
 
+The Main Web exposes the same current projection through the Session supporting
+panel's `services` destination on desktop and mobile. `page=services` restores that
+destination, and service polling runs while it is visible even when the Runtime is
+absent. Direct create, approve, reject, cancel, request again, URL copy/open, and
+close actions retain revision fencing. Active approval and a simultaneous pending
+request remain independent. Runtime unavailability is shown as Runtime evidence and
+does not claim that the application port was checked or that closing exposure stops
+the application.
+
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
 items, or audit history. Each admitted HTTP, SSE, or WebSocket exchange uses a
 dedicated bounded bidirectional stream between Gateway, Runtime Control, and the
@@ -213,23 +222,28 @@ environments. Local E2E may explicitly use the isolated insecure trusted port.
 
 The independent Gateway synchronizes the current Runtime Web configuration,
 explicitly invalidates browser identities, bindings, and tickets when security
-configuration changes, resolves the endpoint by opaque hostname, authenticates a
-browser identity, validates current approval and Runtime/Runner generations, acquires
-admission, and streams the exchange. It fails closed when configuration or database
-authority is unavailable.
+configuration changes, resolves the endpoint by opaque hostname, authenticates one
+opaque browser identity, validates current approval and Runtime/Runner generations,
+acquires admission, and streams the exchange. It fails closed when configuration or
+database authority is unavailable. Identity extraction scans every raw Cookie header
+and exact cookie pair: zero matches is unauthenticated, one match is validated, and
+multiple matches are rejected before authority lookup without retaining request
+history or depending on Redis.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
 responses as applicable; safe browser navigation is redirected only to the exact
 configured Main Web authentication or confirmation route.
 
-Gateway browser policy admits only the configured Chromium version range with
-consistent client hints. It rejects Service Worker requests, cross-root origins,
-invalid Fetch Metadata, ambiguous hosts, non-origin-form targets, oversized headers
-or bodies, and unauthorized WebSocket upgrades before application content is
-returned. Upstream access-control headers are replaced by Gateway policy, hop-by-hop
-headers are removed, cookies are bounded and rewritten for the service host, and
-security responses are content-free. Logs and metrics retain identifiers, status
-classes, durations, and byte counts but never application bodies, query strings,
-cookies, authorization values, tickets, or identity secrets.
+Gateway authentication is browser-vendor and version neutral and does not use
+User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
+use the same exact identity-cookie contract. Gateway policy independently rejects
+Service Worker requests, cross-root origins, invalid Fetch Metadata, ambiguous hosts,
+non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
+upgrades before application content is returned. Upstream access-control headers are
+replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
+rewritten for the service host, and security responses are content-free. Logs and
+metrics retain identifiers, status classes, durations, and byte counts but never
+application bodies, query strings, cookies, authorization values, tickets, or
+identity secrets.
 
 ## Runtime File Transfer
 
@@ -993,6 +1007,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-13 (spec_version=82)** — Removed Chromium, client-hint,
+  browser-profile, capability-probe, and browser-proof authorization; documented
+  exact raw identity-cookie cardinality and restored the desktop/mobile Services
+  supporting-panel destination with authority-honest Runtime state.
 - **2026-09-13 (spec_version=81)** — Removed Runtime Web configuration versions,
   epochs, and duration revisions. Security configuration changes explicitly
   invalidate browser authentication state, and approval compares the displayed

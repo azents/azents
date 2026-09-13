@@ -199,8 +199,8 @@ export function useWorkspacePanelContainer({
   });
   const directCreateServiceMutation = trpc.runtimeWeb.directCreate.useMutation({
     onSuccess: async () => {
-      setPreparedRuntimeService(null);
       await invalidateServices();
+      setPreparedRuntimeService(null);
     },
   });
   const requestServiceMutation = trpc.runtimeWeb.request.useMutation({

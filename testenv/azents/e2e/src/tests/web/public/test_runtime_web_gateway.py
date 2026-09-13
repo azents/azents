@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import socket
+import ssl
 import subprocess
 import tempfile
 import time
@@ -53,11 +55,14 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
+from websockets.sync.client import connect
+from websockets.typing import Origin
 
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
@@ -82,7 +87,6 @@ _SHARED_COOKIE_DOMAIN = "runtime-e2e.test"
 _SEPARATE_COOKIE_DOMAIN = _SERVICE_SUFFIX
 _TERMINAL_ORIGIN = "https://azents-web-gateway:8443"
 _SIGNUP_PASSWORD = "TestPass123!"
-_CHROMIUM_MAJOR_VERSION = "149"
 logger = logging.getLogger(__name__)
 
 
@@ -308,14 +312,6 @@ def _runtime_web_gateway_container(
             "runtime-control-relay:8033",
         )
         .with_env("AZ_RUNTIME_WEB_GATEWAY_CONTROL_ALLOW_INSECURE", "true")
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION",
-            _CHROMIUM_MAJOR_VERSION,
-        )
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION",
-            _CHROMIUM_MAJOR_VERSION,
-        )
     )
 
 
@@ -367,14 +363,6 @@ def _runtime_web_public_api_container(
         .with_env("AZ_RUNTIME_WEB_GATEWAY_BROKER_ORIGIN", _BROKER_ORIGIN)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX", _SERVICE_SUFFIX)
         .with_env("AZ_RUNTIME_WEB_GATEWAY_COOKIE_DOMAIN", cookie_domain)
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MIN_VERSION",
-            _CHROMIUM_MAJOR_VERSION,
-        )
-        .with_env(
-            "AZ_RUNTIME_WEB_GATEWAY_CHROMIUM_MAX_VERSION",
-            _CHROMIUM_MAJOR_VERSION,
-        )
     )
 
 
@@ -1052,6 +1040,140 @@ def _open_application_in_browser(
         ) from error
 
 
+def _services_button(driver: WebDriver, label: str) -> WebElement:
+    return WebDriverWait(driver, 30).until(
+        ec.element_to_be_clickable((By.XPATH, f"//button[normalize-space()={label!r}]"))
+    )
+
+
+def _exercise_services_management_ui(
+    driver: WebDriver,
+    *,
+    workspace: _RuntimeWebWorkspace,
+    endpoint_url: str,
+) -> None:
+    """Exercise direct creation and current-request decisions in Services."""
+    driver.get(
+        f"{_MAIN_ORIGIN}/w/{workspace.handle}/agents/{workspace.agent_id}"
+        f"/sessions/{workspace.session_id}?page=services"
+    )
+    wait = WebDriverWait(driver, 30)
+    wait.until(
+        ec.visibility_of_element_located((By.XPATH, "//*[text()='Web services']"))
+    )
+    assert "page=services" in driver.current_url
+
+    _services_button(driver, "Create service").click()
+    port = wait.until(
+        ec.element_to_be_clickable((By.CSS_SELECTOR, "input[placeholder='3000']"))
+    )
+    port.send_keys(Keys.CONTROL, "a")
+    port.send_keys(str(_RUNTIME_WEB_PORT))
+    label = wait.until(
+        ec.element_to_be_clickable(
+            (By.CSS_SELECTOR, "input[placeholder='Preview app']")
+        )
+    )
+    label.send_keys(Keys.CONTROL, "a")
+    label.send_keys("Services UI")
+    _services_button(driver, "Review exposure").click()
+    wait.until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//*[normalize-space()='Expose this service?']")
+        )
+    )
+    wait.until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//button[starts-with(normalize-space(), 'Approve for ')]")
+        )
+    ).click()
+    wait.until(
+        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Active']"))
+    )
+    wait.until(
+        ec.visibility_of_element_located(
+            (By.XPATH, f"//*[normalize-space()={endpoint_url!r}]")
+        )
+    )
+
+    _services_button(driver, "Request again").click()
+    wait.until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//*[contains(normalize-space(), 'new approval pending')]")
+        )
+    )
+    _services_button(driver, "Cancel request").click()
+    _services_button(driver, "Request again")
+
+    _services_button(driver, "Request again").click()
+    _services_button(driver, "Approve").click()
+    approval_button = wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//button"
+                "[starts-with(normalize-space(), 'Approve for ')]",
+            )
+        )
+    )
+    driver.execute_script(
+        """
+const originalFetch = window.fetch.bind(window);
+window.fetch = (...args) => {
+  const input = args[0];
+  const url = typeof input === 'string' ? input : input.url;
+  if (url.includes('/api/trpc/runtimeWeb.approve')) {
+    window.fetch = originalFetch;
+    const init = args[1];
+    const payload = JSON.parse(init.body);
+    payload.json.expectedRevision += 1000;
+    return originalFetch(input, {
+      ...init,
+      body: JSON.stringify(payload),
+    });
+  }
+  return originalFetch(...args);
+};
+"""
+    )
+    approval_button.click()
+    wait.until(ec.visibility_of_element_located((By.XPATH, "//*[@role='dialog']")))
+    wait.until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//*[@role='dialog']//*[@role='alert']")
+        )
+    )
+    dialog = driver.find_element(By.XPATH, "//*[@role='dialog']")
+    assert "Review web service access" in dialog.text
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//button"
+                "[starts-with(normalize-space(), 'Approve for ')]",
+            )
+        )
+    ).click()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//*[normalize-space()='Review web service access']",
+            )
+        )
+    )
+    _services_button(driver, "Request again")
+
+    _services_button(driver, "Request again").click()
+    _services_button(driver, "Reject").click()
+    _services_button(driver, "Request again")
+
+    _services_button(driver, "Close exposure").click()
+    wait.until(
+        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Closed']"))
+    )
+
+
 def _browser_transport_evidence(driver: WebDriver) -> dict[str, object]:
     """Exercise HTTP, SSE, WebSocket, redirects, and a 64 MiB streamed response."""
     result = driver.execute_async_script(
@@ -1075,7 +1197,11 @@ const done = arguments[arguments.length - 1];
   const websocket = await new Promise((resolve, reject) => {
     const socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}/ws`);
     socket.onopen = () => socket.send('runtime-web-socket');
-    socket.onmessage = event => resolve(event.data);
+    socket.onmessage = event => {
+      const data = event.data;
+      socket.close();
+      resolve(data);
+    };
     socket.onerror = () => reject(new Error('websocket failed'));
   });
   done({
@@ -1093,6 +1219,57 @@ const done = arguments[arguments.length - 1];
     if not isinstance(result, dict):
         raise AssertionError(f"Browser transport evidence was invalid: {result!r}")
     return result
+
+
+def _browser_neutral_transport_evidence(
+    *,
+    stack: _RuntimeWebStack,
+    endpoint_url: str,
+    identity_secret: str,
+) -> None:
+    """Exercise authenticated HTTP and WebSocket without Chromium client signals."""
+    endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
+    cookie = f"__Http-Azents-Runtime-Web={identity_secret}"
+    firefox_user_agent = "Mozilla/5.0 Firefox/143.0"
+    response = requests.post(
+        f"{stack.edge_host_url}/echo",
+        headers={
+            "Host": endpoint_host,
+            "Cookie": cookie,
+            "User-Agent": firefox_user_agent,
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+        },
+        data="browser-neutral-body",
+        verify=False,
+        timeout=10,
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "body": "browser-neutral-body",
+        "method": "POST",
+    }
+
+    edge_address = stack.edge_host_url.removeprefix("https://")
+    edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
+    raw_socket = socket.create_connection((edge_host, int(edge_port_text)), timeout=10)
+    tls_context = ssl.create_default_context()
+    tls_context.check_hostname = False
+    tls_context.verify_mode = ssl.CERT_NONE
+
+    with connect(
+        f"wss://{endpoint_host}/ws",
+        sock=raw_socket,
+        ssl=tls_context,
+        server_hostname=endpoint_host,
+        origin=Origin(endpoint_url.rstrip("/")),
+        additional_headers={"Cookie": cookie},
+        user_agent_header=firefox_user_agent,
+        proxy=None,
+        open_timeout=10,
+    ) as websocket:
+        websocket.send("browser-neutral-socket")
+        assert websocket.recv(timeout=10) == "echo:browser-neutral-socket"
 
 
 @pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
@@ -1175,6 +1352,15 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             assert evidence["websocket"] == "echo:runtime-web-socket"
             assert driver.current_url == endpoint_url
             assert "ticket" not in driver.current_url.lower()
+            identity_cookie = driver.get_cookie("__Http-Azents-Runtime-Web")
+            assert identity_cookie is not None
+            identity_secret = identity_cookie.get("value")
+            assert isinstance(identity_secret, str)
+            _browser_neutral_transport_evidence(
+                stack=stack,
+                endpoint_url=endpoint_url,
+                identity_secret=identity_secret,
+            )
 
             replacement = api.runtime_web_v1_request_runtime_web_exposure(
                 handle=workspace.handle,
@@ -1245,6 +1431,11 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 ".catch(error => done(String(error)));"
             )
             assert status_after_close == 410
+            _exercise_services_management_ui(
+                driver,
+                workspace=workspace,
+                endpoint_url=endpoint_url,
+            )
         finally:
             driver.quit()
 
@@ -1252,7 +1443,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             f"{stack.edge_host_url}/",
             headers={
                 "Host": endpoint_url.removeprefix("https://").rstrip("/"),
-                "User-Agent": "not-a-browser",
+                "User-Agent": "Mozilla/5.0 Firefox/143.0",
                 "Sec-Fetch-Mode": "cors",
                 "Sec-Fetch-Dest": "empty",
             },
@@ -1260,7 +1451,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             timeout=10,
             allow_redirects=False,
         )
-        assert unauthenticated.status_code == 426
+        assert unauthenticated.status_code == 401
 
         listed = api.runtime_web_v1_list_runtime_web_services(
             handle=workspace.handle,

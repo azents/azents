@@ -11833,16 +11833,6 @@
         "summary": "Issue Runtime Web Shared Identity",
         "description": "Mint one opaque Gateway identity for a trusted Main Web response.",
         "operationId": "runtime_web_v1_issue_runtime_web_shared_identity",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeWebBrowserProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -11860,16 +11850,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeWebActionErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -32497,24 +32477,6 @@
         ],
         "title": "RuntimeWebApprovalRequest",
         "description": "Revision- and displayed-duration-bound approval mutation."
-      },
-      "RuntimeWebBrowserProfileRequest": {
-        "properties": {
-          "browser_profile": {
-            "type": "string",
-            "maxLength": 32,
-            "minLength": 10,
-            "pattern": "^chromium-[0-9]+$",
-            "title": "Browser Profile"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "browser_profile"
-        ],
-        "title": "RuntimeWebBrowserProfileRequest",
-        "description": "Trusted Main Web proof for the admitted browser profile."
       },
       "RuntimeWebCloseRequest": {
         "properties": {

@@ -9,7 +9,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
 _ENDPOINT_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_CHROMIUM_BRAND = re.compile(r'"Chromium";v="(?P<version>[0-9]+)"')
 _FORBIDDEN_REQUEST_HEADERS = frozenset(
     {
         b"connection",
@@ -78,7 +77,6 @@ class RuntimeWebPolicyCode(enum.StrEnum):
     FORBIDDEN = "forbidden"
     HEADER_TOO_LARGE = "header_too_large"
     METHOD_NOT_ALLOWED = "method_not_allowed"
-    UPGRADE_REQUIRED = "upgrade_required"
 
 
 class RuntimeWebPolicyError(ValueError):
@@ -149,57 +147,6 @@ def reject_service_worker_request(headers: Mapping[str, str]) -> None:
     service_worker = headers.get("Service-Worker", "").lower()
     if destination in _SERVICE_WORKER_DESTINATIONS or service_worker == "script":
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-
-
-def require_supported_browser_user_agent(
-    headers: Mapping[str, str],
-    *,
-    config: RuntimeWebGatewayConfig,
-) -> str:
-    """Resolve the configured Chromium profile from its User-Agent version."""
-    user_agent = headers.get("User-Agent")
-    match = (
-        None
-        if user_agent is None
-        else re.search(r"(?:Chrome|Chromium)/([0-9]+)", user_agent)
-    )
-    if match is None:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
-    version = int(match.group(1))
-    if not config.chromium_min_version <= version <= config.chromium_max_version:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
-    return f"chromium-{version}"
-
-
-def require_admitted_browser(
-    headers: Mapping[str, str],
-    *,
-    config: RuntimeWebGatewayConfig,
-) -> str:
-    """Require the approved Chromium prefix-enforcement evidence."""
-    sec_ch_ua = headers.get("Sec-CH-UA")
-    user_agent = headers.get("User-Agent")
-    fetch_site = headers.get("Sec-Fetch-Site")
-    fetch_mode = headers.get("Sec-Fetch-Mode")
-    fetch_dest = headers.get("Sec-Fetch-Dest")
-    if (
-        sec_ch_ua is None
-        or user_agent is None
-        or fetch_site is None
-        or fetch_mode is None
-        or fetch_dest is None
-    ):
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
-    match = _CHROMIUM_BRAND.search(sec_ch_ua)
-    if match is None:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
-    browser_profile = require_supported_browser_user_agent(headers, config=config)
-    client_hint_version = int(match.group("version"))
-    if browser_profile != f"chromium-{client_hint_version}":
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
-    if fetch_site not in {"same-origin", "same-site", "cross-site", "none"}:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    return browser_profile
 
 
 def evaluate_actual_origin(

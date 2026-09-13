@@ -2,7 +2,7 @@
   "retry": "Try again",
   "auth": {
     "title": "Connecting to this web service",
-    "description": "Verifying your browser and Azents sign-in before opening the Runtime application.",
+    "description": "Verifying your Azents sign-in before opening the Runtime application.",
     "errorDescription": "The web service could not be connected safely.",
     "invalidResponse": "The authentication response was invalid.",
     "failed": "Runtime Web authentication failed."
@@ -50,7 +50,7 @@
     "expired": "Expired",
     "closed": "Closed",
     "unconfigured": "Installation not ready",
-    "unavailable": "Application unavailable"
+    "runtimeUnavailable": "Runtime unavailable; application reachability has not been checked"
   },
   "actions": {
     "approve": "Approve",

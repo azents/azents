@@ -28,7 +28,6 @@ class RuntimeWebGatewayIdentity(BaseModel):
     user_id: str
     auth_session_id: str
     mode: RuntimeWebAuthMode
-    browser_profile: str
     issued_at: datetime.datetime
     expires_at: datetime.datetime
 

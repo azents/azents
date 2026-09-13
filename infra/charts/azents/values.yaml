@@ -134,9 +134,6 @@ server:
     identityCookieName: __Http-Azents-Runtime-Web
     identityLifetimeSeconds: 1800
     activeDurationSeconds: 3600
-    chromium:
-      minVersion: 152
-      maxVersion: 152
     request:
       headerBytes: 32768
       bodyBytes: 67108864

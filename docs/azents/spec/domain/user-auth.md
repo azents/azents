@@ -98,7 +98,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-13
-spec_version: 18
+spec_version: 19
 ---
 
 # User & Authentication
@@ -370,11 +370,11 @@ Main Web access and refresh cookies use host-only `__Host-` names, `Secure`,
 retain their explicit legacy cookie names without providing a production fallback.
 
 Unsafe Main Web Runtime Web routes accept only the exact configured Main Web origin
-and fail closed when that origin is absent or mismatched. Before identity issuance,
-the browser proves that an ordinary Secure cookie is writable while a forged
-`__Http-` cookie cannot replace the server-set HTTP-only probe. The server also binds
-the identity to a normalized admitted Chromium profile. Logout revokes the opaque
-Runtime Web identity and clears its cookie without revealing the secret.
+and fail closed when that origin is absent or mismatched. Shared identity issuance
+requires the authenticated Main Web user and current authentication Session but does
+not use browser vendor, version, User-Agent Client Hints, a browser capability probe,
+or a browser-profile field. Logout revokes the opaque Runtime Web identity and clears
+its cookie without revealing the secret.
 
 Shared-cookie mode mints the identity through the authenticated Public API and writes
 it from a trusted Main Web response to the configured parent cookie domain.
@@ -383,10 +383,12 @@ posts only the initiation ID to the broker, binds the broker callback to the cur
 auth Session, issues a single-use 30-second ticket, and redeems that ticket only with
 the broker's HTTP-only binding cookie. The resulting service-domain identity cookie
 is `Secure`, `HttpOnly`, `SameSite=Strict`, path `/`, and scoped to the configured
-service suffix. Ticket replay, binding mismatch, expired exchange, browser-profile
-mismatch, or a security configuration change fails closed. The Gateway explicitly
-revokes identities and removes pending bindings and tickets when that configuration
-changes.
+service suffix. Ticket replay, binding mismatch, expired exchange, or a security
+configuration change fails closed. The Gateway explicitly revokes
+identities and removes pending bindings and tickets when that configuration changes.
+For both modes, the Gateway scans all raw Cookie headers and rejects more than one
+exact identity-cookie value before validating the sole opaque secret, authentication
+Session, user, expiry, revocation, and current service authority.
 
 ### 3.11 Workspace invitation integration
 
@@ -546,6 +548,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-13** (v19) — Removed Runtime Web browser-profile and capability-probe
+  authorization, made identity issuance browser-neutral, and documented exact raw
+  identity-cookie cardinality before opaque-secret validation.
 - **2026-09-13** (v18) — Replaced Runtime Web configuration-epoch rejection with
   explicit identity revocation and pending binding and ticket removal when security
   configuration changes.

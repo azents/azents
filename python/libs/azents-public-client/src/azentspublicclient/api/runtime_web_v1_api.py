@@ -20,7 +20,6 @@ from pydantic import Field, StrictStr
 from typing import Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.runtime_web_approval_request import RuntimeWebApprovalRequest
-from azentspublicclient.models.runtime_web_browser_profile_request import RuntimeWebBrowserProfileRequest
 from azentspublicclient.models.runtime_web_close_request import RuntimeWebCloseRequest
 from azentspublicclient.models.runtime_web_direct_create_request import RuntimeWebDirectCreateRequest
 from azentspublicclient.models.runtime_web_expected_revision_request import RuntimeWebExpectedRevisionRequest
@@ -3567,7 +3566,6 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_issue_runtime_web_shared_identity(
         self,
-        runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3585,8 +3583,6 @@ class RuntimeWebV1Api:
 
         Mint one opaque Gateway identity for a trusted Main Web response.
 
-        :param runtime_web_browser_profile_request: (required)
-        :type runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3610,7 +3606,6 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_issue_runtime_web_shared_identity_serialize(
-            runtime_web_browser_profile_request=runtime_web_browser_profile_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3620,7 +3615,6 @@ class RuntimeWebV1Api:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "RuntimeWebIdentitySecretResponse",
             '409': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3636,7 +3630,6 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_issue_runtime_web_shared_identity_with_http_info(
         self,
-        runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3654,8 +3647,6 @@ class RuntimeWebV1Api:
 
         Mint one opaque Gateway identity for a trusted Main Web response.
 
-        :param runtime_web_browser_profile_request: (required)
-        :type runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3679,7 +3670,6 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_issue_runtime_web_shared_identity_serialize(
-            runtime_web_browser_profile_request=runtime_web_browser_profile_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3689,7 +3679,6 @@ class RuntimeWebV1Api:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "RuntimeWebIdentitySecretResponse",
             '409': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3705,7 +3694,6 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_issue_runtime_web_shared_identity_without_preload_content(
         self,
-        runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3723,8 +3711,6 @@ class RuntimeWebV1Api:
 
         Mint one opaque Gateway identity for a trusted Main Web response.
 
-        :param runtime_web_browser_profile_request: (required)
-        :type runtime_web_browser_profile_request: RuntimeWebBrowserProfileRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3748,7 +3734,6 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_issue_runtime_web_shared_identity_serialize(
-            runtime_web_browser_profile_request=runtime_web_browser_profile_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3758,7 +3743,6 @@ class RuntimeWebV1Api:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "RuntimeWebIdentitySecretResponse",
             '409': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3769,7 +3753,6 @@ class RuntimeWebV1Api:
 
     def _runtime_web_v1_issue_runtime_web_shared_identity_serialize(
         self,
-        runtime_web_browser_profile_request,
         _request_auth,
         _content_type,
         _headers,
@@ -3795,8 +3778,6 @@ class RuntimeWebV1Api:
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if runtime_web_browser_profile_request is not None:
-            _body_params = runtime_web_browser_profile_request
 
 
         # set the HTTP header `Accept`
@@ -3807,19 +3788,6 @@ class RuntimeWebV1Api:
                 ]
             )
 
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
 
         # authentication setting
         _auth_settings: List[str] = [

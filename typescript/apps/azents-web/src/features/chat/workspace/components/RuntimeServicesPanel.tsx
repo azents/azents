@@ -16,7 +16,7 @@ import {
 } from "@mantine/core";
 import { IconExternalLink, IconWorld } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RuntimeServicesState } from "../types";
 import type { RuntimeWebServiceResponse } from "@azents/public-client";
 
@@ -39,7 +39,6 @@ type StatusColor = "gray" | "green" | "red" | "yellow";
 
 function serviceStatus(
   service: RuntimeWebServiceResponse,
-  runtimeAvailable: boolean,
   t: ReturnType<typeof useTranslations<"runtimeWeb">>,
 ): { color: StatusColor; label: string } {
   if (service.endpoint.configuration_state === "unconfigured") {
@@ -49,10 +48,7 @@ function serviceStatus(
     return { color: "green", label: t("status.activePending") };
   }
   if (service.active) {
-    return {
-      color: runtimeAvailable ? "green" : "yellow",
-      label: runtimeAvailable ? t("status.active") : t("status.unavailable"),
-    };
+    return { color: "green", label: t("status.active") };
   }
   if (service.current_request?.state === "pending") {
     return { color: "yellow", label: t("status.pending") };
@@ -107,6 +103,35 @@ export function RuntimeServicesPanel({
   const [label, setLabel] = useState("");
   const [approvalService, setApprovalService] =
     useState<RuntimeWebServiceResponse | null>(null);
+  const preparedEndpointId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (preparedService !== null) {
+      preparedEndpointId.current = preparedService.endpoint.id;
+      return;
+    }
+    if (preparedEndpointId.current !== null && !mutating) {
+      preparedEndpointId.current = null;
+      setCreateOpened(false);
+    }
+  }, [mutating, preparedService]);
+
+  useEffect(() => {
+    if (approvalService === null || state.type !== "READY") {
+      return;
+    }
+    const requestId = approvalService.current_request?.id ?? null;
+    const current = state.services.find(
+      (service) => service.endpoint.id === approvalService.endpoint.id,
+    );
+    if (
+      requestId === null ||
+      current?.current_request?.id !== requestId ||
+      current.current_request.state !== "pending"
+    ) {
+      setApprovalService(null);
+    }
+  }, [approvalService, state]);
 
   const closeCreate = (): void => {
     if (mutating) {
@@ -167,7 +192,7 @@ export function RuntimeServicesPanel({
           state.services.map((service) => {
             const pending = service.current_request?.state === "pending";
             const url = service.endpoint.url;
-            const status = serviceStatus(service, state.runtimeAvailable, t);
+            const status = serviceStatus(service, t);
             return (
               <Paper key={service.endpoint.id} withBorder radius="md" p="md">
                 <Stack gap="sm">
@@ -215,7 +240,9 @@ export function RuntimeServicesPanel({
                   ) : null}
 
                   {service.active && !state.runtimeAvailable ? (
-                    <Alert color="yellow">{t("status.unavailable")}</Alert>
+                    <Alert color="yellow">
+                      {t("status.runtimeUnavailable")}
+                    </Alert>
                   ) : null}
 
                   {url !== null ? (
@@ -373,13 +400,7 @@ export function RuntimeServicesPanel({
               <Button variant="default" onClick={closeCreate}>
                 {t("panel.cancelDialog")}
               </Button>
-              <Button
-                loading={mutating}
-                onClick={() => {
-                  onConfirmCreate();
-                  setCreateOpened(false);
-                }}
-              >
+              <Button loading={mutating} onClick={onConfirmCreate}>
                 {t("actions.approveDuration", {
                   minutes: formatDuration(preparedService, locale),
                 })}
@@ -401,6 +422,9 @@ export function RuntimeServicesPanel({
       >
         {approvalService !== null ? (
           <Stack gap="md">
+            {mutationError !== null ? (
+              <Alert color="red">{mutationError}</Alert>
+            ) : null}
             <Text fw={600}>
               {approvalService.current_request?.label ??
                 approvalService.endpoint.label ??
@@ -426,10 +450,7 @@ export function RuntimeServicesPanel({
               </Button>
               <Button
                 loading={mutating}
-                onClick={() => {
-                  onApprove(approvalService);
-                  setApprovalService(null);
-                }}
+                onClick={() => onApprove(approvalService)}
               >
                 {t("actions.approveDuration", {
                   minutes: formatDuration(approvalService, locale),

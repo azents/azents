@@ -43,8 +43,6 @@ class RuntimeWebGatewayAuthService:
         workspace_user_repository: WorkspaceUserRepository,
         identity_lifetime: datetime.timedelta,
         desired_configuration: RuntimeWebDesiredConfiguration | None,
-        chromium_min_version: int,
-        chromium_max_version: int,
     ) -> None:
         self.session_manager = session_manager
         self.repository = repository
@@ -52,8 +50,6 @@ class RuntimeWebGatewayAuthService:
         self.workspace_user_repository = workspace_user_repository
         self.identity_lifetime = identity_lifetime
         self.desired_configuration = desired_configuration
-        self.chromium_min_version = chromium_min_version
-        self.chromium_max_version = chromium_max_version
 
     async def synchronize_configuration(
         self,
@@ -71,12 +67,10 @@ class RuntimeWebGatewayAuthService:
         *,
         user_id: str,
         auth_session_id: str,
-        browser_profile: str,
         now: datetime.datetime,
     ) -> RuntimeWebIssuedSecret:
         """Mint one shared-mode identity for a trusted Main Web response."""
         await self._ensure_configuration()
-        self._validate_browser_profile(browser_profile)
         secret = _secret()
         expires_at = now + self.identity_lifetime
         async with self.session_manager() as session:
@@ -85,7 +79,6 @@ class RuntimeWebGatewayAuthService:
                 secret_hash=_hash(secret),
                 user_id=user_id,
                 auth_session_id=auth_session_id,
-                browser_profile=browser_profile,
                 issued_at=now,
                 expires_at=expires_at,
             )
@@ -95,15 +88,13 @@ class RuntimeWebGatewayAuthService:
         self,
         *,
         secret: str,
-        browser_profile: str,
         now: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity | None:
-        """Validate one browser-protected identity cookie."""
+        """Validate one opaque identity cookie."""
         async with self.session_manager() as session:
             return await self.repository.authenticate_identity(
                 session,
                 secret_hash=_hash(secret),
-                browser_profile=browser_profile,
                 now=now,
             )
 
@@ -250,12 +241,10 @@ class RuntimeWebGatewayAuthService:
         *,
         ticket_secret: str,
         broker_binding_secret: str,
-        browser_profile: str,
         now: datetime.datetime,
     ) -> RuntimeWebRedeemedIdentity:
         """Consume a ticket once and establish the common identity."""
         await self._ensure_configuration()
-        self._validate_browser_profile(browser_profile)
         identity = _secret()
         expires_at = now + self.identity_lifetime
         async with self.session_manager() as session:
@@ -265,7 +254,6 @@ class RuntimeWebGatewayAuthService:
                 broker_binding_hash=_hash(broker_binding_secret),
                 identity_hash=_hash(identity),
                 identity_secret=identity,
-                browser_profile=browser_profile,
                 identity_expires_at=expires_at,
                 now=now,
             )
@@ -274,18 +262,6 @@ class RuntimeWebGatewayAuthService:
         if self.desired_configuration is None:
             return
         await self.synchronize_configuration(self.desired_configuration)
-
-    def _validate_browser_profile(self, browser_profile: str) -> None:
-        prefix, separator, version_text = browser_profile.partition("-")
-        if prefix != "chromium" or separator != "-" or not version_text.isdigit():
-            raise RuntimeWebRepositoryConflict(
-                "Runtime Web browser profile is unsupported"
-            )
-        version = int(version_text)
-        if not self.chromium_min_version <= version <= self.chromium_max_version:
-            raise RuntimeWebRepositoryConflict(
-                "Runtime Web browser profile is unsupported"
-            )
 
 
 def _secret() -> str:

@@ -42,25 +42,6 @@ export function RuntimeWebAuth({
     let active = true;
     const start = async (): Promise<void> => {
       try {
-        await fetch("/runtime-web/auth/probe", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phase: "reset" }),
-        });
-        document.cookie =
-          "Azents-Runtime-Web-Cookie-Probe=ready; Path=/; SameSite=Strict; Secure";
-        document.cookie =
-          "__Http-Azents-Runtime-Web-Cookie-Probe=forged; Path=/; SameSite=Strict; Secure";
-        const probe = await fetch("/runtime-web/auth/probe", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phase: "verify" }),
-        });
-        if (!probe.ok) {
-          throw new Error(await responseError(probe));
-        }
         const response = await fetch("/runtime-web/auth/start", {
           method: "POST",
           credentials: "same-origin",

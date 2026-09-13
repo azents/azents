@@ -13,7 +13,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "15a8e809bc16412b814d612b4a00fb2693f1351e1c00d3f7ea7b91bd887e76c9"
+    "122064b212e8158c6e94124553482d83658665b28f7f31e9ed2d77a64e44df24"
 )
 
 
@@ -711,6 +711,18 @@ def test_baseline_schema_and_seed_state(
         assert _public_schema_fingerprint(connection) == (
             _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT
         )
+        browser_profile_column = connection.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'runtime_web_gateway_identities'
+                  AND column_name = 'browser_profile'
+                """
+            )
+        ).one_or_none()
+        assert browser_profile_column is None
         file_lifecycle_settings = connection.execute(
             sa.text(
                 """

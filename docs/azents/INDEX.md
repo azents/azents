@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-12 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-10 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-13 | 117 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-13 | 18 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-13 | 19 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-13 | 83 |
 
 ## Living Specs — Flow
@@ -33,9 +33,9 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 179 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 81 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-13 | 36 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 49 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 82 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-13 | 37 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 50 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
@@ -361,6 +361,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Responsive Runtime Operation Delivery Requirements](requirements/runtime-260910-responsive-operation-delivery.md) | runtime-260910 | 2026-09-10 | 2026-09-10 |
 | [Isolated Runtime Operation Reply Streams Requirements](requirements/runtime-260912-isolated-operation-reply-streams.md) | runtime-260912 | 2026-09-12 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
+| [Runtime Web Browser and Services Correction Requirements](requirements/runtimeweb-260913-browser-services-correction.md) | runtimeweb-260913 | 2026-09-13 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
 | [Sandbox Runtime Profile Abstraction Discussion Historical Requirements Reconstruction](requirements/sandbox-260419-sandbox-profile.md) | sandbox-260419 | 2026-04-19 | - |
@@ -791,6 +792,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Responsive Runtime Operation Delivery](adr/runtime-260910-responsive-operation-delivery.md)
 - [Isolated Runtime Operation Reply Streams](adr/runtime-260912-isolated-operation-reply-streams.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
+- [Runtime Web Browser and Services Correction Decisions](adr/runtimeweb-260913-browser-services-correction.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
 - [Sandbox Runtime Profile Abstraction Discussion](adr/sandbox-260419-sandbox-profile.md)

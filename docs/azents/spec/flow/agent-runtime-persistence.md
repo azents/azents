@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/776db49c8368_drop_runtime_web_browser_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -48,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-09-13
-spec_version: 36
+spec_version: 37
 ---
 
 # Agent Runtime Persistence
@@ -99,6 +100,11 @@ errors are never written to PostgreSQL, Redis, object storage, events, Chat hist
 or Runtime configuration history. A transport or coordination loss therefore ends
 only the active exchange; it does not replay application requests or change the
 stable endpoint and finite approval records.
+Gateway identities contain no browser-vendor or browser-profile state. An endpoint's
+current-cycle pointer retains the latest active or ended cycle so projections can
+distinguish active, expired, and explicitly closed authority. Closing advances the
+endpoint revision and close barrier and marks the cycle ended without deleting that
+latest-cycle pointer; a later approval replaces it with the new cycle ID.
 
 The logical Runtime persists durable Provider routing IDs and a monotonic
 `configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
@@ -429,6 +435,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-13 (spec_version=37)** — Removed persisted Runtime Web browser-profile
+  state and retained the latest ended cycle pointer so refreshed projections preserve
+  explicit closed authority.
 - **2026-09-13 (spec_version=36)** — Removed Runtime Web configuration versions,
   epochs, and duration revisions in favor of current configuration plus explicit
   browser authentication invalidation.

@@ -2,7 +2,7 @@
   "retry": "다시 시도",
   "auth": {
     "title": "웹 서비스에 연결하는 중",
-    "description": "Runtime 애플리케이션을 열기 전에 브라우저와 Azents 로그인을 확인하고 있습니다.",
+    "description": "Runtime 애플리케이션을 열기 전에 Azents 로그인을 확인하고 있습니다.",
     "errorDescription": "웹 서비스에 안전하게 연결하지 못했습니다.",
     "invalidResponse": "인증 응답이 올바르지 않습니다.",
     "failed": "Runtime Web 인증에 실패했습니다."
@@ -50,7 +50,7 @@
     "expired": "만료됨",
     "closed": "닫힘",
     "unconfigured": "설치 준비 필요",
-    "unavailable": "애플리케이션 연결 불가"
+    "runtimeUnavailable": "Runtime을 사용할 수 없어 애플리케이션 연결 상태를 확인하지 않았습니다"
   },
   "actions": {
     "approve": "승인",
