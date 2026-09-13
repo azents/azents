@@ -22,11 +22,12 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -126,6 +127,11 @@ from azents.services.exchange_file import (
 from azents.services.exchange_file import (
     SessionNotFound as ExchangeSessionNotFound,
 )
+from azents.services.model_availability import (
+    SessionModelAvailabilityNotFound,
+    SessionModelAvailabilityService,
+    SessionModelReservationConflict,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.project_browser_manifest import (
     ProjectBrowserAccessDenied,
@@ -177,8 +183,11 @@ from .data import (
     AgentProjectPresetResponse,
     AgentSessionCreateRequest,
     AgentSessionListResponse,
+    AgentSessionModelAvailabilityResponse,
     AgentSessionPageResponse,
     AgentSessionPinUpdateRequest,
+    AgentSessionPrimaryModelCancelRequest,
+    AgentSessionPrimaryModelReserveRequest,
     AgentSessionProjectDefaultsResponse,
     AgentSessionResponse,
     AgentSessionSidebarResponse,
@@ -2171,6 +2180,112 @@ async def get_agent_session(
                 raise HTTPException(status_code=404, detail="Session not found.")
             case _:
                 assert_never(error)
+
+
+@router.get("/agents/{agent_id}/sessions/{session_id}/model-availability")
+async def get_agent_session_model_availability(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    availability_service: Annotated[SessionModelAvailabilityService, Depends()],
+) -> AgentSessionModelAvailabilityResponse:
+    """Return authoritative model availability for one writable root Session."""
+    _validate_session_id(session_id)
+    result = await availability_service.get(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(availability):
+            return AgentSessionModelAvailabilityResponse.model_validate(availability)
+        case Failure(SessionModelAvailabilityNotFound()):
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case _:
+            assert_never(result)
+
+
+@router.post(
+    "/agents/{agent_id}/sessions/{session_id}/model-reservation",
+    response_model=AgentSessionModelAvailabilityResponse,
+    responses={409: {"model": AgentSessionModelAvailabilityResponse}},
+)
+async def reserve_agent_session_primary_model(
+    agent_id: str,
+    session_id: str,
+    request: AgentSessionPrimaryModelReserveRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    availability_service: Annotated[SessionModelAvailabilityService, Depends()],
+) -> Response:
+    """Reserve one exact Primary recovery opportunity for this Session."""
+    _validate_session_id(session_id)
+    result = await availability_service.reserve(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+        semantic_label=request.semantic_label,
+        primary=request.primary,
+    )
+    if result.success:
+        return JSONResponse(
+            content=AgentSessionModelAvailabilityResponse.model_validate(
+                result.value
+            ).model_dump(mode="json")
+        )
+    error = result.error
+    match error:
+        case SessionModelAvailabilityNotFound():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case SessionModelReservationConflict(availability=availability):
+            return JSONResponse(
+                status_code=409,
+                content=AgentSessionModelAvailabilityResponse.model_validate(
+                    availability
+                ).model_dump(mode="json"),
+            )
+        case _:
+            assert_never(error)
+
+
+@router.post(
+    "/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel",
+    response_model=AgentSessionModelAvailabilityResponse,
+    responses={409: {"model": AgentSessionModelAvailabilityResponse}},
+)
+async def cancel_agent_session_primary_model_reservation(
+    agent_id: str,
+    session_id: str,
+    request: AgentSessionPrimaryModelCancelRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    availability_service: Annotated[SessionModelAvailabilityService, Depends()],
+) -> Response:
+    """Cancel one exact current Primary reservation generation."""
+    _validate_session_id(session_id)
+    result = await availability_service.cancel(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+        reservation_generation=request.reservation_generation,
+    )
+    if result.success:
+        return JSONResponse(
+            content=AgentSessionModelAvailabilityResponse.model_validate(
+                result.value
+            ).model_dump(mode="json")
+        )
+    error = result.error
+    match error:
+        case SessionModelAvailabilityNotFound():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case SessionModelReservationConflict(availability=availability):
+            return JSONResponse(
+                status_code=409,
+                content=AgentSessionModelAvailabilityResponse.model_validate(
+                    availability
+                ).model_dump(mode="json"),
+            )
+        case _:
+            assert_never(error)
 
 
 @router.post("/agents/{agent_id}/sessions/{session_id}/read", status_code=204)

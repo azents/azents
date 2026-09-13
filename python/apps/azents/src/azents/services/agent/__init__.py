@@ -12,11 +12,10 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
-    DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
-    DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SelectableModelCandidateInput,
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
@@ -51,7 +50,6 @@ from azents.services.image_generation_catalog import ImageGenerationCatalogServi
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_options import (
     NormalizedSelectableModelOptions,
-    build_legacy_selectable_model_options,
     normalize_selectable_model_options,
     normalize_stored_selectable_model_options,
 )
@@ -251,11 +249,11 @@ class AgentService:
         """Normalize selectable option inputs into stored model snapshots."""
 
         async def resolve_option(
-            option_input: SelectableModelOptionInput,
+            candidate_input: SelectableModelCandidateInput,
         ) -> Result[AgentModelSelection, ModelSelectionNotFound]:
             return await self._resolve_model_selection_input(
                 workspace_id,
-                option_input.model_selection,
+                candidate_input.model_selection,
             )
 
         async def validate_image_generation_config(
@@ -314,85 +312,12 @@ class AgentService:
                 case _:
                     assert_never(options_result)
 
-        if create.model_selection is not None:
-            main_result = await self._resolve_model_selection_input(
-                create.workspace_id,
-                create.model_selection,
-            )
-            match main_result:
-                case Success(value):
-                    main_selection = value
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(main_result)
-            if create.lightweight_model_selection is not None:
-                lw_result = await self._resolve_model_selection_input(
-                    create.workspace_id,
-                    create.lightweight_model_selection,
-                )
-                match lw_result:
-                    case Success(value):
-                        lightweight_selection = value
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(lw_result)
-            elif settings.default_lightweight_model_selection is not None:
-                lightweight_selection = settings.default_lightweight_model_selection
-            else:
-                lightweight_selection = main_selection
-            return Success(
-                build_legacy_selectable_model_options(
-                    model_selection=main_selection,
-                    lightweight_model_selection=lightweight_selection,
-                    main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                    lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
-                )
-            )
-
         if settings.default_selectable_model_options is not None:
-            labels = {
-                option.label for option in settings.default_selectable_model_options
-            }
-            main_label = (
-                settings.default_main_model_label
-                if settings.default_main_model_label in labels
-                else settings.default_selectable_model_options[0].label
-            )
-            lightweight_label = (
-                settings.default_lightweight_model_label
-                if settings.default_lightweight_model_label in labels
-                else settings.default_selectable_model_options[0].label
-            )
-            option_by_label = {
-                option.label: option
-                for option in settings.default_selectable_model_options
-            }
             return Success(
-                NormalizedSelectableModelOptions(
-                    selectable_model_options=list(
-                        settings.default_selectable_model_options
-                    ),
-                    main_model_label=main_label,
-                    lightweight_model_label=lightweight_label,
-                    model_selection=option_by_label[main_label].model_selection,
-                    lightweight_model_selection=option_by_label[
-                        lightweight_label
-                    ].model_selection,
-                )
-            )
-
-        if settings.default_model_selection is not None:
-            return Success(
-                build_legacy_selectable_model_options(
-                    model_selection=settings.default_model_selection,
-                    lightweight_model_selection=(
-                        settings.default_lightweight_model_selection
-                        or settings.default_model_selection
-                    ),
-                    main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                    lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
+                normalize_stored_selectable_model_options(
+                    selectable_model_options=settings.default_selectable_model_options,
+                    main_model_label=settings.default_main_model_label,
+                    lightweight_model_label=settings.default_lightweight_model_label,
                 )
             )
 
@@ -472,11 +397,6 @@ class AgentService:
                 auto_archive_ttl_days=create.auto_archive_ttl_days,
                 subagent_settings=create.subagent_settings,
             )
-            if create.model_selection is not None:
-                set_default = (
-                    self.workspace_model_settings_repository.set_default_model_if_empty
-                )
-                await set_default(session, create.workspace_id, main_selection)
             agent = await self.repository.create(session, repo_create)
             await self.admin_repository.create(
                 session,
@@ -636,55 +556,6 @@ class AgentService:
                     return Failure(error)
                 case _:
                     assert_never(options_result)
-        elif "model_selection" in update or "lightweight_model_selection" in update:
-            main_selection = existing.model_selection
-            if "model_selection" in update:
-                selection_input = update["model_selection"]
-                if selection_input is None:
-                    async with self.session_manager() as session:
-                        settings = await self.workspace_model_settings_repository.get(
-                            session,
-                            workspace_id,
-                        )
-                    if settings is None or settings.default_model_selection is None:
-                        return Failure(ModelRequired(workspace_id=workspace_id))
-                    main_selection = settings.default_model_selection
-                else:
-                    main_result = await self._resolve_model_selection_input(
-                        workspace_id,
-                        selection_input,
-                    )
-                    match main_result:
-                        case Success(value):
-                            main_selection = value
-                        case Failure(error):
-                            return Failure(error)
-                        case _:
-                            assert_never(main_result)
-
-            lightweight_selection = existing.lightweight_model_selection
-            if "lightweight_model_selection" in update:
-                selection_input = update["lightweight_model_selection"]
-                if selection_input is None:
-                    lightweight_selection = main_selection
-                else:
-                    lw_result = await self._resolve_model_selection_input(
-                        workspace_id,
-                        selection_input,
-                    )
-                    match lw_result:
-                        case Success(value):
-                            lightweight_selection = value
-                        case Failure(error):
-                            return Failure(error)
-                        case _:
-                            assert_never(lw_result)
-            model_options = build_legacy_selectable_model_options(
-                model_selection=main_selection,
-                lightweight_model_selection=lightweight_selection,
-                main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
-            )
         elif "main_model_label" in update or "lightweight_model_label" in update:
             model_options = normalize_stored_selectable_model_options(
                 selectable_model_options=existing.selectable_model_options,
@@ -1234,23 +1105,25 @@ class AgentService:
         if main_option is None or lightweight_option is None:
             return None
 
+        main_candidate = main_option.candidates[0]
+        lightweight_candidate = lightweight_option.candidates[0]
         main_input_tokens = resolve_model_input_tokens(
-            main_option.model_selection.normalized_capabilities.context_window.default_input_tokens,
-            main_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            main_candidate.model_selection.normalized_capabilities.context_window.default_input_tokens,
+            main_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
-                main_option.model_selection.provider,
-                main_option.model_selection.model_identifier,
+                main_candidate.model_selection.provider,
+                main_candidate.model_selection.model_identifier,
             ),
-            main_option.settings.context_window_tokens,
+            main_candidate.settings.context_window_tokens,
         )
         compaction_input_tokens = resolve_model_input_tokens(
-            lightweight_option.model_selection.normalized_capabilities.context_window.default_input_tokens,
-            lightweight_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            lightweight_candidate.model_selection.normalized_capabilities.context_window.default_input_tokens,
+            lightweight_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
-                lightweight_option.model_selection.provider,
-                lightweight_option.model_selection.model_identifier,
+                lightweight_candidate.model_selection.provider,
+                lightweight_candidate.model_selection.model_identifier,
             ),
-            lightweight_option.settings.context_window_tokens,
+            lightweight_candidate.settings.context_window_tokens,
         )
         return compute_effective_context_window_tokens(
             main_max_input_tokens=main_input_tokens.effective_input_tokens,

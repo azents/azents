@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
 from azents.broker.types import PublishedEvent, SessionWakeUp
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import (
+    AgentModelSelection,
+    SelectableModelCandidate,
+    SelectableModelOption,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentLifecycleStatus,
@@ -47,7 +51,9 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_operation import ModelOperationState
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -105,6 +111,7 @@ from azents.engine.run.resolve import (
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
     ResolvedInvokeInputProfile,
+    ResolvedModelCandidateRuntime,
 )
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
@@ -119,10 +126,17 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.mailbox.data import MailboxItem
+from azents.repos.model_candidate_health.data import (
+    CandidateHealthSettlement,
+    ForegroundProbeOutcome,
+    ForegroundProbeResult,
+    ModelCandidateHealthObservation,
+    ModelCandidateHealthStatus,
+)
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
@@ -289,6 +303,7 @@ class _PendingRun:
     """Minimal pending-run projection for executor tests."""
 
     id: str = "run-001"
+    session_id: str = "session-001"
     run_index: int = 1
     requested_model_target_label: str | None = "default"
     requested_reasoning_effort: ModelReasoningEffort | None = None
@@ -309,6 +324,104 @@ class _PendingRun:
     model_call_started_at: datetime.datetime | None = None
     active_tool_calls: list[ActiveToolCall] = dataclasses.field(default_factory=list)
     retry_state: FailedRunRetryState | None = None
+    model_operation_state: ModelOperationState | None = None
+
+
+class _AgentRunRepository:
+    """In-memory AgentRun state used by fenced executor transitions."""
+
+    def __init__(self, run: _PendingRun | None = None) -> None:
+        self.run = run or _PendingRun()
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> _PendingRun | None:
+        """Return the current run under the caller's synthetic lock."""
+        del session
+        if self.run.id != run_id:
+            self.run = dataclasses.replace(self.run, id=run_id)
+        return self.run
+
+    async def update(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        patch: AgentRunPatch,
+    ) -> _PendingRun:
+        """Apply operation fields used by the production repository."""
+        del session
+        if self.run.id != run_id:
+            raise ValueError("AgentRun not found")
+        values: dict[str, object] = {}
+        if "model_operation_state" in patch.model_fields_set:
+            values["model_operation_state"] = patch.model_operation_state
+        if "retry_state" in patch.model_fields_set:
+            values["retry_state"] = patch.retry_state
+        if "model_call_started_at" in patch.model_fields_set:
+            values["model_call_started_at"] = patch.model_call_started_at
+        self.run = dataclasses.replace(self.run, **values)
+        return self.run
+
+
+class _ModelCandidateHealthRepository:
+    """Healthy candidate authority for existing executor behavior tests."""
+
+    def _available(self) -> ModelCandidateHealthObservation:
+        return ModelCandidateHealthObservation(
+            server_time=datetime.datetime.now(datetime.UTC),
+            status=ModelCandidateHealthStatus.AVAILABLE,
+            health=None,
+        )
+
+    async def claim_foreground_probe_in_session(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> ForegroundProbeResult:
+        """Treat every candidate as healthy without allocating a probe."""
+        del args, kwargs
+        return ForegroundProbeResult(
+            outcome=ForegroundProbeOutcome.HEALTHY,
+            observation=self._available(),
+        )
+
+    async def snapshot_for_background_in_session(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> ModelCandidateHealthObservation:
+        """Treat every background candidate as healthy."""
+        del args, kwargs
+        return self._available()
+
+    async def renew_quota_in_session(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> ModelCandidateHealthObservation:
+        """Return deterministic database time for quota tests."""
+        del args, kwargs
+        return self._available()
+
+    async def complete_probe_success_in_session(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> CandidateHealthSettlement:
+        """Accept a matching synthetic probe settlement."""
+        del args, kwargs
+        return CandidateHealthSettlement.APPLIED
+
+    async def transfer_reservation_in_session(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """Report no Session reservation in existing behavior tests."""
+        del args, kwargs
+        return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -331,7 +444,7 @@ class _SessionLifecycle:
     ) -> None:
         self.order = order
         self.recoverable_run = recoverable_run
-        self.agent_run_repository = AgentRunRepository()
+        self.agent_run_repository = _AgentRunRepository(recoverable_run)
         self.heartbeat_session_ids: list[str] = []
         self.second_heartbeat = asyncio.Event()
         self.heartbeat_error_after: int | None = None
@@ -367,6 +480,20 @@ class _SessionLifecycle:
         del session_id, owner_generation
         if self.owner_generation_error is not None:
             raise self.owner_generation_error
+
+    async def assert_owner_generation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> None:
+        """Apply the same synthetic owner fence inside a caller transaction."""
+        del session
+        await self.assert_current_owner_generation(
+            session_id,
+            owner_generation=owner_generation,
+        )
 
     async def set_session_activity(
         self,
@@ -499,7 +626,9 @@ class _SessionLifecycle:
         """Return one stable pending run for execution tests."""
         del session_id, kwargs
         self.pending_run_create_calls += 1
-        return _PendingRun()
+        created = _PendingRun()
+        self.agent_run_repository.run = created
+        return created
 
     async def claim_lifecycle_start(
         self,
@@ -556,10 +685,16 @@ class _SessionLifecycle:
         self.activation_profiles.append(requested_profile)
         if self.order is not None:
             self.order.append("activate_pending")
-        return _PendingRun(
+        activated = _PendingRun(
             status=AgentRunStatus.RUNNING,
             phase=initial_phase,
         )
+        self.agent_run_repository.run = dataclasses.replace(
+            self.agent_run_repository.run,
+            status=AgentRunStatus.RUNNING,
+            phase=initial_phase,
+        )
+        return activated
 
     async def activate_inherited_pending_agent_run(
         self,
@@ -785,6 +920,22 @@ class _AgentSessionRepository:
         del session, session_id
         self.inference_state = inference_state
         return SimpleNamespace(inference_state=inference_state)
+
+    async def set_primary_model_reservation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        reservation: object | None,
+        expected_reservation_generation: int | None,
+    ) -> AgentSession:
+        """Accept reservation cleanup without an active reservation."""
+        del session, session_id, reservation, expected_reservation_generation
+        return _default_agent_session(
+            inference_state=self.inference_state,
+            applied_inference_profile=self.applied_inference_profile,
+            owner_generation=self.owner_generation,
+        )
 
     async def list_session_agent_tree(
         self,
@@ -1019,6 +1170,47 @@ class _Engine:
         assert isinstance(context, RunContext)
 
         async def iterator() -> AsyncIterator[Emit]:
+            yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
+class _QuotaThenSuccessEngine(_Engine):
+    """Fail one sampling candidate with quota, then complete on fallback."""
+
+    def __init__(self) -> None:
+        self.requests: list[RunRequest] = []
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: PollMessages | None = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Journal candidate requests and fail only the first."""
+        del poll_messages, check_stop
+        assert isinstance(context, RunContext)
+
+        async def iterator() -> AsyncIterator[Emit]:
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                inference_state = request.inference_state
+                assert inference_state is not None
+                raise model_provider_failure(
+                    operation="sampling",
+                    provider=request.provider.value,
+                    model=request.model,
+                    integration=(
+                        inference_state.model_selection.llm_provider_integration_id
+                    ),
+                    provider_message="Quota exceeded.",
+                    status_code=402,
+                    provider_code="billing_limit",
+                    provider_error_type="billing_error",
+                    provider_error_param=None,
+                )
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -1552,6 +1744,7 @@ def _executor(
     session_git_worktree_service: Any | None = None,  # noqa: ANN401
     vfs_projection_service: Any | None = None,  # noqa: ANN401
     image_generation_catalog_service: Any | None = None,  # noqa: ANN401
+    model_candidate_health_repository: Any | None = None,  # noqa: ANN401
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
@@ -1607,6 +1800,8 @@ def _executor(
     if image_generation_catalog_service is None:
         image_generation_catalog_service = AsyncMock()
         image_generation_catalog_service.validate_runtime.return_value = None
+    if model_candidate_health_repository is None:
+        model_candidate_health_repository = _ModelCandidateHealthRepository()
     capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
         "skill_store": object(),
         "vfs_projection_service": None,
@@ -1622,6 +1817,7 @@ def _executor(
         agent_repository=_AgentRepository(agent),
         command_registry=command_registry,
         integration_repository=object(),
+        model_candidate_health_repository=model_candidate_health_repository,
         toolkit_registry={},
         vfs_projection_service=vfs_projection_service,
         toolkit_repository=object(),
@@ -2077,6 +2273,7 @@ async def test_boundary_cancellation_waits_for_live_action_handoff(
 async def _resolve_success(*args: object, **kwargs: object) -> object:
     """Return a minimal run request from resolve input."""
     del args, kwargs
+    selection = make_test_model_selection()
     return Success(
         ResolvedInvokeInputProfile(
             run_request=RunRequest(
@@ -2091,10 +2288,19 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
                 agent_id="agent-001",
                 tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
-                compaction_provider_integration_id=None,
+                compaction_provider_integration_id=(
+                    selection.llm_provider_integration_id
+                ),
+                compaction_model=to_runtime_model(
+                    selection.provider,
+                    selection.model_identifier,
+                ),
+                compaction_provider=selection.provider,
+                compaction_credential_kwargs={},
+                compaction_max_input_tokens=128_000,
                 inference_state=None,
             ),
-            model_selection=make_test_model_selection(),
+            model_selection=selection,
             model_settings=make_test_model_settings(),
             reasoning_effort=None,
         )
@@ -2104,6 +2310,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
 async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
     """Return a minimal run request for an existing Session inference state."""
     del args, kwargs
+    selection = make_test_model_selection()
     return Success(
         RunRequest(
             enabled_execution_options=[],
@@ -2117,7 +2324,14 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
             agent_id="agent-001",
             tool_search_enabled=False,
             auto_compaction_threshold_tokens=None,
-            compaction_provider_integration_id=None,
+            compaction_provider_integration_id=(selection.llm_provider_integration_id),
+            compaction_model=to_runtime_model(
+                selection.provider,
+                selection.model_identifier,
+            ),
+            compaction_provider=selection.provider,
+            compaction_credential_kwargs={},
+            compaction_max_input_tokens=128_000,
             inference_state=None,
         )
     )
@@ -2934,7 +3148,16 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
                     agent_id="agent-001",
                     tool_search_enabled=False,
                     auto_compaction_threshold_tokens=None,
-                    compaction_provider_integration_id=None,
+                    compaction_provider_integration_id=(
+                        selection.llm_provider_integration_id
+                    ),
+                    compaction_model=to_runtime_model(
+                        selection.provider,
+                        selection.model_identifier,
+                    ),
+                    compaction_provider=selection.provider,
+                    compaction_credential_kwargs={},
+                    compaction_max_input_tokens=128_000,
                     inference_state=None,
                 ),
                 model_selection=selection,
@@ -3158,6 +3381,7 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
     prepared = await executor._prepare_fresh_main_model_turn(
         agent_id="agent-001",
         session_id="session-001",
+        run_id="run-001",
         owner_generation=1,
         invoke_input=InvokeInput(
             agent_id="agent-001",
@@ -3175,6 +3399,144 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
     )
     assert prepared.value.inference_state.model_selection.model_identifier == "gpt-4o"
     assert session_repository.inference_state is prepared.value.inference_state
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_materializes_the_frozen_primary_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent Agent edit cannot replace the committed operation route."""
+    executor = _executor()
+    live_selection = make_test_model_selection(model_identifier="gpt-live-edit")
+    frozen_selections: list[AgentModelSelection] = []
+
+    async def resolve_live_profile(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        resolved = await _resolve_success()
+        assert isinstance(resolved, Success)
+        return Success(
+            dataclasses.replace(
+                resolved.value,
+                run_request=dataclasses.replace(
+                    resolved.value.run_request,
+                    model="gpt-live-edit",
+                ),
+                model_selection=live_selection,
+            )
+        )
+
+    async def resolve_frozen_profile(
+        *args: object,
+        **kwargs: Unpack[_ResolvedSelectionKwargs],
+    ) -> object:
+        del args
+        frozen_selections.append(kwargs["resolved_model_selection"])
+        return await _resolve_existing_success()
+
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_live_profile,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_frozen_profile,
+    )
+
+    prepared = await executor._prepare_fresh_main_model_turn(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        invoke_input=InvokeInput(
+            agent_id="agent-001",
+            session_id="session-001",
+            messages=[],
+        ),
+        override=None,
+    )
+
+    assert isinstance(prepared, Success)
+    assert [selection.model_identifier for selection in frozen_selections] == ["gpt-4o"]
+    assert prepared.value.run_request.model == "gpt-test"
+    assert prepared.value.inference_state.model_selection.model_identifier == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent Lightweight edit cannot replace the committed operation route."""
+    executor = _executor()
+    frozen_compaction_selections: list[AgentModelSelection] = []
+
+    async def resolve_live_profile(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        resolved = await _resolve_success()
+        assert isinstance(resolved, Success)
+        return Success(
+            dataclasses.replace(
+                resolved.value,
+                run_request=dataclasses.replace(
+                    resolved.value.run_request,
+                    compaction_model="openai/gpt-live-edit",
+                ),
+            )
+        )
+
+    async def resolve_frozen_compaction(
+        *,
+        selection: AgentModelSelection,
+        **kwargs: object,
+    ) -> object:
+        del kwargs
+        frozen_compaction_selections.append(selection)
+        return Success(
+            ResolvedModelCandidateRuntime(
+                provider=selection.provider,
+                provider_integration_id=selection.llm_provider_integration_id,
+                model=to_runtime_model(
+                    selection.provider,
+                    selection.model_identifier,
+                ),
+                credential_kwargs={"api_key": "frozen"},
+                effective_input_tokens=128_000,
+            )
+        )
+
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_live_profile,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_model_candidate_runtime",
+        resolve_frozen_compaction,
+    )
+
+    prepared = await executor._prepare_fresh_main_model_turn(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        invoke_input=InvokeInput(
+            agent_id="agent-001",
+            session_id="session-001",
+            messages=[],
+        ),
+        override=None,
+    )
+
+    assert isinstance(prepared, Success)
+    assert [
+        selection.model_identifier for selection in frozen_compaction_selections
+    ] == ["gpt-4o"]
+    assert prepared.value.run_request.compaction_model == "gpt-4o"
+    assert prepared.value.run_request.compaction_credential_kwargs == {
+        "api_key": "frozen"
+    }
 
 
 @pytest.mark.asyncio
@@ -3265,6 +3627,7 @@ async def test_prepare_fresh_turn_fails_closed_when_session_is_missing(
         await executor._prepare_fresh_main_model_turn(
             agent_id="agent-001",
             session_id="session-001",
+            run_id="run-001",
             owner_generation=1,
             invoke_input=InvokeInput(
                 agent_id="agent-001",
@@ -3298,6 +3661,7 @@ async def test_prepare_fresh_turn_fails_closed_when_agent_is_missing(
         await executor._prepare_fresh_main_model_turn(
             agent_id="agent-001",
             session_id="session-001",
+            run_id="run-001",
             owner_generation=1,
             invoke_input=InvokeInput(
                 agent_id="agent-001",
@@ -3326,6 +3690,7 @@ async def test_prepare_fresh_turn_rejects_owner_generation_drift(
         await executor._prepare_fresh_main_model_turn(
             agent_id="agent-001",
             session_id="session-001",
+            run_id="run-001",
             owner_generation=1,
             invoke_input=InvokeInput(
                 agent_id="agent-001",
@@ -5691,6 +6056,151 @@ async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> N
 
 
 @pytest.mark.asyncio
+async def test_quota_progresses_candidate_before_generic_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Primary quota dispatches fallback without consuming retry budget."""
+    primary = make_test_model_selection(
+        integration_id="integration-primary",
+        model_identifier="gpt-primary",
+    )
+    fallback = make_test_model_selection(
+        integration_id="integration-fallback",
+        model_identifier="gpt-fallback",
+    )
+    option = SelectableModelOption(
+        label="default",
+        candidates=[
+            SelectableModelCandidate(
+                model_selection=primary,
+                settings=make_test_model_settings(),
+            ),
+            SelectableModelCandidate(
+                model_selection=fallback,
+                settings=make_test_model_settings(),
+            ),
+        ],
+        subagent_enabled=True,
+        subagent_guidance=None,
+    )
+    agent = _default_agent().model_copy(
+        update={
+            "model_selection": primary,
+            "lightweight_model_selection": primary,
+            "selectable_model_options": [option],
+        }
+    )
+    engine = _QuotaThenSuccessEngine()
+    lifecycle = _SessionLifecycle()
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=engine,
+        agent=agent,
+        failed_run_max_retries=0,
+    )
+
+    def request_for(selection: AgentModelSelection) -> RunRequest:
+        return RunRequest(
+            session_id="session-001",
+            user_messages=[],
+            agent_prompt=None,
+            toolkits=[],
+            provider=selection.provider,
+            model=to_runtime_model(
+                selection.provider,
+                selection.model_identifier,
+            ),
+            credential_kwargs={},
+            workspace_id="workspace-001",
+            agent_id="agent-001",
+            tool_search_enabled=False,
+            auto_compaction_threshold_tokens=None,
+            enabled_execution_options=[],
+            inference_state=None,
+            compaction_provider_integration_id=(primary.llm_provider_integration_id),
+            compaction_model=to_runtime_model(
+                primary.provider,
+                primary.model_identifier,
+            ),
+            compaction_provider=primary.provider,
+            compaction_credential_kwargs={},
+            compaction_max_input_tokens=128_000,
+        )
+
+    async def resolve_primary(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(
+            ResolvedInvokeInputProfile(
+                run_request=request_for(primary),
+                model_selection=primary,
+                model_settings=make_test_model_settings(),
+                reasoning_effort=None,
+            )
+        )
+
+    async def resolve_fallback(
+        *args: object,
+        **kwargs: Unpack[_ResolvedSelectionKwargs],
+    ) -> object:
+        del args
+        selection = kwargs["resolved_model_selection"]
+        return Success(request_for(selection))
+
+    async def resolve_tools(*args: object, **kwargs: object) -> list[ToolkitBinding]:
+        del args, kwargs
+        return []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            has_actionable_work=True,
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_primary,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_fallback,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status is AgentRunStatus.COMPLETED
+    assert [request.model for request in engine.requests] == [
+        to_runtime_model(primary.provider, primary.model_identifier),
+        to_runtime_model(fallback.provider, fallback.model_identifier),
+    ]
+    assert lifecycle.retry_states == []
+    operation_state = lifecycle.agent_run_repository.run.model_operation_state
+    assert operation_state is not None
+    assert operation_state.foreground is not None
+    assert operation_state.foreground.cursor == 1
+    assert operation_state.foreground.outcomes[0].status.value == "quota_or_billing"
+
+
+@pytest.mark.asyncio
 async def test_execute_retries_failed_run_without_durable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -5840,7 +6350,16 @@ async def test_execute_refreshes_session_profile_before_model_retry(
                     agent_id="agent-001",
                     tool_search_enabled=False,
                     auto_compaction_threshold_tokens=None,
-                    compaction_provider_integration_id=None,
+                    compaction_provider_integration_id=(
+                        selection.llm_provider_integration_id
+                    ),
+                    compaction_model=to_runtime_model(
+                        selection.provider,
+                        selection.model_identifier,
+                    ),
+                    compaction_provider=selection.provider,
+                    compaction_credential_kwargs={},
+                    compaction_max_input_tokens=128_000,
                     inference_state=None,
                 ),
                 model_selection=selection,

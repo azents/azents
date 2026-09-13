@@ -41,9 +41,7 @@ class TestSelectableModelSettings(unittest.TestCase):
                     {
                         'key' : null
                         }
-                    ],
-                subagent_enabled = True,
-                subagent_guidance = ''
+                    ]
             )
         else:
             return SelectableModelSettings(
@@ -54,8 +52,6 @@ class TestSelectableModelSettings(unittest.TestCase):
                         'key' : null
                         }
                     ],
-                subagent_enabled = True,
-                subagent_guidance = '',
         )
         """
 

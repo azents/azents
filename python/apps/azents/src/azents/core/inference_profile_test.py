@@ -9,6 +9,7 @@ from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
+    AppliedModelRoute,
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
     SessionInferenceState,
@@ -126,6 +127,18 @@ def test_session_state_projects_only_applied_public_settings() -> None:
         effective_auto_compaction_threshold_tokens=80_000,
         resolved_at=datetime.datetime.now(datetime.UTC),
         enabled_execution_options=[],
+        applied_model_route=AppliedModelRoute(
+            operation_id="operation-1",
+            operation_kind="foreground",
+            candidate_ordinal=2,
+            candidate_role="fallback",
+            provider=LLMProvider.OPENAI,
+            llm_provider_integration_id="integration-secret-boundary",
+            model_identifier="gpt-5.4",
+            model_display_name="GPT-5.4",
+            effective_context_window_tokens=100_000,
+            effective_auto_compaction_threshold_tokens=80_000,
+        ),
     )
 
     assert state.applied_profile.model_dump(mode="json") == {
@@ -135,3 +148,5 @@ def test_session_state_projects_only_applied_public_settings() -> None:
         "enabled_execution_options": [],
     }
     assert "llm_provider_integration_id" not in state.applied_profile.model_dump()
+    assert state.applied_model_route is not None
+    assert state.applied_model_route.candidate_role == "fallback"

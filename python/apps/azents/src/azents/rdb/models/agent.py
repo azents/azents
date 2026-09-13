@@ -61,46 +61,6 @@ class RDBAgent(RDBModel):
 
     __tablename__ = "agents"
 
-    def __post_init__(self) -> None:
-        """Populate selectable model options for legacy test constructors."""
-        if self.selectable_model_options is None:
-            options = [
-                {
-                    "label": "default",
-                    "model_selection": self.model_selection,
-                    "settings": {
-                        "context_window_tokens": None,
-                        "max_output_tokens": None,
-                        "builtin_tools": [],
-                        "subagent_enabled": True,
-                        "subagent_guidance": None,
-                    },
-                }
-            ]
-            if self.model_selection != self.lightweight_model_selection:
-                options.append(
-                    {
-                        "label": "lightweight",
-                        "model_selection": self.lightweight_model_selection,
-                        "settings": {
-                            "context_window_tokens": None,
-                            "max_output_tokens": None,
-                            "builtin_tools": [],
-                            "subagent_enabled": True,
-                            "subagent_guidance": None,
-                        },
-                    }
-                )
-            self.selectable_model_options = options
-        if self.main_model_label is None:
-            self.main_model_label = "default"
-        if self.lightweight_model_label is None:
-            self.lightweight_model_label = (
-                "default"
-                if self.model_selection == self.lightweight_model_selection
-                else "lightweight"
-            )
-
     id: Mapped[str] = mapped_column(
         sa.String(32),
         primary_key=True,
@@ -119,17 +79,12 @@ class RDBAgent(RDBModel):
         JSONB,
         nullable=False,
     )
-    selectable_model_options: Mapped[list[dict[str, Any]] | None] = mapped_column(
+    selectable_model_options: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
-        default=None,
     )
-    main_model_label: Mapped[str | None] = mapped_column(
-        sa.String(80), nullable=False, default=None
-    )
-    lightweight_model_label: Mapped[str | None] = mapped_column(
-        sa.String(80), nullable=False, default=None
-    )
+    main_model_label: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    lightweight_model_label: Mapped[str] = mapped_column(sa.String(80), nullable=False)
 
     # Optional field. Defaults are required only when explicitly needed.
     description: Mapped[str | None] = mapped_column(
@@ -274,7 +229,13 @@ class RDBAgent(RDBModel):
     )
     CK_SELECTABLE_MODEL_OPTIONS_SHAPE = sa.CheckConstraint(
         "jsonb_typeof(selectable_model_options) = 'array' "
-        "AND jsonb_array_length(selectable_model_options) BETWEEN 1 AND 10",
+        "AND jsonb_array_length(selectable_model_options) BETWEEN 1 AND 10 "
+        "AND NOT jsonb_path_exists("
+        "selectable_model_options, "
+        "'$[*] ? (!exists(@.candidates) || "
+        '@.candidates.type() != "array" || '
+        "@.candidates.size() < 1 || @.candidates.size() > 5)'"
+        ")",
         name="ck_agents_selectable_model_options_shape",
     )
     CK_SUBAGENT_SETTINGS_SHAPE = sa.CheckConstraint(

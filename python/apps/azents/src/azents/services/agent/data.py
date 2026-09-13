@@ -9,7 +9,6 @@ from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
     AgentModelSelection,
-    AgentModelSelectionInput,
     ModelParameters,
     SelectableModelOption,
     SelectableModelOptionInput,
@@ -196,14 +195,6 @@ class AgentCreateInput(BaseModel):
 
     workspace_id: str = Field(description="Workspace ID")
     name: str = Field(description="Agent name")
-    model_selection: AgentModelSelectionInput | None = Field(
-        default=None,
-        description="Main model selection input. Copy workspace default when None",
-    )
-    lightweight_model_selection: AgentModelSelectionInput | None = Field(
-        default=None,
-        description="Lightweight model selection input. Copy default/main when None",
-    )
     selectable_model_options: list[SelectableModelOptionInput] | None = Field(
         default=None, description="Ordered selectable model option inputs"
     )
@@ -247,20 +238,6 @@ class AgentUpdateInput(TypedDict, total=False):
 
     name: Annotated[str, Field(description="Agent name")]
     description: Annotated[str | None, Field(description="Agent description")]
-    model_selection: Annotated[
-        AgentModelSelectionInput | None,
-        Field(
-            description=("Main model selection input. Copy workspace default when None")
-        ),
-    ]
-    lightweight_model_selection: Annotated[
-        AgentModelSelectionInput | None,
-        Field(
-            description=(
-                "Lightweight model selection input. Copy default/main when None"
-            )
-        ),
-    ]
     selectable_model_options: Annotated[
         list[SelectableModelOptionInput] | None,
         Field(description="Ordered selectable model option inputs"),

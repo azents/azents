@@ -75,17 +75,21 @@ void test("selectable model input mapping preserves and normalizes subagent poli
   assert.deepEqual(selectableModelOptionInputsFromFormValues([configured]), [
     {
       label: "lightweight",
-      model_selection: {
-        llm_provider_integration_id: "integration-1",
-        model_identifier: "model-1",
-      },
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        subagent_enabled: false,
-        subagent_guidance: "Prefer for bounded investigation.",
-      },
+      candidates: [
+        {
+          model_selection: {
+            llm_provider_integration_id: "integration-1",
+            model_identifier: "model-1",
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+          },
+        },
+      ],
+      subagent_enabled: false,
+      subagent_guidance: "Prefer for bounded investigation.",
     },
   ]);
 });
@@ -159,8 +163,9 @@ void test("form serialization preserves complete built-in tool config", () => {
   };
 
   const [input] = selectableModelOptionInputsFromFormValues([configured]);
-  assert.ok(input?.settings);
-  assert.deepEqual(input.settings.builtin_tools, [
+  const settings = input?.candidates[0]?.settings;
+  assert.ok(settings);
+  assert.deepEqual(settings.builtin_tools, [
     {
       name: "image_generation",
       config: {

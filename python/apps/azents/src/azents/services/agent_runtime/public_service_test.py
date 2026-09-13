@@ -11,7 +11,11 @@ import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import DEFAULT_MAIN_MODEL_OPTION_LABEL, SelectableModelOption
+from azents.core.agent import (
+    DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    SelectableModelCandidate,
+    SelectableModelOption,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -77,8 +81,14 @@ def _agent(
         selectable_model_options=[
             SelectableModelOption(
                 label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                model_selection=selection,
-                settings=make_test_model_settings(),
+                candidates=[
+                    SelectableModelCandidate(
+                        model_selection=selection,
+                        settings=make_test_model_settings(),
+                    )
+                ],
+                subagent_enabled=True,
+                subagent_guidance=None,
             )
         ],
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,

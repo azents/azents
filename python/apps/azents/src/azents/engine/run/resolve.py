@@ -246,6 +246,17 @@ class ResolvedInvokeInputProfile:
 
 
 @dataclasses.dataclass(frozen=True)
+class ResolvedModelCandidateRuntime:
+    """Runtime provider materialization for one frozen physical candidate."""
+
+    provider: LLMProvider
+    provider_integration_id: str
+    model: str
+    credential_kwargs: dict[str, object]
+    effective_input_tokens: int
+
+
+@dataclasses.dataclass(frozen=True)
 class _ResolvedInvokeInputModelSource:
     """Run request and main selection resolved from one Agent snapshot."""
 
@@ -297,6 +308,72 @@ RuntimeTokenRefreshError = (
     | KimiOAuthProviderRejected
     | KimiOAuthProviderUnavailable
 )
+
+
+async def resolve_model_candidate_runtime(
+    *,
+    agent_id: str,
+    workspace_id: str,
+    selection: AgentModelSelection,
+    settings: SelectableModelSettings,
+    integration_repository: LLMProviderIntegrationRepository,
+    session_manager: SessionManager[AsyncSession],
+) -> Result[
+    ResolvedModelCandidateRuntime,
+    IntegrationNotFound | IntegrationDisabled | InvalidModelParameters,
+]:
+    """Load credentials and materialize one frozen model candidate."""
+    async with session_manager() as session:
+        integration = await integration_repository.get_by_id_with_secrets(
+            session,
+            selection.llm_provider_integration_id,
+        )
+    if integration is None or integration.workspace_id != workspace_id:
+        return Failure(
+            IntegrationNotFound(
+                integration_id=selection.llm_provider_integration_id,
+            )
+        )
+    if not integration.enabled:
+        return Failure(
+            IntegrationDisabled(
+                integration_id=selection.llm_provider_integration_id,
+            )
+        )
+    settings_result = _validate_model_settings(
+        agent_id=agent_id,
+        selection=selection,
+        settings=settings,
+    )
+    if settings_result.failure:
+        return Failure(settings_result.error)
+    refreshed = await _ensure_provider_runtime_tokens(
+        integration=integration,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+    )
+    if refreshed.failure:
+        return Failure(
+            IntegrationDisabled(
+                integration_id=selection.llm_provider_integration_id,
+            )
+        )
+    runtime_model = to_runtime_model(selection.provider, selection.model_identifier)
+    input_tokens = resolve_model_input_tokens(
+        selection.normalized_capabilities.context_window.default_input_tokens,
+        selection.normalized_capabilities.context_window.max_input_tokens,
+        runtime_model,
+        settings.context_window_tokens,
+    )
+    return Success(
+        ResolvedModelCandidateRuntime(
+            provider=selection.provider,
+            provider_integration_id=selection.llm_provider_integration_id,
+            model=runtime_model,
+            credential_kwargs=build_credential_kwargs(refreshed.value),
+            effective_input_tokens=input_tokens.effective_input_tokens,
+        )
+    )
 
 
 def _find_model_option(
@@ -578,8 +655,8 @@ async def resolve_invoke_input_with_model_source(
             return Failure(
                 ModelTargetNotFound(model_target_label=model_agent.main_model_label)
             )
-        main_selection = main_option.model_selection
-        main_settings = main_option.settings
+        main_selection = main_option.candidates[0].model_selection
+        main_settings = main_option.candidates[0].settings
         if resolved_model_selection is not None:
             if resolved_model_settings is None:
                 raise ValueError("Resolved model settings are required")
@@ -596,8 +673,8 @@ async def resolve_invoke_input_with_model_source(
                         model_target_label=requested_profile.model_target_label
                     )
                 )
-            main_selection = selected_option.model_selection
-            main_settings = selected_option.settings
+            main_selection = selected_option.candidates[0].model_selection
+            main_settings = selected_option.candidates[0].settings
             requested_effort = requested_profile.reasoning_effort
             if requested_effort is not None:
                 reasoning = main_selection.normalized_capabilities.reasoning
@@ -621,7 +698,7 @@ async def resolve_invoke_input_with_model_source(
                     model_target_label=model_agent.lightweight_model_label
                 )
             )
-        lightweight_selection = lightweight_option.model_selection
+        lightweight_selection = lightweight_option.candidates[0].model_selection
 
         integration = await integration_repository.get_by_id_with_secrets(
             session,
@@ -800,7 +877,7 @@ async def resolve_invoke_input_with_model_source(
         lightweight_selection.normalized_capabilities.context_window.default_input_tokens,
         lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
         compaction_model,
-        lightweight_option.settings.context_window_tokens,
+        lightweight_option.candidates[0].settings.context_window_tokens,
     )
 
     model_developer = main_selection.model_developer

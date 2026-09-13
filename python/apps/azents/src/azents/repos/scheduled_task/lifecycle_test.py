@@ -38,7 +38,10 @@ from azents.repos.scheduled_task_cycle import (
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 _NOW = datetime.datetime(2026, 8, 16, 0, 0, tzinfo=datetime.UTC)
 
@@ -138,6 +141,24 @@ async def _create_subject(session: AsyncSession, *, handle: str) -> _Subject:
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{handle}-model",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

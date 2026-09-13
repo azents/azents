@@ -20,7 +20,6 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.agent_model_selection import AgentModelSelection
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
@@ -37,8 +36,6 @@ class AgentResponse(BaseModel):
     id: StrictStr
     name: StrictStr
     description: Optional[StrictStr]
-    model_selection: Optional[AgentModelSelection]
-    lightweight_model_selection: Optional[AgentModelSelection]
     selectable_model_options: List[SelectableModelOptionResponse]
     main_model_label: StrictStr
     lightweight_model_label: StrictStr
@@ -72,7 +69,7 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     @field_validator('runtime_profile_configuration_status')
     def runtime_profile_configuration_status_validate_enum(cls, value):
@@ -132,12 +129,6 @@ class AgentResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of model_selection
-        if self.model_selection:
-            _dict['model_selection'] = self.model_selection.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of lightweight_model_selection
-        if self.lightweight_model_selection:
-            _dict['lightweight_model_selection'] = self.lightweight_model_selection.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in selectable_model_options (list)
         _items = []
         if self.selectable_model_options:
@@ -163,16 +154,6 @@ class AgentResponse(BaseModel):
         # and model_fields_set contains the field
         if self.description is None and "description" in self.model_fields_set:
             _dict['description'] = None
-
-        # set to None if model_selection (nullable) is None
-        # and model_fields_set contains the field
-        if self.model_selection is None and "model_selection" in self.model_fields_set:
-            _dict['model_selection'] = None
-
-        # set to None if lightweight_model_selection (nullable) is None
-        # and model_fields_set contains the field
-        if self.lightweight_model_selection is None and "lightweight_model_selection" in self.model_fields_set:
-            _dict['lightweight_model_selection'] = None
 
         # set to None if effective_context_window_tokens (nullable) is None
         # and model_fields_set contains the field
@@ -244,8 +225,6 @@ class AgentResponse(BaseModel):
             "id": obj.get("id"),
             "name": obj.get("name"),
             "description": obj.get("description"),
-            "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
-            "lightweight_model_selection": AgentModelSelection.from_dict(obj["lightweight_model_selection"]) if obj.get("lightweight_model_selection") is not None else None,
             "selectable_model_options": [SelectableModelOptionResponse.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
             "main_model_label": obj.get("main_model_label"),
             "lightweight_model_label": obj.get("lightweight_model_label"),

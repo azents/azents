@@ -37,7 +37,9 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_availability import PrimaryModelReservation
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_operation import ModelOperationSnapshot
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -1605,6 +1607,7 @@ class AgentSessionRepository:
         if title_source != AgentSessionTitleSource.AUTO_GENERATED:
             values["title_generated_at"] = None
             values["title_generation_event_id"] = None
+            values["title_model_operation_state"] = None
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -1669,6 +1672,76 @@ class AgentSessionRepository:
                 title_source=AgentSessionTitleSource.AUTO_GENERATED,
                 title_generated_at=sa.func.now(),
                 title_generation_event_id=event_id,
+                title_model_operation_state=None,
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def set_primary_model_reservation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        reservation: PrimaryModelReservation | None,
+        expected_reservation_generation: int | None,
+    ) -> AgentSession | None:
+        """Replace a Primary reservation under an optional generation fence."""
+        predicates: list[sa.ColumnElement[bool]] = [
+            RDBAgentSession.id == session_id,
+            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+        ]
+        if expected_reservation_generation is not None:
+            predicates.append(
+                RDBAgentSession.primary_model_reservation[
+                    "reservation_generation"
+                ].astext.cast(sa.BigInteger)
+                == expected_reservation_generation
+            )
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(*predicates)
+            .values(
+                primary_model_reservation=(
+                    reservation.model_dump(mode="json")
+                    if reservation is not None
+                    else None
+                )
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def set_title_model_operation_state(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        generation_event_id: str,
+        operation: ModelOperationSnapshot | None,
+    ) -> AgentSession | None:
+        """Set title operation state only for the current generation event."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.title_source == AgentSessionTitleSource.AUTO_INITIAL,
+                RDBAgentSession.title_generation_event_id == generation_event_id,
+            )
+            .values(
+                title_model_operation_state=(
+                    operation.model_dump(mode="json") if operation is not None else None
+                )
             )
             .returning(RDBAgentSession)
         )
@@ -1729,6 +1802,8 @@ class AgentSessionRepository:
                 ended_at=archived_at,
                 end_reason=end_reason,
                 run_state=AgentSessionRunState.IDLE,
+                primary_model_reservation=None,
+                title_model_operation_state=None,
             )
         )
         await session.execute(
@@ -1803,6 +1878,8 @@ class AgentSessionRepository:
                 status=AgentSessionStatus.ARCHIVED,
                 ended_at=ended_at,
                 end_reason=end_reason,
+                primary_model_reservation=None,
+                title_model_operation_state=None,
             )
         )
         await session.flush()
@@ -2631,6 +2708,16 @@ class AgentSessionRepository:
             title_source=rdb.title_source,
             title_generated_at=rdb.title_generated_at,
             title_generation_event_id=rdb.title_generation_event_id,
+            primary_model_reservation=(
+                PrimaryModelReservation.model_validate(rdb.primary_model_reservation)
+                if rdb.primary_model_reservation is not None
+                else None
+            ),
+            title_model_operation_state=(
+                ModelOperationSnapshot.model_validate(rdb.title_model_operation_state)
+                if rdb.title_model_operation_state is not None
+                else None
+            ),
             last_user_input_at=rdb.last_user_input_at,
             last_activity_at=rdb.last_activity_at,
             pinned=rdb.pinned,

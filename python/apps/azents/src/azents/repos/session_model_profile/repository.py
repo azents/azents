@@ -219,6 +219,52 @@ class SessionModelProfileRepository:
             raise ValueError("Requester does not have session access")
         return locked
 
+    async def get_readable_root(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> AgentSession:
+        """Validate the exact readable active root Session authority."""
+        readable = await self.agent_session_repository.get_by_id(session, session_id)
+        if readable is None:
+            raise ValueError("AgentSession not found")
+        if readable.agent_id != agent_id:
+            raise ValueError("AgentSession does not belong to the agent")
+        if (
+            readable.session_kind is not AgentSessionKind.ROOT
+            or readable.status is not AgentSessionStatus.ACTIVE
+        ):
+            raise ValueError("AgentSession is not an active root")
+        if (
+            readable.product_mode is AgentSessionProductMode.USER
+            and readable.associated_user_id != user_id
+        ):
+            raise ValueError("Requester does not have session access")
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.workspace_id != readable.workspace_id
+        ):
+            raise ValueError("AgentSession is not active")
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            session_id,
+        )
+        if root is None or root.agent_session_id != readable.id:
+            raise ValueError("AgentSession root lineage is invalid")
+        membership = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=readable.workspace_id,
+            user_id=user_id,
+        )
+        if membership is None:
+            raise ValueError("Requester does not have session access")
+        return readable
+
     @staticmethod
     def _validate_record(
         *,

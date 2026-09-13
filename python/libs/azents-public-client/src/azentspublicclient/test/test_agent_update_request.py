@@ -37,8 +37,6 @@ class TestAgentUpdateRequest(unittest.TestCase):
             return AgentUpdateRequest(
                 name = '',
                 description = '',
-                model_selection = { },
-                lightweight_model_selection = { },
                 selectable_model_options = [
                     { }
                     ],

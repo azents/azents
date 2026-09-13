@@ -28,6 +28,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHubProps {
@@ -145,6 +146,7 @@ export function AgentSettingsHub({
 }: AgentSettingsHubProps): React.ReactElement {
   const t = useTranslations("workspace.agents.settingsHub");
   const basePath = `/w/${handle}/agents/${agent.id}/settings`;
+  const primaryModel = agentPrimaryModelSelection(agent);
 
   const sections: SettingsSection[] = [
     {
@@ -162,7 +164,7 @@ export function AgentSettingsHub({
           icon: <IconAdjustments size={rem(18)} />,
           label: t("model.label"),
           description: t("model.description"),
-          value: agent.model_selection?.model_display_name ?? null,
+          value: primaryModel?.model_display_name ?? null,
         },
       ],
     },

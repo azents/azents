@@ -43,7 +43,10 @@ from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
     RuntimeRunnerStateRepositorySink,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 async def test_runner_heartbeat_configuration_waits_for_provider_ack(
@@ -906,6 +909,24 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-model-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-model-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-model-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

@@ -103,9 +103,12 @@ __all__ = [
     "AgentRuntimeSystemMetricsSampleResponse",
     "AgentSessionCreateRequest",
     "AgentSessionListResponse",
+    "AgentSessionModelAvailabilityResponse",
     "AgentSessionPageResponse",
     "AgentSessionPinUpdateRequest",
     "AgentSessionPrimaryKind",
+    "AgentSessionPrimaryModelCancelRequest",
+    "AgentSessionPrimaryModelReserveRequest",
     "AgentSessionProductMode",
     "AgentSessionProjectDefaultsResponse",
     "AgentSessionProjectDefaultsResponseItemsInner",
@@ -336,6 +339,7 @@ __all__ = [
     "MemoryScope",
     "MemoryUpdateRequest",
     "ModelBuiltInToolCapabilities",
+    "ModelCandidateIdentity",
     "ModelCapabilities",
     "ModelCatalogEntryListResponse",
     "ModelCatalogEntryResponse",
@@ -380,6 +384,7 @@ __all__ = [
     "PreviewPasswordResetTokenResponse",
     "PreviewSignupTokenRequest",
     "PreviewSignupTokenResponse",
+    "PrimaryModelReservation",
     "ProjectBrowserEmptyStateResponse",
     "ProjectBrowserEntryCapabilitiesResponse",
     "ProjectBrowserEntryResponse",
@@ -460,6 +465,9 @@ __all__ = [
     "Secrets1",
     "SelectableInfrastructureProfileListResponse",
     "SelectableInfrastructureProfileResponse",
+    "SelectableModelCandidate",
+    "SelectableModelCandidateInput",
+    "SelectableModelCandidateResponse",
     "SelectableModelOption",
     "SelectableModelOptionInput",
     "SelectableModelOptionResponse",
@@ -639,9 +647,12 @@ from azentspublicclient.models.agent_runtime_system_metrics_response import Agen
 from azentspublicclient.models.agent_runtime_system_metrics_sample_response import AgentRuntimeSystemMetricsSampleResponse as AgentRuntimeSystemMetricsSampleResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
+from azentspublicclient.models.agent_session_model_availability_response import AgentSessionModelAvailabilityResponse as AgentSessionModelAvailabilityResponse
 from azentspublicclient.models.agent_session_page_response import AgentSessionPageResponse as AgentSessionPageResponse
 from azentspublicclient.models.agent_session_pin_update_request import AgentSessionPinUpdateRequest as AgentSessionPinUpdateRequest
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_primary_model_cancel_request import AgentSessionPrimaryModelCancelRequest as AgentSessionPrimaryModelCancelRequest
+from azentspublicclient.models.agent_session_primary_model_reserve_request import AgentSessionPrimaryModelReserveRequest as AgentSessionPrimaryModelReserveRequest
 from azentspublicclient.models.agent_session_product_mode import AgentSessionProductMode as AgentSessionProductMode
 from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
 from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner as AgentSessionProjectDefaultsResponseItemsInner
@@ -872,6 +883,7 @@ from azentspublicclient.models.memory_response import MemoryResponse as MemoryRe
 from azentspublicclient.models.memory_scope import MemoryScope as MemoryScope
 from azentspublicclient.models.memory_update_request import MemoryUpdateRequest as MemoryUpdateRequest
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities as ModelBuiltInToolCapabilities
+from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity as ModelCandidateIdentity
 from azentspublicclient.models.model_capabilities import ModelCapabilities as ModelCapabilities
 from azentspublicclient.models.model_catalog_entry_list_response import ModelCatalogEntryListResponse as ModelCatalogEntryListResponse
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse as ModelCatalogEntryResponse
@@ -916,6 +928,7 @@ from azentspublicclient.models.preview_password_reset_token_request import Previ
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse
 from azentspublicclient.models.preview_signup_token_request import PreviewSignupTokenRequest as PreviewSignupTokenRequest
 from azentspublicclient.models.preview_signup_token_response import PreviewSignupTokenResponse as PreviewSignupTokenResponse
+from azentspublicclient.models.primary_model_reservation import PrimaryModelReservation as PrimaryModelReservation
 from azentspublicclient.models.project_browser_empty_state_response import ProjectBrowserEmptyStateResponse as ProjectBrowserEmptyStateResponse
 from azentspublicclient.models.project_browser_entry_capabilities_response import ProjectBrowserEntryCapabilitiesResponse as ProjectBrowserEntryCapabilitiesResponse
 from azentspublicclient.models.project_browser_entry_response import ProjectBrowserEntryResponse as ProjectBrowserEntryResponse
@@ -996,6 +1009,9 @@ from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
 from azentspublicclient.models.selectable_infrastructure_profile_list_response import SelectableInfrastructureProfileListResponse as SelectableInfrastructureProfileListResponse
 from azentspublicclient.models.selectable_infrastructure_profile_response import SelectableInfrastructureProfileResponse as SelectableInfrastructureProfileResponse
+from azentspublicclient.models.selectable_model_candidate import SelectableModelCandidate as SelectableModelCandidate
+from azentspublicclient.models.selectable_model_candidate_input import SelectableModelCandidateInput as SelectableModelCandidateInput
+from azentspublicclient.models.selectable_model_candidate_response import SelectableModelCandidateResponse as SelectableModelCandidateResponse
 from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
 from azentspublicclient.models.selectable_model_option_response import SelectableModelOptionResponse as SelectableModelOptionResponse

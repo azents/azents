@@ -8,7 +8,10 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import MemoryRepository
 from .data import MemoryCreate, MemoryScope, MemorySummary
@@ -58,6 +61,24 @@ async def _create_agent(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{model_slug}-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=llm_integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{model_slug}-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=llm_integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{model_slug}-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

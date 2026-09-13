@@ -9,8 +9,6 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **name** | **str** |  | 
 **description** | **str** |  | 
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
-**lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
 **selectable_model_options** | [**List[SelectableModelOptionResponse]**](SelectableModelOptionResponse.md) |  | 
 **main_model_label** | **str** |  | 
 **lightweight_model_label** | **str** |  | 

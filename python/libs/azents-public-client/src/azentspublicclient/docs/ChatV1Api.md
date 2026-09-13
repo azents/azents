@@ -8,6 +8,7 @@ Method | HTTP request | Description
 [**chat_v1_archive_agent_session**](ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 [**chat_v1_bulk_delete_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 [**chat_v1_bulk_move_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
+[**chat_v1_cancel_agent_session_primary_model_reservation**](ChatV1Api.md#chat_v1_cancel_agent_session_primary_model_reservation) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel | Cancel Agent Session Primary Model Reservation
 [**chat_v1_cleanup_session_git_worktree**](ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
 [**chat_v1_create_agent_workspace_directory**](ChatV1Api.md#chat_v1_create_agent_workspace_directory) | **POST** /chat/v1/agents/{agent_id}/workspace/directories | Create Agent Workspace Directory
 [**chat_v1_create_input**](ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
@@ -23,6 +24,7 @@ Method | HTTP request | Description
 [**chat_v1_edit_message**](ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
 [**chat_v1_get_agent_session**](ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
+[**chat_v1_get_agent_session_model_availability**](ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
 [**chat_v1_get_agent_session_project_defaults**](ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 [**chat_v1_get_agent_session_sidebar**](ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 [**chat_v1_get_agent_workspace**](ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
@@ -46,6 +48,7 @@ Method | HTTP request | Description
 [**chat_v1_read_agent_workspace_path**](ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 [**chat_v1_register_agent_project**](ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 [**chat_v1_replace_session_model_profile**](ChatV1Api.md#chat_v1_replace_session_model_profile) | **PUT** /chat/v1/sessions/{session_id}/model-profile | Replace Session Model Profile
+[**chat_v1_reserve_agent_session_primary_model**](ChatV1Api.md#chat_v1_reserve_agent_session_primary_model) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation | Reserve Agent Session Primary Model
 [**chat_v1_restore_agent_session**](ChatV1Api.md#chat_v1_restore_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/restore | Restore Agent Session
 [**chat_v1_retry_failed_run**](ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 [**chat_v1_stat_agent_workspace_path**](ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
@@ -376,6 +379,91 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_cancel_agent_session_primary_model_reservation**
+> AgentSessionModelAvailabilityResponse chat_v1_cancel_agent_session_primary_model_reservation(agent_id, session_id, agent_session_primary_model_cancel_request)
+
+Cancel Agent Session Primary Model Reservation
+
+Cancel one exact current Primary reservation generation.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_model_availability_response import AgentSessionModelAvailabilityResponse
+from azentspublicclient.models.agent_session_primary_model_cancel_request import AgentSessionPrimaryModelCancelRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    agent_session_primary_model_cancel_request = azentspublicclient.AgentSessionPrimaryModelCancelRequest() # AgentSessionPrimaryModelCancelRequest | 
+
+    try:
+        # Cancel Agent Session Primary Model Reservation
+        api_response = api_instance.chat_v1_cancel_agent_session_primary_model_reservation(agent_id, session_id, agent_session_primary_model_cancel_request)
+        print("The response of ChatV1Api->chat_v1_cancel_agent_session_primary_model_reservation:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_cancel_agent_session_primary_model_reservation: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **agent_session_primary_model_cancel_request** | [**AgentSessionPrimaryModelCancelRequest**](AgentSessionPrimaryModelCancelRequest.md)|  | 
+
+### Return type
+
+[**AgentSessionModelAvailabilityResponse**](AgentSessionModelAvailabilityResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | Conflict |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -1580,6 +1668,87 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**SessionContextResponse**](SessionContextResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_get_agent_session_model_availability**
+> AgentSessionModelAvailabilityResponse chat_v1_get_agent_session_model_availability(agent_id, session_id)
+
+Get Agent Session Model Availability
+
+Return authoritative model availability for one writable root Session.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_model_availability_response import AgentSessionModelAvailabilityResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+
+    try:
+        # Get Agent Session Model Availability
+        api_response = api_instance.chat_v1_get_agent_session_model_availability(agent_id, session_id)
+        print("The response of ChatV1Api->chat_v1_get_agent_session_model_availability:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_get_agent_session_model_availability: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+
+### Return type
+
+[**AgentSessionModelAvailabilityResponse**](AgentSessionModelAvailabilityResponse.md)
 
 ### Authorization
 
@@ -3455,6 +3624,91 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_reserve_agent_session_primary_model**
+> AgentSessionModelAvailabilityResponse chat_v1_reserve_agent_session_primary_model(agent_id, session_id, agent_session_primary_model_reserve_request)
+
+Reserve Agent Session Primary Model
+
+Reserve one exact Primary recovery opportunity for this Session.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_model_availability_response import AgentSessionModelAvailabilityResponse
+from azentspublicclient.models.agent_session_primary_model_reserve_request import AgentSessionPrimaryModelReserveRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    agent_session_primary_model_reserve_request = azentspublicclient.AgentSessionPrimaryModelReserveRequest() # AgentSessionPrimaryModelReserveRequest | 
+
+    try:
+        # Reserve Agent Session Primary Model
+        api_response = api_instance.chat_v1_reserve_agent_session_primary_model(agent_id, session_id, agent_session_primary_model_reserve_request)
+        print("The response of ChatV1Api->chat_v1_reserve_agent_session_primary_model:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_reserve_agent_session_primary_model: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **agent_session_primary_model_reserve_request** | [**AgentSessionPrimaryModelReserveRequest**](AgentSessionPrimaryModelReserveRequest.md)|  | 
+
+### Return type
+
+[**AgentSessionModelAvailabilityResponse**](AgentSessionModelAvailabilityResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | Conflict |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

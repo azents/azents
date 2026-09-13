@@ -3928,6 +3928,217 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Session Model Availability",
+        "description": "Return authoritative model availability for one writable root Session.",
+        "operationId": "chat_v1_get_agent_session_model_availability",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionModelAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Reserve Agent Session Primary Model",
+        "description": "Reserve one exact Primary recovery opportunity for this Session.",
+        "operationId": "chat_v1_reserve_agent_session_primary_model",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionPrimaryModelReserveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionModelAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionModelAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Cancel Agent Session Primary Model Reservation",
+        "description": "Cancel one exact current Primary reservation generation.",
+        "operationId": "chat_v1_cancel_agent_session_primary_model_reservation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionPrimaryModelCancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionModelAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionModelAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/read": {
       "post": {
         "tags": [
@@ -15916,28 +16127,6 @@
             "title": "Name",
             "description": "Agent name"
           },
-          "model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Main model selection. Copies workspace default when None"
-          },
-          "lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Lightweight model selection. Copies default/main when None"
-          },
           "selectable_model_options": {
             "anyOf": [
               {
@@ -16078,6 +16267,7 @@
             "description": "Subagent execution settings"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name"
@@ -16387,26 +16577,6 @@
             ],
             "title": "Description"
           },
-          "model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelection"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelection"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "selectable_model_options": {
             "items": {
               "$ref": "#/components/schemas/SelectableModelOptionResponse"
@@ -16632,8 +16802,6 @@
           "id",
           "name",
           "description",
-          "model_selection",
-          "lightweight_model_selection",
           "selectable_model_options",
           "main_model_label",
           "lightweight_model_label",
@@ -17755,6 +17923,85 @@
         "title": "AgentSessionListResponse",
         "description": "Conversation session list response."
       },
+      "AgentSessionModelAvailabilityResponse": {
+        "properties": {
+          "semantic_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Semantic Label"
+          },
+          "primary": {
+            "$ref": "#/components/schemas/ModelCandidateIdentity"
+          },
+          "primary_display_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Primary Display Name"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "cooldown",
+              "probing",
+              "primary_next"
+            ],
+            "title": "State"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "first_usable_fallback_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Usable Fallback Display Name"
+          },
+          "reservation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrimaryModelReservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "semantic_label",
+          "primary",
+          "primary_display_name",
+          "state",
+          "deadline",
+          "server_time",
+          "first_usable_fallback_display_name",
+          "reservation"
+        ],
+        "title": "AgentSessionModelAvailabilityResponse",
+        "description": "Authoritative Session model availability response."
+      },
       "AgentSessionPageResponse": {
         "properties": {
           "items": {
@@ -17829,6 +18076,42 @@
         ],
         "title": "AgentSessionPrimaryKind",
         "description": "AgentSession primary role."
+      },
+      "AgentSessionPrimaryModelCancelRequest": {
+        "properties": {
+          "reservation_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Reservation Generation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reservation_generation"
+        ],
+        "title": "AgentSessionPrimaryModelCancelRequest",
+        "description": "Cancel one exact Session reservation generation."
+      },
+      "AgentSessionPrimaryModelReserveRequest": {
+        "properties": {
+          "semantic_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Semantic Label"
+          },
+          "primary": {
+            "$ref": "#/components/schemas/ModelCandidateIdentity"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "semantic_label",
+          "primary"
+        ],
+        "title": "AgentSessionPrimaryModelReserveRequest",
+        "description": "Request one exact Primary recovery reservation."
       },
       "AgentSessionProductMode": {
         "type": "string",
@@ -18532,28 +18815,6 @@
             "title": "Description",
             "description": "Agent description"
           },
-          "model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Main model selection. Copies workspace default when None"
-          },
-          "lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Lightweight model selection. Copies default/main when None"
-          },
           "selectable_model_options": {
             "anyOf": [
               {
@@ -18682,6 +18943,7 @@
             "description": "Subagent execution settings"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "AgentUpdateRequest",
         "description": "Agent update request, for partial updates."
@@ -26496,6 +26758,28 @@
         "title": "ModelBuiltInToolCapabilities",
         "description": "Represents provider built-in tool capability."
       },
+      "ModelCandidateIdentity": {
+        "properties": {
+          "llm_provider_integration_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Llm Provider Integration Id"
+          },
+          "model_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model Identifier"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "llm_provider_integration_id",
+          "model_identifier"
+        ],
+        "title": "ModelCandidateIdentity",
+        "description": "Public-safe exact physical candidate identity."
+      },
       "ModelCapabilities": {
         "properties": {
           "context_window": {
@@ -28131,6 +28415,62 @@
         ],
         "title": "PreviewSignupTokenResponse",
         "description": "Signup token preview response."
+      },
+      "PrimaryModelReservation": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version",
+            "default": 1
+          },
+          "semantic_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Semantic Label"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/ModelCandidateIdentity"
+          },
+          "health_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Health Generation"
+          },
+          "reservation_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Reservation Generation"
+          },
+          "claim_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Claim Token"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "semantic_label",
+          "candidate",
+          "health_generation",
+          "reservation_generation",
+          "claim_token",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "PrimaryModelReservation",
+        "description": "Durable one-shot Session authority for a Primary candidate attempt."
       },
       "ProjectBrowserEmptyStateResponse": {
         "properties": {
@@ -30685,16 +31025,11 @@
         "title": "SelectableInfrastructureProfileResponse",
         "description": "One Provider/Profile option currently selectable by the Workspace."
       },
-      "SelectableModelOption": {
+      "SelectableModelCandidate": {
         "properties": {
-          "label": {
-            "type": "string",
-            "title": "Label",
-            "description": "Selectable model label"
-          },
           "model_selection": {
             "$ref": "#/components/schemas/AgentModelSelection",
-            "description": "Selectable model selection snapshot"
+            "description": "Physical model selection snapshot"
           },
           "settings": {
             "$ref": "#/components/schemas/SelectableModelSettings",
@@ -30704,25 +31039,17 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "label",
           "model_selection",
           "settings"
         ],
-        "title": "SelectableModelOption",
-        "description": "Stored selectable model option keyed by label."
+        "title": "SelectableModelCandidate",
+        "description": "Stored physical model candidate inside one selectable label."
       },
-      "SelectableModelOptionInput": {
+      "SelectableModelCandidateInput": {
         "properties": {
-          "label": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Label",
-            "description": "Selectable model label"
-          },
           "model_selection": {
             "$ref": "#/components/schemas/AgentModelSelectionInput",
-            "description": "Selectable model selection input"
+            "description": "Physical model selection input"
           },
           "settings": {
             "anyOf": [
@@ -30739,11 +31066,122 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "label",
           "model_selection"
         ],
+        "title": "SelectableModelCandidateInput",
+        "description": "Physical model candidate input inside one selectable label."
+      },
+      "SelectableModelCandidateResponse": {
+        "properties": {
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelection"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SelectableModelSettings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_selection",
+          "settings"
+        ],
+        "title": "SelectableModelCandidateResponse",
+        "description": "Public physical model candidate snapshot."
+      },
+      "SelectableModelOption": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableModelCandidate"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Candidates",
+            "description": "Ordered physical model candidates; first is Primary"
+          },
+          "subagent_enabled": {
+            "type": "boolean",
+            "title": "Subagent Enabled",
+            "description": "Available as an explicit subagent model target"
+          },
+          "subagent_guidance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subagent Guidance",
+            "description": "Optional parent-model guidance for explicit subagent selection"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "candidates",
+          "subagent_enabled",
+          "subagent_guidance"
+        ],
+        "title": "SelectableModelOption",
+        "description": "Stored selectable semantic label with ordered physical candidates."
+      },
+      "SelectableModelOptionInput": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableModelCandidateInput"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Candidates",
+            "description": "Ordered physical model candidates; first is Primary"
+          },
+          "subagent_enabled": {
+            "type": "boolean",
+            "title": "Subagent Enabled",
+            "description": "Available as an explicit subagent model target",
+            "default": true
+          },
+          "subagent_guidance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subagent Guidance",
+            "description": "Optional parent-model guidance for explicit subagent selection"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "candidates"
+        ],
         "title": "SelectableModelOptionInput",
-        "description": "Selectable model option input keyed by label."
+        "description": "Selectable semantic label input with ordered physical candidates."
       },
       "SelectableModelOptionResponse": {
         "properties": {
@@ -30751,11 +31189,27 @@
             "type": "string",
             "title": "Label"
           },
-          "model_selection": {
-            "$ref": "#/components/schemas/AgentModelSelection"
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableModelCandidateResponse"
+            },
+            "type": "array",
+            "title": "Candidates"
           },
-          "settings": {
-            "$ref": "#/components/schemas/SelectableModelSettings"
+          "subagent_enabled": {
+            "type": "boolean",
+            "title": "Subagent Enabled"
+          },
+          "subagent_guidance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subagent Guidance"
           },
           "execution_option_definitions": {
             "items": {
@@ -30768,12 +31222,13 @@
         "type": "object",
         "required": [
           "label",
-          "model_selection",
-          "settings",
+          "candidates",
+          "subagent_enabled",
+          "subagent_guidance",
           "execution_option_definitions"
         ],
         "title": "SelectableModelOptionResponse",
-        "description": "Public selectable model option with execution descriptors."
+        "description": "Public selectable semantic label with ordered candidates."
       },
       "SelectableModelSettings": {
         "properties": {
@@ -30810,24 +31265,6 @@
             "type": "array",
             "title": "Builtin Tools",
             "description": "Enabled built-in tools"
-          },
-          "subagent_enabled": {
-            "type": "boolean",
-            "title": "Subagent Enabled",
-            "description": "Available as an explicit subagent model target"
-          },
-          "subagent_guidance": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subagent Guidance",
-            "description": "Optional parent-model guidance for explicit subagent selection"
           }
         },
         "additionalProperties": false,
@@ -30835,12 +31272,10 @@
         "required": [
           "context_window_tokens",
           "max_output_tokens",
-          "builtin_tools",
-          "subagent_enabled",
-          "subagent_guidance"
+          "builtin_tools"
         ],
         "title": "SelectableModelSettings",
-        "description": "Stored user settings for one selectable model option."
+        "description": "Stored user settings for one physical model candidate."
       },
       "SelectableModelSettingsInput": {
         "properties": {
@@ -30884,31 +31319,12 @@
             ],
             "title": "Builtin Tools",
             "description": "Enabled built-in tools; omitted enables every supported tool"
-          },
-          "subagent_enabled": {
-            "type": "boolean",
-            "title": "Subagent Enabled",
-            "description": "Available as an explicit subagent model target",
-            "default": true
-          },
-          "subagent_guidance": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subagent Guidance",
-            "description": "Optional parent-model guidance for explicit subagent selection"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SelectableModelSettingsInput",
-        "description": "Optional user settings submitted for one selectable model option."
+        "description": "Optional user settings submitted for one physical model candidate."
       },
       "SendCodeRequest": {
         "properties": {
@@ -32905,28 +33321,6 @@
       },
       "WorkspaceModelSettingsResponse": {
         "properties": {
-          "default_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Default main model selection snapshot"
-          },
-          "default_lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Default lightweight model selection snapshot"
-          },
           "default_selectable_model_options": {
             "anyOf": [
               {
@@ -32965,17 +33359,6 @@
             ],
             "title": "Default Lightweight Model Label",
             "description": "Default lightweight model option label"
-          },
-          "effective_default_lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Effective default lightweight model selection"
           }
         },
         "type": "object",
@@ -32984,28 +33367,6 @@
       },
       "WorkspaceModelSettingsUpdateRequest": {
         "properties": {
-          "default_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Default main model selection input"
-          },
-          "default_lightweight_model_selection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentModelSelectionInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Default lightweight model selection input"
-          },
           "default_selectable_model_options": {
             "anyOf": [
               {
@@ -33046,6 +33407,7 @@
             "description": "Default lightweight model option label"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "WorkspaceModelSettingsUpdateRequest",
         "description": "Workspace model settings update request."

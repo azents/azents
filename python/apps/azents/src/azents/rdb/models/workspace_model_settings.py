@@ -60,7 +60,13 @@ class RDBWorkspaceModelSettings(RDBModel):
         "default_selectable_model_options IS NULL OR "
         "jsonb_typeof(default_selectable_model_options) = 'null' OR "
         "(jsonb_typeof(default_selectable_model_options) = 'array' "
-        "AND jsonb_array_length(default_selectable_model_options) BETWEEN 1 AND 10)",
+        "AND jsonb_array_length(default_selectable_model_options) BETWEEN 1 AND 10 "
+        "AND NOT jsonb_path_exists("
+        "default_selectable_model_options, "
+        "'$[*] ? (!exists(@.candidates) || "
+        '@.candidates.type() != "array" || '
+        "@.candidates.size() < 1 || @.candidates.size() > 5)'"
+        "))",
         name="ck_ws_model_settings_selectable_options_shape",
     )
 

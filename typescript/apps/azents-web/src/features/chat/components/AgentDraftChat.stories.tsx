@@ -37,19 +37,21 @@ const agent: AgentResponse = {
   type: "private",
   enabled: true,
   avatar: null,
-  model_selection: subscriptionModel,
-  lightweight_model_selection: null,
   selectable_model_options: [
     {
       label: "default",
-      model_selection: subscriptionModel,
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [{ name: "web_search" }],
-        subagent_enabled: true,
-        subagent_guidance: "Use for release coordination.",
-      },
+      candidates: [
+        {
+          model_selection: subscriptionModel,
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [{ name: "web_search" }],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: "Use for release coordination.",
       execution_option_definitions: [],
     },
   ],

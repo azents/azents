@@ -301,23 +301,21 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         return [
             option
             for option in agent.selectable_model_options
-            if option.settings.subagent_enabled
+            if option.subagent_enabled
         ]
 
     def _spawn_agent_description(self) -> str:
         """Build label-only spawn guidance from the current Agent snapshot."""
         target_lines: list[str] = []
         for option in self._subagent_override_options(self.agent):
-            levels = (
-                option.model_selection.normalized_capabilities.reasoning.effort_levels
-            )
+            levels = option.candidates[
+                0
+            ].model_selection.normalized_capabilities.reasoning.effort_levels
             efforts = ", ".join(level.value for level in levels)
             effort_text = efforts if efforts else "none"
             target_line = f"- `{option.label}` Reasoning efforts: {effort_text}."
-            if option.settings.subagent_guidance is not None:
-                guidance_lines = "\n  ".join(
-                    option.settings.subagent_guidance.splitlines()
-                )
+            if option.subagent_guidance is not None:
+                guidance_lines = "\n  ".join(option.subagent_guidance.splitlines())
                 target_line = f"{target_line}\n  Guidance: {guidance_lines}"
             target_lines.append(target_line)
         if target_lines:
@@ -494,8 +492,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     f"Model target label '{model_target_label}' is not available "
                     "for explicit subagent override"
                 )
-            selection = option.model_selection
-            settings = option.settings
+            selection = option.candidates[0].model_selection
+            settings = option.candidates[0].settings
 
         supported_efforts = selection.normalized_capabilities.reasoning.effort_levels
         if reasoning_effort is not None:
@@ -549,7 +547,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
             if lightweight_option is None:
                 raise FunctionToolError("Agent lightweight model target was not found")
-            lightweight = lightweight_option.model_selection
+            lightweight = lightweight_option.candidates[0].model_selection
             lightweight_model = to_runtime_model(
                 lightweight.provider,
                 lightweight.model_identifier,
@@ -558,7 +556,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 lightweight.normalized_capabilities.context_window.default_input_tokens,
                 lightweight.normalized_capabilities.context_window.max_input_tokens,
                 lightweight_model,
-                lightweight_option.settings.context_window_tokens,
+                lightweight_option.candidates[0].settings.context_window_tokens,
             )
             main_input_tokens = resolve_model_input_tokens(
                 selection.normalized_capabilities.context_window.default_input_tokens,

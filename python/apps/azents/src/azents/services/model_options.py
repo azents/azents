@@ -7,9 +7,12 @@ from typing import TypeVar
 from azcommon.result import Failure, Result, Success
 
 from azents.core.agent import (
+    MAX_SELECTABLE_MODEL_CANDIDATES,
     MAX_SELECTABLE_MODEL_LABEL_LENGTH,
     MAX_SELECTABLE_MODEL_OPTIONS,
     AgentModelSelection,
+    SelectableModelCandidate,
+    SelectableModelCandidateInput,
     SelectableModelOption,
     SelectableModelOptionInput,
     SelectableModelSettings,
@@ -106,10 +109,6 @@ def _normalize_selectable_model_settings(
             context_window_tokens=settings_input.context_window_tokens,
             max_output_tokens=settings_input.max_output_tokens,
             builtin_tools=list(builtin_tools),
-            subagent_enabled=settings_input.subagent_enabled,
-            subagent_guidance=_normalize_subagent_guidance(
-                settings_input.subagent_guidance
-            ),
         )
     )
 
@@ -135,50 +134,12 @@ def normalize_stored_selectable_model_options(
         selectable_model_options=list(selectable_model_options),
         main_model_label=effective_main_label,
         lightweight_model_label=effective_lightweight_label,
-        model_selection=option_by_label[effective_main_label].model_selection,
-        lightweight_model_selection=option_by_label[
-            effective_lightweight_label
-        ].model_selection,
-    )
-
-
-def build_legacy_selectable_model_options(
-    *,
-    model_selection: AgentModelSelection,
-    lightweight_model_selection: AgentModelSelection,
-    main_label: str,
-    lightweight_label: str,
-) -> NormalizedSelectableModelOptions:
-    """Build selectable options from existing direct effective snapshots."""
-    if model_selection == lightweight_model_selection:
-        options = [
-            SelectableModelOption(
-                label=main_label,
-                model_selection=model_selection,
-                settings=default_selectable_model_settings(model_selection),
-            )
-        ]
-        effective_lightweight_label = main_label
-    else:
-        options = [
-            SelectableModelOption(
-                label=main_label,
-                model_selection=model_selection,
-                settings=default_selectable_model_settings(model_selection),
-            ),
-            SelectableModelOption(
-                label=lightweight_label,
-                model_selection=lightweight_model_selection,
-                settings=default_selectable_model_settings(lightweight_model_selection),
-            ),
-        ]
-        effective_lightweight_label = lightweight_label
-    return NormalizedSelectableModelOptions(
-        selectable_model_options=options,
-        main_model_label=main_label,
-        lightweight_model_label=effective_lightweight_label,
-        model_selection=model_selection,
-        lightweight_model_selection=lightweight_model_selection,
+        model_selection=option_by_label[effective_main_label]
+        .candidates[0]
+        .model_selection,
+        lightweight_model_selection=option_by_label[effective_lightweight_label]
+        .candidates[0]
+        .model_selection,
     )
 
 
@@ -188,7 +149,7 @@ async def normalize_selectable_model_options(
     main_model_label: str | None,
     lightweight_model_label: str | None,
     resolve_model_selection: Callable[
-        [SelectableModelOptionInput], Awaitable[Result[AgentModelSelection, TError]]
+        [SelectableModelCandidateInput], Awaitable[Result[AgentModelSelection, TError]]
     ],
     validate_image_generation_config: Callable[
         [AgentModelSelection, SelectableModelSettings],
@@ -223,41 +184,82 @@ async def normalize_selectable_model_options(
 
     options: list[SelectableModelOption] = []
     for label, option_input in normalized_inputs:
-        result = await resolve_model_selection(option_input)
-        match result:
-            case Success(selection):
-                settings_result = _normalize_selectable_model_settings(
-                    settings_input=option_input.settings,
-                    selection=selection,
+        if len(option_input.candidates) == 0:
+            errors.append(
+                f"Selectable model '{label}' requires at least one candidate."
+            )
+            continue
+        if len(option_input.candidates) > MAX_SELECTABLE_MODEL_CANDIDATES:
+            errors.append(
+                f"Selectable model '{label}' allows at most "
+                f"{MAX_SELECTABLE_MODEL_CANDIDATES} candidates."
+            )
+            continue
+
+        identities: set[tuple[str, str]] = set()
+        candidates: list[SelectableModelCandidate] = []
+        for candidate_index, candidate_input in enumerate(option_input.candidates):
+            identity = (
+                candidate_input.model_selection.llm_provider_integration_id,
+                candidate_input.model_selection.model_identifier,
+            )
+            if identity in identities:
+                errors.append(
+                    f"Selectable model '{label}' candidate identities must be unique."
                 )
-                match settings_result:
-                    case Success(settings):
-                        image_errors = await validate_image_generation_config(
-                            selection,
-                            settings,
-                        )
-                        if image_errors:
-                            errors.extend(
-                                f"Selectable model '{label}': {error}"
-                                for error in image_errors
+                continue
+            identities.add(identity)
+
+            result = await resolve_model_selection(candidate_input)
+            match result:
+                case Success(selection):
+                    settings_result = _normalize_selectable_model_settings(
+                        settings_input=candidate_input.settings,
+                        selection=selection,
+                    )
+                    match settings_result:
+                        case Success(settings):
+                            image_errors = await validate_image_generation_config(
+                                selection,
+                                settings,
                             )
-                        else:
-                            options.append(
-                                SelectableModelOption(
-                                    label=label,
-                                    model_selection=selection,
-                                    settings=settings,
+                            if image_errors:
+                                errors.extend(
+                                    f"Selectable model '{label}' candidate "
+                                    f"{candidate_index + 1}: {error}"
+                                    for error in image_errors
                                 )
+                            else:
+                                candidates.append(
+                                    SelectableModelCandidate(
+                                        model_selection=selection,
+                                        settings=settings,
+                                    )
+                                )
+                        case Failure(settings_errors):
+                            errors.extend(
+                                f"Selectable model '{label}' candidate "
+                                f"{candidate_index + 1}: {error}"
+                                for error in settings_errors
                             )
-                    case Failure(settings_errors):
-                        errors.extend(
-                            f"Selectable model '{label}': {error}"
-                            for error in settings_errors
-                        )
-                    case _:
-                        raise AssertionError("Unhandled settings result")
-            case Failure(error):
-                return Failure(error)
+                        case _:
+                            raise AssertionError("Unhandled settings result")
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    raise AssertionError("Unhandled model selection result")
+
+        if len(candidates) == len(option_input.candidates):
+            options.append(
+                SelectableModelOption(
+                    label=label,
+                    candidates=candidates,
+                    subagent_enabled=option_input.subagent_enabled,
+                    subagent_guidance=_normalize_subagent_guidance(
+                        option_input.subagent_guidance
+                    ),
+                )
+            )
 
     if errors:
         return Failure(errors)
@@ -275,9 +277,11 @@ async def normalize_selectable_model_options(
             selectable_model_options=options,
             main_model_label=effective_main_label,
             lightweight_model_label=effective_lightweight_label,
-            model_selection=option_by_label[effective_main_label].model_selection,
-            lightweight_model_selection=option_by_label[
-                effective_lightweight_label
-            ].model_selection,
+            model_selection=option_by_label[effective_main_label]
+            .candidates[0]
+            .model_selection,
+            lightweight_model_selection=option_by_label[effective_lightweight_label]
+            .candidates[0]
+            .model_selection,
         )
     )

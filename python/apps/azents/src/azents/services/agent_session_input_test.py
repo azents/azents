@@ -12,7 +12,11 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from azents.core.agent import DEFAULT_MAIN_MODEL_OPTION_LABEL, SelectableModelOption
+from azents.core.agent import (
+    DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    SelectableModelCandidate,
+    SelectableModelOption,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -95,6 +99,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
     make_test_model_settings,
+    make_test_selectable_model_option_dicts,
 )
 from azents.testing.turn_action import (
     make_test_mailbox_promotion_repository,
@@ -178,8 +183,14 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
             selectable_model_options=[
                 SelectableModelOption(
                     label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                    model_selection=selection,
-                    settings=make_test_model_settings(),
+                    candidates=[
+                        SelectableModelCandidate(
+                            model_selection=selection,
+                            settings=make_test_model_settings(),
+                        )
+                    ],
+                    subagent_enabled=True,
+                    subagent_guidance=None,
                 )
             ],
             main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -488,6 +499,24 @@ async def _create_agent(
             model_identifier=f"{slug}-id",
         ),
         runtime_capability=runtime_capability,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

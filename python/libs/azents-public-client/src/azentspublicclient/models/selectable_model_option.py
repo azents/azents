@@ -17,22 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.agent_model_selection import AgentModelSelection
-from azentspublicclient.models.selectable_model_settings import SelectableModelSettings
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from azentspublicclient.models.selectable_model_candidate import SelectableModelCandidate
 from typing import Optional, Set
 from typing_extensions import Self
 
 class SelectableModelOption(BaseModel):
     """
-    Stored selectable model option keyed by label.
+    Stored selectable semantic label with ordered physical candidates.
     """ # noqa: E501
     label: StrictStr = Field(description="Selectable model label")
-    model_selection: AgentModelSelection = Field(description="Selectable model selection snapshot")
-    settings: SelectableModelSettings = Field(description="Stored model-scoped settings")
+    candidates: Annotated[List[SelectableModelCandidate], Field(min_length=1, max_length=5)] = Field(description="Ordered physical model candidates; first is Primary")
+    subagent_enabled: StrictBool = Field(description="Available as an explicit subagent model target")
+    subagent_guidance: Optional[Annotated[str, Field(strict=True, max_length=500)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["label", "model_selection", "settings"]
+    __properties: ClassVar[List[str]] = ["label", "candidates", "subagent_enabled", "subagent_guidance"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -75,16 +76,22 @@ class SelectableModelOption(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of model_selection
-        if self.model_selection:
-            _dict['model_selection'] = self.model_selection.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of settings
-        if self.settings:
-            _dict['settings'] = self.settings.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in candidates (list)
+        _items = []
+        if self.candidates:
+            for _item_candidates in self.candidates:
+                if _item_candidates:
+                    _items.append(_item_candidates.to_dict())
+            _dict['candidates'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if subagent_guidance (nullable) is None
+        # and model_fields_set contains the field
+        if self.subagent_guidance is None and "subagent_guidance" in self.model_fields_set:
+            _dict['subagent_guidance'] = None
 
         return _dict
 
@@ -99,8 +106,9 @@ class SelectableModelOption(BaseModel):
 
         _obj = cls.model_validate({
             "label": obj.get("label"),
-            "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
-            "settings": SelectableModelSettings.from_dict(obj["settings"]) if obj.get("settings") is not None else None
+            "candidates": [SelectableModelCandidate.from_dict(_item) for _item in obj["candidates"]] if obj.get("candidates") is not None else None,
+            "subagent_enabled": obj.get("subagent_enabled"),
+            "subagent_guidance": obj.get("subagent_guidance")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

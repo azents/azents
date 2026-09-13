@@ -10,6 +10,7 @@ from azents.core.enums import (
     AgentRunStatus,
     EventKind,
 )
+from azents.core.model_operation import ModelOperationState
 from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.event import JSONValue
@@ -52,6 +53,10 @@ class AgentRunCreate(BaseModel):
         default=AgentRunStatus.RUNNING,
         description="Initial status",
     )
+    model_operation_state: ModelOperationState | None = Field(
+        default=None,
+        description="Durable foreground and compaction model operation state",
+    )
 
 
 class AgentRunPatch(BaseModel):
@@ -72,6 +77,10 @@ class AgentRunPatch(BaseModel):
     retry_state: FailedRunRetryState | None = Field(
         default=None,
         description="Durable failed-run retry state",
+    )
+    model_operation_state: ModelOperationState | None = Field(
+        default=None,
+        description="Durable foreground and compaction model operation state",
     )
     last_completed_event_id: str | None = Field(
         default=None,
