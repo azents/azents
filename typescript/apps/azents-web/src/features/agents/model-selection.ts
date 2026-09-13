@@ -96,7 +96,9 @@ export interface SelectableModelOptionFormValue {
 
 export interface PrimarySettingsCopyResult {
   candidate: SelectableModelCandidateFormValue;
-  omitted: Array<"context_window" | "max_output" | "builtin_tools">;
+  omitted: Array<
+    "context_window" | "max_output" | "builtin_tools" | "builtin_tool_configs"
+  >;
 }
 
 export function copyCompatiblePrimarySettings(
@@ -137,18 +139,29 @@ export function copyCompatiblePrimarySettings(
   if (builtinTools.length !== primary.builtin_tools.length) {
     omitted.push("builtin_tools");
   }
+  const sameIntegration =
+    primary.model_provider_integration_id != null &&
+    primary.model_provider_integration_id ===
+      target.model_provider_integration_id;
+  const builtinToolConfigs = Object.fromEntries(
+    builtinTools.map((tool) => {
+      const config = primary.builtin_tool_configs[tool] ?? {};
+      if (sameIntegration || Object.keys(config).length === 0) {
+        return [tool, { ...config }];
+      }
+      if (!omitted.includes("builtin_tool_configs")) {
+        omitted.push("builtin_tool_configs");
+      }
+      return [tool, {}];
+    }),
+  );
   return {
     candidate: {
       ...target,
       context_window_tokens: contextWindowTokens,
       max_output_tokens: maxOutputTokens,
       builtin_tools: builtinTools,
-      builtin_tool_configs: Object.fromEntries(
-        builtinTools.map((tool) => [
-          tool,
-          { ...(primary.builtin_tool_configs[tool] ?? {}) },
-        ]),
-      ),
+      builtin_tool_configs: builtinToolConfigs,
     },
     omitted,
   };

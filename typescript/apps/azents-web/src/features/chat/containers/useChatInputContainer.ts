@@ -621,15 +621,15 @@ function useChatInputContainerImplementation({
     }
     const delay =
       Date.parse(availability.deadline) - Date.parse(availability.server_time);
-    const timeout = window.setTimeout(
-      () => {
-        void utils.chat.getAgentSessionModelAvailability.invalidate({
-          agentId,
-          sessionId,
-        });
-      },
-      Math.max(0, delay) + 250,
-    );
+    if (!Number.isFinite(delay) || delay <= 0) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      void utils.chat.getAgentSessionModelAvailability.invalidate({
+        agentId,
+        sessionId,
+      });
+    }, delay + 250);
     return () => window.clearTimeout(timeout);
   }, [
     agentId,

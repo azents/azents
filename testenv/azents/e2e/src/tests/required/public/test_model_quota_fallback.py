@@ -18,6 +18,8 @@ from tests.required.public.test_per_prompt_inference_profile import (
 
 _PROMPT = "Quota fallback uses secondary candidate"
 _SUCCESS = "Secondary candidate completed the request."
+_PRIMARY_RETRY_PROMPT = "Reserved Primary retry uses primary candidate"
+_PRIMARY_RETRY_SUCCESS = "Reserved Primary candidate completed the request."
 
 
 def _candidate_selection(option: dict[str, object]) -> dict[str, object]:
@@ -175,3 +177,93 @@ def test_quota_advances_to_fallback_and_primary_reservation_reconciles(
     )
     cancelled.raise_for_status()
     assert _response_object(cancelled)["state"] == "cooldown"
+
+    reserved_again = requests.post(
+        f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
+        f"{session_id}/model-reservation",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={
+            "semantic_label": availability["semantic_label"],
+            "primary": availability["primary"],
+        },
+        timeout=10,
+    )
+    reserved_again.raise_for_status()
+    second_reservation_state = _response_object(reserved_again)
+    assert second_reservation_state["state"] == "primary_next"
+    second_reservation = _object(
+        second_reservation_state.get("reservation"),
+        label="Second Primary reservation",
+    )
+    first_generation = reservation.get("reservation_generation")
+    second_generation = second_reservation.get("reservation_generation")
+    assert isinstance(first_generation, int)
+    assert isinstance(second_generation, int)
+    assert second_generation > first_generation
+
+    stale_cancel = requests.post(
+        f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
+        f"{session_id}/model-reservation/cancel",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={"reservation_generation": first_generation},
+        timeout=10,
+    )
+    assert stale_cancel.status_code == 409
+    assert (
+        _object(stale_cancel.json(), label="stale cancellation conflict")["state"]
+        == "primary_next"
+    )
+
+    requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
+    retried = requests.post(
+        f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "client_request_id": f"primary-retry-{unique()}",
+            "message": _PRIMARY_RETRY_PROMPT,
+            "inference_profile": {
+                "model_target_label": "Quality",
+                "reasoning_effort": None,
+                "enabled_execution_options": [],
+            },
+        },
+        timeout=10,
+    )
+    retried.raise_for_status()
+    _wait_for_session_idle(
+        server_url=azents_public_server_url,
+        token=token,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    primary_journal = _wait_for_mock_models(mock_openai_url, "gpt-5.5")
+    assert "gpt-5.5-mini" not in primary_journal
+
+    retried_history = _history(azents_public_server_url, token, session_id)
+    retried_assistant_contents = [
+        _object(event.get("payload"), label="assistant payload").get("content")
+        for event in retried_history
+        if event.get("kind") == "assistant_message"
+    ]
+    assert retried_assistant_contents[-1] == _PRIMARY_RETRY_SUCCESS
+    retried_markers = [
+        event for event in retried_history if event.get("kind") == "turn_marker"
+    ]
+    retried_marker = _object(
+        retried_markers[-1].get("payload"),
+        label="reserved Primary turn marker payload",
+    )
+    retried_route = _object(
+        retried_marker.get("applied_model_route"),
+        label="reserved Primary applied model route",
+    )
+    assert retried_route["candidate_ordinal"] == 1
+    assert retried_route["candidate_role"] == "primary"
+    assert retried_route["model_identifier"] == "gpt-5.5"
+
+    recovered = _response_object(
+        requests.get(availability_url, headers=_headers(token), timeout=10)
+    )
+    assert recovered["state"] == "available"
+    assert recovered["reservation"] is None

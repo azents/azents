@@ -40,6 +40,16 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Reserved Primary retry uses primary candidate",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Reserved Primary candidate completed the request."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Quota fallback desktop uses secondary candidate",
         "systemMessage": "Create a brief title from the request"
       },

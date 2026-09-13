@@ -937,7 +937,8 @@
       "copyOmitted": {
         "context_window": "limite de fenêtre de contexte",
         "max_output": "jetons de sortie maximum",
-        "builtin_tools": "outils intégrés non pris en charge"
+        "builtin_tools": "outils intégrés non pris en charge",
+        "builtin_tool_configs": "réglages d’outils intégrés propres à l’intégration"
       }
     },
     "externalChannels": {

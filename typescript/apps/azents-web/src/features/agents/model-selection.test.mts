@@ -263,6 +263,7 @@ void test("duplicate candidate validation is label-local", () => {
 void test("Primary settings copy keeps only target-compatible values", () => {
   const primary = {
     ...candidate("primary"),
+    model_provider_integration_id: "integration-primary",
     context_window_tokens: 128_000,
     max_output_tokens: 16_000,
     builtin_tools: ["web_search", "image_generation"],
@@ -273,6 +274,7 @@ void test("Primary settings copy keeps only target-compatible values", () => {
   };
   const target = {
     ...candidate("fallback"),
+    model_provider_integration_id: "integration-fallback",
     normalized_capabilities: {
       reasoning: { supported: false, effort_levels: [] },
       built_in_tools: { supported: ["web_search"] },
@@ -292,10 +294,80 @@ void test("Primary settings copy keeps only target-compatible values", () => {
   assert.equal(copied.candidate.context_window_tokens, null);
   assert.equal(copied.candidate.max_output_tokens, 16_000);
   assert.deepEqual(copied.candidate.builtin_tools, ["web_search"]);
+  assert.deepEqual(copied.candidate.builtin_tool_configs, { web_search: {} });
+  assert.deepEqual(copied.omitted, [
+    "context_window",
+    "builtin_tools",
+    "builtin_tool_configs",
+  ]);
+});
+
+void test("Primary settings copy preserves configs within one integration", () => {
+  const primary = {
+    ...candidate("primary"),
+    model_provider_integration_id: "integration-shared",
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: { model: "gpt-image-current" },
+    },
+  };
+  const target = {
+    ...candidate("fallback"),
+    model_provider_integration_id: "integration-shared",
+    normalized_capabilities: {
+      reasoning: { supported: false, effort_levels: [] },
+      built_in_tools: { supported: ["image_generation"] },
+      context_window: {
+        max_input_tokens: 64_000,
+        max_output_tokens: 32_000,
+      },
+      modalities: { input: ["text"], output: ["text"] },
+      tool_calling: { supported: true },
+      parameters: {},
+      compatibility: {},
+    } satisfies ModelCapabilities,
+  };
+
+  const copied = copyCompatiblePrimarySettings(primary, target);
+
   assert.deepEqual(copied.candidate.builtin_tool_configs, {
-    web_search: { depth: "high" },
+    image_generation: { model: "gpt-image-current" },
   });
-  assert.deepEqual(copied.omitted, ["context_window", "builtin_tools"]);
+  assert.deepEqual(copied.omitted, []);
+});
+
+void test("Primary settings copy resets pinned image config across integrations", () => {
+  const primary = {
+    ...candidate("primary"),
+    model_provider_integration_id: "integration-primary",
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: { model: "gpt-image-primary", quality: "high" },
+    },
+  };
+  const target = {
+    ...candidate("fallback"),
+    model_provider_integration_id: "integration-fallback",
+    normalized_capabilities: {
+      reasoning: { supported: false, effort_levels: [] },
+      built_in_tools: { supported: ["image_generation"] },
+      context_window: {
+        max_input_tokens: 64_000,
+        max_output_tokens: 32_000,
+      },
+      modalities: { input: ["text"], output: ["text"] },
+      tool_calling: { supported: true },
+      parameters: {},
+      compatibility: {},
+    } satisfies ModelCapabilities,
+  };
+
+  const copied = copyCompatiblePrimarySettings(primary, target);
+
+  assert.deepEqual(copied.candidate.builtin_tool_configs, {
+    image_generation: {},
+  });
+  assert.deepEqual(copied.omitted, ["builtin_tool_configs"]);
 });
 
 void test("explicit image selection is invalid until a current catalog authorizes it", () => {

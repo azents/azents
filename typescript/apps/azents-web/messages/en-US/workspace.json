@@ -937,7 +937,8 @@
       "copyOmitted": {
         "context_window": "context window cap",
         "max_output": "max output tokens",
-        "builtin_tools": "unsupported built-in tools"
+        "builtin_tools": "unsupported built-in tools",
+        "builtin_tool_configs": "integration-specific built-in tool settings"
       }
     },
     "externalChannels": {

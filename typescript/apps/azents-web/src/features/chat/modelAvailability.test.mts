@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   modelAvailabilityBadge,
+  modelAvailabilityPrimaryRetryAvailable,
+  modelAvailabilityRecoveryPending,
   modelAvailabilityRemainingMinutes,
   type ModelAvailabilityViewState,
 } from "./modelAvailability.ts";
@@ -73,4 +75,30 @@ void test("availability deadlines use server-relative whole minutes", () => {
     ),
     null,
   );
+});
+
+void test("Primary retry remains available after cooldown becomes recovery-pending", () => {
+  assert.equal(modelAvailabilityPrimaryRetryAvailable(cooldown.data), true);
+  assert.equal(
+    modelAvailabilityPrimaryRetryAvailable({
+      ...cooldown.data,
+      state: "probing",
+      deadline: null,
+    }),
+    true,
+  );
+  assert.equal(
+    modelAvailabilityPrimaryRetryAvailable({
+      ...cooldown.data,
+      state: "probing",
+    }),
+    false,
+  );
+  const expiredProbe = {
+    ...cooldown.data,
+    state: "probing" as const,
+    deadline: "2026-09-13T03:59:59Z",
+  };
+  assert.equal(modelAvailabilityRecoveryPending(expiredProbe), true);
+  assert.equal(modelAvailabilityPrimaryRetryAvailable(expiredProbe), true);
 });

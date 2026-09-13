@@ -42,3 +42,30 @@ export function modelAvailabilityRemainingMinutes(
     elapsedMs;
   return remainingMs > 0 ? Math.ceil(remainingMs / 60_000) : null;
 }
+
+export function modelAvailabilityPrimaryRetryAvailable(
+  availability: AgentSessionModelAvailabilityResponse,
+): boolean {
+  return (
+    availability.state === "cooldown" ||
+    modelAvailabilityRecoveryPending(availability)
+  );
+}
+
+export function modelAvailabilityRecoveryPending(
+  availability: AgentSessionModelAvailabilityResponse,
+): boolean {
+  if (availability.state !== "probing") {
+    return false;
+  }
+  if (availability.deadline == null) {
+    return true;
+  }
+  const deadlineMs = Date.parse(availability.deadline);
+  const serverTimeMs = Date.parse(availability.server_time);
+  return (
+    Number.isFinite(deadlineMs) &&
+    Number.isFinite(serverTimeMs) &&
+    deadlineMs <= serverTimeMs
+  );
+}

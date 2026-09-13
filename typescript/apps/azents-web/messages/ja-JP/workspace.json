@@ -937,7 +937,8 @@
       "copyOmitted": {
         "context_window": "コンテキストウィンドウ上限",
         "max_output": "最大出力トークン",
-        "builtin_tools": "未対応の組み込みツール"
+        "builtin_tools": "未対応の組み込みツール",
+        "builtin_tool_configs": "連携固有の組み込みツール設定"
       }
     },
     "externalChannels": {

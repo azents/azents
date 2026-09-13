@@ -810,6 +810,7 @@
     "primaryAvailable": "{model} 사용 가능",
     "primaryCooldown": "{model}을 일시적으로 사용할 수 없습니다",
     "primaryProbing": "{model} 복구 여부를 확인하는 중입니다",
+    "primaryRecoveryPending": "{model} 복구를 다시 시도할 수 있습니다",
     "primaryNextTitle": "다음 실행에서 {model}을 먼저 시도합니다",
     "currentFallback": "현재 Fallback: {model}",
     "availabilityDeadline": "약 {minutes}분 후 새로고침",

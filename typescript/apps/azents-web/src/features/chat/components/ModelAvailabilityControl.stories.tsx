@@ -79,6 +79,15 @@ export const ProbeBusy = {
   args: { state: loaded("probing") },
 } satisfies Story;
 
+export const RecoveryPending = {
+  args: {
+    state: {
+      type: "LOADED",
+      data: { ...baseAvailability, state: "probing", deadline: null },
+    },
+  },
+} satisfies Story;
+
 export const PrimaryNext = {
   args: { state: loaded("primary_next") },
 } satisfies Story;

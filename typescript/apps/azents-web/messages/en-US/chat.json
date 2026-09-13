@@ -810,6 +810,7 @@
     "primaryAvailable": "{model} is available",
     "primaryCooldown": "{model} is temporarily unavailable",
     "primaryProbing": "{model} recovery is being checked",
+    "primaryRecoveryPending": "{model} is ready for a recovery attempt",
     "primaryNextTitle": "{model} will be tried next",
     "currentFallback": "Current fallback: {model}",
     "availabilityDeadline": "Refreshes in about {minutes} min",

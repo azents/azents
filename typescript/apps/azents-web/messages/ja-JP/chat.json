@@ -810,6 +810,7 @@
     "primaryAvailable": "{model} は利用可能です",
     "primaryCooldown": "{model} は一時的に利用できません",
     "primaryProbing": "{model} の復旧を確認中です",
+    "primaryRecoveryPending": "{model} の復旧を再試行できます",
     "primaryNextTitle": "次の実行で {model} を最初に試します",
     "currentFallback": "現在の Fallback: {model}",
     "availabilityDeadline": "約 {minutes} 分後に更新",

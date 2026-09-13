@@ -2,7 +2,11 @@
 
 import { Alert, Button, Stack, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { modelAvailabilityRemainingMinutes } from "../modelAvailability";
+import {
+  modelAvailabilityPrimaryRetryAvailable,
+  modelAvailabilityRecoveryPending,
+  modelAvailabilityRemainingMinutes,
+} from "../modelAvailability";
 import type { ModelAvailabilityViewState } from "../modelAvailability";
 
 export interface ModelAvailabilityControlProps {
@@ -73,6 +77,9 @@ export function ModelAvailabilityControl({
     observedAtMs,
     nowMs,
   );
+  const recoveryPending = modelAvailabilityRecoveryPending(availability);
+  const primaryRetryAvailable =
+    modelAvailabilityPrimaryRetryAvailable(availability);
   return (
     <Stack gap="xs">
       <Text size="xs" c="dimmed" fw={600}>
@@ -98,13 +105,17 @@ export function ModelAvailabilityControl({
                 ? t("primaryNextTitle", {
                     model: availability.primary_display_name,
                   })
-                : availability.state === "probing"
-                  ? t("primaryProbing", {
+                : recoveryPending
+                  ? t("primaryRecoveryPending", {
                       model: availability.primary_display_name,
                     })
-                  : t("primaryCooldown", {
-                      model: availability.primary_display_name,
-                    })
+                  : availability.state === "probing"
+                    ? t("primaryProbing", {
+                        model: availability.primary_display_name,
+                      })
+                    : t("primaryCooldown", {
+                        model: availability.primary_display_name,
+                      })
           }
         >
           <Stack gap="xs">
@@ -122,7 +133,7 @@ export function ModelAvailabilityControl({
                 {t("availabilityDeadline", { minutes: remainingMinutes })}
               </Text>
             ) : null}
-            {availability.state === "cooldown" ? (
+            {primaryRetryAvailable ? (
               <Button
                 size="compact-sm"
                 variant="light"

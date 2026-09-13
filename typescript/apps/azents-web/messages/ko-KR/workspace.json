@@ -937,7 +937,8 @@
       "copyOmitted": {
         "context_window": "컨텍스트 창 제한",
         "max_output": "최대 출력 토큰",
-        "builtin_tools": "지원하지 않는 기본 제공 도구"
+        "builtin_tools": "지원하지 않는 기본 제공 도구",
+        "builtin_tool_configs": "연동별 기본 제공 도구 설정"
       }
     },
     "externalChannels": {
