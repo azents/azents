@@ -69,6 +69,10 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
 from azents.services.toolkit import ToolkitService
+from azents.services.toolkit.credential_edits import (
+    merge_kubernetes_credentials,
+    merge_redacted_credential_values,
+)
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitOAuthConnectionInput,
@@ -1533,11 +1537,15 @@ async def _resolve_agent_test_credentials(
                 saved = _credentials_adapter.validate_json(toolkit.credentials)
             except ValidationError:
                 pass
+        if body.toolkit_type == "kubernetes":
+            merged = merge_kubernetes_credentials(
+                toolkit.credentials,
+                body.credentials,
+                body.config,
+            )
+            return json.dumps(merged)
         if body.credentials is not None:
-            for key, value in body.credentials.items():
-                if isinstance(value, str) and value == "":
-                    continue
-                saved[key] = value
+            saved = merge_redacted_credential_values(saved, body.credentials)
         return json.dumps(saved) if saved else None
     if body.credentials is not None:
         return json.dumps(body.credentials)
@@ -1589,6 +1597,13 @@ async def _resolve_test_credentials(
             )
 
         if toolkit is not None and toolkit.workspace_id == workspace_id:
+            if body.toolkit_type == "kubernetes":
+                merged = merge_kubernetes_credentials(
+                    toolkit.credentials,
+                    body.credentials,
+                    body.config,
+                )
+                return json.dumps(merged)
             saved: dict[str, object] = {}
             if toolkit.credentials is not None:
                 try:
@@ -1600,10 +1615,7 @@ async def _resolve_test_credentials(
 
             # Override with form-entered values, ignoring empty strings
             if body.credentials is not None:
-                for key, value in body.credentials.items():
-                    if isinstance(value, str) and value == "":
-                        continue
-                    saved[key] = value
+                saved = merge_redacted_credential_values(saved, body.credentials)
 
             if saved:
                 return json.dumps(saved)

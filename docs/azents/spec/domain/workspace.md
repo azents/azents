@@ -116,7 +116,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-09-13
-spec_version: 82
+spec_version: 83
 ---
 
 # Workspace & Membership
@@ -500,7 +500,7 @@ removal instead of dispatching per-Session folder deletion. Retention purge rema
 
 azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows the Agent list, and sidebar renders workspace navigation and agent section together for workspace-scoped pages. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, and `AgentTeamCard` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
 
-Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, linked Agent identity, session list, session creation, and global account/workspace actions. The linked Agent identity opens the independent Agent settings page under the same Agent-focused shell. Concrete session routes keep Chat as the main surface and expose a unified supporting panel through a header toggle. Files/projects, Runtime settings, metrics, terminal, Context diagnostics, Subagents, Channels, and Scheduled Tasks use their existing content inside that panel. Desktop has a resizable right-side panel with vertical navigation. Mobile has one full-width supporting surface with horizontally scrollable tabs and directional scroll cues; it has no side-by-side feature list, additional selector screen, or nested selection overlay. The Agent navigation rail remains accessible through the existing mobile drawer. Feature selection preserves the Chat mount and session identity.
+Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, linked Agent identity, session list, session creation, and global account/workspace actions. The linked Agent identity opens the independent Agent settings page under the same Agent-focused shell. Concrete session routes keep Chat as the main surface and expose a unified supporting panel through a header toggle. Files/projects, Runtime settings, metrics, terminal, Context diagnostics, Subagents, Channels, and Scheduled Tasks use their existing content inside that panel. The panel content host gives every selected subview one bounded full-height flex area, so scrollable subviews own one vertical scroll viewport while fixed-layout Workspace and Terminal views remain contained. Desktop has a resizable right-side panel with vertical navigation. Mobile has one full-width supporting surface with horizontally scrollable tabs and directional scroll cues; it has no side-by-side feature list, additional selector screen, or nested selection overlay. The Agent navigation rail remains accessible through the existing mobile drawer. Feature selection preserves the Chat mount and session identity. Mobile text-like form controls use at least the medium input font size so focusing a Mantine or native control does not trigger iOS Safari auto-zoom.
 
 Membership UI has these routes:
 
@@ -833,6 +833,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-13 (spec_version=83)** — Standardized the Session Panel's bounded
+  flex and vertical-scroll contract across subviews and enforced mobile input
+  sizing that avoids iOS focus zoom.
 - **2026-09-12 (spec_version=82)** — Kept Chat mounted as the primary
   concrete-session surface and moved Files, Runtime, Context, Subagents, Channels,
   Scheduled Tasks, Metrics, and Terminal into one responsive supporting panel.

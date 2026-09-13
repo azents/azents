@@ -244,7 +244,7 @@ export function GoogleAnalyticsConfigFields({
           leftSection={<IconPlugConnected size={16} />}
           onClick={handleTestConnection}
           loading={testConnectionMutation.isPending}
-          disabled={!credentials}
+          disabled={!credentials && !hasCredentials}
         >
           Test Connection
         </Button>
