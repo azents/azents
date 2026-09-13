@@ -40,6 +40,7 @@ from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
 )
 
@@ -150,8 +151,11 @@ def _create_runtime_free_agent(
         handle=workspace.handle,
         agent_create_request=AgentCreateRequest(
             name=f"Runtime-free Agent {unique()}",
-            model_selection=workspace.model_selection,
-            lightweight_model_selection=workspace.model_selection,
+            selectable_model_options=single_candidate_model_options(
+                workspace.model_selection
+            ),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
         ),
         _headers=_headers(workspace.token),

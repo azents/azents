@@ -67,7 +67,10 @@ from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from .data import (
     ExternalChannelAgentRouteCreate,
@@ -129,6 +132,12 @@ async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgen
         name=f"{slug} Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

@@ -34,7 +34,10 @@ from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 async def _authority_fixture(
@@ -59,20 +62,23 @@ async def _authority_fixture(
     )
     session.add(integration)
     await session.flush()
+    model_selection = make_test_model_selection_dict(
+        integration_id=integration.id,
+        provider=LLMProvider.ANTHROPIC,
+        model_identifier="runtime-web-model",
+    )
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Runtime Web agent",
         runtime_capability=AgentRuntimeCapability.NONE,
-        model_selection=make_test_model_selection_dict(
-            integration_id=integration.id,
-            provider=LLMProvider.ANTHROPIC,
-            model_identifier="runtime-web-model",
+        model_selection=model_selection,
+        lightweight_model_selection=model_selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
         ),
-        lightweight_model_selection=make_test_model_selection_dict(
-            integration_id=integration.id,
-            provider=LLMProvider.ANTHROPIC,
-            model_identifier="runtime-web-model",
-        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

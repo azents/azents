@@ -40,17 +40,18 @@ class TestAgentListResponse(unittest.TestCase):
                         id = '', 
                         name = '', 
                         description = '', 
-                        model_selection = {
-                            'key' : null
-                            }, 
-                        lightweight_model_selection = {
-                            'key' : null
-                            }, 
                         selectable_model_options = [
                             azentspublicclient.models.selectable_model_option_response.SelectableModelOptionResponse(
                                 label = '', 
-                                model_selection = , 
-                                settings = { }, 
+                                candidates = [
+                                    azentspublicclient.models.selectable_model_candidate_response.SelectableModelCandidateResponse(
+                                        model_selection = {
+                                            'key' : null
+                                            }, 
+                                        settings = { }, )
+                                    ], 
+                                subagent_enabled = True, 
+                                subagent_guidance = '', 
                                 execution_option_definitions = [
                                     { }
                                     ], )
@@ -108,17 +109,18 @@ class TestAgentListResponse(unittest.TestCase):
                         id = '', 
                         name = '', 
                         description = '', 
-                        model_selection = {
-                            'key' : null
-                            }, 
-                        lightweight_model_selection = {
-                            'key' : null
-                            }, 
                         selectable_model_options = [
                             azentspublicclient.models.selectable_model_option_response.SelectableModelOptionResponse(
                                 label = '', 
-                                model_selection = , 
-                                settings = { }, 
+                                candidates = [
+                                    azentspublicclient.models.selectable_model_candidate_response.SelectableModelCandidateResponse(
+                                        model_selection = {
+                                            'key' : null
+                                            }, 
+                                        settings = { }, )
+                                    ], 
+                                subagent_enabled = True, 
+                                subagent_guidance = '', 
                                 execution_option_definitions = [
                                     { }
                                     ], )

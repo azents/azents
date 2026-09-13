@@ -103,6 +103,29 @@ def test_usage_limit_reached_is_user_visible_quota_failure() -> None:
     assert isinstance(failure, ModelCallError)
 
 
+def test_preserves_exact_internal_route_identity_beside_bounded_diagnostics() -> None:
+    """Quota routing retains exact identifiers without exposing them as diagnostics."""
+    exact_model = f"custom model/{'x' * 120}"
+    failure = model_provider_failure(
+        operation="compaction",
+        provider="custom provider",
+        model=exact_model,
+        integration="integration with spaces",
+        provider_message="Quota exhausted",
+        status_code=402,
+        provider_code="billing_limit",
+        provider_error_type=None,
+        provider_error_param=None,
+    )
+
+    assert failure.provider == "unknown"
+    assert failure.integration is None
+    assert failure.model == "unknown"
+    assert failure.route_provider == "custom provider"
+    assert failure.route_integration == "integration with spaces"
+    assert failure.route_model == exact_model
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [

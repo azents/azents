@@ -383,6 +383,24 @@ class RDBAgentSession(RDBModel):
         nullable=True,
         default=None,
     )
+    primary_model_reservation: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    primary_model_reservation_generation: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        init=False,
+        nullable=False,
+        server_default=sa.text("0"),
+    )
+    title_model_operation_state: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     last_user_input_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,

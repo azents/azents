@@ -21,6 +21,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentMessagePayload,
+    AgentRunState,
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -167,6 +168,43 @@ def test_event_rejects_payload_kind_mismatch() -> None:
         )
 
 
+def test_agent_run_state_decodes_historical_missing_operation_state() -> None:
+    """Historical Run projections without operation state remain nullable."""
+    now = datetime.datetime.now(datetime.UTC)
+
+    state = AgentRunState.model_validate(
+        {
+            "id": "1" * 32,
+            "session_id": "session-1",
+            "scheduled_task_cycle_id": None,
+            "run_index": 1,
+            "phase": "idle",
+            "status": "completed",
+            "parent_agent_run_id": None,
+            "requested_model_target_label": "default",
+            "requested_reasoning_effort": None,
+            "requested_enabled_execution_options": [],
+            "active_tool_calls": [],
+            "retry_state": None,
+            "vfs_projection": None,
+            "last_completed_event_id": None,
+            "terminal_result_event_id": None,
+            "terminal_result_message": None,
+            "parent_result_delivery_state": None,
+            "parent_result_mailbox_item_id": None,
+            "parent_result_enqueued_at": None,
+            "stop_requested_at": None,
+            "created_at": now,
+            "started_at": now,
+            "model_call_started_at": None,
+            "ended_at": now,
+            "updated_at": now,
+        }
+    )
+
+    assert state.model_operation_state is None
+
+
 def _external_message_payload(
     *,
     projection_root_id: str = "external-channel:binding-1:message-1",
@@ -257,6 +295,7 @@ def test_turn_marker_decodes_historical_payload_without_provenance() -> None:
     )
 
     assert payload.applied_inference_profile is None
+    assert payload.applied_model_route is None
     assert payload.effective_context_window_tokens is None
     assert payload.effective_auto_compaction_threshold_tokens is None
 

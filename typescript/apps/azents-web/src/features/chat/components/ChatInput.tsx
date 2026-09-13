@@ -329,7 +329,7 @@ function ChatInputView({
               {option.label}
             </Text>
             <Text size="xs" c="dimmed" lh={rem(16)} truncate>
-              {option.model_selection.model_identifier}
+              {option.candidates[0]?.model_selection.model_identifier}
             </Text>
           </Stack>
           {selected && (

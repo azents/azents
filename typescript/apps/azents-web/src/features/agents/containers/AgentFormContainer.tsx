@@ -68,7 +68,7 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       const defaultReasoningEffort = normalizeReasoningEffort(
         agent.model_parameters?.reasoning_effort ?? null,
         reasoningEffortLevels(
-          mainOption?.model_selection.normalized_capabilities,
+          mainOption?.candidates[0]?.model_selection.normalized_capabilities,
         ),
       );
       form.setValues({

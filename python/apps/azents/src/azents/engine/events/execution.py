@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
+from azents.core.model_operation import ModelOperationKind
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
     AdapterOutputNormalizer,
@@ -315,6 +316,9 @@ class AgentRunExecution[
         | None = None,
         system_prompt_snapshot_repo: SystemPromptSnapshotRepositoryProtocol
         | None = None,
+        complete_model_operation_in_session: (
+            Callable[[AsyncSession, ModelOperationKind], Awaitable[None]] | None
+        ) = None,
     ) -> None:
         """Inject loop dependencies."""
         self.session_manager = session_manager
@@ -339,6 +343,7 @@ class AgentRunExecution[
         self.session_repo = session_repo
         self.terminal_finalization_coordinator = terminal_finalization_coordinator
         self.system_prompt_snapshot_repo = system_prompt_snapshot_repo
+        self.complete_model_operation_in_session = complete_model_operation_in_session
 
     async def run(
         self,
@@ -653,6 +658,10 @@ class AgentRunExecution[
                                 "completed",
                             )
                             terminal_result = _terminal_result_from_events(appended)
+                            await self._complete_model_operation(
+                                session,
+                                ModelOperationKind.FOREGROUND,
+                            )
                             await self._mark_terminal(
                                 session,
                                 request.run_id,
@@ -746,6 +755,10 @@ class AgentRunExecution[
                                 "completed",
                             )
                             terminal_result = _terminal_result_from_events(appended)
+                            await self._complete_model_operation(
+                                session,
+                                ModelOperationKind.FOREGROUND,
+                            )
                             await self._mark_terminal(
                                 session,
                                 request.run_id,
@@ -1269,6 +1282,10 @@ class AgentRunExecution[
                 request.run_id,
                 "completed",
             )
+            await self._complete_model_operation(
+                session,
+                ModelOperationKind.FOREGROUND,
+            )
             await self._mark_terminal(
                 session,
                 request.run_id,
@@ -1282,6 +1299,16 @@ class AgentRunExecution[
                 [run_marker],
             )
         return True
+
+    async def _complete_model_operation(
+        self,
+        session: AsyncSession,
+        operation_kind: ModelOperationKind,
+    ) -> None:
+        """Run the optional operation settlement in the caller transaction."""
+        if self.complete_model_operation_in_session is None:
+            return
+        await self.complete_model_operation_in_session(session, operation_kind)
 
     async def _append_cancelled_tool_results(
         self,
@@ -1453,6 +1480,11 @@ class AgentRunExecution[
             run_id=run_id,
             usage=usage,
             applied_inference_profile=applied_profile,
+            applied_model_route=(
+                inference_state.applied_model_route
+                if inference_state is not None
+                else None
+            ),
             effective_context_window_tokens=(
                 inference_state.effective_context_window_tokens
                 if inference_state is not None

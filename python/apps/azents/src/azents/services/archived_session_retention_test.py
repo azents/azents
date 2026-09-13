@@ -46,7 +46,10 @@ from azents.services.archived_session_retention import (
     RetentionApplicationInProgress,
     RetentionRevisionConflict,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 def _service(
@@ -103,6 +106,12 @@ async def _create_root(
         name=f"Retention {suffix}",
         model_selection=model_selection,
         lightweight_model_selection=model_selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(model_selection),
+            lightweight_model_selection=(model_selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

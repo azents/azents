@@ -28,10 +28,12 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
+    AppliedModelRoute,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_operation import ModelOperationState
 from azents.core.vfs import VfsProjection
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.action_messages import ActionMessagePayload
@@ -611,6 +613,7 @@ class TurnMarkerPayload(BaseModel):
     run_id: str = Field(min_length=1)
     usage: TokenUsagePayload
     applied_inference_profile: AppliedInferenceProfile | None = Field(default=None)
+    applied_model_route: AppliedModelRoute | None = Field(default=None)
     effective_context_window_tokens: int | None = Field(default=None, gt=0)
     effective_auto_compaction_threshold_tokens: int | None = Field(
         default=None,
@@ -933,6 +936,7 @@ class AgentRunState(BaseModel):
     requested_enabled_execution_options: list[ModelExecutionOptionId]
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
+    model_operation_state: ModelOperationState | None = Field(default=None)
     vfs_projection: VfsProjection | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
     terminal_result_event_id: str | None = Field(default=None)

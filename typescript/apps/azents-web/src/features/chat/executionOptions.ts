@@ -18,7 +18,9 @@ export function executionOptionDefinitionsForModel(
 export function supportedExecutionOptionIds(
   option?: SelectableModelOption | null,
 ): ModelExecutionOptionId[] {
-  return option?.model_selection.supported_execution_options ?? [];
+  return (
+    option?.candidates[0]?.model_selection.supported_execution_options ?? []
+  );
 }
 
 export function enabledExecutionOptionIds(

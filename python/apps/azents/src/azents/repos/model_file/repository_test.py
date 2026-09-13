@@ -26,7 +26,10 @@ from azents.repos.model_file.data import ModelFileCreate
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 async def _noop_terminal_finalization(
@@ -71,6 +74,24 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, s
             provider=LLMProvider.ANTHROPIC,
             model_identifier="model-file-test-model-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier="model-file-test-model-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier="model-file-test-model-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

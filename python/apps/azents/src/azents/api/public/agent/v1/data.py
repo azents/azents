@@ -3,13 +3,13 @@
 import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
     AgentModelSelection,
-    AgentModelSelectionInput,
     ModelParameters,
+    SelectableModelCandidate,
     SelectableModelOption,
     SelectableModelOptionInput,
     SelectableModelSettings,
@@ -32,12 +32,30 @@ from azents.services.memory.data import MemoryOutput
 from azents.services.uploads.schema import UploadedImage
 
 
-class SelectableModelOptionResponse(BaseModel):
-    """Public selectable model option with execution descriptors."""
+class SelectableModelCandidateResponse(BaseModel):
+    """Public physical model candidate snapshot."""
 
-    label: str
     model_selection: AgentModelSelection
     settings: SelectableModelSettings
+
+    @classmethod
+    def convert_from(
+        cls, candidate: SelectableModelCandidate
+    ) -> "SelectableModelCandidateResponse":
+        """Convert one persisted candidate."""
+        return cls(
+            model_selection=candidate.model_selection,
+            settings=candidate.settings,
+        )
+
+
+class SelectableModelOptionResponse(BaseModel):
+    """Public selectable semantic label with ordered candidates."""
+
+    label: str
+    candidates: list[SelectableModelCandidateResponse]
+    subagent_enabled: bool
+    subagent_guidance: str | None
     execution_option_definitions: list[ModelExecutionOptionDefinition]
 
     @classmethod
@@ -47,11 +65,17 @@ class SelectableModelOptionResponse(BaseModel):
         """Convert a persisted selectable model option."""
         return cls(
             label=option.label,
-            model_selection=option.model_selection,
-            settings=option.settings,
+            candidates=[
+                SelectableModelCandidateResponse.convert_from(candidate)
+                for candidate in option.candidates
+            ],
+            subagent_enabled=option.subagent_enabled,
+            subagent_guidance=option.subagent_guidance,
             execution_option_definitions=list_model_execution_option_definitions(
-                provider=option.model_selection.provider,
-                supported=option.model_selection.supported_execution_options,
+                provider=option.candidates[0].model_selection.provider,
+                supported=option.candidates[
+                    0
+                ].model_selection.supported_execution_options,
             ),
         )
 
@@ -62,8 +86,6 @@ class AgentResponse(BaseModel):
     id: str
     name: str
     description: str | None
-    model_selection: AgentModelSelection | None
-    lightweight_model_selection: AgentModelSelection | None
     selectable_model_options: list[SelectableModelOptionResponse]
     main_model_label: str
     lightweight_model_label: str
@@ -120,8 +142,6 @@ class AgentResponse(BaseModel):
             id=data.id,
             name=data.name,
             description=data.description,
-            model_selection=data.model_selection,
-            lightweight_model_selection=data.lightweight_model_selection,
             selectable_model_options=[
                 SelectableModelOptionResponse.convert_from(option)
                 for option in data.selectable_model_options
@@ -269,15 +289,9 @@ class AgentDecommissionResponse(BaseModel):
 class AgentCreateRequest(BaseModel):
     """Agent creation request."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(description="Agent name")
-    model_selection: AgentModelSelectionInput | None = Field(
-        default=None,
-        description="Main model selection. Copies workspace default when None",
-    )
-    lightweight_model_selection: AgentModelSelectionInput | None = Field(
-        default=None,
-        description="Lightweight model selection. Copies default/main when None",
-    )
     selectable_model_options: list[SelectableModelOptionInput] | None = Field(
         default=None, description="Ordered selectable model option inputs"
     )
@@ -318,19 +332,11 @@ class AgentCreateRequest(BaseModel):
     )
 
 
-class AgentUpdateRequest(TypedDict, total=False):
+class AgentUpdateRequest(TypedDict, total=False, closed=True):
     """Agent update request, for partial updates."""
 
     name: Annotated[str, Field(description="Agent name")]
     description: Annotated[str | None, Field(description="Agent description")]
-    model_selection: Annotated[
-        AgentModelSelectionInput | None,
-        Field(description="Main model selection. Copies workspace default when None"),
-    ]
-    lightweight_model_selection: Annotated[
-        AgentModelSelectionInput | None,
-        Field(description="Lightweight model selection. Copies default/main when None"),
-    ]
     selectable_model_options: Annotated[
         list[SelectableModelOptionInput] | None,
         Field(description="Ordered selectable model option inputs"),

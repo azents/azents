@@ -93,6 +93,7 @@ class _FailedRunEventStore:
                     retry_state,
                     finalization_reason=reason,
                     action_hint=action_hint,
+                    model_operation=None,
                 ),
             ).model_dump(mode="json", exclude_none=True),
             external_id=f"failed-run:{run_id}:system-error",

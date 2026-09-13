@@ -67,7 +67,10 @@ from azents.services.runtime_profile_resolution.service import (
     PreparedRuntimeProfileSelection,
     RuntimeProfileResolutionService,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from .data import AgentRuntimeAdditionRequest, AgentRuntimeAdditionUnavailable
 from .service import AgentRuntimeTransitionService
@@ -302,6 +305,12 @@ async def _seed_runtime_free_agent(
         model_selection=selection,
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.NONE,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

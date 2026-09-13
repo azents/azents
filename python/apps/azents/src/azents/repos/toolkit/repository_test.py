@@ -137,7 +137,19 @@ async def _seed_effective_toolkits(session: AsyncSession) -> None:
                     :agent_id,
                     '{}'::jsonb,
                     '{}'::jsonb,
-                    '[{"label":"default","model_selection":{}}]'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
                     'default',
                     'default'
                 )

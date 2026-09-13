@@ -82,6 +82,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
     make_test_model_settings,
+    make_test_selectable_model_option_dicts,
     make_test_selectable_model_options,
 )
 from azents.testing.turn_action import (
@@ -181,6 +182,24 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()
@@ -310,6 +329,7 @@ def _failed_run_system_error_payload() -> dict[str, JSONValue]:
         failure=FailedRunFailureMetadata.from_retry_state(
             retry_state,
             finalization_reason="retry_exhausted",
+            model_operation=None,
         ),
     ).model_dump(mode="json", exclude_none=True)
 
@@ -650,7 +670,7 @@ class TestChatWriteService:
             agent = await AgentRepository().get_by_id(session, agent_id)
             assert agent is not None
             replacement_options = make_test_selectable_model_options(
-                agent.selectable_model_options[0].model_selection,
+                agent.selectable_model_options[0].candidates[0].model_selection,
                 label="replacement",
             )
             update_result = await AgentRepository().update_by_id(

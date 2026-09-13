@@ -13,7 +13,10 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import AgentRuntimeRemovalRepository
 from .data import AgentRuntimeRemovalCreateResult
@@ -33,6 +36,12 @@ async def _create_agent(session: AsyncSession) -> tuple[str, str]:
         name="Runtime removal Agent",
         model_selection=make_test_model_selection_dict(),
         lightweight_model_selection=make_test_model_selection_dict(),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(make_test_model_selection_dict()),
+            lightweight_model_selection=(make_test_model_selection_dict()),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

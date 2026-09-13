@@ -449,13 +449,23 @@ class TestModelSelectionReadiness:
             f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
             headers=_headers(token),
             json={
-                "default_model_selection": selection,
-                "default_lightweight_model_selection": selection,
+                "default_selectable_model_options": [
+                    {
+                        "label": "default",
+                        "candidates": [{"model_selection": selection}],
+                        "subagent_enabled": True,
+                        "subagent_guidance": None,
+                    }
+                ],
+                "default_main_model_label": "default",
+                "default_lightweight_model_label": "default",
             },
             timeout=10,
         )
         assert workspace_update.status_code == 200
-        workspace_selection = workspace_update.json()["default_model_selection"]
+        workspace_selection = workspace_update.json()[
+            "default_selectable_model_options"
+        ][0]["candidates"][0]["model_selection"]
         assert workspace_selection["provider"] == "openrouter"
         assert workspace_selection["model_identifier"] == "new-publisher/frontier-text"
         assert workspace_selection["model_developer"] == "other"
@@ -467,7 +477,9 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert created.status_code == 201
-        agent_selection = created.json()["model_selection"]
+        agent_selection = created.json()["selectable_model_options"][0]["candidates"][
+            0
+        ]["model_selection"]
         assert agent_selection["provider"] == "openrouter"
         assert agent_selection["model_identifier"] == "new-publisher/frontier-text"
         assert agent_selection["model_developer"] == "other"
@@ -539,8 +551,16 @@ class TestModelSelectionReadiness:
             f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
             headers=_headers(token),
             json={
-                "default_model_selection": selection,
-                "default_lightweight_model_selection": selection,
+                "default_selectable_model_options": [
+                    {
+                        "label": "default",
+                        "candidates": [{"model_selection": selection}],
+                        "subagent_enabled": True,
+                        "subagent_guidance": None,
+                    }
+                ],
+                "default_main_model_label": "default",
+                "default_lightweight_model_label": "default",
             },
             timeout=10,
         )
@@ -553,10 +573,8 @@ class TestModelSelectionReadiness:
         )
         assert fetched.status_code == 200
         body = fetched.json()
-        assert body["default_model_selection"]["model_identifier"] == "gpt-5.5"
-        assert body["default_lightweight_model_selection"]["model_identifier"] == (
-            "gpt-5.5"
-        )
+        candidate = body["default_selectable_model_options"][0]["candidates"][0]
+        assert candidate["model_selection"]["model_identifier"] == "gpt-5.5"
 
     def test_context_range_default_and_maximum_resolution(
         self,
@@ -624,11 +642,17 @@ class TestModelSelectionReadiness:
                 "selectable_model_options": [
                     {
                         "label": label,
-                        "model_selection": selection(identifier),
-                        "settings": {
-                            "context_window_tokens": context_window_tokens,
-                            "builtin_tools": [],
-                        },
+                        "candidates": [
+                            {
+                                "model_selection": selection(identifier),
+                                "settings": {
+                                    "context_window_tokens": context_window_tokens,
+                                    "builtin_tools": [],
+                                },
+                            }
+                        ],
+                        "subagent_enabled": True,
+                        "subagent_guidance": None,
                     }
                     for label, identifier, context_window_tokens, _ in scenarios
                 ],
@@ -683,13 +707,13 @@ class TestModelSelectionReadiness:
                 expected_effective=expected_effective,
             )
 
-    def test_selectable_model_options_copy_to_agent_and_fallback(
+    def test_selectable_model_candidate_chains_copy_and_remain_independent(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Workspace selectable model options copy to Agent and fallback by order."""
+        """Workspace candidate chains deep-copy to Agents and remain independent."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
@@ -728,10 +752,10 @@ class TestModelSelectionReadiness:
             "model_identifier": entries[1]["provider_model_identifier"],
         }
 
-        workspace_settings_payload: dict[str, object] = {
-            "default_selectable_model_options": [
+        default_option = {
+            "label": "default",
+            "candidates": [
                 {
-                    "label": "default",
                     "model_selection": main_selection,
                     "settings": {
                         "context_window_tokens": 100_000,
@@ -746,21 +770,39 @@ class TestModelSelectionReadiness:
                                 },
                             },
                         ],
-                        "subagent_enabled": False,
-                        "subagent_guidance": "Reserve for complex synthesis.",
                     },
                 },
                 {
-                    "label": "lightweight",
                     "model_selection": lightweight_selection,
                     "settings": {
                         "context_window_tokens": 32_000,
                         "max_output_tokens": 4_000,
                         "builtin_tools": [],
-                        "subagent_enabled": True,
-                        "subagent_guidance": "Prefer for bounded investigation.",
                     },
                 },
+            ],
+            "subagent_enabled": False,
+            "subagent_guidance": "Reserve for complex synthesis.",
+        }
+        lightweight_option = {
+            "label": "lightweight",
+            "candidates": [
+                {
+                    "model_selection": lightweight_selection,
+                    "settings": {
+                        "context_window_tokens": 32_000,
+                        "max_output_tokens": 4_000,
+                        "builtin_tools": [],
+                    },
+                }
+            ],
+            "subagent_enabled": True,
+            "subagent_guidance": "Prefer for bounded investigation.",
+        }
+        workspace_settings_payload: dict[str, object] = {
+            "default_selectable_model_options": [
+                default_option,
+                lightweight_option,
             ],
             "default_main_model_label": "default",
             "default_lightweight_model_label": "lightweight",
@@ -776,34 +818,18 @@ class TestModelSelectionReadiness:
         assert [
             option["label"] for option in settings["default_selectable_model_options"]
         ] == ["default", "lightweight"]
-        assert settings["default_selectable_model_options"][0]["settings"] == {
-            "context_window_tokens": 100_000,
-            "max_output_tokens": 12_000,
-            "builtin_tools": [
-                {"name": "web_search", "config": {}},
-                {
-                    "name": "image_generation",
-                    "config": {
-                        "model": "gpt-image-2.5-sunburst",
-                        "quality": "high",
-                    },
-                },
-            ],
-            "subagent_enabled": False,
-            "subagent_guidance": "Reserve for complex synthesis.",
-        }
-        assert settings["default_selectable_model_options"][1]["settings"] == {
-            "context_window_tokens": 32_000,
-            "max_output_tokens": 4_000,
-            "builtin_tools": [],
-            "subagent_enabled": True,
-            "subagent_guidance": "Prefer for bounded investigation.",
-        }
-        assert settings["default_model_selection"]["model_identifier"] == "gpt-5.5"
+        stored_default = settings["default_selectable_model_options"][0]
+        assert len(stored_default["candidates"]) == 2
         assert (
-            settings["default_lightweight_model_selection"]["model_identifier"]
+            stored_default["candidates"][0]["settings"]["context_window_tokens"]
+            == 100_000
+        )
+        assert (
+            stored_default["candidates"][1]["model_selection"]["model_identifier"]
             == "gpt-5.5-mini"
         )
+        assert stored_default["subagent_enabled"] is False
+        assert stored_default["subagent_guidance"] == ("Reserve for complex synthesis.")
 
         created = requests.post(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
@@ -817,57 +843,71 @@ class TestModelSelectionReadiness:
             "default",
             "lightweight",
         ]
-        assert [option["settings"] for option in agent["selectable_model_options"]] == [
-            {
-                "context_window_tokens": 100_000,
-                "max_output_tokens": 12_000,
-                "builtin_tools": [
-                    {"name": "web_search", "config": {}},
-                    {
-                        "name": "image_generation",
-                        "config": {
-                            "model": "gpt-image-2.5-sunburst",
-                            "quality": "high",
-                        },
-                    },
-                ],
-                "subagent_enabled": False,
-                "subagent_guidance": "Reserve for complex synthesis.",
-            },
-            {
-                "context_window_tokens": 32_000,
-                "max_output_tokens": 4_000,
-                "builtin_tools": [],
-                "subagent_enabled": True,
-                "subagent_guidance": "Prefer for bounded investigation.",
-            },
-        ]
+        agent_default = agent["selectable_model_options"][0]
+        assert len(agent_default["candidates"]) == 2
+        assert (
+            agent_default["candidates"][0]["model_selection"]["model_identifier"]
+            == "gpt-5.5"
+        )
+        assert (
+            agent_default["candidates"][1]["model_selection"]["model_identifier"]
+            == "gpt-5.5-mini"
+        )
         assert agent["main_model_label"] == "default"
         assert agent["lightweight_model_label"] == "lightweight"
-        assert agent["model_selection"]["model_identifier"] == "gpt-5.5"
+
+        changed_defaults = requests.put(
+            f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
+            headers=_headers(token),
+            json={
+                "default_selectable_model_options": [lightweight_option],
+                "default_main_model_label": "lightweight",
+                "default_lightweight_model_label": "lightweight",
+            },
+            timeout=10,
+        )
+        changed_defaults.raise_for_status()
+        unchanged_agent = requests.get(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent['id']}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        unchanged_agent.raise_for_status()
         assert (
-            agent["lightweight_model_selection"]["model_identifier"] == "gpt-5.5-mini"
+            len(unchanged_agent.json()["selectable_model_options"][0]["candidates"])
+            == 2
         )
 
-        fallback_update = requests.patch(
+        normalization_update = requests.patch(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent['id']}",
             headers=_headers(token),
             json={
                 "selectable_model_options": [
-                    {"label": "fast", "model_selection": lightweight_selection},
-                    {"label": "default", "model_selection": main_selection},
+                    {
+                        "label": "fast",
+                        "candidates": [{"model_selection": lightweight_selection}],
+                        "subagent_enabled": True,
+                        "subagent_guidance": None,
+                    },
+                    {
+                        "label": "default",
+                        "candidates": [{"model_selection": main_selection}],
+                        "subagent_enabled": True,
+                        "subagent_guidance": None,
+                    },
                 ],
                 "main_model_label": "removed-label",
                 "lightweight_model_label": "removed-label",
             },
             timeout=10,
         )
-        assert fallback_update.status_code == 200
-        updated_agent = fallback_update.json()
+        assert normalization_update.status_code == 200
+        updated_agent = normalization_update.json()
         assert updated_agent["main_model_label"] == "fast"
         assert updated_agent["lightweight_model_label"] == "fast"
-        assert updated_agent["model_selection"]["model_identifier"] == "gpt-5.5-mini"
         assert (
-            updated_agent["lightweight_model_selection"]["model_identifier"]
+            updated_agent["selectable_model_options"][0]["candidates"][0][
+                "model_selection"
+            ]["model_identifier"]
             == "gpt-5.5-mini"
         )

@@ -2,14 +2,13 @@
 
 import dataclasses
 
-from azents.core.agent import AgentModelSelection
-from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.core.model_operation import ModelOperationSnapshot
 
 
 @dataclasses.dataclass(frozen=True)
 class SessionTitleGenerationSnapshot:
-    """Completed database snapshot needed for one automatic title generation."""
+    """Durable candidate operation needed for one automatic title attempt."""
 
     agent_id: str
-    selection: AgentModelSelection
-    integration: LLMProviderIntegrationWithSecrets
+    workspace_id: str
+    operation: ModelOperationSnapshot

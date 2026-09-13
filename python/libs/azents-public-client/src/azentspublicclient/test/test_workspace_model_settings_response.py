@@ -35,20 +35,11 @@ class TestWorkspaceModelSettingsResponse(unittest.TestCase):
         model = WorkspaceModelSettingsResponse()
         if include_optional:
             return WorkspaceModelSettingsResponse(
-                default_model_selection = {
-                    'key' : null
-                    },
-                default_lightweight_model_selection = {
-                    'key' : null
-                    },
                 default_selectable_model_options = [
                     { }
                     ],
                 default_main_model_label = '',
-                default_lightweight_model_label = '',
-                effective_default_lightweight_model_selection = {
-                    'key' : null
-                    }
+                default_lightweight_model_label = ''
             )
         else:
             return WorkspaceModelSettingsResponse(

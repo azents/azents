@@ -8,9 +8,10 @@ from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -30,6 +31,14 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcome,
+    ModelOperationCandidateOutcomeStatus,
+    ModelOperationCandidateSnapshot,
+    ModelOperationKind,
+    ModelOperationSnapshot,
+    ModelOperationState,
+)
 from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.filters import EventCompactor
@@ -45,13 +54,14 @@ from azents.engine.events.types import (
 from azents.engine.run.errors import CompactionPlanStaleError
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
-from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
+from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -59,6 +69,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
+    make_test_selectable_model_option_dicts,
 )
 
 
@@ -110,6 +121,24 @@ async def _create_agent_runtime(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{handle}-model-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()
@@ -136,6 +165,51 @@ def _model_selection() -> AgentModelSelection:
             provider=LLMProvider.ANTHROPIC,
             model_identifier="resolved-model",
         )
+    )
+
+
+def _model_operation_state() -> ModelOperationState:
+    """Create strict foreground operation state for repository round trips."""
+    selection = _model_selection()
+    candidate = ModelOperationCandidateSnapshot(
+        ordinal=1,
+        model_selection=selection,
+        settings=SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[],
+        ),
+    )
+    return ModelOperationState(
+        foreground=ModelOperationSnapshot(
+            operation_id="1" * 32,
+            kind=ModelOperationKind.FOREGROUND,
+            semantic_label="default",
+            requested_reasoning_effort=None,
+            requested_execution_options=[],
+            candidates=[candidate],
+            cursor=0,
+            outcomes=[
+                ModelOperationCandidateOutcome(
+                    candidate_ordinal=1,
+                    candidate_role=candidate.role,
+                    provider=selection.provider.value,
+                    llm_provider_integration_id=(selection.llm_provider_integration_id),
+                    model_identifier=selection.model_identifier,
+                    model_display_name=selection.model_display_name,
+                    status=ModelOperationCandidateOutcomeStatus.PENDING,
+                    reason=None,
+                    recorded_at=datetime.datetime(
+                        2026,
+                        9,
+                        13,
+                        tzinfo=datetime.UTC,
+                    ),
+                )
+            ],
+            transferred_probe_claim=None,
+        ),
+        compaction=None,
     )
 
 
@@ -1766,6 +1840,101 @@ class TestEventExecutionRepositories:
         )
 
         assert completed.retry_state is None
+
+    async def test_agent_run_model_operation_state_create_update_and_clear(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persist strict operation JSON and clear it explicitly or at terminal."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-model-operation-state",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        operation_state = _model_operation_state()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                scheduled_task_cycle_id=None,
+                parent_agent_run_id=None,
+                model_operation_state=operation_state,
+            ),
+        )
+
+        assert run.model_operation_state == operation_state
+        stored = await rdb_session.get(RDBAgentRun, run.id)
+        assert stored is not None
+        assert stored.model_operation_state == operation_state.model_dump(mode="json")
+
+        cleared = await repo.update(
+            rdb_session,
+            run.id,
+            AgentRunPatch(model_operation_state=None),
+        )
+        assert cleared.model_operation_state is None
+
+        restored = await repo.update(
+            rdb_session,
+            run.id,
+            AgentRunPatch(model_operation_state=operation_state),
+        )
+        assert restored.model_operation_state == operation_state
+
+        completed = await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        assert completed.model_operation_state is None
+
+    async def test_agent_run_rejects_invalid_persisted_model_operation_state(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Repository ingress rejects malformed operation JSON."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-invalid-model-operation-state",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                scheduled_task_cycle_id=None,
+                parent_agent_run_id=None,
+            ),
+        )
+        stored = await rdb_session.get(RDBAgentRun, run.id)
+        assert stored is not None
+        malformed: dict[str, JSONValue] = {"foreground": {"schema_version": 1}}
+        stored.model_operation_state = malformed
+        await rdb_session.flush()
+
+        with pytest.raises(ValidationError):
+            await repo.get_by_id(rdb_session, run.id)
 
     async def test_agent_run_create_closes_stale_running_runs(
         self,

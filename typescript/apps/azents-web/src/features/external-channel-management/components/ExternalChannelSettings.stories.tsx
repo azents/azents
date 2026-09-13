@@ -19,8 +19,6 @@ const agent: AgentResponse = {
   type: "private",
   enabled: true,
   avatar: null,
-  model_selection: null,
-  lightweight_model_selection: null,
   selectable_model_options: [],
   main_model_label: "default",
   lightweight_model_label: "default",

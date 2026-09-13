@@ -110,6 +110,7 @@ from support.utils import (
     authenticate_user,
     decode_docker_exec_output,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
     wait_until,
 )
@@ -385,8 +386,11 @@ def _create_workspace_agents(
             handle=handle,
             agent_create_request=AgentCreateRequest(
                 name=f"External Channel Agent {index + 1} {suffix}",
-                model_selection=model_selection,
-                lightweight_model_selection=model_selection,
+                selectable_model_options=single_candidate_model_options(
+                    model_selection
+                ),
+                main_model_label="default",
+                lightweight_model_label="default",
                 type=AgentType.PUBLIC,
                 runtime_profile_id=runtime_profile_id,
             ),

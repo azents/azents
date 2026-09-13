@@ -102,7 +102,10 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 def _at(minute: int) -> datetime.datetime:
@@ -227,6 +230,12 @@ async def _create_discord_gateway_typing_fixture(
         name="Discord Gateway Typing Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()
@@ -1986,18 +1995,36 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
         name="Route Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     foreign_agent = RDBAgent(
         workspace_id=second_workspace,
         name="Foreign Route Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     second_agent = RDBAgent(
         workspace_id=first_workspace,
         name="Second Route Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     rdb_session.add_all((agent, second_agent, foreign_agent))
     await rdb_session.flush()

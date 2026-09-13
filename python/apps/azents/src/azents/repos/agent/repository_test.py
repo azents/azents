@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    SelectableModelCandidate,
     SelectableModelOption,
 )
 from azents.core.enums import AgentRuntimeCapability, ExternalChannelResponseMode
@@ -25,6 +26,7 @@ from azents.services.uploads.schema import (
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
+    make_test_selectable_model_option_dicts,
 )
 
 from . import AgentRepository
@@ -40,8 +42,14 @@ def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
     selection = make_test_model_selection()
     option = SelectableModelOption(
         label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-        model_selection=selection,
-        settings=make_test_model_settings(),
+        candidates=[
+            SelectableModelCandidate(
+                model_selection=selection,
+                settings=make_test_model_settings(),
+            )
+        ],
+        subagent_enabled=True,
+        subagent_guidance=None,
     )
     return AgentCreate(
         workspace_id="workspace-1",
@@ -196,6 +204,14 @@ async def test_update_avatar_locks_agent_and_enqueues_prior_snapshot() -> None:
         model_selection=make_test_model_selection().model_dump(mode="json"),
         lightweight_model_selection=make_test_model_selection().model_dump(mode="json"),
         avatar=old_avatar.model_dump(mode="json"),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(make_test_model_selection().model_dump(mode="json")),
+            lightweight_model_selection=(
+                make_test_model_selection().model_dump(mode="json")
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     result = Mock()
     result.scalar_one_or_none.return_value = row

@@ -21,6 +21,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
+from azents.core.model_operation import ModelOperationKind
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
 from azents.engine.context.compaction import (
@@ -484,6 +485,7 @@ class AgentEngineAdapter:
         self, request: RunRequest, context: RunContext
     ) -> AsyncIterator[Emit]:
         """Run manual event compaction in append-only style."""
+        compaction_request = request
         owner_session_manager = OwnerBoundSessionManager(
             session_manager=self.session_manager,
             session_id=request.session_id,
@@ -508,6 +510,11 @@ class AgentEngineAdapter:
         hook_providers = _runtime_hook_provider_refs(request.toolkits)
 
         async def on_compaction_started() -> None:
+            nonlocal compaction_request
+            if context.prepare_compaction_request is not None:
+                compaction_request = await context.prepare_compaction_request(
+                    compaction_request
+                )
             await hook_dispatcher.dispatch_observation(
                 hook_providers,
                 "on_session_compact",
@@ -526,16 +533,26 @@ class AgentEngineAdapter:
                 request.session_id,
             )
 
+        async def commit_compaction(session: AsyncSession) -> None:
+            if context.complete_model_operation_in_session is not None:
+                await context.complete_model_operation_in_session(
+                    session,
+                    ModelOperationKind.COMPACTION,
+                )
+            await clear_tool_working_set(session)
+
         await compactor.compact(
             session_id=request.session_id,
             transcript=transcript,
             compaction_id=uuid7().hex,
             summarize=_event_summary_generator(
-                request,
+                lambda: compaction_request,
                 summarize=self.summary_model_call,
             ),
             on_started=on_compaction_started,
-            summary_context_window_tokens=request.effective_max_input_tokens,
+            summary_context_window_tokens=(
+                lambda: compaction_request.effective_max_input_tokens
+            ),
             reason="manual_command",
             summary_enricher=_compaction_summary_enricher(
                 request,
@@ -543,7 +560,7 @@ class AgentEngineAdapter:
                 providers=hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=clear_tool_working_set,
+            on_committing=commit_compaction,
         )
         yield ephemeral(CompactionComplete())
 
@@ -982,7 +999,14 @@ class AgentEngineAdapter:
                 on_turn_end=on_turn_end,
             )
 
+        compaction_request = request
+
         async def on_auto_compaction_started() -> None:
+            nonlocal compaction_request
+            if context.prepare_compaction_request is not None:
+                compaction_request = await context.prepare_compaction_request(
+                    compaction_request
+                )
             await hook_dispatcher.dispatch_observation(
                 run_hook_providers,
                 "on_session_compact",
@@ -1001,6 +1025,14 @@ class AgentEngineAdapter:
                 request.session_id,
             )
 
+        async def commit_compaction(session: AsyncSession) -> None:
+            if context.complete_model_operation_in_session is not None:
+                await context.complete_model_operation_in_session(
+                    session,
+                    ModelOperationKind.COMPACTION,
+                )
+            await clear_tool_working_set(session)
+
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -1011,10 +1043,10 @@ class AgentEngineAdapter:
             session_id=request.session_id,
             compactor=compactor,
             summarize=_event_summary_generator(
-                request,
+                lambda: compaction_request,
                 summarize=self.summary_model_call,
             ),
-            max_input_tokens=request.effective_max_input_tokens,
+            max_input_tokens=lambda: compaction_request.effective_max_input_tokens,
             auto_compaction_threshold_tokens=request.auto_compaction_threshold_tokens,
             compaction_id_factory=lambda: uuid7().hex,
             on_compaction_started=on_auto_compaction_started,
@@ -1024,7 +1056,7 @@ class AgentEngineAdapter:
                 providers=run_hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=clear_tool_working_set,
+            on_committing=commit_compaction,
         )
         integration_id = (
             request.inference_state.model_selection.llm_provider_integration_id
@@ -1120,6 +1152,9 @@ class AgentEngineAdapter:
             session_repo=self.session_head_repo,
             terminal_finalization_coordinator=self.terminal_finalization_coordinator,
             system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
+            complete_model_operation_in_session=(
+                context.complete_model_operation_in_session
+            ),
         )
 
         async def execute_run() -> AgentRunStatus:
@@ -1521,16 +1556,17 @@ def _compaction_summary_enricher(
 
 
 def _event_summary_generator(
-    request: RunRequest,
+    request_provider: Callable[[], RunRequest],
     *,
     summarize: SummaryModelCall,
 ) -> SummaryGenerator:
-    """Create event summary generator bound to RunRequest."""
+    """Create an event summary generator bound to the latest compaction request."""
 
     async def generate(
         events: Sequence[Event],
         summary_budget: CompactionSummaryBudget,
     ) -> str:
+        request = request_provider()
         input_char_budget = _summary_input_char_budget(
             request.effective_max_input_tokens,
             summary_budget,

@@ -3,6 +3,7 @@
 import datetime
 
 from azents.api.public.chat.v1.data import (
+    AgentSessionModelAvailabilityResponse,
     AgentSessionResponse,
     ChatEditMessageWriteRequest,
     ChatLiveRunRetryStateResponse,
@@ -21,6 +22,10 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_availability import (
+    ModelCandidateIdentity,
+    SessionModelAvailability,
+)
 from azents.repos.agent_session.data import AgentSession
 from azents.services.chat.data import ChatLiveRunRetryState
 
@@ -73,6 +78,28 @@ def test_model_profile_update_accepts_historical_payload_without_options() -> No
     )
 
     assert request.enabled_execution_options == []
+
+
+def test_model_availability_response_converts_core_projection() -> None:
+    """The public availability response accepts the core Pydantic model."""
+    now = datetime.datetime.now(datetime.UTC)
+    availability = SessionModelAvailability(
+        semantic_label="Quality",
+        primary=ModelCandidateIdentity(
+            llm_provider_integration_id="integration-1",
+            model_identifier="model-1",
+        ),
+        primary_display_name="Primary model",
+        state="available",
+        deadline=None,
+        server_time=now,
+        first_usable_fallback_display_name=None,
+        reservation=None,
+    )
+
+    response = AgentSessionModelAvailabilityResponse.from_domain(availability)
+
+    assert response.model_dump(mode="json") == availability.model_dump(mode="json")
 
 
 def test_session_projection_reads_applied_intent_not_prepared_state() -> None:
