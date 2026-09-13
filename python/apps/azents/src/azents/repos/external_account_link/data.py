@@ -7,24 +7,31 @@ from azents.core.enums import ExternalChannelProvider
 from azents.core.external_account_link import (
     ExternalAccountLinkCandidateStatus,
     ExternalAccountLinkOriginState,
+    ExternalAccountLinkRevocationReason,
     ExternalAccountLinkState,
 )
 
 
 @dataclasses.dataclass(frozen=True)
 class ExternalAccountLink:
-    """Persisted external account link."""
+    """Persisted global external account link."""
 
     id: str
-    workspace_id: str
     user_id: str
     provider: ExternalChannelProvider
     identity_scope: str
     provider_user_id: str
-    provider_tenant_display_label: str
+    provider_tenant_display_label: str | None
     provider_display_label: str
     linked_at: datetime.datetime
     revoked_at: datetime.datetime | None
+    legacy_workspace_id: str | None
+    revocation_reason: ExternalAccountLinkRevocationReason | None
+
+    @property
+    def workspace_id(self) -> str | None:
+        """Return retained legacy workspace provenance."""
+        return self.legacy_workspace_id
 
 
 @dataclasses.dataclass(frozen=True)

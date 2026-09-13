@@ -524,6 +524,7 @@ class ExternalModelSettingsRepository:
                 provider_user_id_snapshot=actor.provider_user_id,
                 provider_tenant_display_label_snapshot=(
                     authorized.link.provider_tenant_display_label
+                    or actor.provider_tenant_id
                 ),
                 actor_display_name_snapshot=authorized.link.provider_display_label,
                 link_id=authorized.link.id,
@@ -767,7 +768,6 @@ class ExternalModelSettingsRepository:
         )
         link = await self.external_account_link_repository.lock_active_link(
             session,
-            workspace_id=connection.workspace_id,
             provider=actor.provider,
             identity_scope=identity_scope,
             provider_user_id=actor.provider_user_id,

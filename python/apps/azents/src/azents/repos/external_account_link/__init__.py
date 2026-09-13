@@ -1,6 +1,7 @@
 """Completed database operations for external account linking."""
 
 import datetime
+import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, NamedTuple, TypeVar
 from urllib.parse import quote
@@ -10,7 +11,10 @@ from fastapi import Depends
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.crypto import CredentialCipher
+from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
+    ExternalAccountOAuthAttemptStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
@@ -37,6 +41,7 @@ from azents.core.external_account_link import (
     ExternalAccountLinkOriginView,
     ExternalAccountLinkReturnContext,
     ExternalAccountLinkReturnKind,
+    ExternalAccountLinkRevocationReason,
     ExternalAccountLinkState,
     ExternalAccountLinkUnavailable,
     ExternalAccountLinkView,
@@ -45,12 +50,21 @@ from azents.core.external_account_link import (
     ExternalAccountProviderProofResult,
     VerifiedExternalAccountActor,
 )
+from azents.core.external_account_oauth import ExternalAccountOAuthIdentity
+from azents.core.system_setting import (
+    SystemSettingEnvironment,
+    SystemSettingGenerationHasher,
+    SystemSettingRegistry,
+    SystemSettingSection,
+)
+from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_account_link import (
     RDBExternalAccountLink,
     RDBExternalAccountLinkCandidate,
     RDBExternalAccountLinkOrigin,
 )
+from azents.rdb.models.external_account_oauth import RDBExternalAccountOAuthAttempt
 from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelPrincipal,
@@ -60,6 +74,11 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.services.system_setting.service import (
+    get_system_setting_environment,
+    get_system_setting_generation_hasher,
+)
 
 from .data import ExternalAccountLink
 
@@ -68,6 +87,11 @@ _RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 _MAX_TRANSACTION_ATTEMPTS = 3
 _LOCK_TIMEOUT = "2s"
 _MANAGEMENT_PATH = "/account/external-accounts"
+_SYSTEM_SETTING_REPOSITORY_DEP = Depends(SystemSettingRepository)
+_SYSTEM_SETTING_REGISTRY_DEP = Depends(get_system_setting_registry)
+_CIPHER_DEP = Depends(get_credential_cipher)
+_SYSTEM_SETTING_ENVIRONMENT_DEP = Depends(get_system_setting_environment)
+_GENERATION_HASHER_DEP = Depends(get_system_setting_generation_hasher)
 
 
 class _ValidatedExternalAccountActor(NamedTuple):
@@ -75,6 +99,13 @@ class _ValidatedExternalAccountActor(NamedTuple):
 
     workspace_id: str
     identity_scope: str
+
+
+class ExternalAccountOAuthFinalizeResult(NamedTuple):
+    """Result of one atomic claimed-attempt/link finalization."""
+
+    link: ExternalAccountLinkView | None
+    failure_code: str | None
 
 
 class ExternalAccountLinkRepository:
@@ -86,24 +117,36 @@ class ExternalAccountLinkRepository:
             SessionManager[AsyncSession],
             Depends(get_session_manager),
         ],
+        system_setting_repository: SystemSettingRepository = (
+            _SYSTEM_SETTING_REPOSITORY_DEP
+        ),
+        registry: SystemSettingRegistry = _SYSTEM_SETTING_REGISTRY_DEP,
+        cipher: CredentialCipher = _CIPHER_DEP,
+        environment: SystemSettingEnvironment = _SYSTEM_SETTING_ENVIRONMENT_DEP,
+        generation_hasher: SystemSettingGenerationHasher = _GENERATION_HASHER_DEP,
     ) -> None:
         self.session_manager = session_manager
+        self.system_setting_repository = system_setting_repository
+        self.registry = registry
+        self.cipher = cipher
+        self.environment = environment
+        self.generation_hasher = generation_hasher
 
     async def lock_active_link(
         self,
         session: AsyncSession,
         *,
-        workspace_id: str,
         provider: ExternalChannelProvider,
         identity_scope: str,
         provider_user_id: str,
         nowait: bool = True,
+        workspace_id: str | None = None,
     ) -> ExternalAccountLink | None:
-        """Lock the actual active link row for repository composition."""
+        """Lock the globally active link for repository composition."""
+        del workspace_id
         rdb = await session.scalar(
             sa.select(RDBExternalAccountLink)
             .where(
-                RDBExternalAccountLink.workspace_id == workspace_id,
                 RDBExternalAccountLink.provider == provider,
                 RDBExternalAccountLink.identity_scope == identity_scope,
                 RDBExternalAccountLink.provider_user_id == provider_user_id,
@@ -121,14 +164,13 @@ class ExternalAccountLinkRepository:
     ) -> ExternalAccountNativeLinkState:
         """Resolve actor-private link state in one completed transaction."""
         async with self.session_manager() as session:
-            workspace_id, identity_scope = await self._validate_actor(
+            _, identity_scope = await self._validate_actor(
                 session,
                 actor=actor,
                 lock=False,
             )
             link = await session.scalar(
                 sa.select(RDBExternalAccountLink).where(
-                    RDBExternalAccountLink.workspace_id == workspace_id,
                     RDBExternalAccountLink.provider == actor.provider,
                     RDBExternalAccountLink.identity_scope == identity_scope,
                     RDBExternalAccountLink.provider_user_id == actor.provider_user_id,
@@ -292,31 +334,20 @@ class ExternalAccountLinkRepository:
         user_id: str,
         now: datetime.datetime,
     ) -> list[ExternalAccountLinkView]:
-        """List the current User's Workspace links."""
+        """List the current User's active global links."""
         del now
         async with self.session_manager() as session:
             rows = (
                 await session.execute(
                     sa.select(
                         RDBExternalAccountLink,
-                        RDBWorkspace,
-                        RDBWorkspaceUser.id,
                         RDBUser.access_disabled_at,
                     )
-                    .join(
-                        RDBWorkspace,
-                        RDBWorkspace.id == RDBExternalAccountLink.workspace_id,
-                    )
                     .join(RDBUser, RDBUser.id == RDBExternalAccountLink.user_id)
-                    .outerjoin(
-                        RDBWorkspaceUser,
-                        sa.and_(
-                            RDBWorkspaceUser.workspace_id
-                            == RDBExternalAccountLink.workspace_id,
-                            RDBWorkspaceUser.user_id == RDBExternalAccountLink.user_id,
-                        ),
+                    .where(
+                        RDBExternalAccountLink.user_id == user_id,
+                        RDBExternalAccountLink.revoked_at.is_(None),
                     )
-                    .where(RDBExternalAccountLink.user_id == user_id)
                     .order_by(
                         RDBExternalAccountLink.linked_at.desc(),
                         RDBExternalAccountLink.id,
@@ -326,14 +357,12 @@ class ExternalAccountLinkRepository:
             return [
                 _link_view(
                     link,
-                    workspace,
-                    ExternalAccountLinkState.REVOKED
-                    if link.revoked_at is not None
-                    else ExternalAccountLinkState.ACTIVE
-                    if membership_id is not None and access_disabled_at is None
-                    else ExternalAccountLinkState.INACTIVE,
+                    None,
+                    ExternalAccountLinkState.INACTIVE
+                    if access_disabled_at is not None
+                    else ExternalAccountLinkState.ACTIVE,
                 )
-                for link, workspace, membership_id, access_disabled_at in rows
+                for link, access_disabled_at in rows
             ]
 
     async def unlink(
@@ -365,10 +394,203 @@ class ExternalAccountLinkRepository:
                 raise ExternalAccountLinkNotFound
             if link.revoked_at is None:
                 link.revoked_at = now
+                link.revocation_reason = (
+                    ExternalAccountLinkRevocationReason.OWNER_DISCONNECTED
+                )
                 await session.flush()
             return await self._build_link_view(session, link)
 
         return await self._run_retryable(operation)
+
+    async def finalize_oauth_link(
+        self,
+        *,
+        attempt_id: str,
+        user_id: str,
+        auth_session_id: str,
+        provider: ExternalChannelProvider,
+        setting_generation: str,
+        redirect_uri: str,
+        identity: ExternalAccountOAuthIdentity,
+        now: datetime.datetime,
+    ) -> ExternalAccountOAuthFinalizeResult:
+        """Atomically fence a claimed attempt and create or reuse one global link."""
+        for transaction_attempt in range(_MAX_TRANSACTION_ATTEMPTS):
+            try:
+                return await self._finalize_oauth_link_once(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    auth_session_id=auth_session_id,
+                    provider=provider,
+                    setting_generation=setting_generation,
+                    redirect_uri=redirect_uri,
+                    identity=identity,
+                    now=now,
+                )
+            except DBAPIError as error:
+                if _is_retryable(error) and transaction_attempt + 1 < (
+                    _MAX_TRANSACTION_ATTEMPTS
+                ):
+                    continue
+                failure_code = "busy" if _is_retryable(error) else "finalization_failed"
+                await self._mark_oauth_attempt_failed(
+                    attempt_id=attempt_id,
+                    failure_code=failure_code,
+                    now=now,
+                )
+                if _is_retryable(error):
+                    return ExternalAccountOAuthFinalizeResult(None, "busy")
+                raise
+        return ExternalAccountOAuthFinalizeResult(None, "busy")
+
+    async def _finalize_oauth_link_once(
+        self,
+        *,
+        attempt_id: str,
+        user_id: str,
+        auth_session_id: str,
+        provider: ExternalChannelProvider,
+        setting_generation: str,
+        redirect_uri: str,
+        identity: ExternalAccountOAuthIdentity,
+        now: datetime.datetime,
+    ) -> ExternalAccountOAuthFinalizeResult:
+        """Run one transaction for claimed-attempt/link finalization."""
+        section = _setting_section(provider)
+        try:
+            async with self.session_manager() as session:
+                await self.system_setting_repository.acquire_section_lock(
+                    session,
+                    section=section,
+                )
+                attempt = await session.scalar(
+                    sa.select(RDBExternalAccountOAuthAttempt)
+                    .where(RDBExternalAccountOAuthAttempt.id == attempt_id)
+                    .with_for_update(nowait=True)
+                )
+                if (
+                    attempt is None
+                    or attempt.status is not ExternalAccountOAuthAttemptStatus.CLAIMED
+                    or attempt.user_id != user_id
+                    or attempt.auth_session_id != auth_session_id
+                    or attempt.provider is not provider
+                    or attempt.setting_generation != setting_generation
+                    or attempt.redirect_uri != redirect_uri
+                ):
+                    return ExternalAccountOAuthFinalizeResult(None, "invalid_attempt")
+                await self._lock_active_user_session(
+                    session,
+                    user_id=user_id,
+                    auth_session_id=auth_session_id,
+                    now=now,
+                )
+                current_generation = await self._current_setting_generation(
+                    session,
+                    section=section,
+                )
+                if current_generation != setting_generation:
+                    attempt.status = ExternalAccountOAuthAttemptStatus.FAILED
+                    attempt.failed_at = now
+                    attempt.failure_code = "configuration_changed"
+                    await session.flush()
+                    return ExternalAccountOAuthFinalizeResult(
+                        None,
+                        "configuration_changed",
+                    )
+                if (
+                    identity.provider is not provider
+                    or not identity.identity_scope
+                    or len(identity.identity_scope) > 255
+                    or not identity.provider_user_id
+                    or len(identity.provider_user_id) > 255
+                ):
+                    attempt.status = ExternalAccountOAuthAttemptStatus.FAILED
+                    attempt.failed_at = now
+                    attempt.failure_code = "malformed_provider_identity"
+                    await session.flush()
+                    return ExternalAccountOAuthFinalizeResult(
+                        None,
+                        "malformed_provider_identity",
+                    )
+                active_links = (
+                    await session.scalars(
+                        sa.select(RDBExternalAccountLink)
+                        .where(
+                            RDBExternalAccountLink.provider == provider,
+                            RDBExternalAccountLink.identity_scope
+                            == identity.identity_scope,
+                            RDBExternalAccountLink.provider_user_id
+                            == identity.provider_user_id,
+                            RDBExternalAccountLink.revoked_at.is_(None),
+                        )
+                        .with_for_update(nowait=True)
+                    )
+                ).all()
+                if active_links and active_links[0].user_id != user_id:
+                    attempt.status = ExternalAccountOAuthAttemptStatus.FAILED
+                    attempt.failed_at = now
+                    attempt.failure_code = "ownership_conflict"
+                    await session.flush()
+                    return ExternalAccountOAuthFinalizeResult(None, "conflict")
+                link = active_links[0] if active_links else None
+                if link is None:
+                    link = RDBExternalAccountLink(
+                        legacy_workspace_id=None,
+                        user_id=user_id,
+                        provider=provider,
+                        identity_scope=identity.identity_scope,
+                        provider_user_id=identity.provider_user_id,
+                        provider_tenant_display_label=_bounded_optional_label(
+                            identity.provider_tenant_display_label
+                        ),
+                        provider_display_label=_bounded_label(
+                            identity.provider_display_label,
+                            fallback=(
+                                "Discord user"
+                                if provider is ExternalChannelProvider.DISCORD
+                                else "Slack user"
+                            ),
+                        ),
+                        linked_at=now,
+                        revoked_at=None,
+                        revocation_reason=None,
+                    )
+                    session.add(link)
+                else:
+                    link.provider_tenant_display_label = _bounded_optional_label(
+                        identity.provider_tenant_display_label
+                    )
+                    link.provider_display_label = _bounded_label(
+                        identity.provider_display_label,
+                        fallback=(
+                            "Discord user"
+                            if provider is ExternalChannelProvider.DISCORD
+                            else "Slack user"
+                        ),
+                    )
+                attempt.status = ExternalAccountOAuthAttemptStatus.COMPLETED
+                attempt.completed_at = now
+                await session.flush()
+                return ExternalAccountOAuthFinalizeResult(
+                    _link_view(link, None, ExternalAccountLinkState.ACTIVE),
+                    None,
+                )
+        except ExternalAccountLinkUnavailable:
+            await self._mark_oauth_attempt_failed(
+                attempt_id=attempt_id,
+                failure_code="auth_session_mismatch",
+                now=now,
+            )
+            return ExternalAccountOAuthFinalizeResult(None, "auth_session_mismatch")
+        except IntegrityError as error:
+            if _sqlstate(error) != "23505":
+                raise
+            await self._mark_oauth_attempt_failed(
+                attempt_id=attempt_id,
+                failure_code="ownership_conflict",
+                now=now,
+            )
+            return ExternalAccountOAuthFinalizeResult(None, "conflict")
 
     async def get_origin(
         self,
@@ -816,29 +1038,92 @@ class ExternalAccountLinkRepository:
         ):
             raise ExternalAccountLinkUnavailable
 
+    async def _mark_oauth_attempt_failed(
+        self,
+        *,
+        attempt_id: str,
+        failure_code: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Terminalize a claimed attempt after a concurrent uniqueness race."""
+        async with self.session_manager() as session:
+            await session.execute(
+                sa.update(RDBExternalAccountOAuthAttempt)
+                .where(
+                    RDBExternalAccountOAuthAttempt.id == attempt_id,
+                    RDBExternalAccountOAuthAttempt.status
+                    == ExternalAccountOAuthAttemptStatus.CLAIMED,
+                )
+                .values(
+                    status=ExternalAccountOAuthAttemptStatus.FAILED,
+                    failed_at=now,
+                    failure_code=failure_code[:120],
+                )
+            )
+
+    async def _current_setting_generation(
+        self,
+        session: AsyncSession,
+        *,
+        section: SystemSettingSection,
+    ) -> str:
+        """Resolve the current effective System Settings generation in a lock."""
+        definition = self.registry.get(section)
+        current = await self.system_setting_repository.get_current(
+            session,
+            section=section,
+        )
+        if current is None:
+            config_data: dict[str, object] = {}
+            secret_data: dict[str, object] = {}
+            schema_version = definition.schema_version
+        else:
+            config_data = dict(current.config)
+            secret_data = (
+                {}
+                if current.encrypted_secrets is None
+                else json.loads(self.cipher.decrypt(current.encrypted_secrets))
+            )
+            schema_version = current.schema_version
+        config_data, secret_data = definition.migrate_payload(
+            schema_version=schema_version,
+            config=config_data,
+            secrets=secret_data,
+        )
+        for binding in definition.environment_bindings:
+            if not self.environment.contains(binding.environment_variable):
+                continue
+            value = self.environment.get_present(binding.environment_variable)
+            if binding.target.value == "config":
+                config_data[binding.field_name] = value
+            else:
+                secret_data[binding.field_name] = value
+        config = definition.config_model.model_validate(config_data)
+        secrets = definition.secret_model.model_validate(secret_data)
+        return self.generation_hasher.generate(
+            section=section,
+            schema_version=definition.schema_version,
+            config=config,
+            secrets=secrets,
+        )
+
     async def _build_link_view(
         self,
         session: AsyncSession,
         link: RDBExternalAccountLink,
     ) -> ExternalAccountLinkView:
-        workspace = await session.get(RDBWorkspace, link.workspace_id)
-        if workspace is None:
-            raise ExternalAccountLinkNotFound
-        user = await session.get(RDBUser, link.user_id)
-        membership_id = await session.scalar(
-            sa.select(RDBWorkspaceUser.id).where(
-                RDBWorkspaceUser.workspace_id == link.workspace_id,
-                RDBWorkspaceUser.user_id == link.user_id,
-            )
+        workspace = (
+            await session.get(RDBWorkspace, link.legacy_workspace_id)
+            if link.legacy_workspace_id is not None
+            else None
         )
+        user = await session.get(RDBUser, link.user_id)
         state = (
             ExternalAccountLinkState.REVOKED
             if link.revoked_at is not None
-            else ExternalAccountLinkState.ACTIVE
-            if membership_id is not None
-            and user is not None
-            and user.access_disabled_at is None
             else ExternalAccountLinkState.INACTIVE
+            if user is None or user.access_disabled_at is not None
+            else ExternalAccountLinkState.ACTIVE
         )
         return _link_view(link, workspace, state)
 
@@ -873,7 +1158,6 @@ class ExternalAccountLinkRepository:
 def _link_record(rdb: RDBExternalAccountLink) -> ExternalAccountLink:
     return ExternalAccountLink(
         id=rdb.id,
-        workspace_id=rdb.workspace_id,
         user_id=rdb.user_id,
         provider=rdb.provider,
         identity_scope=rdb.identity_scope,
@@ -882,19 +1166,21 @@ def _link_record(rdb: RDBExternalAccountLink) -> ExternalAccountLink:
         provider_display_label=rdb.provider_display_label,
         linked_at=rdb.linked_at,
         revoked_at=rdb.revoked_at,
+        legacy_workspace_id=rdb.legacy_workspace_id,
+        revocation_reason=rdb.revocation_reason,
     )
 
 
 def _link_view(
     link: RDBExternalAccountLink,
-    workspace: RDBWorkspace,
+    workspace: RDBWorkspace | None,
     state: ExternalAccountLinkState,
 ) -> ExternalAccountLinkView:
     return ExternalAccountLinkView(
         id=link.id,
-        workspace_id=link.workspace_id,
-        workspace_name=workspace.name,
-        workspace_handle=workspace.handle,
+        workspace_id=link.legacy_workspace_id,
+        workspace_name=workspace.name if workspace is not None else None,
+        workspace_handle=workspace.handle if workspace is not None else None,
         user_id=link.user_id,
         provider=link.provider,
         identity_scope=link.identity_scope,
@@ -903,6 +1189,7 @@ def _link_view(
         provider_display_label=link.provider_display_label,
         linked_at=link.linked_at,
         state=state,
+        revocation_reason=link.revocation_reason,
     )
 
 
@@ -983,6 +1270,27 @@ def _origin_state(
     if origin.expires_at <= now:
         return ExternalAccountLinkOriginState.EXPIRED
     return ExternalAccountLinkOriginState.OPEN
+
+
+def _setting_section(provider: ExternalChannelProvider) -> SystemSettingSection:
+    """Map a provider to its canonical OAuth System Settings Section."""
+    if provider is ExternalChannelProvider.SLACK:
+        return SystemSettingSection.SLACK_IDENTITY_OAUTH
+    return SystemSettingSection.DISCORD_IDENTITY_OAUTH
+
+
+def _bounded_label(value: str, *, fallback: str) -> str:
+    """Return one bounded non-empty provider display label."""
+    value = value.strip()
+    return value[:255] if value else fallback
+
+
+def _bounded_optional_label(value: str | None) -> str | None:
+    """Return bounded optional provider tenant metadata."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value[:255] if value else None
 
 
 def _identity_scope(actor: VerifiedExternalAccountActor) -> str:

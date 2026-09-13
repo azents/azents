@@ -180,6 +180,7 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_disconnect_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_multi_discord_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Disconnect Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_disconnect_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_multi_slack_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Disconnect Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_disconnect_session_channel**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_session_channel) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id} | Disconnect Session Channel
+*ExternalChannelV1Api* | [**external_channel_v1_exchange_account_link_oauth**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_exchange_account_link_oauth) | **POST** /external-channel/v1/account-links/oauth/{provider}/exchange | Exchange Account Link Oauth
 *ExternalChannelV1Api* | [**external_channel_v1_get_account_link_candidate**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_account_link_candidate) | **GET** /external-channel/v1/account-link-candidates/{candidate_id} | Get Account Link Candidate
 *ExternalChannelV1Api* | [**external_channel_v1_get_account_link_origin**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_account_link_origin) | **GET** /external-channel/v1/account-link-origins/{origin_id} | Get Account Link Origin
 *ExternalChannelV1Api* | [**external_channel_v1_get_approval_request**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_approval_request) | **GET** /external-channel/v1/approval-requests/{access_request_id} | Get Approval Request
@@ -190,6 +191,7 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Get Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_connection_impact**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/impact | Get Multi Slack Connection Impact
 *ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_route_impact**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_route_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/impact | Get Multi Slack Route Impact
+*ExternalChannelV1Api* | [**external_channel_v1_list_account_link_providers**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_account_link_providers) | **GET** /external-channel/v1/account-links/providers | List Account Link Providers
 *ExternalChannelV1Api* | [**external_channel_v1_list_account_links**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_account_links) | **GET** /external-channel/v1/account-links | List Account Links
 *ExternalChannelV1Api* | [**external_channel_v1_list_agent_access**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
 *ExternalChannelV1Api* | [**external_channel_v1_list_connections**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
@@ -218,6 +220,7 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_start_account_link_oauth**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_start_account_link_oauth) | **POST** /external-channel/v1/account-links/oauth/{provider}/start | Start Account Link Oauth
 *ExternalChannelV1Api* | [**external_channel_v1_unlink_account_link**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_unlink_account_link) | **DELETE** /external-channel/v1/account-links/{link_id} | Unlink Account Link
 *ExternalChannelV1Api* | [**external_channel_v1_update_connection_access_policy**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_connection_access_policy) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy | Update Connection Access Policy
 *ExternalChannelV1Api* | [**external_channel_v1_update_default_response_mode**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_default_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode | Update Default Response Mode
@@ -344,8 +347,11 @@ Class | Method | HTTP request | Description
  - [AcceptDeclineResponse](azentspublicclient/docs/AcceptDeclineResponse.md)
  - [AccountLinkCandidateCreatedResponse](azentspublicclient/docs/AccountLinkCandidateCreatedResponse.md)
  - [AccountLinkCandidateResponse](azentspublicclient/docs/AccountLinkCandidateResponse.md)
- - [AccountLinkListResponse](azentspublicclient/docs/AccountLinkListResponse.md)
+ - [AccountLinkOAuthExchangeRequest](azentspublicclient/docs/AccountLinkOAuthExchangeRequest.md)
+ - [AccountLinkOAuthStartResponse](azentspublicclient/docs/AccountLinkOAuthStartResponse.md)
  - [AccountLinkOriginResponse](azentspublicclient/docs/AccountLinkOriginResponse.md)
+ - [AccountLinkProviderAvailabilityListResponse](azentspublicclient/docs/AccountLinkProviderAvailabilityListResponse.md)
+ - [AccountLinkProviderAvailabilityResponse](azentspublicclient/docs/AccountLinkProviderAvailabilityResponse.md)
  - [AccountLinkResponse](azentspublicclient/docs/AccountLinkResponse.md)
  - [AccountLinkReturnContextResponse](azentspublicclient/docs/AccountLinkReturnContextResponse.md)
  - [Action](azentspublicclient/docs/Action.md)
@@ -509,6 +515,7 @@ Class | Method | HTTP request | Description
  - [ExternalAccountLinkOriginState](azentspublicclient/docs/ExternalAccountLinkOriginState.md)
  - [ExternalAccountLinkReturnKind](azentspublicclient/docs/ExternalAccountLinkReturnKind.md)
  - [ExternalAccountLinkState](azentspublicclient/docs/ExternalAccountLinkState.md)
+ - [ExternalAccountOAuthEffectiveStatus](azentspublicclient/docs/ExternalAccountOAuthEffectiveStatus.md)
  - [ExternalChannelAccessGrantScope](azentspublicclient/docs/ExternalChannelAccessGrantScope.md)
  - [ExternalChannelAccessRequestStatus](azentspublicclient/docs/ExternalChannelAccessRequestStatus.md)
  - [ExternalChannelAppMode](azentspublicclient/docs/ExternalChannelAppMode.md)
@@ -546,6 +553,9 @@ Class | Method | HTTP request | Description
  - [GitRefEntryResponse](azentspublicclient/docs/GitRefEntryResponse.md)
  - [GitRefPreviewResponse](azentspublicclient/docs/GitRefPreviewResponse.md)
  - [GitWorktreeWorkspaceItemResponse](azentspublicclient/docs/GitWorktreeWorkspaceItemResponse.md)
+ - [GlobalAccountLinkListResponse](azentspublicclient/docs/GlobalAccountLinkListResponse.md)
+ - [GlobalAccountLinkResponse](azentspublicclient/docs/GlobalAccountLinkResponse.md)
+ - [GlobalAccountLinkUnlinkResponse](azentspublicclient/docs/GlobalAccountLinkUnlinkResponse.md)
  - [GoalAction](azentspublicclient/docs/GoalAction.md)
  - [GoalStateResponse](azentspublicclient/docs/GoalStateResponse.md)
  - [GoalStatusUpdateRequest](azentspublicclient/docs/GoalStatusUpdateRequest.md)

@@ -20,7 +20,7 @@ from typing_extensions import Self
 
 class ExternalAccountLinkState(str, Enum):
     """
-    User-visible state of a Workspace external account link.
+    User-visible state of an external account link.
     """
 
     """

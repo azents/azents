@@ -97,10 +97,10 @@ function LinkCard({
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
           <Stack gap={rem(2)}>
             <Text size="xs" c="dimmed">
-              {t("workspace")}
+              {t("accountContext")}
             </Text>
             <Text size="sm" fw={500}>
-              {link.workspaceName}
+              {link.accountContextLabel}
             </Text>
           </Stack>
           <Stack gap={rem(2)}>
@@ -165,7 +165,6 @@ function DisconnectModal({
         <Text size="sm">
           {t("disconnectDialog.description", {
             account: disconnect.link.externalDisplayLabel,
-            workspace: disconnect.link.workspaceName,
           })}
         </Text>
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
@@ -232,7 +231,6 @@ export function ExternalAccountLinks({
             <Alert color="blue" icon={<IconPlugConnected size={16} />}>
               {t("elevationDisconnect", {
                 account: state.link.externalDisplayLabel,
-                workspace: state.link.workspaceName,
               })}
             </Alert>
           </Container>

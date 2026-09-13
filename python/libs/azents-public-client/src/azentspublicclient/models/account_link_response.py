@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_account_link_state import ExternalAccountLinkState
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from typing import Optional, Set
@@ -30,12 +30,12 @@ class AccountLinkResponse(BaseModel):
     Personal Workspace external account link.
     """ # noqa: E501
     id: StrictStr
-    workspace_id: StrictStr
-    workspace_name: StrictStr
-    workspace_handle: StrictStr
+    workspace_id: Optional[StrictStr]
+    workspace_name: Optional[StrictStr]
+    workspace_handle: Optional[StrictStr]
     provider: ExternalChannelProvider
     identity_scope: StrictStr
-    provider_tenant_display_label: StrictStr
+    provider_tenant_display_label: Optional[StrictStr]
     provider_display_label: StrictStr
     linked_at: datetime
     state: ExternalAccountLinkState
@@ -87,6 +87,26 @@ class AccountLinkResponse(BaseModel):
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if workspace_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_id is None and "workspace_id" in self.model_fields_set:
+            _dict['workspace_id'] = None
+
+        # set to None if workspace_name (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_name is None and "workspace_name" in self.model_fields_set:
+            _dict['workspace_name'] = None
+
+        # set to None if workspace_handle (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_handle is None and "workspace_handle" in self.model_fields_set:
+            _dict['workspace_handle'] = None
+
+        # set to None if provider_tenant_display_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.provider_tenant_display_label is None and "provider_tenant_display_label" in self.model_fields_set:
+            _dict['provider_tenant_display_label'] = None
 
         return _dict
 

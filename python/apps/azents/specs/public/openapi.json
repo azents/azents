@@ -5405,7 +5405,7 @@
           "External Channel v1"
         ],
         "summary": "List Account Links",
-        "description": "List the current User's own Workspace external account links.",
+        "description": "List the current User's active global provider identities.",
         "operationId": "external_channel_v1_list_account_links",
         "responses": {
           "200": {
@@ -5413,7 +5413,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountLinkListResponse"
+                  "$ref": "#/components/schemas/GlobalAccountLinkListResponse"
                 }
               }
             }
@@ -5424,6 +5424,137 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/external-channel/v1/account-links/providers": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Account Link Providers",
+        "description": "List redacted provider availability for authenticated account linking.",
+        "operationId": "external_channel_v1_list_account_link_providers",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkProviderAvailabilityListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/external-channel/v1/account-links/oauth/{provider}/start": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Start Account Link Oauth",
+        "description": "Start one authenticated provider identity OAuth attempt.",
+        "operationId": "external_channel_v1_start_account_link_oauth",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalChannelProvider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLinkOAuthStartResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/account-links/oauth/{provider}/exchange": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Exchange Account Link Oauth",
+        "description": "Exchange one authenticated callback and finalize its global link.",
+        "operationId": "external_channel_v1_exchange_account_link_oauth",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalChannelProvider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLinkOAuthExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalAccountLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/external-channel/v1/account-links/{link_id}": {
@@ -5456,7 +5587,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountLinkResponse"
+                  "$ref": "#/components/schemas/GlobalAccountLinkUnlinkResponse"
                 }
               }
             }
@@ -5482,6 +5613,7 @@
         "summary": "Get Account Link Origin",
         "description": "Load bounded provider identity and Workspace confirmation context.",
         "operationId": "external_channel_v1_get_account_link_origin",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -5530,6 +5662,7 @@
         "summary": "Create Account Link Candidate",
         "description": "Create one immutable elevated browser candidate and return its code once.",
         "operationId": "external_channel_v1_create_account_link_candidate",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -5578,6 +5711,7 @@
         "summary": "Get Account Link Candidate",
         "description": "Get status for an exact current User/auth-Session candidate.",
         "operationId": "external_channel_v1_get_account_link_candidate",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -5624,6 +5758,7 @@
         "summary": "Cancel Account Link Candidate",
         "description": "Cancel one exact current User/auth-Session candidate.",
         "operationId": "external_channel_v1_cancel_account_link_candidate",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -5672,6 +5807,7 @@
         "summary": "Confirm Account Link Candidate",
         "description": "Atomically finalize an exact elevated browser candidate.",
         "operationId": "external_channel_v1_confirm_account_link_candidate",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -15232,22 +15368,38 @@
         "title": "AccountLinkCandidateResponse",
         "description": "Status-only immutable candidate response."
       },
-      "AccountLinkListResponse": {
+      "AccountLinkOAuthExchangeRequest": {
         "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AccountLinkResponse"
-            },
-            "type": "array",
-            "title": "Items"
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "code",
+          "state"
         ],
-        "title": "AccountLinkListResponse",
-        "description": "Current User's Workspace external account links."
+        "title": "AccountLinkOAuthExchangeRequest",
+        "description": "Authenticated callback exchange payload."
+      },
+      "AccountLinkOAuthStartResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url"
+        ],
+        "title": "AccountLinkOAuthStartResponse",
+        "description": "Fixed-provider authorization URL for one durable OAuth attempt."
       },
       "AccountLinkOriginResponse": {
         "properties": {
@@ -15336,6 +15488,57 @@
         "title": "AccountLinkOriginResponse",
         "description": "Browser-safe original provider confirmation context."
       },
+      "AccountLinkProviderAvailabilityListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountLinkProviderAvailabilityResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AccountLinkProviderAvailabilityListResponse",
+        "description": "Redacted provider availability list."
+      },
+      "AccountLinkProviderAvailabilityResponse": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalAccountOAuthEffectiveStatus"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "status",
+          "available",
+          "callback_url"
+        ],
+        "title": "AccountLinkProviderAvailabilityResponse",
+        "description": "Redacted availability of one provider identity OAuth Section."
+      },
       "AccountLinkResponse": {
         "properties": {
           "id": {
@@ -15343,15 +15546,36 @@
             "title": "Id"
           },
           "workspace_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Workspace Id"
           },
           "workspace_name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Workspace Name"
           },
           "workspace_handle": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Workspace Handle"
           },
           "provider": {
@@ -15362,7 +15586,14 @@
             "title": "Identity Scope"
           },
           "provider_tenant_display_label": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Tenant Display Label"
           },
           "provider_display_label": {
@@ -21821,7 +22052,19 @@
           "revoked"
         ],
         "title": "ExternalAccountLinkState",
-        "description": "User-visible state of a Workspace external account link."
+        "description": "User-visible state of an external account link."
+      },
+      "ExternalAccountOAuthEffectiveStatus": {
+        "type": "string",
+        "enum": [
+          "not_configured",
+          "incomplete",
+          "invalid",
+          "ready",
+          "unavailable"
+        ],
+        "title": "ExternalAccountOAuthEffectiveStatus",
+        "description": "Redacted provider OAuth configuration status."
       },
       "ExternalChannelAccessGrantScope": {
         "type": "string",
@@ -22900,6 +23143,92 @@
         ],
         "title": "GitWorktreeWorkspaceItemResponse",
         "description": "Git worktree default workspace item response."
+      },
+      "GlobalAccountLinkListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalAccountLinkResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "GlobalAccountLinkListResponse",
+        "description": "Active global provider identities owned by the current User."
+      },
+      "GlobalAccountLinkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "identity_scope": {
+            "type": "string",
+            "title": "Identity Scope"
+          },
+          "provider_user_id": {
+            "type": "string",
+            "title": "Provider User Id"
+          },
+          "provider_tenant_display_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Tenant Display Label"
+          },
+          "provider_display_label": {
+            "type": "string",
+            "title": "Provider Display Label"
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Linked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "identity_scope",
+          "provider_user_id",
+          "provider_tenant_display_label",
+          "provider_display_label",
+          "linked_at"
+        ],
+        "title": "GlobalAccountLinkResponse",
+        "description": "Active global provider identity owned by the current User."
+      },
+      "GlobalAccountLinkUnlinkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ExternalAccountLinkState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "GlobalAccountLinkUnlinkResponse",
+        "description": "Terminal result for disconnecting one global provider identity."
       },
       "GoalAction": {
         "properties": {
