@@ -1498,6 +1498,160 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
     assert runtime_configuration["desired_generation"] == restart.desired_generation
 
 
+async def test_reconciler_observes_recreated_configuration_missing_provider_evidence(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A running replacement is observed until Provider evidence is complete."""
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-observe-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-observe-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        initial = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert initial is not None
+        initial_state = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=initial.desired_generation,
+        )
+        restart = await runtime_repository.set_desired_state_if_configuration_current(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+            expected_configuration_sequence=initial_state.desired.sequence,
+            expected_digest=initial_state.desired.digest or "",
+            expected_generation=initial.desired_generation,
+        )
+        assert restart is not None
+        current_state = await profile_repository.get_configuration_state(
+            session,
+            runtime_id=runtime.id,
+        )
+        assert current_state is not None
+        assert current_state.desired.document is not None
+        desired_payload = current_state.desired.document.model_dump(mode="python")
+        resolved_configuration = desired_payload["resolved_configuration"]
+        assert isinstance(resolved_configuration, dict)
+        effective_profile = resolved_configuration["effective_profile"]
+        assert isinstance(effective_profile, dict)
+        workspace_volume = effective_profile["workspace_volume"]
+        assert isinstance(workspace_volume, dict)
+        workspace_volume["storage_request_bytes"] = 2_147_483_648
+        desired_document = RuntimeConfigurationDocument.model_validate(desired_payload)
+        desired_state = await profile_repository.overwrite_desired_configuration_state(
+            session,
+            write=RuntimeConfigurationDesiredStateWrite(
+                runtime_id=runtime.id,
+                status=RuntimeConfigurationStateStatus.READY,
+                target_generation=restart.desired_generation,
+                digest="e" * 64,
+                document=desired_document,
+                reason_code=None,
+            ),
+            expected_sequence=current_state.desired.sequence,
+        )
+        assert desired_state is not None
+        assert desired_state.desired.digest is not None
+        runner_state = await profile_repository.record_runner_configuration_evidence(
+            session,
+            runtime_id=runtime.id,
+            provider_id=desired_document.provider_id,
+            evidence=RuntimeConfigurationEvidence(
+                configuration_sequence=desired_state.desired.sequence,
+                digest=desired_state.desired.digest,
+                desired_generation=restart.desired_generation,
+            ),
+            observed_at=datetime.datetime.now(datetime.UTC),
+        )
+        assert runner_state is not None
+        dispatched = await runtime_repository.mark_lifecycle_dispatched(
+            session,
+            runtime.id,
+            restart.desired_generation,
+        )
+        assert dispatched is not None
+        running = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            1,
+            restart.desired_generation,
+        )
+        assert running is not None
+        old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            minutes=10
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                provider_observed_at=old_observe_at,
+                provider_observe_requested_at=old_observe_at,
+            )
+        )
+
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = FakeRuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "request-recreated-observe",
+    )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        dispatch_repository=_dispatch_repository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+            observe_interval=datetime.timedelta(minutes=1),
+        ),
+    )
+
+    reconciled = await reconciler.reconcile_once(limit=10)
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert reconciled == 1
+    assert claimed is not None
+    assert claimed.operation_type == "provider.observe"
+    runtime_configuration = claimed.payload["runtime_configuration"]
+    assert isinstance(runtime_configuration, dict)
+    assert runtime_configuration["configuration_sequence"] == (
+        desired_state.desired.sequence
+    )
+
+
 async def test_reconciler_repairs_stale_stop_configuration_generation(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
