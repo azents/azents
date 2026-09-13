@@ -386,19 +386,20 @@ Session title and Agent execution.
   Tracker when none exists.
   A message-only Action delivers the reply without changing Tracker presentation.
   When an explicitly supplied ordered task snapshot differs from the canonical
-  pre-transition tasks and the Action also contains a conversational message, every
-  reply part is attempted first and Tracker relocation then removes the previous host:
+  pre-transition tasks and the Action also contains a conversational message, Tracker
+  relocation runs before the reply: it removes the previous host first:
   standalone hosts are deleted, while reply hosts keep their conversational content
   and have only Tracker Embeds and controls cleared. Confirmed removal permits
   notification-suppressed standalone creation with the complete latest Tracker.
-  Creation is not gated on reply delivery. An identical task replacement or title-only
-  progress change updates the current standalone or reply host in place. The normal
-  successful relocation path therefore exposes at most one Tracker, while temporary
-  absence is allowed between removal and creation. Creation and update both send a
-  `View session` link derived from the current canonical Workspace, Agent, and Session
-  target. Conversational Tracker creation and update also derive one signed
-  `Conversation settings` action from the current Binding. Scheduled Task Trackers
-  retain only Session navigation and task controls; their standalone
+  Reply delivery follows the relocation attempt and is not gated by Tracker
+  success. An identical task replacement or title-only progress change updates the
+  current standalone or reply host in place. The normal successful relocation path
+  therefore exposes at most one Tracker immediately before the reply, while
+  temporary absence is allowed between removal and creation. Creation and update
+  both send a `View session` link derived from the current canonical Workspace,
+  Agent, and Session target. Conversational Tracker creation and update also derive
+  one signed `Conversation settings` action from the current Binding. Scheduled Task
+  Trackers retain only Session navigation and task controls; their standalone
   `PROGRESS_CREATE` messages are notification-suppressed, while registration,
   deletion, progress replies, and terminal results retain their existing notification
   behavior.

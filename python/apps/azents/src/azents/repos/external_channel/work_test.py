@@ -1443,8 +1443,8 @@ def _moving_tasks() -> list[ChannelWorkTask]:
     ]
 
 
-async def test_discord_task_change_recreates_tracker_after_reply() -> None:
-    """Discord plans reply, removal, then standalone creation for changed tasks."""
+async def test_discord_task_change_recreates_tracker_before_reply() -> None:
+    """Discord relocates the Tracker before replying for changed tasks."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="discord:111:555",
@@ -1461,21 +1461,21 @@ async def test_discord_task_change_recreates_tracker_after_reply() -> None:
     )
 
     assert [effect.provider.target.operation for effect in transition.effects] == [
-        ExternalChannelDeliveryOperation.REPLY,
         ExternalChannelDeliveryOperation.PROGRESS_DELETE,
         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        ExternalChannelDeliveryOperation.REPLY,
     ]
-    reply, remove, create = transition.effects
-    assert reply.dependencies == ()
+    remove, create, reply = transition.effects
     assert remove.dependencies == ()
     assert remove.provider.target.request_payload["provider_message_key"] == (
         "discord:111:555"
     )
     assert remove.provider.target.request_payload["tracker_host_kind"] == "standalone"
-    assert create.dependencies == (1,)
+    assert create.dependencies == (0,)
     assert create.projection_host_kind == "standalone"
     assert "provider_message_key" not in create.provider.target.request_payload
     assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
+    assert reply.dependencies == ()
     assert updated.projection_parts == [projection]
 
 
@@ -1493,13 +1493,43 @@ async def test_discord_task_change_creates_when_current_tracker_is_missing() -> 
     )
 
     assert [effect.provider.target.operation for effect in transition.effects] == [
-        ExternalChannelDeliveryOperation.REPLY,
         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        ExternalChannelDeliveryOperation.REPLY,
     ]
-    create = transition.effects[1]
+    create = transition.effects[0]
     assert create.dependencies == ()
     assert create.projection_host_kind == "standalone"
     assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
+
+
+async def test_discord_task_change_recreates_reply_host_tracker_before_reply() -> None:
+    """Discord detaches a reply-hosted Tracker before the next reply."""
+    projection = _part(
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:111:555",
+        host_kind="reply",
+    )
+    work = _work(desired=True, projection_parts=[projection])
+
+    transition, _, _ = await _commit_action(
+        work,
+        provider=ExternalChannelProvider.DISCORD,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="I found the next step.",
+        title="Moving the Tracker…",
+        tasks=_moving_tasks(),
+    )
+
+    assert [effect.provider.target.operation for effect in transition.effects] == [
+        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        ExternalChannelDeliveryOperation.REPLY,
+    ]
+    remove, create, reply = transition.effects
+    assert remove.provider.target.request_payload["tracker_host_kind"] == "reply"
+    assert create.dependencies == (0,)
+    assert create.provider.target.request_payload["tracker_host_kind"] == "standalone"
+    assert reply.dependencies == ()
 
 
 async def test_discord_identical_tasks_preserve_reply_tracker_host() -> None:

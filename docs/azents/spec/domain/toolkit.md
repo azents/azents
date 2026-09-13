@@ -941,8 +941,8 @@ projects the complete latest Tracker; every continue invalidates older awaiting
 settlement, while message-only continuation leaves progress and Tracker position
 unchanged. For Discord, an explicitly supplied complete ordered task snapshot is
 compared with the canonical pre-transition tasks. A changed snapshot accompanied by a
-message attempts reply parts first, removes or detaches the current Tracker, and then
-creates the complete latest Tracker as a notification-suppressed standalone message.
+message removes or detaches the current Tracker, creates the complete latest Tracker
+as a notification-suppressed standalone message, and then attempts the reply parts.
 Replacement creation depends on confirmed current-host removal but not on reply
 delivery. A changed snapshot without a message updates the current standalone or reply
 host in place, or creates a missing standalone host. Identical task replacements and

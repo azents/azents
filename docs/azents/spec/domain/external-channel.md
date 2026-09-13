@@ -295,11 +295,12 @@ effects are not replayed.
   separate unconditional lifecycle.
 - Discord compares each explicitly supplied ordered task snapshot with the canonical
   pre-transition tasks. A changed snapshot accompanied by a conversational message
-  removes or detaches the current Tracker and then creates the complete latest Tracker
-  as a notification-suppressed standalone message. A changed snapshot without a
-  message updates the current standalone or reply host in place, or creates a missing
-  standalone host. An identical task replacement or title-only change also updates the
-  current host in place; a message-only Action leaves it unchanged.
+  removes or detaches the current Tracker, creates the complete latest Tracker as a
+  notification-suppressed standalone message, and then sends the reply. A changed
+  snapshot without a message updates the current standalone or reply host in place,
+  or creates a missing standalone host. An identical task replacement or title-only
+  change also updates the current host in place; a message-only Action leaves it
+  unchanged.
 - Every model input boundary exposes `request_input` and `ignore` beside `finish` and
   `continue`. `request_input` requires an ordinary participant-visible message,
   preserves active Work, and stores nullable requesting Run identity in version-4
