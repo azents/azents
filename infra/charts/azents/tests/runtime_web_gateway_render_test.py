@@ -62,6 +62,14 @@ def _enabled_values() -> tuple[str, ...]:
     )
 
 
+def _rendered_resource(rendered: str, *, kind: str, name: str) -> str:
+    marker = f"kind: {kind}\nmetadata:\n  name: {name}\n"
+    for document in rendered.split("---"):
+        if marker in document:
+            return document
+    raise AssertionError(f"{kind} {name} was not rendered")
+
+
 def test_runtime_web_gateway_is_disabled_by_default() -> None:
     rendered = _helm_template()
 
@@ -97,6 +105,17 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
         'RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME: "__Http-Azents-Runtime-Web"'
         in rendered
     )
+
+
+def test_enabled_gateway_configures_worker_endpoint_urls() -> None:
+    rendered = _helm_template(*_enabled_values())
+    worker = _rendered_resource(rendered, kind="Deployment", name="worker")
+
+    assert 'name: AZ_RUNTIME_WEB_GATEWAY_ENABLED\n              value: "true"' in worker
+    assert (
+        "name: AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX\n"
+        '              value: "services.example.com"'
+    ) in worker
 
 
 def test_enabled_gateway_allows_operator_managed_external_routing() -> None:
