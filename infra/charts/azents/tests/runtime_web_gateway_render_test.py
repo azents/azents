@@ -1,5 +1,6 @@
 """Runtime Web Gateway Helm render contract tests."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -97,6 +98,36 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
         'RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME: "__Http-Azents-Runtime-Web"'
         in rendered
     )
+
+
+def test_enabled_gateway_allows_operator_managed_external_routing() -> None:
+    values = tuple(
+        value
+        for value in _enabled_values()
+        if not value.startswith("server.runtimeWebGateway.ingress.")
+    )
+
+    rendered = _helm_template(*values)
+
+    assert "kind: Deployment" in rendered
+    assert "name: runtime-web-gateway" in rendered
+    assert "kind: Ingress" not in rendered
+
+
+def test_runtime_web_configuration_change_rolls_main_web() -> None:
+    shared_cookie = _helm_template(*_enabled_values())
+    separate_domain = _helm_template(
+        *_enabled_values(),
+        "server.runtimeWebGateway.authMode=separate_domain",
+    )
+
+    checksum_pattern = re.compile(r"checksum/web-config: ([a-f0-9]{64})")
+    shared_checksum = checksum_pattern.search(shared_cookie)
+    separate_checksum = checksum_pattern.search(separate_domain)
+
+    assert shared_checksum is not None
+    assert separate_checksum is not None
+    assert shared_checksum.group(1) != separate_checksum.group(1)
 
 
 def test_gateway_requires_the_trusted_control_transport() -> None:

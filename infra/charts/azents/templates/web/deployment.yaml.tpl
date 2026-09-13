@@ -22,8 +22,9 @@ spec:
         {{- with .Values.global.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.global.podAnnotations }}
       annotations:
+        checksum/web-config: {{ include (print $.Template.BasePath "/web/configmap.yaml.tpl") . | sha256sum }}
+      {{- with .Values.global.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:

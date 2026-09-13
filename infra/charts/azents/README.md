@@ -106,6 +106,22 @@ The chart currently renders:
 
 Ingress is disabled by default. Use `server.apiserver.ingress`, `web.ingress`, and `adminWeb.ingress` for component-specific host, class, and TLS settings.
 
+### Runtime Web Gateway Routing
+
+`server.runtimeWebGateway` is default-off and requires
+`server.runtimeControl.webTransport`. Enabling the Gateway always renders its
+Deployment and ClusterIP Service. Set `server.runtimeWebGateway.ingress.enabled=true`
+to render the chart-managed wildcard Ingress, or leave it disabled when the platform
+routes the Service through an operator-managed Gateway API `HTTPRoute`, service mesh,
+or equivalent ingress layer.
+
+Operator-managed routing must provide HTTPS for the configured broker origin and
+every single-label endpoint hostname under `server.runtimeWebGateway.serviceSuffix`.
+The chart does not create DNS records or TLS certificates for an external route.
+Runtime Web authentication values are part of the Main Web ConfigMap checksum, so a
+configuration change rolls the Main Web Deployment instead of leaving stale
+process-level settings active.
+
 ### Admin Surface Routing And Bootstrap
 
 Admin Web and Main Web are independently routable. Configure these values for the selected host, path-prefix, port-forward, or gateway topology:
