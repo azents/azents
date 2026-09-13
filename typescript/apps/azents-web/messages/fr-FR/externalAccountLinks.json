@@ -1,6 +1,6 @@
 {
   "title": "Comptes externes",
-  "description": "Consultez les identités Slack et Discord associées à votre compte Azents dans chaque Workspace.",
+  "description": "Consultez les identités Slack et Discord associées à votre compte Azents.",
   "loading": "Chargement des comptes externes...",
   "loadErrorTitle": "Impossible de charger les comptes externes",
   "retry": "Réessayer",
@@ -9,6 +9,7 @@
   "emptyTitle": "Aucun compte externe associé",
   "emptyDescription": "Pour associer un compte, commencez depuis les paramètres privés de la conversation dans Slack ou Discord.",
   "workspace": "Workspace",
+  "accountContext": "Compte externe",
   "linkedAt": "Associé le",
   "providerTeam": "{provider} · {team}",
   "providers": {
@@ -24,11 +25,11 @@
   "disconnect": "Dissocier",
   "disconnected": "Dissocié",
   "cancel": "Annuler",
-  "elevationDisconnect": "Vérifiez votre identité pour dissocier {account} de {workspace}.",
+  "elevationDisconnect": "Vérifiez votre identité pour dissocier {account} de votre compte Azents.",
   "disconnectDialog": {
     "title": "Dissocier le compte externe ?",
-    "description": "Dissocier {account} de votre compte Azents dans {workspace}.",
-    "impact": "Les contrôles dépendant de cette association ne fonctionneront plus dans ce Workspace. Les accès invités, messages, historiques, paramètres partagés, autorisations et blocages existants sont conservés.",
+    "description": "Dissocier {account} de votre compte Azents.",
+    "impact": "Les contrôles qui dépendent de cette identité associée ne fonctionneront plus. Les accès invités, messages, historiques, paramètres partagés, autorisations et blocages existants sont conservés.",
     "confirm": "Dissocier le compte"
   },
   "candidateStatus": {

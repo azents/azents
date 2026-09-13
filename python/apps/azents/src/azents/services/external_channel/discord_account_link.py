@@ -286,8 +286,8 @@ def _web_url(*, web_url: str, path: str) -> str:
     return f"{web_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _discord_text(value: str, limit: int) -> str:
-    escaped = value.replace("\\", "\\\\")
+def _discord_text(value: str | None, limit: int) -> str:
+    escaped = (value or "provider account").replace("\\", "\\\\")
     for character in ("*", "_", "`", "~", "|", ">", "#"):
         escaped = escaped.replace(character, f"\\{character}")
     return escaped[:limit]

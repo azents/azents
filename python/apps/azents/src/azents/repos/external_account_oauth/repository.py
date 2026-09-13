@@ -49,8 +49,8 @@ class ExternalAccountOAuthAttemptRepository:
             Depends(get_session_manager),
         ],
         system_setting_repository: Annotated[
-            "SystemSettingRepository",
-            Depends(),
+            SystemSettingRepository,
+            Depends(SystemSettingRepository),
         ],
         registry: Annotated[
             SystemSettingRegistry,
@@ -214,6 +214,55 @@ class ExternalAccountOAuthAttemptRepository:
                 .returning(RDBExternalAccountOAuthAttempt.id)
             )
             return result.scalar_one_or_none() is not None
+
+    async def classify_claim_failure(
+        self,
+        *,
+        state_hash: str,
+        user_id: str,
+        auth_session_id: str,
+        provider: ExternalChannelProvider,
+        setting_generation: str,
+        redirect_uri: str,
+        now: datetime.datetime,
+    ) -> str:
+        """Classify a rejected callback without disclosing durable attempt data."""
+        async with self.session_manager() as session:
+            row = await session.scalar(
+                sa.select(RDBExternalAccountOAuthAttempt).where(
+                    RDBExternalAccountOAuthAttempt.state_hash == state_hash,
+                )
+            )
+            if row is None:
+                return "invalid_attempt"
+            if row.provider is not provider:
+                return "provider_mismatch"
+            if row.user_id != user_id or row.auth_session_id != auth_session_id:
+                return "auth_session_mismatch"
+            if row.redirect_uri != redirect_uri:
+                return "invalid_callback"
+            if row.setting_generation != setting_generation:
+                return "configuration_changed"
+            user = await session.scalar(sa.select(RDBUser).where(RDBUser.id == user_id))
+            auth_session = await session.scalar(
+                sa.select(RDBSession).where(
+                    RDBSession.id == auth_session_id,
+                    RDBSession.user_id == user_id,
+                )
+            )
+            if (
+                user is None
+                or user.access_disabled_at is not None
+                or auth_session is None
+                or auth_session.revoked_at is not None
+                or auth_session.expires_at <= now
+            ):
+                return "auth_session_mismatch"
+            if row.expires_at <= now:
+                return "expired"
+            if row.status is not ExternalAccountOAuthAttemptStatus.OPEN:
+                return "already_consumed"
+            return "invalid_attempt"
 
     async def cleanup(
         self,

@@ -1,6 +1,6 @@
 {
   "title": "外部アカウント",
-  "description": "各 Workspace で Azents アカウントに連携されている Slack と Discord のアカウントを確認します。",
+  "description": "Azents アカウントに連携されている Slack と Discord の外部アカウントを確認します。",
   "loading": "外部アカウントを読み込んでいます...",
   "loadErrorTitle": "外部アカウントを読み込めませんでした",
   "retry": "再試行",
@@ -9,6 +9,7 @@
   "emptyTitle": "連携済みの外部アカウントはありません",
   "emptyDescription": "アカウントを連携するには、Slack または Discord の非公開の会話設定から開始してください。",
   "workspace": "Workspace",
+  "accountContext": "外部アカウント",
   "linkedAt": "連携日時",
   "providerTeam": "{provider} · {team}",
   "providers": {
@@ -24,11 +25,11 @@
   "disconnect": "連携を解除",
   "disconnected": "連携解除済み",
   "cancel": "キャンセル",
-  "elevationDisconnect": "{workspace} から {account} の連携を解除するには、本人確認が必要です。",
+  "elevationDisconnect": "Azents アカウントから {account} の連携を解除するには、本人確認が必要です。",
   "disconnectDialog": {
     "title": "外部アカウントの連携を解除しますか？",
-    "description": "{workspace} で Azents アカウントと {account} の連携を解除します。",
-    "impact": "この Workspace では、今後この連携に依存する操作を利用できなくなります。既存のゲストアクセス、メッセージ、履歴、共有設定、許可、ブロックは保持されます。",
+    "description": "Azents アカウントから {account} の連携を解除します。",
+    "impact": "この連携済み外部アカウントを必要とする操作を今後利用できなくなります。既存のゲストアクセス、メッセージ、履歴、共有設定、許可、ブロックは保持されます。",
     "confirm": "アカウントの連携を解除"
   },
   "candidateStatus": {

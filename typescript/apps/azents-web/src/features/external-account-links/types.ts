@@ -15,8 +15,7 @@ export type AccountLinkFailureReason =
 
 export interface ExternalAccountLinkItem {
   id: string;
-  workspaceName: string;
-  workspaceHandle: string;
+  accountContextLabel: string;
   provider: ExternalAccountProvider;
   providerTeamLabel: string;
   externalDisplayLabel: string;

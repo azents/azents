@@ -21,8 +21,10 @@ from typing import Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.account_link_candidate_created_response import AccountLinkCandidateCreatedResponse
 from azentspublicclient.models.account_link_candidate_response import AccountLinkCandidateResponse
-from azentspublicclient.models.account_link_list_response import AccountLinkListResponse
+from azentspublicclient.models.account_link_o_auth_exchange_request import AccountLinkOAuthExchangeRequest
+from azentspublicclient.models.account_link_o_auth_start_response import AccountLinkOAuthStartResponse
 from azentspublicclient.models.account_link_origin_response import AccountLinkOriginResponse
+from azentspublicclient.models.account_link_provider_availability_list_response import AccountLinkProviderAvailabilityListResponse
 from azentspublicclient.models.account_link_response import AccountLinkResponse
 from azentspublicclient.models.connection_access_policy_request import ConnectionAccessPolicyRequest
 from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest
@@ -32,9 +34,12 @@ from azentspublicclient.models.external_channel_connection_status_snapshot impor
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput
 from azentspublicclient.models.external_channel_multi_connection_impact import ExternalChannelMultiConnectionImpact
 from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact
+from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
+from azentspublicclient.models.global_account_link_list_response import GlobalAccountLinkListResponse
+from azentspublicclient.models.global_account_link_response import GlobalAccountLinkResponse
 from azentspublicclient.models.managed_access_response import ManagedAccessResponse
 from azentspublicclient.models.managed_approval_request import ManagedApprovalRequest
 from azentspublicclient.models.managed_binding import ManagedBinding
@@ -708,7 +713,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AccountLinkCandidateResponse:
-        """Cancel Account Link Candidate
+        """(Deprecated) Cancel Account Link Candidate
 
         Cancel one exact current User/auth-Session candidate.
 
@@ -735,6 +740,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("DELETE /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_cancel_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -776,7 +782,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AccountLinkCandidateResponse]:
-        """Cancel Account Link Candidate
+        """(Deprecated) Cancel Account Link Candidate
 
         Cancel one exact current User/auth-Session candidate.
 
@@ -803,6 +809,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("DELETE /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_cancel_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -844,7 +851,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Cancel Account Link Candidate
+        """(Deprecated) Cancel Account Link Candidate
 
         Cancel one exact current User/auth-Session candidate.
 
@@ -871,6 +878,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("DELETE /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_cancel_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -1616,7 +1624,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AccountLinkResponse:
-        """Confirm Account Link Candidate
+        """(Deprecated) Confirm Account Link Candidate
 
         Atomically finalize an exact elevated browser candidate.
 
@@ -1643,6 +1651,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-candidates/{candidate_id}/confirm is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_confirm_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -1684,7 +1693,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AccountLinkResponse]:
-        """Confirm Account Link Candidate
+        """(Deprecated) Confirm Account Link Candidate
 
         Atomically finalize an exact elevated browser candidate.
 
@@ -1711,6 +1720,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-candidates/{candidate_id}/confirm is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_confirm_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -1752,7 +1762,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Confirm Account Link Candidate
+        """(Deprecated) Confirm Account Link Candidate
 
         Atomically finalize an exact elevated browser candidate.
 
@@ -1779,6 +1789,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-candidates/{candidate_id}/confirm is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_confirm_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -1880,7 +1891,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AccountLinkCandidateCreatedResponse:
-        """Create Account Link Candidate
+        """(Deprecated) Create Account Link Candidate
 
         Create one immutable elevated browser candidate and return its code once.
 
@@ -1907,6 +1918,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-origins/{origin_id}/candidates is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_create_account_link_candidate_serialize(
             origin_id=origin_id,
@@ -1948,7 +1960,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AccountLinkCandidateCreatedResponse]:
-        """Create Account Link Candidate
+        """(Deprecated) Create Account Link Candidate
 
         Create one immutable elevated browser candidate and return its code once.
 
@@ -1975,6 +1987,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-origins/{origin_id}/candidates is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_create_account_link_candidate_serialize(
             origin_id=origin_id,
@@ -2016,7 +2029,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Create Account Link Candidate
+        """(Deprecated) Create Account Link Candidate
 
         Create one immutable elevated browser candidate and return its code once.
 
@@ -2043,6 +2056,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("POST /external-channel/v1/account-link-origins/{origin_id}/candidates is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_create_account_link_candidate_serialize(
             origin_id=origin_id,
@@ -3637,6 +3651,298 @@ class ExternalChannelV1Api:
 
 
     @validate_call
+    def external_channel_v1_exchange_account_link_oauth(
+        self,
+        provider: ExternalChannelProvider,
+        account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> GlobalAccountLinkResponse:
+        """Exchange Account Link Oauth
+
+        Exchange one authenticated callback and finalize its global link.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param account_link_o_auth_exchange_request: (required)
+        :type account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_exchange_account_link_oauth_serialize(
+            provider=provider,
+            account_link_o_auth_exchange_request=account_link_o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "GlobalAccountLinkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def external_channel_v1_exchange_account_link_oauth_with_http_info(
+        self,
+        provider: ExternalChannelProvider,
+        account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[GlobalAccountLinkResponse]:
+        """Exchange Account Link Oauth
+
+        Exchange one authenticated callback and finalize its global link.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param account_link_o_auth_exchange_request: (required)
+        :type account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_exchange_account_link_oauth_serialize(
+            provider=provider,
+            account_link_o_auth_exchange_request=account_link_o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "GlobalAccountLinkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def external_channel_v1_exchange_account_link_oauth_without_preload_content(
+        self,
+        provider: ExternalChannelProvider,
+        account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Exchange Account Link Oauth
+
+        Exchange one authenticated callback and finalize its global link.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param account_link_o_auth_exchange_request: (required)
+        :type account_link_o_auth_exchange_request: AccountLinkOAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_exchange_account_link_oauth_serialize(
+            provider=provider,
+            account_link_o_auth_exchange_request=account_link_o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "GlobalAccountLinkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _external_channel_v1_exchange_account_link_oauth_serialize(
+        self,
+        provider,
+        account_link_o_auth_exchange_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if provider is not None:
+            _path_params['provider'] = provider.value
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if account_link_o_auth_exchange_request is not None:
+            _body_params = account_link_o_auth_exchange_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/external-channel/v1/account-links/oauth/{provider}/exchange',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
     def external_channel_v1_get_account_link_candidate(
         self,
         candidate_id: StrictStr,
@@ -3653,7 +3959,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AccountLinkCandidateResponse:
-        """Get Account Link Candidate
+        """(Deprecated) Get Account Link Candidate
 
         Get status for an exact current User/auth-Session candidate.
 
@@ -3680,6 +3986,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -3721,7 +4028,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AccountLinkCandidateResponse]:
-        """Get Account Link Candidate
+        """(Deprecated) Get Account Link Candidate
 
         Get status for an exact current User/auth-Session candidate.
 
@@ -3748,6 +4055,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -3789,7 +4097,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Get Account Link Candidate
+        """(Deprecated) Get Account Link Candidate
 
         Get status for an exact current User/auth-Session candidate.
 
@@ -3816,6 +4124,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-candidates/{candidate_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_candidate_serialize(
             candidate_id=candidate_id,
@@ -3917,7 +4226,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AccountLinkOriginResponse:
-        """Get Account Link Origin
+        """(Deprecated) Get Account Link Origin
 
         Load bounded provider identity and Workspace confirmation context.
 
@@ -3944,6 +4253,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-origins/{origin_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_origin_serialize(
             origin_id=origin_id,
@@ -3985,7 +4295,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AccountLinkOriginResponse]:
-        """Get Account Link Origin
+        """(Deprecated) Get Account Link Origin
 
         Load bounded provider identity and Workspace confirmation context.
 
@@ -4012,6 +4322,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-origins/{origin_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_origin_serialize(
             origin_id=origin_id,
@@ -4053,7 +4364,7 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Get Account Link Origin
+        """(Deprecated) Get Account Link Origin
 
         Load bounded provider identity and Workspace confirmation context.
 
@@ -4080,6 +4391,7 @@ class ExternalChannelV1Api:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /external-channel/v1/account-link-origins/{origin_id} is deprecated.", DeprecationWarning)
 
         _param = self._external_channel_v1_get_account_link_origin_serialize(
             origin_id=origin_id,
@@ -6446,6 +6758,252 @@ class ExternalChannelV1Api:
 
 
     @validate_call
+    def external_channel_v1_list_account_link_providers(
+        self,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> AccountLinkProviderAvailabilityListResponse:
+        """List Account Link Providers
+
+        List redacted provider availability for authenticated account linking.
+
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_list_account_link_providers_serialize(
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkProviderAvailabilityListResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def external_channel_v1_list_account_link_providers_with_http_info(
+        self,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[AccountLinkProviderAvailabilityListResponse]:
+        """List Account Link Providers
+
+        List redacted provider availability for authenticated account linking.
+
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_list_account_link_providers_serialize(
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkProviderAvailabilityListResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def external_channel_v1_list_account_link_providers_without_preload_content(
+        self,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """List Account Link Providers
+
+        List redacted provider availability for authenticated account linking.
+
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_list_account_link_providers_serialize(
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkProviderAvailabilityListResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _external_channel_v1_list_account_link_providers_serialize(
+        self,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/external-channel/v1/account-links/providers',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
     def external_channel_v1_list_account_links(
         self,
         _request_timeout: Union[
@@ -6460,10 +7018,10 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> AccountLinkListResponse:
+    ) -> GlobalAccountLinkListResponse:
         """List Account Links
 
-        List the current User's own Workspace external account links.
+        List the current User's active global provider identities.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -6495,7 +7053,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkListResponse",
+            '200': "GlobalAccountLinkListResponse",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -6523,10 +7081,10 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[AccountLinkListResponse]:
+    ) -> ApiResponse[GlobalAccountLinkListResponse]:
         """List Account Links
 
-        List the current User's own Workspace external account links.
+        List the current User's active global provider identities.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -6558,7 +7116,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkListResponse",
+            '200': "GlobalAccountLinkListResponse",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -6589,7 +7147,7 @@ class ExternalChannelV1Api:
     ) -> RESTResponseType:
         """List Account Links
 
-        List the current User's own Workspace external account links.
+        List the current User's active global provider identities.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -6621,7 +7179,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkListResponse",
+            '200': "GlobalAccountLinkListResponse",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -14889,6 +15447,270 @@ class ExternalChannelV1Api:
 
 
     @validate_call
+    def external_channel_v1_start_account_link_oauth(
+        self,
+        provider: ExternalChannelProvider,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> AccountLinkOAuthStartResponse:
+        """Start Account Link Oauth
+
+        Start one authenticated provider identity OAuth attempt.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_start_account_link_oauth_serialize(
+            provider=provider,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkOAuthStartResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def external_channel_v1_start_account_link_oauth_with_http_info(
+        self,
+        provider: ExternalChannelProvider,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[AccountLinkOAuthStartResponse]:
+        """Start Account Link Oauth
+
+        Start one authenticated provider identity OAuth attempt.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_start_account_link_oauth_serialize(
+            provider=provider,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkOAuthStartResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def external_channel_v1_start_account_link_oauth_without_preload_content(
+        self,
+        provider: ExternalChannelProvider,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Start Account Link Oauth
+
+        Start one authenticated provider identity OAuth attempt.
+
+        :param provider: (required)
+        :type provider: ExternalChannelProvider
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_start_account_link_oauth_serialize(
+            provider=provider,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AccountLinkOAuthStartResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _external_channel_v1_start_account_link_oauth_serialize(
+        self,
+        provider,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if provider is not None:
+            _path_params['provider'] = provider.value
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/external-channel/v1/account-links/oauth/{provider}/start',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
     def external_channel_v1_unlink_account_link(
         self,
         link_id: StrictStr,
@@ -14904,7 +15726,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> AccountLinkResponse:
+    ) -> GlobalAccountLinkResponse:
         """Unlink Account Link
 
         Terminally disconnect one elevated owner's link.
@@ -14942,7 +15764,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkResponse",
+            '200': "GlobalAccountLinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -14972,7 +15794,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[AccountLinkResponse]:
+    ) -> ApiResponse[GlobalAccountLinkResponse]:
         """Unlink Account Link
 
         Terminally disconnect one elevated owner's link.
@@ -15010,7 +15832,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkResponse",
+            '200': "GlobalAccountLinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -15078,7 +15900,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "AccountLinkResponse",
+            '200': "GlobalAccountLinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(

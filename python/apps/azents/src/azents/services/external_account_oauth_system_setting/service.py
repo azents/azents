@@ -9,6 +9,10 @@ from pydantic import ValidationError
 
 from azents.core.config import Config
 from azents.core.deps import get_config
+from azents.core.enums import ExternalChannelProvider
+from azents.core.external_account_link import (
+    ExternalAccountOAuthProviderUnavailable,
+)
 from azents.core.external_account_oauth import (
     DISCORD_IDENTITY_AUTHORIZE_URL,
     DISCORD_IDENTITY_TOKEN_URL,
@@ -16,6 +20,9 @@ from azents.core.external_account_oauth import (
     SLACK_IDENTITY_AUTHORIZE_URL,
     SLACK_IDENTITY_TOKEN_URL,
     SLACK_IDENTITY_USERINFO_URL,
+    ExternalAccountOAuthCallbackContext,
+    ExternalAccountOAuthClientConfiguration,
+    ExternalAccountOAuthRuntimeConfiguration,
 )
 from azents.core.external_account_oauth_system_setting import (
     DiscordIdentityOAuthConfig,
@@ -62,6 +69,61 @@ class ExternalAccountOAuthSystemSettingService:
         section = _section_for_provider(provider)
         state = await self.system_settings.get_state(section)
         return self._project(provider=provider, state=state)
+
+    async def resolve_callback_context(
+        self,
+        provider: ExternalChannelProvider,
+    ) -> ExternalAccountOAuthCallbackContext:
+        """Resolve callback generation and URI without requiring ready credentials."""
+        provider_name = provider.value
+        section = _section_for_provider(provider_name)
+        state = await self.system_settings.get_state(section)
+        callback_url = _callback_url(self.config.web_url, provider_name)
+        if callback_url is None:
+            raise ExternalAccountOAuthProviderUnavailable
+        return ExternalAccountOAuthCallbackContext(
+            setting_generation=state.resolved.effective_generation,
+            redirect_uri=callback_url,
+        )
+
+    async def resolve_runtime(
+        self,
+        provider: ExternalChannelProvider,
+    ) -> ExternalAccountOAuthRuntimeConfiguration:
+        """Resolve one ready provider client for an authenticated OAuth operation."""
+        provider_name = provider.value
+        section = _section_for_provider(provider_name)
+        state = await self.system_settings.get_state(section)
+        detail = self._project(provider=provider_name, state=state)
+        if detail.effective_status is not ExternalAccountOAuthEffectiveStatus.READY:
+            raise ExternalAccountOAuthProviderUnavailable
+        if provider is ExternalChannelProvider.SLACK:
+            config = _require_slack_config(state.resolved)
+        else:
+            config = _require_discord_config(state.resolved)
+        secrets = state.resolved.secrets
+        client_id = (
+            config.client_id
+            if isinstance(config, ExternalAccountOAuthConfig)
+            else config.application_id
+        )
+        if not isinstance(
+            secrets,
+            (ExternalAccountOAuthSecrets, DiscordIdentityOAuthSecrets),
+        ):
+            raise TypeError("Unexpected provider OAuth secret model.")
+        client_secret = secrets.client_secret
+        if client_id is None or client_secret is None or detail.callback_url is None:
+            raise ExternalAccountOAuthProviderUnavailable
+        return ExternalAccountOAuthRuntimeConfiguration(
+            client=ExternalAccountOAuthClientConfiguration(
+                provider=provider,
+                client_id=client_id,
+                client_secret=client_secret,
+            ),
+            setting_generation=state.resolved.effective_generation,
+            redirect_uri=detail.callback_url,
+        )
 
     async def patch(
         self,

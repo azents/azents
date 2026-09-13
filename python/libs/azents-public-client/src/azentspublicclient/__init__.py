@@ -55,8 +55,11 @@ __all__ = [
     "AcceptDeclineResponse",
     "AccountLinkCandidateCreatedResponse",
     "AccountLinkCandidateResponse",
-    "AccountLinkListResponse",
+    "AccountLinkOAuthExchangeRequest",
+    "AccountLinkOAuthStartResponse",
     "AccountLinkOriginResponse",
+    "AccountLinkProviderAvailabilityListResponse",
+    "AccountLinkProviderAvailabilityResponse",
     "AccountLinkResponse",
     "AccountLinkReturnContextResponse",
     "Action",
@@ -223,6 +226,7 @@ __all__ = [
     "ExternalAccountLinkOriginState",
     "ExternalAccountLinkReturnKind",
     "ExternalAccountLinkState",
+    "ExternalAccountOAuthEffectiveStatus",
     "ExternalChannelAccessGrantScope",
     "ExternalChannelAccessRequestStatus",
     "ExternalChannelAppMode",
@@ -260,6 +264,8 @@ __all__ = [
     "GitRefEntryResponse",
     "GitRefPreviewResponse",
     "GitWorktreeWorkspaceItemResponse",
+    "GlobalAccountLinkListResponse",
+    "GlobalAccountLinkResponse",
     "GoalAction",
     "GoalStateResponse",
     "GoalStatusUpdateRequest",
@@ -623,8 +629,11 @@ from azentspublicclient.exceptions import ApiException as ApiException
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse as AcceptDeclineResponse
 from azentspublicclient.models.account_link_candidate_created_response import AccountLinkCandidateCreatedResponse as AccountLinkCandidateCreatedResponse
 from azentspublicclient.models.account_link_candidate_response import AccountLinkCandidateResponse as AccountLinkCandidateResponse
-from azentspublicclient.models.account_link_list_response import AccountLinkListResponse as AccountLinkListResponse
+from azentspublicclient.models.account_link_o_auth_exchange_request import AccountLinkOAuthExchangeRequest as AccountLinkOAuthExchangeRequest
+from azentspublicclient.models.account_link_o_auth_start_response import AccountLinkOAuthStartResponse as AccountLinkOAuthStartResponse
 from azentspublicclient.models.account_link_origin_response import AccountLinkOriginResponse as AccountLinkOriginResponse
+from azentspublicclient.models.account_link_provider_availability_list_response import AccountLinkProviderAvailabilityListResponse as AccountLinkProviderAvailabilityListResponse
+from azentspublicclient.models.account_link_provider_availability_response import AccountLinkProviderAvailabilityResponse as AccountLinkProviderAvailabilityResponse
 from azentspublicclient.models.account_link_response import AccountLinkResponse as AccountLinkResponse
 from azentspublicclient.models.account_link_return_context_response import AccountLinkReturnContextResponse as AccountLinkReturnContextResponse
 from azentspublicclient.models.action import Action as Action
@@ -791,6 +800,7 @@ from azentspublicclient.models.external_account_link_candidate_status import Ext
 from azentspublicclient.models.external_account_link_origin_state import ExternalAccountLinkOriginState as ExternalAccountLinkOriginState
 from azentspublicclient.models.external_account_link_return_kind import ExternalAccountLinkReturnKind as ExternalAccountLinkReturnKind
 from azentspublicclient.models.external_account_link_state import ExternalAccountLinkState as ExternalAccountLinkState
+from azentspublicclient.models.external_account_o_auth_effective_status import ExternalAccountOAuthEffectiveStatus as ExternalAccountOAuthEffectiveStatus
 from azentspublicclient.models.external_channel_access_grant_scope import ExternalChannelAccessGrantScope as ExternalChannelAccessGrantScope
 from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus as ExternalChannelAccessRequestStatus
 from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode as ExternalChannelAppMode
@@ -828,6 +838,8 @@ from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHu
 from azentspublicclient.models.git_ref_entry_response import GitRefEntryResponse as GitRefEntryResponse
 from azentspublicclient.models.git_ref_preview_response import GitRefPreviewResponse as GitRefPreviewResponse
 from azentspublicclient.models.git_worktree_workspace_item_response import GitWorktreeWorkspaceItemResponse as GitWorktreeWorkspaceItemResponse
+from azentspublicclient.models.global_account_link_list_response import GlobalAccountLinkListResponse as GlobalAccountLinkListResponse
+from azentspublicclient.models.global_account_link_response import GlobalAccountLinkResponse as GlobalAccountLinkResponse
 from azentspublicclient.models.goal_action import GoalAction as GoalAction
 from azentspublicclient.models.goal_state_response import GoalStateResponse as GoalStateResponse
 from azentspublicclient.models.goal_status_update_request import GoalStatusUpdateRequest as GoalStatusUpdateRequest

@@ -110,6 +110,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_exchange_account_link_oauth(self) -> None:
+        """Test case for external_channel_v1_exchange_account_link_oauth
+
+        Exchange Account Link Oauth
+        """
+        pass
+
     def test_external_channel_v1_get_account_link_candidate(self) -> None:
         """Test case for external_channel_v1_get_account_link_candidate
 
@@ -177,6 +184,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_get_multi_slack_route_impact
 
         Get Multi Slack Route Impact
+        """
+        pass
+
+    def test_external_channel_v1_list_account_link_providers(self) -> None:
+        """Test case for external_channel_v1_list_account_link_providers
+
+        List Account Link Providers
         """
         pass
 
@@ -373,6 +387,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_setup_slack_connection
 
         Setup Slack Connection
+        """
+        pass
+
+    def test_external_channel_v1_start_account_link_oauth(self) -> None:
+        """Test case for external_channel_v1_start_account_link_oauth
+
+        Start Account Link Oauth
         """
         pass
 
