@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { SelectableModelOptionsEditor } from "@/features/agents/components/SelectableModelOptionsEditor";
 import { useImageGenerationCatalogs } from "@/features/agents/containers/useImageGenerationCatalogs";
 import {
+  hasDuplicateSelectableModelCandidates,
   hasInvalidImageGenerationSelections,
   selectableModelOptionFormValuesFromStoredOptions,
 } from "@/features/agents/model-selection";
@@ -63,13 +64,20 @@ export function WorkspaceModelSettingsCard({
       );
       const uniqueLabels = new Set(labels);
       const hasMissingModel = values.defaultSelectableModelOptions.some(
-        (option) => option.model_selection_value == null,
+        (option) =>
+          option.candidates.length === 0 ||
+          option.candidates.some(
+            (candidate) => candidate.model_selection_value == null,
+          ),
       );
       if (
         values.defaultSelectableModelOptions.length === 0 ||
         hasEmptyLabel ||
         uniqueLabels.size !== labels.length ||
-        hasMissingModel
+        hasMissingModel ||
+        hasDuplicateSelectableModelCandidates(
+          values.defaultSelectableModelOptions,
+        )
       ) {
         return { defaultSelectableModelOptions: t("invalidOptions") };
       }

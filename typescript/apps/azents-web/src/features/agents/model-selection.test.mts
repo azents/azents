@@ -2,32 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  copyCompatiblePrimarySettings,
+  createSelectableModelCandidateFormValue,
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
+  hasDuplicateSelectableModelCandidates,
   hasInvalidImageGenerationSelections,
   imageGenerationModelIdentifier,
   imageGenerationModelSelectionVisible,
   isSubagentGuidanceWithinLimit,
   modelContextBadgeValue,
   resolveModelContextRange,
+  type SelectableModelCandidateFormValue,
   type SelectableModelOptionFormValue,
   selectableModelOptionInputsFromFormValues,
   withImageGenerationModelIdentifier,
 } from "./model-selection.ts";
+import type { ModelCapabilities } from "@azents/public-client";
+
+function candidate(id: string): SelectableModelCandidateFormValue {
+  return createSelectableModelCandidateFormValue(id);
+}
 
 function option(id: string, label: string): SelectableModelOptionFormValue {
   return {
     id,
     label,
-    model_provider_integration_id: null,
-    model_selection_value: null,
-    model_display_name: null,
-    model_identifier: null,
-    normalized_capabilities: null,
-    context_window_tokens: null,
-    max_output_tokens: null,
-    builtin_tools: [],
-    builtin_tool_configs: {},
+    candidates: [candidate(`${id}-candidate`)],
     subagent_enabled: true,
     subagent_guidance: null,
   };
@@ -67,7 +68,12 @@ void test("new selectable options enable explicit subagent selection", () => {
 void test("selectable model input mapping preserves and normalizes subagent policy", () => {
   const configured = {
     ...option("lightweight", "lightweight"),
-    model_selection_value: "integration-1:model-1",
+    candidates: [
+      {
+        ...candidate("lightweight-candidate"),
+        model_selection_value: "integration-1:model-1",
+      },
+    ],
     subagent_enabled: false,
     subagent_guidance: "  Prefer for bounded investigation.  ",
   };
@@ -96,7 +102,7 @@ void test("selectable model input mapping preserves and normalizes subagent poli
 
 void test("image generation model updates preserve unrelated built-in config keys", () => {
   const configured = {
-    ...option("default", "default"),
+    ...candidate("default-candidate"),
     builtin_tools: ["image_generation"],
     builtin_tool_configs: {
       image_generation: {
@@ -152,14 +158,19 @@ void test("default-only image providers hide explicit model selection", () => {
 void test("form serialization preserves complete built-in tool config", () => {
   const configured = {
     ...option("default", "default"),
-    model_selection_value: "integration-1:model-1",
-    builtin_tools: ["image_generation"],
-    builtin_tool_configs: {
-      image_generation: {
-        model: "gpt-image-current",
-        quality: "high",
+    candidates: [
+      {
+        ...candidate("default-candidate"),
+        model_selection_value: "integration-1:model-1",
+        builtin_tools: ["image_generation"],
+        builtin_tool_configs: {
+          image_generation: {
+            model: "gpt-image-current",
+            quality: "high",
+          },
+        },
       },
-    },
+    ],
   };
 
   const [input] = selectableModelOptionInputsFromFormValues([configured]);
@@ -176,14 +187,130 @@ void test("form serialization preserves complete built-in tool config", () => {
   ]);
 });
 
+void test("form serialization preserves every ordered candidate", () => {
+  const configured = {
+    ...option("default", "default"),
+    candidates: [
+      {
+        ...candidate("primary"),
+        model_selection_value: "integration-1:model-primary",
+      },
+      {
+        ...candidate("fallback"),
+        model_selection_value: "integration-2:model-fallback",
+        context_window_tokens: 64_000,
+      },
+    ],
+  };
+
+  const [input] = selectableModelOptionInputsFromFormValues([configured]);
+  assert.deepEqual(
+    input?.candidates.map((item) => ({
+      ...item.model_selection,
+      context_window_tokens: item.settings?.context_window_tokens ?? null,
+    })),
+    [
+      {
+        llm_provider_integration_id: "integration-1",
+        model_identifier: "model-primary",
+        context_window_tokens: null,
+      },
+      {
+        llm_provider_integration_id: "integration-2",
+        model_identifier: "model-fallback",
+        context_window_tokens: 64_000,
+      },
+    ],
+  );
+});
+
+void test("duplicate candidate validation is label-local", () => {
+  const duplicated = {
+    ...option("default", "default"),
+    candidates: [
+      {
+        ...candidate("primary"),
+        model_selection_value: "integration-1:model-1",
+      },
+      {
+        ...candidate("fallback"),
+        model_selection_value: "integration-1:model-1",
+      },
+    ],
+  };
+  const separateLabel = {
+    ...option("secondary", "secondary"),
+    candidates: [
+      {
+        ...candidate("secondary-primary"),
+        model_selection_value: "integration-1:model-1",
+      },
+    ],
+  };
+
+  assert.equal(hasDuplicateSelectableModelCandidates([duplicated]), true);
+  const uniqueCandidate = duplicated.candidates[0];
+  assert.ok(uniqueCandidate);
+  assert.equal(
+    hasDuplicateSelectableModelCandidates([
+      { ...duplicated, candidates: [uniqueCandidate] },
+      separateLabel,
+    ]),
+    false,
+  );
+});
+
+void test("Primary settings copy keeps only target-compatible values", () => {
+  const primary = {
+    ...candidate("primary"),
+    context_window_tokens: 128_000,
+    max_output_tokens: 16_000,
+    builtin_tools: ["web_search", "image_generation"],
+    builtin_tool_configs: {
+      web_search: { depth: "high" },
+      image_generation: { model: "gpt-image-current" },
+    },
+  };
+  const target = {
+    ...candidate("fallback"),
+    normalized_capabilities: {
+      reasoning: { supported: false, effort_levels: [] },
+      built_in_tools: { supported: ["web_search"] },
+      context_window: {
+        max_input_tokens: 64_000,
+        max_output_tokens: 32_000,
+      },
+      modalities: { input: ["text"], output: ["text"] },
+      tool_calling: { supported: true },
+      parameters: {},
+      compatibility: {},
+    } satisfies ModelCapabilities,
+  };
+
+  const copied = copyCompatiblePrimarySettings(primary, target);
+
+  assert.equal(copied.candidate.context_window_tokens, null);
+  assert.equal(copied.candidate.max_output_tokens, 16_000);
+  assert.deepEqual(copied.candidate.builtin_tools, ["web_search"]);
+  assert.deepEqual(copied.candidate.builtin_tool_configs, {
+    web_search: { depth: "high" },
+  });
+  assert.deepEqual(copied.omitted, ["context_window", "builtin_tools"]);
+});
+
 void test("explicit image selection is invalid until a current catalog authorizes it", () => {
   const configured = {
     ...option("default", "default"),
-    model_provider_integration_id: "integration-1",
-    builtin_tools: ["image_generation"],
-    builtin_tool_configs: {
-      image_generation: { model: "gpt-image-current" },
-    },
+    candidates: [
+      {
+        ...candidate("default-candidate"),
+        model_provider_integration_id: "integration-1",
+        builtin_tools: ["image_generation"],
+        builtin_tool_configs: {
+          image_generation: { model: "gpt-image-current" },
+        },
+      },
+    ],
   };
 
   assert.equal(

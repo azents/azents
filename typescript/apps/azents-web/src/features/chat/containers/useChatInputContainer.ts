@@ -15,6 +15,7 @@ import {
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
+import { trpc } from "@/trpc/client";
 import {
   executionOptionDefinitionsForModel,
   normalizeComposerProfile,
@@ -22,6 +23,7 @@ import {
   supportedExecutionOptionIds,
 } from "../executionOptions";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
+import type { ModelAvailabilityViewState } from "../modelAvailability";
 import type {
   ChatAction,
   ChatLiveRunState,
@@ -42,6 +44,7 @@ import type {
 } from "@azents/public-client";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
+const ENTITY_ID_PATTERN = /^[0-9a-f]{32}$/;
 
 function getScopedStorageKey(
   prefix: string,
@@ -491,6 +494,160 @@ function useChatInputContainerImplementation({
   disabledPlaceholder = null,
 }: ChatInputProps) {
   const t = useTranslations("chat");
+  const utils = trpc.useUtils();
+  const availabilityInput = {
+    agentId: agentId ?? "",
+    sessionId: sessionId ?? "",
+  };
+  const availabilityEnabled =
+    agentId != null &&
+    sessionId != null &&
+    ENTITY_ID_PATTERN.test(agentId) &&
+    ENTITY_ID_PATTERN.test(sessionId) &&
+    inferenceProfileSelectionEnabled &&
+    editingMessageId == null;
+  const availabilityQuery = trpc.chat.getAgentSessionModelAvailability.useQuery(
+    availabilityInput,
+    {
+      enabled: availabilityEnabled,
+      refetchOnWindowFocus: true,
+    },
+  );
+  const reservePrimaryMutation =
+    trpc.chat.reserveAgentSessionPrimaryModel.useMutation();
+  const cancelPrimaryMutation =
+    trpc.chat.cancelAgentSessionPrimaryModelReservation.useMutation();
+  const [modelAvailabilityActionError, setModelAvailabilityActionError] =
+    useState(false);
+  const [modelAvailabilityClockMs, setModelAvailabilityClockMs] = useState(() =>
+    Date.now(),
+  );
+  const refreshedTerminalAvailabilityRunIdRef = useRef<string | null>(null);
+  const modelAvailability: ModelAvailabilityViewState = !availabilityEnabled
+    ? { type: "UNAVAILABLE" }
+    : availabilityQuery.isLoading
+      ? { type: "LOADING" }
+      : availabilityQuery.isError || availabilityQuery.data == null
+        ? { type: "ERROR" }
+        : { type: "LOADED", data: availabilityQuery.data };
+  const refreshModelAvailability = useCallback(async (): Promise<void> => {
+    if (agentId == null || sessionId == null) {
+      return;
+    }
+    setModelAvailabilityActionError(false);
+    await utils.chat.getAgentSessionModelAvailability.invalidate({
+      agentId,
+      sessionId,
+    });
+  }, [agentId, sessionId, utils.chat.getAgentSessionModelAvailability]);
+  useEffect(() => {
+    const run = contextUsageActiveRun;
+    if (
+      !availabilityEnabled ||
+      run == null ||
+      run.status === "running" ||
+      refreshedTerminalAvailabilityRunIdRef.current === run.run_id
+    ) {
+      return;
+    }
+    refreshedTerminalAvailabilityRunIdRef.current = run.run_id;
+    void refreshModelAvailability();
+  }, [availabilityEnabled, contextUsageActiveRun, refreshModelAvailability]);
+  const reservePrimaryModel = useCallback(async (): Promise<void> => {
+    const availability = availabilityQuery.data;
+    if (agentId == null || sessionId == null || availability == null) {
+      return;
+    }
+    setModelAvailabilityActionError(false);
+    try {
+      await reservePrimaryMutation.mutateAsync({
+        agentId,
+        sessionId,
+        semanticLabel: availability.semantic_label,
+        primary: availability.primary,
+      });
+    } catch {
+      setModelAvailabilityActionError(true);
+    } finally {
+      await utils.chat.getAgentSessionModelAvailability.invalidate({
+        agentId,
+        sessionId,
+      });
+    }
+  }, [
+    agentId,
+    availabilityQuery.data,
+    reservePrimaryMutation,
+    sessionId,
+    utils.chat.getAgentSessionModelAvailability,
+  ]);
+  const cancelPrimaryModelReservation = useCallback(async (): Promise<void> => {
+    const availability = availabilityQuery.data;
+    const reservation = availability?.reservation;
+    if (agentId == null || sessionId == null || reservation == null) {
+      return;
+    }
+    setModelAvailabilityActionError(false);
+    try {
+      await cancelPrimaryMutation.mutateAsync({
+        agentId,
+        sessionId,
+        reservationGeneration: reservation.reservation_generation,
+      });
+    } catch {
+      setModelAvailabilityActionError(true);
+    } finally {
+      await utils.chat.getAgentSessionModelAvailability.invalidate({
+        agentId,
+        sessionId,
+      });
+    }
+  }, [
+    agentId,
+    availabilityQuery.data,
+    cancelPrimaryMutation,
+    sessionId,
+    utils.chat.getAgentSessionModelAvailability,
+  ]);
+
+  useEffect(() => {
+    const availability = availabilityQuery.data;
+    if (
+      agentId == null ||
+      sessionId == null ||
+      availability?.deadline == null
+    ) {
+      return;
+    }
+    const delay =
+      Date.parse(availability.deadline) - Date.parse(availability.server_time);
+    const timeout = window.setTimeout(
+      () => {
+        void utils.chat.getAgentSessionModelAvailability.invalidate({
+          agentId,
+          sessionId,
+        });
+      },
+      Math.max(0, delay) + 250,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [
+    agentId,
+    availabilityQuery.data,
+    sessionId,
+    utils.chat.getAgentSessionModelAvailability,
+  ]);
+  useEffect(() => {
+    if (availabilityQuery.data?.deadline == null) {
+      return;
+    }
+    setModelAvailabilityClockMs(Date.now());
+    const interval = window.setInterval(
+      () => setModelAvailabilityClockMs(Date.now()),
+      1_000,
+    );
+    return () => window.clearInterval(interval);
+  }, [availabilityQuery.data?.deadline, availabilityQuery.dataUpdatedAt]);
   const draftStorageKey = useMemo(
     () => getScopedStorageKey(DRAFT_STORAGE_KEY_PREFIX, agentId, sessionId),
     [agentId, sessionId],
@@ -634,6 +791,12 @@ function useChatInputContainerImplementation({
       todo.items.some((item) => item.status !== "completed"));
   const activeInputAction = visibleInputActions[activeInputActionIndex] ?? null;
   const activeInputActionOptionId = `${inputActionListboxId}-option-${activeInputActionIndex}`;
+
+  useEffect(() => {
+    if (profilePickerOpened && availabilityEnabled) {
+      void refreshModelAvailability();
+    }
+  }, [availabilityEnabled, profilePickerOpened, refreshModelAvailability]);
 
   useEffect(() => {
     setActiveInputActionIndex(0);
@@ -809,6 +972,8 @@ function useChatInputContainerImplementation({
         const applied = await onApplyInferenceProfile(inferenceProfile);
         if (!applied) {
           setSendErrorVisible(true);
+        } else {
+          await refreshModelAvailability();
         }
         return;
       }
@@ -899,6 +1064,7 @@ function useChatInputContainerImplementation({
     clearInputAfterSend,
     clearFiles,
     resetDoneFiles,
+    refreshModelAvailability,
   ]);
 
   const handleSelectInputAction = useCallback(
@@ -1328,6 +1494,16 @@ function useChatInputContainerImplementation({
     contextUsageEnabled,
     contextUsage,
     contextUsageActiveRun,
+    modelAvailability,
+    modelAvailabilityObservedAtMs:
+      availabilityQuery.dataUpdatedAt || modelAvailabilityClockMs,
+    modelAvailabilityClockMs,
+    modelAvailabilityActionError,
+    modelAvailabilityActionPending:
+      reservePrimaryMutation.isPending || cancelPrimaryMutation.isPending,
+    refreshModelAvailability,
+    reservePrimaryModel,
+    cancelPrimaryModelReservation,
     onApplyInferenceProfile,
     selectableExecutionOptions,
     isUploading,

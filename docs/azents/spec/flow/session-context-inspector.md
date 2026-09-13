@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-12
-spec_version: 21
+last_verified_at: 2026-09-13
+spec_version: 22
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -84,7 +84,7 @@ pricing-calculator `ValueError` leaves cost absent while preserving provider tok
 calculator defects remain visible through the ordinary internal-error path. ChatGPT OAuth cost is an
 API-pricing estimate rather than subscription billing.
 
-Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state applied to that model call: target label, raw nullable reasoning effort, nullable model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, or Composer selection.
+Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state and applied candidate route: requested target label, raw nullable reasoning effort, operation kind, candidate ordinal and `primary | fallback` role, provider/integration/model identity, public model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot or route remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, current candidate chain, or Composer selection.
 
 ## Latest System Prompt
 
@@ -156,6 +156,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-09-13** — v22. Added immutable actual-candidate route details, including candidate role
+  and ordinal, without deriving historical provenance from current Agent configuration.
 - **2026-09-12** — v21. Embedded the unchanged Context inspector in the unified
   session panel while keeping Chat mounted.
 

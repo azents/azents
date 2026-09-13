@@ -18,15 +18,17 @@ function imageCatalogIntegrationIds(
   return [
     ...new Set(
       options.flatMap((option) => {
-        const supported =
-          option.normalized_capabilities?.built_in_tools?.supported ?? [];
-        if (
-          option.model_provider_integration_id == null ||
-          !supported.includes("image_generation")
-        ) {
-          return [];
-        }
-        return [option.model_provider_integration_id];
+        return option.candidates.flatMap((candidate) => {
+          const supported =
+            candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
+          if (
+            candidate.model_provider_integration_id == null ||
+            !supported.includes("image_generation")
+          ) {
+            return [];
+          }
+          return [candidate.model_provider_integration_id];
+        });
       }),
     ),
   ].sort();

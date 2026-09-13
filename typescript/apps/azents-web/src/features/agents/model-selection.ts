@@ -9,6 +9,7 @@ import type {
 } from "@azents/public-client";
 
 export const MAX_SELECTABLE_MODEL_OPTIONS = 10;
+export const MAX_SELECTABLE_MODEL_CANDIDATES = 5;
 export const MAX_SUBAGENT_GUIDANCE_LENGTH = 500;
 
 export function isSubagentGuidanceWithinLimit(
@@ -72,9 +73,8 @@ export function modelContextBadgeValue(
   };
 }
 
-export interface SelectableModelOptionFormValue {
+export interface SelectableModelCandidateFormValue {
   id: string;
-  label: string;
   model_provider_integration_id: string | null;
   model_selection_value: string | null;
   model_display_name: string | null;
@@ -84,16 +84,81 @@ export interface SelectableModelOptionFormValue {
   max_output_tokens: number | null;
   builtin_tools: string[];
   builtin_tool_configs: Record<string, Record<string, unknown>>;
+}
+
+export interface SelectableModelOptionFormValue {
+  id: string;
+  label: string;
+  candidates: SelectableModelCandidateFormValue[];
   subagent_enabled: boolean;
   subagent_guidance: string | null;
 }
 
-export function createSelectableModelOptionFormValue(
+export interface PrimarySettingsCopyResult {
+  candidate: SelectableModelCandidateFormValue;
+  omitted: Array<"context_window" | "max_output" | "builtin_tools">;
+}
+
+export function copyCompatiblePrimarySettings(
+  primary: SelectableModelCandidateFormValue,
+  target: SelectableModelCandidateFormValue,
+): PrimarySettingsCopyResult {
+  const omitted: PrimarySettingsCopyResult["omitted"] = [];
+  const targetContext = target.normalized_capabilities?.context_window;
+  const contextWindowTokens =
+    primary.context_window_tokens == null ||
+    targetContext?.max_input_tokens == null ||
+    primary.context_window_tokens <= targetContext.max_input_tokens
+      ? primary.context_window_tokens
+      : null;
+  if (
+    primary.context_window_tokens != null &&
+    contextWindowTokens !== primary.context_window_tokens
+  ) {
+    omitted.push("context_window");
+  }
+  const maxOutputTokens =
+    primary.max_output_tokens == null ||
+    targetContext?.max_output_tokens == null ||
+    primary.max_output_tokens <= targetContext.max_output_tokens
+      ? primary.max_output_tokens
+      : null;
+  if (
+    primary.max_output_tokens != null &&
+    maxOutputTokens !== primary.max_output_tokens
+  ) {
+    omitted.push("max_output");
+  }
+  const supportedTools =
+    target.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const builtinTools = primary.builtin_tools.filter((tool) =>
+    supportedTools.includes(tool),
+  );
+  if (builtinTools.length !== primary.builtin_tools.length) {
+    omitted.push("builtin_tools");
+  }
+  return {
+    candidate: {
+      ...target,
+      context_window_tokens: contextWindowTokens,
+      max_output_tokens: maxOutputTokens,
+      builtin_tools: builtinTools,
+      builtin_tool_configs: Object.fromEntries(
+        builtinTools.map((tool) => [
+          tool,
+          { ...(primary.builtin_tool_configs[tool] ?? {}) },
+        ]),
+      ),
+    },
+    omitted,
+  };
+}
+
+export function createSelectableModelCandidateFormValue(
   id: string,
-): SelectableModelOptionFormValue {
+): SelectableModelCandidateFormValue {
   return {
     id,
-    label: "",
     model_provider_integration_id: null,
     model_selection_value: null,
     model_display_name: null,
@@ -103,6 +168,16 @@ export function createSelectableModelOptionFormValue(
     max_output_tokens: null,
     builtin_tools: [],
     builtin_tool_configs: {},
+  };
+}
+
+export function createSelectableModelOptionFormValue(
+  id: string,
+): SelectableModelOptionFormValue {
+  return {
+    id,
+    label: "",
+    candidates: [createSelectableModelCandidateFormValue(`${id}-candidate-1`)],
     subagent_enabled: true,
     subagent_guidance: null,
   };
@@ -150,18 +225,18 @@ export function imageGenerationModelSelectionVisible(
 }
 
 export function imageGenerationModelIdentifier(
-  option: SelectableModelOptionFormValue,
+  candidate: SelectableModelCandidateFormValue,
 ): string | null {
-  const model = option.builtin_tool_configs.image_generation?.model;
+  const model = candidate.builtin_tool_configs.image_generation?.model;
   return typeof model === "string" && model.trim().length > 0 ? model : null;
 }
 
 export function withImageGenerationModelIdentifier(
-  option: SelectableModelOptionFormValue,
+  candidate: SelectableModelCandidateFormValue,
   modelIdentifier: string | null,
-): SelectableModelOptionFormValue {
+): SelectableModelCandidateFormValue {
   const imageGenerationConfig = {
-    ...(option.builtin_tool_configs.image_generation ?? {}),
+    ...(candidate.builtin_tool_configs.image_generation ?? {}),
   };
   if (modelIdentifier == null) {
     delete imageGenerationConfig.model;
@@ -169,9 +244,9 @@ export function withImageGenerationModelIdentifier(
     imageGenerationConfig.model = modelIdentifier;
   }
   return {
-    ...option,
+    ...candidate,
     builtin_tool_configs: {
-      ...option.builtin_tool_configs,
+      ...candidate.builtin_tool_configs,
       image_generation: imageGenerationConfig,
     },
   };
@@ -201,28 +276,30 @@ export function hasInvalidImageGenerationSelections(
   options: SelectableModelOptionFormValue[],
   states: ReadonlyMap<string, ImageGenerationCatalogState>,
 ): boolean {
-  return options.some((option) => {
-    if (!option.builtin_tools.includes("image_generation")) {
-      return false;
-    }
-    const integrationId = option.model_provider_integration_id;
-    const state =
-      integrationId == null ? null : (states.get(integrationId) ?? null);
-    if (
-      (state?.type === "LOADED" || state?.type === "UNSUPPORTED") &&
-      !state.data.default_available
-    ) {
-      return true;
-    }
-    const modelIdentifier = imageGenerationModelIdentifier(option);
-    if (modelIdentifier == null) {
-      return false;
-    }
-    return (
-      integrationId == null ||
-      imageGenerationModelAvailability(modelIdentifier, state) !== "AVAILABLE"
-    );
-  });
+  return options.some((option) =>
+    option.candidates.some((candidate) => {
+      if (!candidate.builtin_tools.includes("image_generation")) {
+        return false;
+      }
+      const integrationId = candidate.model_provider_integration_id;
+      const state =
+        integrationId == null ? null : (states.get(integrationId) ?? null);
+      if (
+        (state?.type === "LOADED" || state?.type === "UNSUPPORTED") &&
+        !state.data.default_available
+      ) {
+        return true;
+      }
+      const modelIdentifier = imageGenerationModelIdentifier(candidate);
+      if (modelIdentifier == null) {
+        return false;
+      }
+      return (
+        integrationId == null ||
+        imageGenerationModelAvailability(modelIdentifier, state) !== "AVAILABLE"
+      );
+    }),
+  );
 }
 
 export interface ProviderIntegrationOption {
@@ -323,28 +400,28 @@ export function selectableModelOptionFormValueFromStoredOption(
   option: SelectableModelOption,
   index: number,
 ): SelectableModelOptionFormValue {
-  const primary = option.candidates[0];
-  if (primary == null) {
-    throw new Error("Selectable model option has no candidates");
-  }
   return {
     id: `stored-${index}-${option.label}`,
     label: option.label,
-    model_provider_integration_id:
-      primary.model_selection.llm_provider_integration_id,
-    model_selection_value: modelSelectionValue(primary.model_selection),
-    model_display_name: primary.model_selection.model_display_name,
-    model_identifier: primary.model_selection.model_identifier,
-    normalized_capabilities: primary.model_selection.normalized_capabilities,
-    context_window_tokens: primary.settings.context_window_tokens,
-    max_output_tokens: primary.settings.max_output_tokens,
-    builtin_tools: primary.settings.builtin_tools.map((tool) => tool.name),
-    builtin_tool_configs: Object.fromEntries(
-      primary.settings.builtin_tools.map((tool) => [
-        tool.name,
-        tool.config ?? {},
-      ]),
-    ),
+    candidates: option.candidates.map((candidate, candidateIndex) => ({
+      id: `stored-${index}-${candidateIndex}-${option.label}`,
+      model_provider_integration_id:
+        candidate.model_selection.llm_provider_integration_id,
+      model_selection_value: modelSelectionValue(candidate.model_selection),
+      model_display_name: candidate.model_selection.model_display_name,
+      model_identifier: candidate.model_selection.model_identifier,
+      normalized_capabilities:
+        candidate.model_selection.normalized_capabilities,
+      context_window_tokens: candidate.settings.context_window_tokens,
+      max_output_tokens: candidate.settings.max_output_tokens,
+      builtin_tools: candidate.settings.builtin_tools.map((tool) => tool.name),
+      builtin_tool_configs: Object.fromEntries(
+        candidate.settings.builtin_tools.map((tool) => [
+          tool.name,
+          tool.config ?? {},
+        ]),
+      ),
+    })),
     subagent_enabled: option.subagent_enabled,
     subagent_guidance: option.subagent_guidance,
   };
@@ -358,33 +435,58 @@ export function selectableModelOptionFormValuesFromStoredOptions(
   );
 }
 
+export function hasDuplicateSelectableModelCandidates(
+  options: SelectableModelOptionFormValue[],
+): boolean {
+  return options.some((option) => {
+    const identities = new Set<string>();
+    return option.candidates.some((candidate) => {
+      const identity = candidate.model_selection_value;
+      if (identity == null) {
+        return false;
+      }
+      if (identities.has(identity)) {
+        return true;
+      }
+      identities.add(identity);
+      return false;
+    });
+  });
+}
+
 export function selectableModelOptionInputsFromFormValues(
   options: SelectableModelOptionFormValue[],
 ): SelectableModelOptionInput[] {
   return options.flatMap((option) => {
-    const modelSelection = parseModelSelectionValue(
-      option.model_selection_value,
-    );
     const label = option.label.trim();
-    if (modelSelection == null || label.length === 0) {
+    const candidates = option.candidates.flatMap((candidate) => {
+      const modelSelection = parseModelSelectionValue(
+        candidate.model_selection_value,
+      );
+      if (modelSelection == null) {
+        return [];
+      }
+      return [
+        {
+          model_selection: modelSelection,
+          settings: {
+            context_window_tokens: candidate.context_window_tokens,
+            max_output_tokens: candidate.max_output_tokens,
+            builtin_tools: candidate.builtin_tools.map((name) => ({
+              name,
+              config: candidate.builtin_tool_configs[name] ?? {},
+            })),
+          },
+        },
+      ];
+    });
+    if (candidates.length !== option.candidates.length || label.length === 0) {
       return [];
     }
     return [
       {
         label,
-        candidates: [
-          {
-            model_selection: modelSelection,
-            settings: {
-              context_window_tokens: option.context_window_tokens,
-              max_output_tokens: option.max_output_tokens,
-              builtin_tools: option.builtin_tools.map((name) => ({
-                name,
-                config: option.builtin_tool_configs[name] ?? {},
-              })),
-            },
-          },
-        ],
+        candidates,
         subagent_enabled: option.subagent_enabled,
         subagent_guidance: option.subagent_guidance?.trim() || null,
       },
