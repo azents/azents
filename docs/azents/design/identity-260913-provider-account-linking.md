@@ -2,6 +2,7 @@
 title: "Provider Account Linking Design"
 created: 2026-09-13
 updated: 2026-09-13
+implemented: 2026-09-13
 tags: [backend, frontend, admin, external-channel, identity, oauth, security, testenv]
 document_role: primary
 document_type: design
