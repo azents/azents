@@ -403,10 +403,12 @@ export const MobilePanel = {
   globals: { viewport: { value: "mobile1", isRotated: false } },
   play: async ({ canvasElement }) => {
     const title = canvasElement.querySelector("[data-session-panel-title]");
-    if (title === null) {
+    const panel = title === null ? null : title.closest("[aria-label]");
+    if (title === null || panel === null) {
       throw new Error("Expected the mobile session panel title.");
     }
     await expect(title).toHaveTextContent("Tools");
+    await expect(panel.getBoundingClientRect().top).toBeGreaterThan(0);
   },
 } satisfies Story;
 

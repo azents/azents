@@ -418,33 +418,31 @@ export function ChatSessionView({
         )}
       </Box>
       {!terminalMobile && (
-        <FocusTrap active={panel.opened}>
-          <Box
-            className={classes.desktopPanel}
-            h="100%"
-            mih={0}
-            miw={0}
-            hidden={!panel.opened}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Escape" &&
-                !event.defaultPrevented &&
-                panel.activeView !== "terminal" &&
-                event.target instanceof Element &&
-                !event.target.closest('[role="dialog"]')
-              ) {
-                event.stopPropagation();
-                panel.onClose();
-              }
-            }}
-            style={{
-              display: panel.opened ? "block" : "none",
-              left: `calc(${panel.chatRatio * 100}% + ${rem(8 * (1 - panel.chatRatio))})`,
-            }}
-          >
-            {panelContent}
-          </Box>
-        </FocusTrap>
+        <Box
+          className={classes.desktopPanel}
+          h="100%"
+          mih={0}
+          miw={0}
+          hidden={!panel.opened}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Escape" &&
+              !event.defaultPrevented &&
+              panel.activeView !== "terminal" &&
+              event.target instanceof Element &&
+              !event.target.closest('[role="dialog"]')
+            ) {
+              event.stopPropagation();
+              panel.onClose();
+            }
+          }}
+          style={{
+            display: panel.opened ? "block" : "none",
+            left: `calc(${panel.chatRatio * 100}% + ${rem(8 * (1 - panel.chatRatio))})`,
+          }}
+        >
+          {panelContent}
+        </Box>
       )}
     </Box>
   );
