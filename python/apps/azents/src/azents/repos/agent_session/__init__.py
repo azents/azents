@@ -1952,6 +1952,8 @@ class AgentSessionRepository:
             )
         ).all()
         for session_id, workspace_id, reservation_payload in rows:
+            if reservation_payload is None:
+                continue
             reservation = PrimaryModelReservation.model_validate(reservation_payload)
             await session.execute(
                 sa.update(RDBModelCandidateHealth)
