@@ -1336,6 +1336,131 @@ class TestChatSessionTeamSessions:
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
 
+    async def test_session_reads_repair_stale_applied_model_profile(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Direct and list reads replace labels removed from Agent options."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-read-repair")
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-read-repair@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-session-read-repair-agent",
+        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == agent_session.id)
+            .values(
+                applied_model_target_label="removed",
+                applied_reasoning_effort=None,
+                applied_enabled_execution_options=[],
+            )
+        )
+        await rdb_session.commit()
+
+        service = _service(rdb_session_manager)
+        direct = await service.get_agent_session_with_unread_terminal_run(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+        )
+        listed = await service.list_agent_sessions(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(direct, Success)
+        assert direct.value.session.applied_inference_profile is not None
+        assert (
+            direct.value.session.applied_inference_profile.model_target_label
+            == "default"
+        )
+        assert isinstance(listed, Success)
+        assert listed.value[0].applied_inference_profile is not None
+        assert listed.value[0].applied_inference_profile.model_target_label == "default"
+        async with rdb_session_manager() as verify_session:
+            repaired = await AgentSessionRepository().get_by_id(
+                verify_session,
+                agent_session.id,
+            )
+        assert repaired is not None
+        assert repaired.applied_inference_profile is not None
+        assert repaired.applied_inference_profile.model_target_label == "default"
+        assert repaired.applied_inference_profile.enabled_execution_options == []
+
+    async def test_session_reads_preserve_valid_applied_model_profile(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Valid Agent labels do not rewrite Session profile intent."""
+        workspace_id = await _create_workspace(
+            rdb_session, "team-session-valid-profile"
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-valid-profile@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-session-valid-profile-agent",
+        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == agent_session.id)
+            .values(
+                applied_model_target_label="default",
+                applied_reasoning_effort=None,
+                applied_enabled_execution_options=["fast"],
+                applied_profile_generation=7,
+            )
+        )
+        await rdb_session.commit()
+
+        result = await _service(rdb_session_manager).get_agent_session(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.applied_inference_profile is not None
+        assert result.value.applied_inference_profile.model_target_label == "default"
+        assert result.value.applied_inference_profile.enabled_execution_options == [
+            "fast"
+        ]
+        assert result.value.applied_profile_generation == 7
+
     async def test_team_session_reads_do_not_create_team_primary(
         self,
         rdb_session: AsyncSession,
