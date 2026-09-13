@@ -559,6 +559,123 @@ def test_selectable_model_candidate_chain_data_migration(
     assert downgraded == legacy_options
 
 
+def test_session_model_settings_candidate_data_migration(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Remove legacy option fields from Session candidate settings."""
+    alembic_runner.migrate_up_to("e767c81c6ed9")
+    selection = {
+        "llm_provider_integration_id": "integration-1",
+        "provider": "openai",
+        "model_identifier": "model-1",
+    }
+    candidate_settings = {
+        "context_window_tokens": 32_000,
+        "max_output_tokens": 4_000,
+        "builtin_tools": [],
+    }
+    guidance = "Use for focused work."
+    options = [
+        {
+            "label": "default",
+            "subagent_enabled": False,
+            "subagent_guidance": guidance,
+            "candidates": [
+                {
+                    "model_selection": selection,
+                    "settings": candidate_settings,
+                }
+            ],
+        }
+    ]
+    legacy_session_settings = {
+        **candidate_settings,
+        "subagent_enabled": False,
+        "subagent_guidance": guidance,
+    }
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES ('session-workspace', 'Session Workspace', 'session-workspace')
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label
+                )
+                VALUES (
+                    'session-agent', 'session-workspace', 'Session Agent',
+                    CAST(:selection AS jsonb), CAST(:selection AS jsonb),
+                    CAST(:options AS jsonb), 'default', 'default'
+                )
+                """
+            ),
+            {
+                "selection": json.dumps(selection),
+                "options": json.dumps(options),
+            },
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_sessions (
+                    id, workspace_id, agent_id, handle,
+                    current_model_target_label, current_model_selection,
+                    current_model_settings,
+                    current_effective_context_window_tokens,
+                    current_effective_auto_compaction_threshold_tokens,
+                    current_inference_resolved_at,
+                    session_kind, product_mode, status, start_reason
+                )
+                VALUES (
+                    'legacy-session', 'session-workspace', 'session-agent',
+                    'legacy-session', 'default', CAST(:selection AS jsonb),
+                    CAST(:settings AS jsonb), 32000, 28000, now(),
+                    'root', 'team', 'active', 'initial'
+                )
+                """
+            ),
+            {
+                "selection": json.dumps(selection),
+                "settings": json.dumps(legacy_session_settings),
+            },
+        )
+
+    alembic_runner.migrate_up_to("head")
+    with alembic_engine.connect() as connection:
+        migrated = connection.execute(
+            sa.text(
+                """
+                SELECT current_model_settings
+                FROM agent_sessions
+                WHERE id = 'legacy-session'
+                """
+            )
+        ).scalar_one()
+    assert migrated == candidate_settings
+
+    alembic_runner.migrate_down_to("e767c81c6ed9")
+    with alembic_engine.connect() as connection:
+        downgraded = connection.execute(
+            sa.text(
+                """
+                SELECT current_model_settings
+                FROM agent_sessions
+                WHERE id = 'legacy-session'
+                """
+            )
+        ).scalar_one()
+    assert downgraded == legacy_session_settings
+
+
 def test_candidate_chain_downgrade_rejects_post_cutover_writes(
     alembic_runner: MigrationContext,
     alembic_engine: Engine,
