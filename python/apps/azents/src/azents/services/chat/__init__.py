@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Annotated, assert_never
+from typing import Annotated, NamedTuple, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -177,6 +177,23 @@ from .live_events import (
     mailbox_item_to_pending_projection,
 )
 
+
+class _SubagentTreeSortKey(NamedTuple):
+    """Field-named result for ``_subagent_tree_sort_key``."""
+
+    missing_sent_at: bool
+    descending_sent_at: float
+    status_rank: int
+    name: str
+
+
+class _SessionProfileFallback(NamedTuple):
+    """Field-named result for ``_session_profile_fallback``."""
+
+    label: str
+    reasoning_effort: ModelReasoningEffort | None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -267,14 +284,14 @@ def _subagent_status_sort_rank(status: str) -> int:
 
 def _subagent_tree_sort_key(
     node: SubagentTreeNode,
-) -> tuple[bool, float, int, str]:
+) -> _SubagentTreeSortKey:
     """Sort siblings with recent message activity first, then stable fallbacks."""
     sent_at = node.last_message_at
-    return (
-        sent_at is None,
-        -sent_at.timestamp() if sent_at is not None else 0.0,
-        _subagent_status_sort_rank(node.status),
-        node.name,
+    return _SubagentTreeSortKey(
+        missing_sent_at=sent_at is None,
+        descending_sent_at=-sent_at.timestamp() if sent_at is not None else 0.0,
+        status_rank=_subagent_status_sort_rank(node.status),
+        name=node.name,
     )
 
 
@@ -335,7 +352,7 @@ def _require_session_inference_profile(
 
 def _session_profile_fallback(
     agent: Agent,
-) -> tuple[str, ModelReasoningEffort | None]:
+) -> _SessionProfileFallback:
     """Return the Agent default label and safe reasoning effort for repair."""
     if not agent.selectable_model_options:
         raise ValueError("Agent has no selectable model options")
@@ -357,7 +374,10 @@ def _session_profile_fallback(
         not reasoning.supported or reasoning_effort not in reasoning.effort_levels
     ):
         reasoning_effort = None
-    return option.label, reasoning_effort
+    return _SessionProfileFallback(
+        label=option.label,
+        reasoning_effort=reasoning_effort,
+    )
 
 
 def _session_profile_is_stale(

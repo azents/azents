@@ -218,9 +218,7 @@ class RunnerWebTransportManager:
                 RunnerWebStreamErrorCode.DEADLINE_EXCEEDED,
             )
         except (aiohttp.ClientError, OSError) as error:
-            error_number = getattr(error, "errno", None)
-            if error_number is None:
-                error_number = getattr(getattr(error, "os_error", None), "errno", None)
+            error_number = error.errno if isinstance(error, OSError) else None
             _LOGGER.warning(
                 "Runtime Web loopback application unavailable",
                 extra={

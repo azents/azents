@@ -1,5 +1,7 @@
 """Toolkit State runtime abstraction tests."""
 
+from typing import NamedTuple
+
 import pytest
 from azcommon.result import Success
 from pydantic import Field, ValidationError
@@ -28,6 +30,13 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+
+
+class _AgentSessionFixture(NamedTuple):
+    """Field-named result for ``_create_agent_and_session``."""
+
+    agent_id: str
+    agent_session_id: str
 
 
 class ExampleToolkitState(ToolkitStateModel):
@@ -145,7 +154,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
 async def _create_agent_and_session(
     session: AsyncSession, suffix: str
-) -> tuple[str, str]:
+) -> _AgentSessionFixture:
     """Create AgentRuntime and AgentSession for tests."""
     workspace_id = await _create_workspace(session, f"toolkit-state-{suffix}")
     agent_id = await _create_agent(session, workspace_id, f"toolkit-state-{suffix}")
@@ -164,7 +173,10 @@ async def _create_agent_and_session(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
         )
     ).session
-    return agent_id, agent_session.id
+    return _AgentSessionFixture(
+        agent_id=agent_id,
+        agent_session_id=agent_session.id,
+    )
 
 
 def _identity(agent_id: str, session_id: str, state_name: str) -> ToolkitStateIdentity:

@@ -120,16 +120,22 @@ async def test_owner_events_survive_gateway_input_half_close() -> None:
     owned = RuntimeWebOwnedTunnel(route=route, tunnel=tunnel)
 
     async def input_completed() -> None:
+        input_closed.set()
         return None
 
     async def send_response() -> None:
-        await asyncio.sleep(0.01)
+        await input_closed.wait()
         runner = await registry.join_runner(_runner_identity(route))
         await runner.receive(RunnerWebResponseHead(status=200, headers=()))
         await runner.receive(RunnerWebStreamEnd(final_sequence=0))
 
+    async def wait_for_renewal() -> None:
+        await renewal_block.wait()
+
+    input_closed = asyncio.Event()
+    renewal_block = asyncio.Event()
     inbound = asyncio.create_task(input_completed())
-    renewal = asyncio.create_task(asyncio.sleep(60))
+    renewal = asyncio.create_task(wait_for_renewal())
     producer = asyncio.create_task(send_response())
     try:
         frames = [frame async for frame in _owner_events(owned, inbound, renewal)]

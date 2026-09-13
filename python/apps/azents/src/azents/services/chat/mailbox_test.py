@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import sqlalchemy as sa
@@ -87,6 +87,14 @@ from azents.testing.turn_action import (
 
 from . import ChatSessionService
 from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
+
+
+class _SessionBufferFixture(NamedTuple):
+    """Field-named result for ``_create_session_with_buffer``."""
+
+    agent_session_id: str
+    user_id: str
+    mailbox_item_id: str
 
 
 class _TrackingSessionManager:
@@ -297,7 +305,7 @@ async def _create_session_with_buffer(
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str, str]:
+) -> _SessionBufferFixture:
     """Create accessible AgentSession and MailboxItem."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
@@ -338,7 +346,11 @@ async def _create_session_with_buffer(
             file_parts=[],
         ),
     )
-    return agent_session.id, user_id, mailbox_item.id
+    return _SessionBufferFixture(
+        agent_session_id=agent_session.id,
+        user_id=user_id,
+        mailbox_item_id=mailbox_item.id,
+    )
 
 
 class TestChatSessionMailboxItem:

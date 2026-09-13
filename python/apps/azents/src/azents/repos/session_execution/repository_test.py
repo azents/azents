@@ -1,7 +1,7 @@
 """Canonical Session execution projection repository tests."""
 
 import datetime
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pytest
 from azcommon.result import Success
@@ -41,11 +41,18 @@ from azents.testing.model_selection import (
 from . import CanonicalExecutionSnapshotError, SessionExecutionRepository
 
 
+class _ExecutionSubject(NamedTuple):
+    """Field-named result for ``_create_execution_subject``."""
+
+    agent_session: RDBAgentSession
+    agent_id: str
+
+
 async def _create_execution_subject(
     session: AsyncSession,
     *,
     handle: str,
-) -> tuple[RDBAgentSession, str]:
+) -> _ExecutionSubject:
     """Create a complete active root Session authority fixture."""
     workspace_repository = WorkspaceRepository()
     result = await workspace_repository.create(
@@ -122,7 +129,10 @@ async def _create_execution_subject(
     assert agent_session is not None
     await AgentSessionRepository().mark_running(session, created.id)
     await session.refresh(agent_session)
-    return agent_session, agent.id
+    return _ExecutionSubject(
+        agent_session=agent_session,
+        agent_id=agent.id,
+    )
 
 
 async def _archive_with_scheduled_continuation(

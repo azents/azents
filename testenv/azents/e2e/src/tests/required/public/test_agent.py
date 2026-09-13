@@ -3,7 +3,7 @@
 Agent CRUD, admin permission, visibility t verifyt.
 """
 
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -51,6 +51,16 @@ from support.utils import (
     unique,
 )
 
+
+class _WorkspaceIntegrationFixture(NamedTuple):
+    """Field-named result for ``_setup_workspace_with_integration``."""
+
+    owner_token: str
+    workspace_handle: str
+    integration_id: str
+    model_selection: AgentModelSelectionInput
+
+
 # ---------------------------------------------------------------------------
 # Setup helpers
 # ---------------------------------------------------------------------------
@@ -59,7 +69,7 @@ from support.utils import (
 def _setup_workspace_with_integration(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
-) -> tuple[str, str, str, AgentModelSelectionInput]:
+) -> _WorkspaceIntegrationFixture:
     """workspace + LLM t create.
 
     :return: (owner_token, handle, integration_id, model_selection) t
@@ -98,7 +108,12 @@ def _setup_workspace_with_integration(
         integration.id,
     )
 
-    return owner_token, handle, integration.id, model_selection
+    return _WorkspaceIntegrationFixture(
+        owner_token=owner_token,
+        workspace_handle=handle,
+        integration_id=integration.id,
+        model_selection=model_selection,
+    )
 
 
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:

@@ -5,7 +5,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
@@ -106,6 +106,17 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+
+
+@runtime_checkable
+class _HasSqlstate(Protocol):
+    sqlstate: object
+
+
+def _dbapi_sqlstate(error: DBAPIError) -> str | None:
+    original = error.orig
+    state = original.sqlstate if isinstance(original, _HasSqlstate) else None
+    return state if isinstance(state, str) else None
 
 
 def _at(minute: int) -> datetime.datetime:
@@ -869,7 +880,7 @@ class TestExternalChannelRepository:
                     .where(RDBUser.id == user.id)
                     .values(access_disabled_at=_at(2))
                 )
-            assert getattr(raised.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(raised.value) == "55P03"
             await disabling.rollback()
             await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
             with pytest.raises(DBAPIError) as block_conflict:
@@ -884,7 +895,7 @@ class TestExternalChannelRepository:
                         removed_at=None,
                     ),
                 )
-            assert getattr(block_conflict.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(block_conflict.value) == "55P03"
             await disabling.rollback()
             await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
             with pytest.raises(DBAPIError) as grant_conflict:
@@ -892,7 +903,7 @@ class TestExternalChannelRepository:
                     disabling,
                     grant_id=grant.id,
                 )
-            assert getattr(grant_conflict.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(grant_conflict.value) == "55P03"
             await disabling.rollback()
             await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
             with pytest.raises(DBAPIError) as member_conflict:
@@ -902,7 +913,7 @@ class TestExternalChannelRepository:
                         RDBWorkspaceUser.user_id == user.id,
                     )
                 )
-            assert getattr(member_conflict.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(member_conflict.value) == "55P03"
             await disabling.rollback()
             await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
             with pytest.raises(DBAPIError) as link_conflict:
@@ -914,7 +925,7 @@ class TestExternalChannelRepository:
                     )
                     .values(revoked_at=_at(2))
                 )
-            assert getattr(link_conflict.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(link_conflict.value) == "55P03"
             await disabling.rollback()
             await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
             with pytest.raises(DBAPIError) as archive_conflict:
@@ -923,7 +934,7 @@ class TestExternalChannelRepository:
                     .where(RDBAgentSession.id == fixture.agent_session_id)
                     .values(status=AgentSessionStatus.ARCHIVED)
                 )
-            assert getattr(archive_conflict.value.orig, "sqlstate", None) == "55P03"
+            assert _dbapi_sqlstate(archive_conflict.value) == "55P03"
 
         opened = await repository.open_editor(
             actor=actor,

@@ -1,6 +1,7 @@
 """Agent Runtime removal repository tests."""
 
 import datetime
+from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -22,7 +23,14 @@ from . import AgentRuntimeRemovalRepository
 from .data import AgentRuntimeRemovalCreateResult
 
 
-async def _create_agent(session: AsyncSession) -> tuple[str, str]:
+class _AgentFixture(NamedTuple):
+    """Field-named result for ``_create_agent``."""
+
+    workspace_id: str
+    agent_id: str
+
+
+async def _create_agent(session: AsyncSession) -> _AgentFixture:
     """Create one Workspace and Agent for removal repository tests."""
     suffix = uuid4().hex[:8]
     workspace = RDBWorkspace(
@@ -45,7 +53,10 @@ async def _create_agent(session: AsyncSession) -> tuple[str, str]:
     )
     session.add(agent)
     await session.flush()
-    return workspace.id, agent.id
+    return _AgentFixture(
+        workspace_id=workspace.id,
+        agent_id=agent.id,
+    )
 
 
 async def test_create_claim_progress_complete_and_recreate(

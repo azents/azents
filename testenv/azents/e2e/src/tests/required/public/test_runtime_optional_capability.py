@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, Callable, NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -43,6 +43,14 @@ from support.utils import (
     single_candidate_model_options,
     unique,
 )
+
+
+class _InvitedMember(NamedTuple):
+    """Field-named result for ``_invite_member``."""
+
+    access_token: str
+    email: str
+
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
@@ -431,7 +439,7 @@ def _invite_member(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     workspace: _Workspace,
-) -> tuple[str, str]:
+) -> _InvitedMember:
     """Invite a second user and return their token and email."""
     member_token, _, member_email = authenticate_user(
         public_api_client,
@@ -447,7 +455,10 @@ def _invite_member(
         invitation.id,
         _headers=_headers(member_token),
     )
-    return member_token, member_email
+    return _InvitedMember(
+        access_token=member_token,
+        email=member_email,
+    )
 
 
 def _create_user_session(

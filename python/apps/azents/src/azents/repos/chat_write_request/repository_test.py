@@ -2,6 +2,7 @@
 
 import datetime
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Success
@@ -26,6 +27,15 @@ from azents.testing.model_selection import (
 
 from . import ChatWriteRequestRepository
 from .data import ChatWriteRequestCreate
+
+
+class _AgentSessionFixture(NamedTuple):
+    """Field-named result for ``_create_agent_session``."""
+
+    agent_session_id: str
+    user_id: str
+    agent_id: str
+    workspace_id: str
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -109,7 +119,7 @@ async def _create_agent_session(
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str, str, str]:
+) -> _AgentSessionFixture:
     """Create AgentSession fixture satisfying ChatWriteRequest FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
@@ -121,7 +131,12 @@ async def _create_agent_session(
             agent_id=agent_id,
         )
     ).session
-    return agent_session.id, user_id, agent_id, workspace_id
+    return _AgentSessionFixture(
+        agent_session_id=agent_session.id,
+        user_id=user_id,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
 
 
 def _create_payload(

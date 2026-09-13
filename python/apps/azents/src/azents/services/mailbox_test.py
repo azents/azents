@@ -6,6 +6,7 @@ import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -147,6 +148,27 @@ from .mailbox import (
 )
 
 
+class _MailboxFixture(NamedTuple):
+    """Field-named result for ``_create_fixture``."""
+
+    agent_session_id: str
+    user_id: str
+
+
+class _ChildSessionAgent(NamedTuple):
+    """Field-named result for ``_create_child_session_agent``."""
+
+    parent_session_id: str
+    child_session_id: str
+
+
+class _TerminalChildRun(NamedTuple):
+    """Field-named result for ``_create_terminal_child_run``."""
+
+    run_id: str
+    run_index: int
+
+
 @pytest.mark.parametrize(
     ("initial", "effects", "expected"),
     [
@@ -236,7 +258,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 async def _create_fixture(
     rdb_session_manager: SessionManager[AsyncSession],
     slug: str,
-) -> tuple[str, str]:
+) -> _MailboxFixture:
     """Create fixture satisfying MailboxItem FK."""
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, f"{slug}-ws")
@@ -262,7 +284,10 @@ async def _create_fixture(
                 agent_id=runtime.agent_id,
             )
         ).session
-        return agent_session.id, user.id
+        return _MailboxFixture(
+            agent_session_id=agent_session.id,
+            user_id=user.id,
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -572,7 +597,7 @@ async def _create_child_session_agent(
     *,
     parent_session_id: str,
     name: str = "reviewer",
-) -> tuple[str, str]:
+) -> _ChildSessionAgent:
     """Create a direct child and return parent and child SessionAgent IDs."""
     async with rdb_session_manager() as session:
         repository = AgentSessionRepository()
@@ -589,7 +614,10 @@ async def _create_child_session_agent(
             title=None,
             last_task_message=None,
         )
-    return parent.id, child.id
+    return _ChildSessionAgent(
+        parent_session_id=parent.id,
+        child_session_id=child.id,
+    )
 
 
 async def _create_terminal_child_run(
@@ -597,7 +625,7 @@ async def _create_terminal_child_run(
     *,
     child_session_agent_id: str,
     terminal_result_event_id: str,
-) -> tuple[str, int]:
+) -> _TerminalChildRun:
     """Create one completed Run owned by a child SessionAgent."""
     async with rdb_session_manager() as session:
         session_repository = AgentSessionRepository()
@@ -621,7 +649,10 @@ async def _create_terminal_child_run(
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message="Completed child result",
         )
-    return completed.id, completed.run_index
+    return _TerminalChildRun(
+        run_id=completed.id,
+        run_index=completed.run_index,
+    )
 
 
 class _VfsService:

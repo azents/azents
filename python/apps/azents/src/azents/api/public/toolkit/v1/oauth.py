@@ -6,7 +6,7 @@ Provides toolkit-level OAuth2 connection endpoints and connection test endpoints
 import json
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, assert_never, cast
+from typing import Annotated, Any, NamedTuple, assert_never, cast
 
 import httpx
 from azcommon.result import Result
@@ -79,6 +79,14 @@ from azents.services.toolkit.data import (
     AgentToolkitOAuthContext,
     ToolkitOutput,
 )
+
+
+class _OAuthClientCredentials(NamedTuple):
+    """Field-named result for ``_extract_oauth_client_credentials``."""
+
+    client_id: str
+    client_secret: str | None
+
 
 logger = logging.getLogger(__name__)
 
@@ -1154,7 +1162,7 @@ def _resolve_mcp_config(
 
 def _extract_oauth_client_credentials(
     credentials_json: str | None,
-) -> tuple[str, str | None] | None:
+) -> _OAuthClientCredentials | None:
     """Extract OAuth client credentials from encrypted Toolkit credentials JSON."""
     if credentials_json is None:
         return None
@@ -1162,7 +1170,10 @@ def _extract_oauth_client_credentials(
         secrets = _oauth_secrets_adapter.validate_json(credentials_json)
     except ValidationError:
         return None
-    return (secrets.client_id, secrets.client_secret)
+    return _OAuthClientCredentials(
+        client_id=secrets.client_id,
+        client_secret=secrets.client_secret,
+    )
 
 
 async def _discover_required_metadata(

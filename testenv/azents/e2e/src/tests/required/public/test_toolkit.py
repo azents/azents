@@ -3,7 +3,7 @@
 Toolkit CRUD, Scope t, Agent t/t t verifyt.
 """
 
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -61,6 +61,23 @@ from support.utils import (
     unique,
 )
 
+
+class _WorkspaceFixture(NamedTuple):
+    """Field-named result for ``_setup_workspace``."""
+
+    owner_token: str
+    workspace_handle: str
+    integration_id: str
+    model_selection: AgentModelSelectionInput
+
+
+class _AddedWorkspaceUser(NamedTuple):
+    """Field-named result for ``_add_workspace_user``."""
+
+    access_token: str
+    workspace_user_id: str
+
+
 # ---------------------------------------------------------------------------
 # Setup helpers
 # ---------------------------------------------------------------------------
@@ -69,7 +86,7 @@ from support.utils import (
 def _setup_workspace(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
-) -> tuple[str, str, str, AgentModelSelectionInput]:
+) -> _WorkspaceFixture:
     """workspace + LLM Integration create.
 
     :return: (owner_token, handle, integration_id, model_selection) t
@@ -105,7 +122,12 @@ def _setup_workspace(
         integration.id,
     )
 
-    return owner_token, handle, integration.id, model_selection
+    return _WorkspaceFixture(
+        owner_token=owner_token,
+        workspace_handle=handle,
+        integration_id=integration.id,
+        model_selection=model_selection,
+    )
 
 
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
@@ -139,7 +161,7 @@ def _add_workspace_user(
     owner_token: str,
     handle: str,
     role: WorkspaceUserRole,
-) -> tuple[str, str]:
+) -> _AddedWorkspaceUser:
     """Invite one Workspace user and return token plus WorkspaceUser ID."""
     uniq = unique()
     email = f"workspace-user-{uniq}@example.com"
@@ -162,7 +184,10 @@ def _add_workspace_user(
         handle=handle,
         _headers={"Authorization": f"Bearer {token}"},
     )
-    return token, member.workspace_user_id
+    return _AddedWorkspaceUser(
+        access_token=token,
+        workspace_user_id=member.workspace_user_id,
+    )
 
 
 def _create_toolkit(

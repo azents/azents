@@ -1,6 +1,7 @@
 """MailboxRepository tests."""
 
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,6 +36,14 @@ from azents.testing.model_selection import (
 
 from . import MailboxRepository
 from .data import MailboxItemCreate
+
+
+class _AgentSessionFixture(NamedTuple):
+    """Field-named result for ``_create_agent_session``."""
+
+    agent_session_id: str
+    user_id: str
+    workspace_id: str
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -110,7 +119,7 @@ async def _create_agent_session(
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str, str]:
+) -> _AgentSessionFixture:
     """Create AgentSession fixture satisfying MailboxItem FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
@@ -130,7 +139,11 @@ async def _create_agent_session(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
         )
     ).session
-    return agent_session.id, user_id, workspace_id
+    return _AgentSessionFixture(
+        agent_session_id=agent_session.id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
 
 
 def _create_payload(

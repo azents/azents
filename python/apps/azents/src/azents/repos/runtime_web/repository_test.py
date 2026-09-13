@@ -1,6 +1,7 @@
 """Runtime Web durable authority repository tests."""
 
 import asyncio
+from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
@@ -41,12 +42,21 @@ from azents.testing.model_selection import (
 )
 
 
+class _RuntimeWebAuthorityFixture(NamedTuple):
+    """Field-named result for ``_authority_fixture``."""
+
+    workspace_id: str
+    agent_id: str
+    agent_session_id: str
+    user_id: str
+
+
 async def _authority_fixture(
     session: AsyncSession,
     *,
     handle: str = "runtime-web",
     email: str = "runtime-web@example.com",
-) -> tuple[str, str, str, str]:
+) -> _RuntimeWebAuthorityFixture:
     workspace_result = await WorkspaceRepository().create(
         session,
         WorkspaceCreate(name="Runtime Web", handle=handle),
@@ -101,7 +111,12 @@ async def _authority_fixture(
     assert configuration is not None
     configuration.enabled = True
     await session.flush()
-    return workspace_id, agent.id, agent_session.id, user.id
+    return _RuntimeWebAuthorityFixture(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        agent_session_id=agent_session.id,
+        user_id=user.id,
+    )
 
 
 def _operation(key: str, *, actor_id: str = "agent-id") -> RuntimeWebOperationIdentity:

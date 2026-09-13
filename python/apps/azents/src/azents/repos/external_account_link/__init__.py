@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Awaitable, Callable
-from typing import Annotated, NamedTuple, TypeVar
+from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 from urllib.parse import quote
 
 import sqlalchemy as sa
@@ -68,6 +68,11 @@ _RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 _MAX_TRANSACTION_ATTEMPTS = 3
 _LOCK_TIMEOUT = "2s"
 _MANAGEMENT_PATH = "/account/external-accounts"
+
+
+@runtime_checkable
+class _HasSqlstate(Protocol):
+    sqlstate: object
 
 
 class _ValidatedExternalAccountActor(NamedTuple):
@@ -1036,9 +1041,11 @@ def _is_retryable(error: DBAPIError) -> bool:
 
 def _sqlstate(error: DBAPIError) -> str | None:
     original = error.orig
-    state = getattr(original, "sqlstate", None)
+    if original is None:
+        return None
+    state = original.sqlstate if isinstance(original, _HasSqlstate) else None
     if isinstance(state, str):
         return state
-    cause = getattr(original, "__cause__", None)
-    state = getattr(cause, "sqlstate", None)
+    cause = original.__cause__
+    state = cause.sqlstate if isinstance(cause, _HasSqlstate) else None
     return state if isinstance(state, str) else None
