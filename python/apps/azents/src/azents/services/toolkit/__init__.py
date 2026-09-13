@@ -48,6 +48,7 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
+from azents.services.toolkit.credential_edits import merge_kubernetes_credentials
 
 from .data import (
     AgentNotBelongToWorkspace,
@@ -301,6 +302,13 @@ class ToolkitService:
                         normalized_credentials,
                         config,
                     )
+                elif existing.toolkit_type == ToolkitType.KUBERNETES:
+                    config = update["config"] if "config" in update else existing.config
+                    normalized_credentials = merge_kubernetes_credentials(
+                        existing.credentials,
+                        normalized_credentials,
+                        config,
+                    )
                 credential_error = self._validate_credentials(
                     existing.toolkit_type,
                     normalized_credentials,
@@ -323,6 +331,22 @@ class ToolkitService:
                 {"values": {}},
                 update["config"],
             )
+        elif (
+            existing.toolkit_type == ToolkitType.KUBERNETES
+            and "config" in update
+            and existing.credentials is not None
+        ):
+            normalized_credentials = merge_kubernetes_credentials(
+                existing.credentials,
+                None,
+                update["config"],
+            )
+            provider_error = await self._validate_provider_credentials(
+                existing.toolkit_type,
+                normalized_credentials,
+            )
+            if provider_error is not None:
+                return Failure(provider_error)
 
         repo_update = self._build_repo_update(
             update,
@@ -1154,6 +1178,13 @@ class ToolkitService:
                         normalized_credentials,
                         config,
                     )
+                elif existing.toolkit_type == ToolkitType.KUBERNETES:
+                    config = update["config"] if "config" in update else existing.config
+                    normalized_credentials = merge_kubernetes_credentials(
+                        existing.credentials,
+                        normalized_credentials,
+                        config,
+                    )
                 credential_error = self._validate_credentials(
                     existing.toolkit_type,
                     normalized_credentials,
@@ -1176,6 +1207,22 @@ class ToolkitService:
                 {"values": {}},
                 update["config"],
             )
+        elif (
+            existing.toolkit_type == ToolkitType.KUBERNETES
+            and "config" in update
+            and existing.credentials is not None
+        ):
+            normalized_credentials = merge_kubernetes_credentials(
+                existing.credentials,
+                None,
+                update["config"],
+            )
+            provider_error = await self._validate_provider_credentials(
+                existing.toolkit_type,
+                normalized_credentials,
+            )
+            if provider_error is not None:
+                return Failure(provider_error)
 
         repo_update = ToolkitUpdate()
         if "slug" in update:

@@ -1,4 +1,4 @@
-import { Box, Text } from "@mantine/core";
+import { Box, rem, Text } from "@mantine/core";
 import { IconFolder } from "@tabler/icons-react";
 import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
@@ -68,5 +68,27 @@ export const LongLabels = {
       label: `Session ${id} information`,
       icon: <IconFolder size="1rem" />,
     })),
+  },
+} satisfies Story;
+
+export const ScrollableContent = {
+  args: {
+    mobile: true,
+    children: (
+      <Box data-testid="scroll-owner" style={{ overflowY: "auto" }} p="md">
+        <Box h={rem(1600)}>
+          <Text>Long session panel content</Text>
+        </Box>
+      </Box>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const scrollOwner = canvas.getByTestId("scroll-owner");
+    await expect(scrollOwner.scrollHeight).toBeGreaterThan(
+      scrollOwner.clientHeight,
+    );
+    scrollOwner.scrollTop = 160;
+    await expect(scrollOwner.scrollTop).toBeGreaterThan(0);
   },
 } satisfies Story;

@@ -43,6 +43,7 @@ import {
   toolkitV1UpdateToolkitConfig,
 } from "@azents/public-client";
 import { z } from "zod/v4";
+import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { TOOLKIT_SLUG_REGEX } from "@/shared/lib/toolkit-slug";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
@@ -672,7 +673,7 @@ export const toolkitRouter = router({
         const body = {
           toolkit_type: input.toolkitType,
           config: input.config,
-          credentials: input.credentials,
+          credentials: normalizeCredentialEdits(input.credentials),
           toolkit_config_id: input.toolkitConfigId,
         };
         const { data } =

@@ -17,6 +17,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import {
   getArray,
   getString,
@@ -133,29 +134,6 @@ function getMcpAuthType(value: unknown): (typeof MCP_AUTH_TYPES)[number] {
 
 function getGithubAuthType(value: unknown): (typeof GITHUB_AUTH_TYPES)[number] {
   return isOneOf(value, GITHUB_AUTH_TYPES) ? value : "pat";
-}
-
-/**
- * Return null when all secret values in credentials dict are empty.
- * Used to keep existing credentials in edit mode.
- */
-function normalizeCredentials(
-  credentials: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  if (credentials == null) {
-    return null;
-  }
-
-  const secretEntries = Object.entries(credentials).filter(
-    ([key]) => key !== "type",
-  );
-  if (secretEntries.length === 0) {
-    return null;
-  }
-  const allEmpty = secretEntries.every(
-    ([, value]) => value === "" || value == null,
-  );
-  return allEmpty ? null : credentials;
 }
 
 export function useToolkitFormContainer(
@@ -419,7 +397,7 @@ export function useToolkitFormContainer(
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
       setMutationState({ type: "SUBMITTING" });
-      const credentials = normalizeCredentials(values.credentials ?? null);
+      const credentials = normalizeCredentialEdits(values.credentials ?? null);
 
       if (agentId) {
         if (isEditMode && toolkitId) {

@@ -276,6 +276,17 @@ export function KubernetesConfigFields({
 
   // Derived state
   const clusters = useMemo(() => getClusters(config), [config]);
+  const [storedClusterAuthTypes] = useState(
+    () =>
+      new Map(
+        getClusters(config)
+          .filter((cluster) => cluster.name !== "")
+          .map((cluster): [string, ClusterAuthType] => [
+            cluster.name,
+            cluster.auth_type,
+          ]),
+      ),
+  );
   const clusterCredentials = useMemo(
     () => getClusterCredentials(credentials),
     [credentials],
@@ -566,9 +577,12 @@ export function KubernetesConfigFields({
               {/* Fields by auth type */}
               {(() => {
                 // When existing credentials are stored on server and user has not selected replacement yet
-                const credsSaved =
+                const canKeepStoredCredentials =
                   hasCredentials &&
-                  !!cluster.name &&
+                  storedClusterAuthTypes.get(cluster.name) ===
+                    cluster.auth_type;
+                const credsSaved =
+                  canKeepStoredCredentials &&
                   !(cluster.name in clusterCredentials) &&
                   !replacingCreds.has(cluster.name);
                 const handleReplace = (): void => {
@@ -612,7 +626,7 @@ export function KubernetesConfigFields({
                             label="Kubeconfig YAML"
                             description="Paste full contents of kubeconfig file"
                             placeholder="apiVersion: v1&#10;kind: Config&#10;..."
-                            required
+                            required={!canKeepStoredCredentials}
                             minRows={6}
                             maxRows={12}
                             autosize
@@ -685,7 +699,7 @@ export function KubernetesConfigFields({
                             label="Service Account Token"
                             description="Bearer token of Kubernetes Service Account"
                             placeholder="eyJhbGciOiJS..."
-                            required
+                            required={!canKeepStoredCredentials}
                             value={
                               clusterCredentials[cluster.name]?.token ?? ""
                             }
@@ -746,7 +760,7 @@ export function KubernetesConfigFields({
                           <TextInput
                             label="Access Key ID"
                             placeholder="AKIA..."
-                            required
+                            required={!canKeepStoredCredentials}
                             value={
                               clusterCredentials[cluster.name]
                                 ?.aws_access_key_id ?? ""
@@ -761,7 +775,7 @@ export function KubernetesConfigFields({
                           <PasswordInput
                             label="Secret Access Key"
                             placeholder="Enter secret access key"
-                            required
+                            required={!canKeepStoredCredentials}
                             value={
                               clusterCredentials[cluster.name]
                                 ?.aws_secret_access_key ?? ""
@@ -844,7 +858,7 @@ export function KubernetesConfigFields({
                         label="Service Account Key JSON"
                         description="Paste full GCP Service Account Key JSON"
                         placeholder='{"type": "service_account", "project_id": "...", ...}'
-                        required
+                        required={!canKeepStoredCredentials}
                         minRows={4}
                         maxRows={8}
                         autosize

@@ -70,8 +70,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-12
-spec_version: 114
+last_verified_at: 2026-09-13
+spec_version: 115
 ---
 
 # Toolkit
@@ -145,6 +145,16 @@ erDiagram
   `envvar` is a generic environment variable injection toolkit. Long-lived API tokens (Notion / OpenAI / Sentry, etc.) can be stored and injected as child process env during agent shell execution. It implements `Toolkit.expose_env()` protocol. Unlike MCP-based toolkit, credentials are exposed inside Runtime. See [sandbox-credential-injection design (archived)](../../design/sandbox-260421-sandbox-credential-injection-2026.md).
 
   When an existing `envvar` Toolkit is edited, non-empty submitted values replace only their matching stored values. Empty submitted values preserve the stored value, while values whose names are removed from `config.entries` are removed from encrypted credentials. This lets the redacted edit form preserve values that a manager leaves blank while retaining explicit entry deletion semantics.
+
+  Redacted Toolkit edit and unsaved Connection test forms omit credential
+  placeholders that contain no secret value. Stored credentials remain authoritative
+  for blank fields. Kubernetes applies this rule per configured cluster: non-empty
+  replacement fields merge into the matching stored cluster credential, untouched
+  clusters retain their stored credentials, clusters removed from `config.clusters`
+  lose their credentials, and an authentication-method change cannot reuse secrets
+  from the previous method. Connection tests use the same merge before provider
+  validation. AWS, GCP, and Google Analytics edit forms allow Connection test with
+  stored credentials even though the browser only receives `has_credentials`.
 
   `github` toolkit has `inject_runtime_environment: bool` config option. When enabled, token resolved at runtime is exposed to Runtime Runner environment variables. PAT credentials expose `GH_TOKEN` and `GITHUB_TOKEN`. GitHub App credentials store `installations[]` targets with installation ID and account login metadata. For a single GitHub App installation, Runtime also exposes `GH_TOKEN` and `GITHUB_TOKEN`; for multiple installations, Runtime exposes `GITHUB_INSTALLATION_MAP` plus `GITHUB_TOKEN_INSTALLATION_<installation_id>` variables. The git credential helper installed in agent-runtime image (`/usr/local/bin/azents-git-credential`) reads the repository owner from Git credential protocol input and chooses the matching installation token. GitHub CLI commands are not wrapped; agents must explicitly select the desired installation token at command time, for example `GH_TOKEN=$GITHUB_TOKEN_INSTALLATION_<installation_id> gh ...`. Token TTL cache defaults to 55 minutes. See [github-toolkit-shell-env design](../../design/github-260424-github-toolkit-shell-env-2026.md) and [github-toolkit-multi-installation design](../../design/github-260621-github-toolkit-multi-installation.md).
 - `ToolkitScopeType` — `workspace` StrEnum. ([`core/enums.py`](../../../../python/apps/azents/src/azents/core/enums.py))
@@ -992,6 +1002,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 115) — Made blank redacted credential edits and
+  Connection tests reuse stored values, including config-aware Kubernetes
+  per-cluster merge and removal semantics.
 - **2026-09-12** (spec_version 114) — Bound Session Toolkit lifecycle,
   background snapshots, and state mutations to the durable execution owner before
   Toolkit entry, while allowing Run-specific authority refresh within one owner.

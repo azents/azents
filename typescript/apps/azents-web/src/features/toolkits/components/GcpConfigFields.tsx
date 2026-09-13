@@ -510,7 +510,7 @@ export function GcpConfigFields({
           leftSection={<IconPlugConnected size={16} />}
           onClick={handleTestConnection}
           loading={testConnectionMutation.isPending}
-          disabled={!projectId || !credentials}
+          disabled={!projectId || (!credentials && !hasCredentials)}
         >
           Test Connection
         </Button>
