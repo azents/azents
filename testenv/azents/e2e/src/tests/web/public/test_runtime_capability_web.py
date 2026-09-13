@@ -39,6 +39,7 @@ from azentspublicclient.models.runtime_system_metrics_summary import (
     RuntimeSystemMetricsSummary,
 )
 from azentspublicclient.models.secrets import Secrets
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -76,7 +77,11 @@ def _headers(token: str) -> dict[str, str]:
 
 def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
     """Return the bounded browser wait used by this surface."""
-    return WebDriverWait(driver, 20)
+    return WebDriverWait(
+        driver,
+        20,
+        ignored_exceptions=(StaleElementReferenceException,),
+    )
 
 
 def _login_main_web(
