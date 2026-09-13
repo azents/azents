@@ -37,6 +37,16 @@ from azents_runtime_control.runner_web import (
 _LOGGER = logging.getLogger(__name__)
 _DEFAULT_PENDING_BYTES = 256 * 1024
 _MAX_PENDING_CONTROL_FRAMES = _DEFAULT_PENDING_BYTES // MAX_RUNTIME_WEB_FRAME_BYTES
+_WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
+    {
+        "connection",
+        "upgrade",
+        "sec-websocket-accept",
+        "sec-websocket-extensions",
+        "sec-websocket-key",
+        "sec-websocket-version",
+    }
+)
 
 
 def _new_http_session() -> aiohttp.ClientSession:
@@ -295,8 +305,10 @@ class RunnerWebTransportManager:
             raise ValueError("Runtime WebSocket target must be origin-form")
         url = f"http://127.0.0.1:{tunnel.identity.port}{target}"
         headers = [
-            (header.name.decode("ascii"), header.value.decode("latin-1"))
+            (name, header.value.decode("latin-1"))
             for header in head.headers
+            if (name := header.name.decode("ascii")).lower()
+            not in _WEBSOCKET_HANDSHAKE_HEADERS
         ]
         timeout = aiohttp.ClientWSTimeout(
             ws_receive=self._remaining(  # ty: ignore[unknown-argument]

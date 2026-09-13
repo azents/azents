@@ -1,8 +1,11 @@
 """Independent aiohttp Runtime Web Gateway process."""
 
 import asyncio
+import base64
 import contextlib
 import datetime
+import hashlib
+import hmac
 import html
 import logging
 import signal
@@ -70,6 +73,7 @@ from azents.runtime_web_gateway.policy import (
     parse_target_host,
     reject_service_worker_request,
     require_admitted_browser,
+    require_supported_browser_user_agent,
 )
 from azents.runtime_web_gateway.settings import (
     RuntimeWebGatewayConfig,
@@ -89,6 +93,7 @@ from azents.services.runtime_web.gateway_authority import (
 
 _LOGGER = logging.getLogger(__name__)
 _BROKER_BINDING_COOKIE = "__Host-Azents-Runtime-Web-Broker-Binding"
+_BROWSER_PROOF_COOKIE = "__Http-Azents-Runtime-Web-Browser-Proof"
 _SECURITY_CSP = (
     "default-src 'none'; base-uri 'none'; form-action 'self'; "
     "frame-ancestors 'none'; script-src 'nonce-runtime-web'"
@@ -521,13 +526,25 @@ async def _endpoint(
             status=204,
             headers=(dict(decision.headers) | _security_headers(state.config)),
         )
-    browser_profile = require_admitted_browser(
-        request.headers,
-        config=state.config,
-    )
     identity_secret = _exact_cookie(
         request,
         state.config.identity_cookie_name,
+    )
+    protocol = (
+        RunnerWebProtocol.WEBSOCKET
+        if request.headers.get("Upgrade", "").lower() == "websocket"
+        else RunnerWebProtocol.HTTP
+    )
+    browser_profile = (
+        _require_websocket_browser_profile(
+            request.headers,
+            identity_secret=identity_secret,
+            browser_proof=_exact_cookie(request, _BROWSER_PROOF_COOKIE),
+            endpoint_key=endpoint_key,
+            config=state.config,
+        )
+        if protocol is RunnerWebProtocol.WEBSOCKET and identity_secret is not None
+        else require_admitted_browser(request.headers, config=state.config)
     )
     navigation = _safe_navigation(request)
     if identity_secret is None:
@@ -539,11 +556,6 @@ async def _endpoint(
             status=401,
             code="unauthenticated",
         )
-    protocol = (
-        RunnerWebProtocol.WEBSOCKET
-        if request.headers.get("Upgrade", "").lower() == "websocket"
-        else RunnerWebProtocol.HTTP
-    )
     try:
         authority = await state.authority.authorize(
             hostname_key=endpoint_key,
@@ -636,6 +648,11 @@ async def _endpoint(
             cors=cors,
             target_origin=target_origin,
             authority=authority,
+            browser_proof=_browser_proof(
+                identity_secret=identity_secret,
+                endpoint_key=endpoint_key,
+                browser_profile=browser_profile,
+            ),
         )
     finally:
         await state.authority.release_admission(tunnel_id=identity.tunnel_id)
@@ -649,6 +666,7 @@ async def _proxy_http(
     cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
+    browser_proof: str,
 ) -> web.StreamResponse:
     session = state.proxy.open()
     response: web.StreamResponse | None = None
@@ -679,6 +697,15 @@ async def _proxy_http(
                         target_origin=target_origin,
                         port=head.identity.port,
                     ),
+                )
+                response.set_cookie(
+                    _BROWSER_PROOF_COOKIE,
+                    browser_proof,
+                    secure=True,
+                    httponly=True,
+                    samesite="Strict",
+                    path="/",
+                    max_age=state.config.identity_lifetime_seconds,
                 )
                 await response.prepare(request)
                 continue
@@ -952,6 +979,43 @@ def _require_broker_request(
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
     if not _public_request_secure(request, state.settings):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
+
+
+def _browser_proof(
+    *,
+    identity_secret: str,
+    endpoint_key: str,
+    browser_profile: str,
+) -> str:
+    material = f"runtime-web-browser-proof-v1\0{endpoint_key}\0{browser_profile}"
+    digest = hmac.new(
+        identity_secret.encode(),
+        material.encode(),
+        hashlib.sha256,
+    ).digest()
+    encoded = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+    return f"{browser_profile}.{encoded}"
+
+
+def _require_websocket_browser_profile(
+    headers: Mapping[str, str],
+    *,
+    identity_secret: str,
+    browser_proof: str | None,
+    endpoint_key: str,
+    config: RuntimeWebGatewayConfig,
+) -> str:
+    if headers.get("Sec-CH-UA") is not None:
+        return require_admitted_browser(headers, config=config)
+    browser_profile = require_supported_browser_user_agent(headers, config=config)
+    expected = _browser_proof(
+        identity_secret=identity_secret,
+        endpoint_key=endpoint_key,
+        browser_profile=browser_profile,
+    )
+    if browser_proof is None or not hmac.compare_digest(browser_proof, expected):
+        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
+    return browser_profile
 
 
 def _exact_cookie(request: web.Request, name: str) -> str | None:

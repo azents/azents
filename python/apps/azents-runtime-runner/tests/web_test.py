@@ -211,7 +211,16 @@ async def test_websocket_transport_streams_messages_in_both_directions() -> None
                 protocol=RunnerWebProtocol.WEBSOCKET,
                 method=b"GET",
                 target=b"/socket",
-                headers=(),
+                headers=(
+                    RunnerWebHeader(b"connection", b"Upgrade"),
+                    RunnerWebHeader(b"upgrade", b"websocket"),
+                    RunnerWebHeader(b"sec-websocket-key", b"browser-key"),
+                    RunnerWebHeader(b"sec-websocket-version", b"13"),
+                    RunnerWebHeader(
+                        b"sec-websocket-extensions",
+                        b"permessage-deflate; client_max_window_bits",
+                    ),
+                ),
             ),
             RunnerWebSocketFrame(
                 sequence=1,

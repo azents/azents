@@ -1075,7 +1075,8 @@ const done = arguments[arguments.length - 1];
   const echoBody = await echo.json();
   const events = await fetch('/events');
   const eventsBody = await events.text();
-  const redirected = await fetch('/redirect', {redirect: 'manual'});
+  const redirected = await fetch('/redirect');
+  const redirectedBody = await redirected.text();
   const large = await fetch('/large');
   const reader = large.body.getReader();
   let bytes = 0;
@@ -1090,7 +1091,15 @@ const done = arguments[arguments.length - 1];
     socket.onmessage = event => resolve(event.data);
     socket.onerror = () => reject(new Error('websocket failed'));
   });
-  done({echoBody, eventsBody, redirectStatus: redirected.status, bytes, websocket});
+  done({
+    echoBody,
+    eventsBody,
+    redirectStatus: redirected.status,
+    redirectedBody,
+    redirectedUrl: redirected.url,
+    bytes,
+    websocket,
+  });
 })().catch(error => done({error: String(error)}));
 """
     )
@@ -1170,7 +1179,11 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 "method": "POST",
             }
             assert evidence["eventsBody"] == "data: runtime-web-e2e\n\n"
-            assert evidence["redirectStatus"] == 302
+            assert evidence["redirectStatus"] == 200
+            assert evidence["redirectedUrl"] == endpoint_url
+            redirected_body = evidence["redirectedBody"]
+            assert isinstance(redirected_body, str)
+            assert "Runtime Web E2E ready" in redirected_body
             assert evidence["bytes"] == 1025 * 65_536
             assert evidence["websocket"] == "echo:runtime-web-socket"
             assert driver.current_url == endpoint_url
@@ -1266,7 +1279,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             timeout=10,
             allow_redirects=False,
         )
-        assert unauthenticated.status_code == 403
+        assert unauthenticated.status_code == 426
 
         listed = api.runtime_web_v1_list_runtime_web_services(
             handle=workspace.handle,

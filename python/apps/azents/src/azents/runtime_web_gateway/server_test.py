@@ -19,7 +19,10 @@ from azents.repos.runtime_web.gateway_data import (
     RuntimeWebGatewayAuthority,
     RuntimeWebRedeemedIdentity,
 )
+from azents.runtime_web_gateway.policy import RuntimeWebPolicyError
 from azents.runtime_web_gateway.server import (
+    _browser_proof,
+    _require_websocket_browser_profile,
     create_runtime_web_gateway_application,
 )
 from azents.runtime_web_gateway.settings import (
@@ -203,6 +206,38 @@ async def _client(proxy: _Proxy) -> TestClient:
     client = TestClient(TestServer(application))
     await client.start_server()
     return client
+
+
+def test_websocket_browser_proof_binds_prior_admission_to_endpoint() -> None:
+    """A host-only proof replaces the client hint omitted by WebSocket handshakes."""
+    identity_secret = "identity-secret"
+    headers = {
+        "User-Agent": "Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36",
+    }
+    proof = _browser_proof(
+        identity_secret=identity_secret,
+        endpoint_key="endpoint",
+        browser_profile="chromium-152",
+    )
+
+    assert (
+        _require_websocket_browser_profile(
+            headers,
+            identity_secret=identity_secret,
+            browser_proof=proof,
+            endpoint_key="endpoint",
+            config=_CONFIG,
+        )
+        == "chromium-152"
+    )
+    with pytest.raises(RuntimeWebPolicyError, match="upgrade_required"):
+        _require_websocket_browser_profile(
+            headers,
+            identity_secret=identity_secret,
+            browser_proof=proof,
+            endpoint_key="other-endpoint",
+            config=_CONFIG,
+        )
 
 
 async def test_valid_same_root_preflight_is_local_and_credentialed() -> None:

@@ -18,6 +18,10 @@ _FORBIDDEN_REQUEST_HEADERS = frozenset(
         b"keep-alive",
         b"proxy-authenticate",
         b"proxy-authorization",
+        b"sec-websocket-accept",
+        b"sec-websocket-extensions",
+        b"sec-websocket-key",
+        b"sec-websocket-version",
         b"te",
         b"trailer",
         b"transfer-encoding",
@@ -36,6 +40,10 @@ _FORBIDDEN_RESPONSE_HEADERS = frozenset(
         b"keep-alive",
         b"proxy-authenticate",
         b"proxy-authorization",
+        b"sec-websocket-accept",
+        b"sec-websocket-extensions",
+        b"sec-websocket-key",
+        b"sec-websocket-version",
         b"te",
         b"trailer",
         b"transfer-encoding",
@@ -143,6 +151,26 @@ def reject_service_worker_request(headers: Mapping[str, str]) -> None:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
 
 
+def require_supported_browser_user_agent(
+    headers: Mapping[str, str],
+    *,
+    config: RuntimeWebGatewayConfig,
+) -> str:
+    """Resolve the configured Chromium profile from its User-Agent version."""
+    user_agent = headers.get("User-Agent")
+    match = (
+        None
+        if user_agent is None
+        else re.search(r"(?:Chrome|Chromium)/([0-9]+)", user_agent)
+    )
+    if match is None:
+        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
+    version = int(match.group(1))
+    if not config.chromium_min_version <= version <= config.chromium_max_version:
+        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
+    return f"chromium-{version}"
+
+
 def require_admitted_browser(
     headers: Mapping[str, str],
     *,
@@ -163,20 +191,15 @@ def require_admitted_browser(
     ):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
     match = _CHROMIUM_BRAND.search(sec_ch_ua)
-    user_agent_match = re.search(r"(?:Chrome|Chromium)/([0-9]+)", user_agent)
-    if match is None or user_agent_match is None:
+    if match is None:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
+    browser_profile = require_supported_browser_user_agent(headers, config=config)
     client_hint_version = int(match.group("version"))
-    user_agent_version = int(user_agent_match.group(1))
-    if client_hint_version != user_agent_version or not (
-        config.chromium_min_version
-        <= client_hint_version
-        <= config.chromium_max_version
-    ):
+    if browser_profile != f"chromium-{client_hint_version}":
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.UPGRADE_REQUIRED)
     if fetch_site not in {"same-origin", "same-site", "cross-site", "none"}:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    return f"chromium-{client_hint_version}"
+    return browser_profile
 
 
 def evaluate_actual_origin(
