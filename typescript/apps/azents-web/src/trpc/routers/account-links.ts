@@ -2,9 +2,11 @@ import {
   externalChannelV1CancelAccountLinkCandidate,
   externalChannelV1ConfirmAccountLinkCandidate,
   externalChannelV1CreateAccountLinkCandidate,
+  externalChannelV1ExchangeAccountLinkOauth,
   externalChannelV1GetAccountLinkCandidate,
   externalChannelV1GetAccountLinkOrigin,
   externalChannelV1ListAccountLinks,
+  externalChannelV1StartAccountLinkOauth,
   externalChannelV1UnlinkAccountLink,
 } from "@azents/public-client";
 import { z } from "zod/v4";
@@ -41,6 +43,45 @@ export const accountLinksRouter = router({
       throw unexpectedAccountLinkError(error);
     }
   }),
+
+  startOauth: publicProcedure
+    .input(z.object({ provider: z.enum(["slack", "discord"]) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        markPrivateNoStore(ctx.resHeaders);
+        const { data } = await externalChannelV1StartAccountLinkOauth({
+          client: ctx.apiClient,
+          path: { provider: input.provider },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw unexpectedAccountLinkError(error);
+      }
+    }),
+
+  exchangeOauth: publicProcedure
+    .input(
+      z.object({
+        provider: z.enum(["slack", "discord"]),
+        code: z.string().min(1).max(2048),
+        state: z.string().min(1).max(512),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        markPrivateNoStore(ctx.resHeaders);
+        const { data } = await externalChannelV1ExchangeAccountLinkOauth({
+          client: ctx.apiClient,
+          path: { provider: input.provider },
+          body: { code: input.code, state: input.state },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw unexpectedAccountLinkError(error);
+      }
+    }),
 
   unlink: publicProcedure
     .input(z.object({ linkId: z.string().min(1) }))

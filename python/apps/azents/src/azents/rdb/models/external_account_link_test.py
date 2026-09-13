@@ -12,7 +12,7 @@ def test_link_model_has_active_partial_uniqueness_and_safe_labels() -> None:
     columns = set(RDBExternalAccountLink.__table__.columns.keys())
     assert columns == {
         "id",
-        "workspace_id",
+        "legacy_workspace_id",
         "user_id",
         "provider",
         "identity_scope",
@@ -21,14 +21,11 @@ def test_link_model_has_active_partial_uniqueness_and_safe_labels() -> None:
         "provider_display_label",
         "linked_at",
         "revoked_at",
+        "revocation_reason",
     }
-    indexes = (
-        RDBExternalAccountLink.UQ_ACTIVE_EXTERNAL_IDENTITY,
-        RDBExternalAccountLink.UQ_ACTIVE_USER_PROVIDER_SCOPE,
-    )
+    indexes = (RDBExternalAccountLink.UQ_ACTIVE_EXTERNAL_IDENTITY,)
     assert {index.name for index in indexes} == {
         "uq_external_account_links_active_external_identity",
-        "uq_external_account_links_active_user_provider_scope",
     }
     assert all(
         str(index.dialect_options["postgresql"]["where"]) == "revoked_at IS NULL"

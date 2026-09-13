@@ -112,6 +112,47 @@ class ExternalAccountOAuthAttemptService:
             now=current,
         )
 
+    async def classify_claim_failure(
+        self,
+        *,
+        state: str,
+        user_id: str,
+        auth_session_id: str,
+        provider: ExternalChannelProvider,
+        setting_generation: str,
+        redirect_uri: str,
+        now: datetime.datetime | None = None,
+    ) -> str:
+        """Classify one rejected callback with a sanitized stable code."""
+        current = now or tznow()
+        try:
+            state_hash = hashlib.sha256(state.encode("ascii")).hexdigest()
+        except UnicodeEncodeError:
+            return "invalid_attempt"
+        return await self.repository.classify_claim_failure(
+            state_hash=state_hash,
+            user_id=user_id,
+            auth_session_id=auth_session_id,
+            provider=provider,
+            setting_generation=setting_generation,
+            redirect_uri=redirect_uri,
+            now=current,
+        )
+
+    async def fail(
+        self,
+        *,
+        attempt_id: str,
+        failure_code: str,
+        now: datetime.datetime | None = None,
+    ) -> bool:
+        """Terminalize one claimed attempt with a sanitized failure code."""
+        return await self.repository.fail(
+            attempt_id=attempt_id,
+            failure_code=failure_code,
+            now=now or tznow(),
+        )
+
     def decrypt_pkce_verifier(self, attempt: ExternalAccountOAuthAttempt) -> str | None:
         """Decrypt a request-local PKCE verifier for provider exchange."""
         if attempt.encrypted_pkce_verifier is None:

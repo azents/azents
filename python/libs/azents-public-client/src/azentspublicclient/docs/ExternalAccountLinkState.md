@@ -1,6 +1,6 @@
 # ExternalAccountLinkState
 
-User-visible state of a Workspace external account link.
+User-visible state of an external account link.
 
 ## Enum
 
