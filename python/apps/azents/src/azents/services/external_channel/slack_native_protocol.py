@@ -1,4 +1,4 @@
-"""Bounded request-local Slack personal controls and signed private scope."""
+"""Bounded request-local Slack model controls and signed private scope."""
 
 import base64
 import datetime
@@ -12,9 +12,6 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 
 NativeAction = Literal[
-    "azents_account_link_start",
-    "azents_account_link_code_open",
-    "azents_account_link_code",
     "azents_model_open",
     "azents_model_select",
     "azents_model_effort",
@@ -24,14 +21,11 @@ NativeAction = Literal[
     "azents_model_apply",
     "azents_model_cancel",
 ]
-NATIVE_ACTIONS = frozenset(get_args(NativeAction)) - {
-    "azents_account_link_code",
-    "azents_model_apply",
-}
+NATIVE_ACTIONS = frozenset(get_args(NativeAction)) - {"azents_model_apply"}
 
 
 class SlackNativeScope(BaseModel):
-    """Signed locator, never sufficient authority without the current actor."""
+    """Signed model locator requiring reauthorization of the current actor."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -41,14 +35,13 @@ class SlackNativeScope(BaseModel):
     channel_id: str = Field(min_length=1, max_length=255)
     thread_id: str | None = Field(max_length=255)
     expires_at: datetime.datetime
-    origin_id: str | None = Field(max_length=32)
     draft_id: str | None = Field(max_length=32)
     selection_fingerprint: str | None = Field(min_length=16, max_length=16)
     offset: int = Field(ge=0)
 
 
 def sign_native_scope(scope: SlackNativeScope, *, secret: str) -> str:
-    """Sign bounded native scope without retaining proof or catalog contents."""
+    """Sign bounded native model scope without retaining catalog contents."""
     encoded = base64.urlsafe_b64encode(scope.model_dump_json().encode()).rstrip(b"=")
     signature = hmac.new(secret.encode(), encoded, hashlib.sha256).hexdigest()
     return encoded.decode() + "." + signature
@@ -77,13 +70,12 @@ def parse_native_scope(
 
 
 class SlackNativeControl(BaseModel):
-    """Transient callback content excluded from durable interaction projections."""
+    """Transient model callback excluded from durable interaction projections."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     action: NativeAction
     metadata: str = Field(min_length=1, max_length=3000, repr=False)
-    code: str | None = Field(max_length=128, repr=False)
     option_id: str | None = Field(max_length=64)
     reasoning_effort: ModelReasoningEffort | None
     execution_options: list[ModelExecutionOptionId] | None
@@ -104,22 +96,11 @@ class _Action(BaseModel):
     selected_options: list[_Option] | None = Field(default=None, max_length=25)
 
 
-class _Input(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    value: str | None = Field(default=None, max_length=128, repr=False)
-
-
-class _State(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    values: dict[str, dict[str, _Input]]
-
-
 class _View(BaseModel):
     model_config = ConfigDict(extra="ignore")
     private_metadata: str = Field(max_length=3000)
     id: str | None = None
     hash: str | None = None
-    state: _State | None = None
 
 
 class _Payload(BaseModel):
@@ -131,7 +112,7 @@ class _Payload(BaseModel):
 def decode_native_control(
     payload: dict[str, object], *, action: str
 ) -> SlackNativeControl:
-    """Decode Slack's open provider schema into one closed operation payload."""
+    """Decode Slack's open provider schema into one closed model operation."""
     parsed = _Payload.model_validate(payload)
     item = parsed.actions[0] if parsed.actions else None
     view = parsed.view
@@ -142,12 +123,6 @@ def decode_native_control(
         if view is not None
         else None
     )
-    code = None
-    if action == "azents_account_link_code" and view is not None and view.state:
-        code_input = view.state.values.get("azents_account_link_code", {}).get("value")
-        code = code_input.value if code_input is not None else None
-        if not code or not code.strip():
-            raise ValueError("Enter the verification code from Azents.")
     selected = item.selected_option.value if item and item.selected_option else None
     if action in {"azents_model_select", "azents_model_effort"} and selected is None:
         raise ValueError("Slack model selection is missing.")
@@ -155,7 +130,6 @@ def decode_native_control(
         {
             "action": action,
             "metadata": metadata,
-            "code": code,
             "option_id": selected if action == "azents_model_select" else None,
             "reasoning_effort": (
                 selected

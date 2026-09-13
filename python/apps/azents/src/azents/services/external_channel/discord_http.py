@@ -53,10 +53,8 @@ from azents.services.external_channel.discord_settings import (
     DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
-    DiscordAccountLinkScope,
     DiscordModelSettingsScope,
     DiscordSettingsScope,
-    parse_discord_account_link_custom_id,
     parse_discord_model_settings_custom_id,
     parse_discord_settings_custom_id,
 )
@@ -94,9 +92,8 @@ class DiscordPrivateSettingsHandoff:
     interaction_id: str
     application_id: str
     interaction_token: str = field(repr=False)
-    scope: DiscordAccountLinkScope | DiscordModelSettingsScope = field(repr=False)
+    scope: DiscordModelSettingsScope = field(repr=False)
     selected_values: tuple[str, ...] = field(repr=False)
-    account_link_code: str | None = field(repr=False)
     context: DiscordSettingsContext = field(repr=False)
     received_at: datetime.datetime
 
@@ -293,13 +290,12 @@ class DiscordHTTPAdmissionService:
                 context=context,
                 received_at=received_at,
             )
-        if custom_id.startswith(("al1:", "ms1:")):
+        if custom_id.startswith("ms1:"):
             return await self._private_settings_component_result(
                 envelope=envelope,
                 admission=admission,
                 context=context,
                 received_at=received_at,
-                account_link_code=None,
             )
         if not custom_id.startswith("a:"):
             return await self._unsupported_result(
@@ -366,7 +362,6 @@ class DiscordHTTPAdmissionService:
         admission: ExternalChannelInteractionAdmission,
         context: DiscordSettingsContext,
         received_at: datetime.datetime,
-        account_link_code: str | None,
     ) -> DiscordHTTPAdmissionResult:
         """Run only an immediate native private control such as modal opening."""
         custom_id = envelope.component_custom_id or envelope.modal_custom_id
@@ -383,7 +378,6 @@ class DiscordHTTPAdmissionService:
             response = await self._run_private_settings(
                 scope=scope,
                 selected_values=envelope.selected_values,
-                account_link_code=account_link_code,
                 context=context,
                 received_at=received_at,
             )
@@ -423,7 +417,6 @@ class DiscordHTTPAdmissionService:
             response = await self._run_private_settings(
                 scope=handoff.scope,
                 selected_values=handoff.selected_values,
-                account_link_code=handoff.account_link_code,
                 context=handoff.context,
                 received_at=handoff.received_at,
             )
@@ -445,21 +438,11 @@ class DiscordHTTPAdmissionService:
     async def _run_private_settings(
         self,
         *,
-        scope: DiscordAccountLinkScope | DiscordModelSettingsScope,
+        scope: DiscordModelSettingsScope,
         selected_values: tuple[str, ...],
-        account_link_code: str | None,
         context: DiscordSettingsContext,
         received_at: datetime.datetime,
     ) -> DiscordSettingsResponse:
-        if isinstance(scope, DiscordAccountLinkScope):
-            return await self.settings_response_service.account_link_response(
-                scope=scope,
-                code=account_link_code,
-                context=context,
-                now=received_at,
-            )
-        if account_link_code is not None:
-            raise ValueError("Discord model settings control is invalid.")
         return await self.settings_response_service.model_response(
             scope=scope,
             selected_values=selected_values,
@@ -470,13 +453,8 @@ class DiscordHTTPAdmissionService:
     def _parse_private_settings_scope(
         self,
         custom_id: str,
-    ) -> DiscordAccountLinkScope | DiscordModelSettingsScope:
+    ) -> DiscordModelSettingsScope:
         secret = self.settings_response_service.config.auth.jwt.secret_key
-        if custom_id.startswith("al1:"):
-            return parse_discord_account_link_custom_id(
-                custom_id=custom_id,
-                secret=secret,
-            )
         if custom_id.startswith("ms1:"):
             return parse_discord_model_settings_custom_id(
                 custom_id=custom_id,
@@ -706,19 +684,6 @@ class DiscordHTTPAdmissionService:
         received_at: datetime.datetime,
     ) -> DiscordHTTPAdmissionResult:
         custom_id = envelope.modal_custom_id
-        if custom_id is not None and custom_id.startswith("al1:"):
-            submission = envelope.account_link_code_submission
-            if submission is None:
-                raise DiscordInteractionInvalidPayload(
-                    "Discord account-link submission is invalid."
-                )
-            return await self._private_settings_component_result(
-                envelope=envelope,
-                admission=admission,
-                context=context,
-                received_at=received_at,
-                account_link_code=submission.code,
-            )
         if custom_id is None or not custom_id.startswith("a:"):
             return await self._unsupported_result(
                 envelope=envelope,
@@ -743,7 +708,6 @@ class DiscordHTTPAdmissionService:
                 selected_value=None,
                 selected_values=(),
                 modal_custom_id=None,
-                account_link_code_submission=None,
                 scheduled_task_edit=None,
             ),
             admission=admission,
@@ -1035,12 +999,7 @@ class DiscordHTTPIngressService:
             custom_id=private_custom_id,
             secret=self.config.auth.jwt.secret_key,
         )
-        modal_open = (
-            envelope.component_custom_id is not None
-            and isinstance(private_scope, DiscordAccountLinkScope)
-            and private_scope.action == "enter_code"
-        )
-        if private_scope is not None and not modal_open:
+        if private_scope is not None:
             acknowledgement = _private_settings_deferred_response(
                 envelope.interaction_type
             )
@@ -1066,11 +1025,6 @@ class DiscordHTTPIngressService:
                 configuration=authenticated.configuration,
                 principal_id=principal_id,
             )
-            account_link_code = (
-                None
-                if envelope.account_link_code_submission is None
-                else envelope.account_link_code_submission.code
-            )
             return DiscordHTTPAdmissionResult(
                 envelope=envelope,
                 admission=admission,
@@ -1081,7 +1035,6 @@ class DiscordHTTPIngressService:
                     interaction_token=authenticated.interaction_token,
                     scope=private_scope,
                     selected_values=envelope.selected_values,
-                    account_link_code=account_link_code,
                     context=context,
                     received_at=received_at,
                 ),
@@ -1229,16 +1182,11 @@ def _optional_discord_private_settings_scope(
     *,
     custom_id: str | None,
     secret: str,
-) -> DiscordAccountLinkScope | DiscordModelSettingsScope | None:
+) -> DiscordModelSettingsScope | None:
     """Parse a valid private scope without running its business operation."""
     if custom_id is None:
         return None
     try:
-        if custom_id.startswith("al1:"):
-            return parse_discord_account_link_custom_id(
-                custom_id=custom_id,
-                secret=secret,
-            )
         if custom_id.startswith("ms1:"):
             return parse_discord_model_settings_custom_id(
                 custom_id=custom_id,
@@ -1254,8 +1202,6 @@ def _private_settings_deferred_response(
 ) -> dict[str, object]:
     if interaction_type == 3:
         return {"type": 6}
-    if interaction_type == 5:
-        return {"type": 5, "data": {"flags": 64}}
     raise DiscordInteractionInvalidPayload(
         "Discord private interaction type is invalid."
     )

@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.config import Config
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_account_link import (
     ExternalAccountLinkBusy,
@@ -74,7 +75,7 @@ class ExternalAccountOAuthService:
     ) -> ExternalAccountOAuthStartResult:
         """Create one authenticated attempt and return its fixed-provider URL."""
         runtime = await self.settings.resolve_runtime(provider)
-        adapter = _adapter(provider)
+        adapter = _adapter(provider, self.settings.config)
         use_pkce = provider is ExternalChannelProvider.DISCORD
         created = await self.attempts.create(
             user_id=user_id,
@@ -166,7 +167,7 @@ class ExternalAccountOAuthService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             raise ExternalAccountOAuthConfigurationChanged
-        adapter = _adapter(provider)
+        adapter = _adapter(provider, self.settings.config)
         try:
             identity = await adapter.exchange_identity(
                 client_id=runtime.client.client_id,
@@ -221,8 +222,11 @@ def _claim_failure(failure_code: str) -> Exception:
     return failure()
 
 
-def _adapter(provider: ExternalChannelProvider) -> ExternalAccountOAuthAdapter:
+def _adapter(
+    provider: ExternalChannelProvider,
+    config: Config | None = None,
+) -> ExternalAccountOAuthAdapter:
     """Return the fixed adapter for one supported provider."""
     if provider is ExternalChannelProvider.SLACK:
-        return SlackIdentityOAuthAdapter()
-    return DiscordIdentityOAuthAdapter()
+        return SlackIdentityOAuthAdapter(config)
+    return DiscordIdentityOAuthAdapter(config)

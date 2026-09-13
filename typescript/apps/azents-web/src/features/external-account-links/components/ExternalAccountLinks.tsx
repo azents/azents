@@ -21,17 +21,19 @@ import {
   IconAlertTriangle,
   IconBrandDiscord,
   IconBrandSlack,
+  IconExternalLink,
   IconLinkOff,
   IconPlugConnected,
   IconRefresh,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
+import Link from "next/link";
 import { ElevationView } from "@/features/security/components/ElevationView";
-import { accountLinkStatusColor } from "../presentation";
 import type { ExternalAccountLinksContainerProps } from "../containers/useExternalAccountLinksContainer";
 import type {
   AccountLinkFailureReason,
   ExternalAccountLinkItem,
+  ExternalAccountProviderAvailability,
 } from "../types";
 
 type Translator = ReturnType<typeof useTranslations<"externalAccountLinks">>;
@@ -51,6 +53,65 @@ function formatDateTime(value: string, locale: string): string {
   }).format(date);
 }
 
+function ProviderConnectCard({
+  availability,
+}: {
+  availability: ExternalAccountProviderAvailability;
+}): React.ReactElement {
+  const t = useTranslations("externalAccountLinks");
+  const ProviderIcon =
+    availability.provider === "discord" ? IconBrandDiscord : IconBrandSlack;
+  const providerLabel = t(`providers.${availability.provider}`);
+
+  return (
+    <Paper
+      withBorder
+      radius="lg"
+      p={{ base: "md", sm: "lg" }}
+      data-testid={`external-account-provider-${availability.provider}`}
+    >
+      <Stack gap="md" h="100%">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon variant="light" size="lg" radius="md">
+              <ProviderIcon aria-hidden="true" size={20} />
+            </ThemeIcon>
+            <Stack gap={rem(2)}>
+              <Text fw={600}>{providerLabel}</Text>
+              <Text size="sm" c="dimmed">
+                {t("providerCard.identity")}
+              </Text>
+            </Stack>
+          </Group>
+          <Badge
+            color={availability.available ? "green" : "gray"}
+            variant="light"
+          >
+            {t(`providerStatus.${availability.status}`)}
+          </Badge>
+        </Group>
+
+        <Text size="sm" c="dimmed" style={{ flex: 1 }}>
+          {t(`providerGuidance.${availability.status}`, {
+            provider: providerLabel,
+          })}
+        </Text>
+
+        {availability.available ? (
+          <Button
+            component={Link}
+            href={`/account/external-accounts/connect/${availability.provider}`}
+            leftSection={<IconExternalLink size={16} />}
+            fullWidth
+          >
+            {t("connectProvider", { provider: providerLabel })}
+          </Button>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
 function LinkCard({
   link,
   onDisconnect,
@@ -62,7 +123,7 @@ function LinkCard({
   const locale = useLocale();
   const ProviderIcon =
     link.provider === "discord" ? IconBrandDiscord : IconBrandSlack;
-  const canDisconnect = link.status !== "revoked";
+  const providerLabel = t(`providers.${link.provider}`);
 
   return (
     <Paper
@@ -82,50 +143,35 @@ function LinkCard({
                 {link.externalDisplayLabel}
               </Text>
               <Text size="sm" c="dimmed" style={{ overflowWrap: "anywhere" }}>
-                {t("providerTeam", {
-                  provider: t(`providers.${link.provider}`),
-                  team: link.providerTeamLabel,
-                })}
+                {link.providerTeamLabel === null
+                  ? providerLabel
+                  : t("providerTeam", {
+                      provider: providerLabel,
+                      team: link.providerTeamLabel,
+                    })}
               </Text>
             </Stack>
           </Group>
-          <Badge color={accountLinkStatusColor(link.status)} variant="light">
-            {t(`status.${link.status}`)}
+          <Badge color="green" variant="light">
+            {t("connected")}
           </Badge>
         </Group>
 
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-          <Stack gap={rem(2)}>
-            <Text size="xs" c="dimmed">
-              {t("accountContext")}
-            </Text>
-            <Text size="sm" fw={500}>
-              {link.accountContextLabel}
-            </Text>
-          </Stack>
-          <Stack gap={rem(2)}>
-            <Text size="xs" c="dimmed">
-              {t("linkedAt")}
-            </Text>
-            <Text size="sm">{formatDateTime(link.linkedAt, locale)}</Text>
-          </Stack>
-        </SimpleGrid>
-
-        {link.status === "inactive" ? (
-          <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
-            {t("inactiveDescription")}
-          </Alert>
-        ) : null}
+        <Stack gap={rem(2)}>
+          <Text size="xs" c="dimmed">
+            {t("linkedAt")}
+          </Text>
+          <Text size="sm">{formatDateTime(link.linkedAt, locale)}</Text>
+        </Stack>
 
         <Group justify="flex-end">
           <Button
             variant="light"
             color="red"
             leftSection={<IconLinkOff size={16} />}
-            disabled={!canDisconnect}
             onClick={() => onDisconnect(link)}
           >
-            {link.status === "revoked" ? t("disconnected") : t("disconnect")}
+            {t("disconnect")}
           </Button>
         </Group>
       </Stack>
@@ -270,7 +316,7 @@ export function ExternalAccountLinks({
           py={{ base: "lg", sm: "xl" }}
           data-testid="external-account-links"
         >
-          <Stack gap="lg">
+          <Stack gap="xl">
             <Stack gap={rem(4)}>
               <Title order={1} size="h2">
                 {t("title")}
@@ -278,29 +324,53 @@ export function ExternalAccountLinks({
               <Text c="dimmed">{t("description")}</Text>
             </Stack>
 
-            {state.links.length === 0 ? (
-              <Paper withBorder radius="lg" p="xl">
-                <Stack align="center" gap="sm" ta="center">
-                  <ThemeIcon variant="light" size="xl" radius="xl">
-                    <IconPlugConnected size={22} />
-                  </ThemeIcon>
-                  <Text fw={600}>{t("emptyTitle")}</Text>
-                  <Text c="dimmed" size="sm">
-                    {t("emptyDescription")}
-                  </Text>
-                </Stack>
-              </Paper>
-            ) : (
-              <Stack gap="md">
-                {state.links.map((link) => (
-                  <LinkCard
-                    key={link.id}
-                    link={link}
-                    onDisconnect={onRequestDisconnect}
+            <Stack gap="md">
+              <Stack gap={rem(4)}>
+                <Title order={2} size="h3">
+                  {t("providerCard.title")}
+                </Title>
+                <Text c="dimmed" size="sm">
+                  {t("providerCard.description")}
+                </Text>
+              </Stack>
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                {state.providers.map((availability) => (
+                  <ProviderConnectCard
+                    key={availability.provider}
+                    availability={availability}
                   />
                 ))}
-              </Stack>
-            )}
+              </SimpleGrid>
+            </Stack>
+
+            <Stack gap="md">
+              <Title order={2} size="h3">
+                {t("connectedAccounts")}
+              </Title>
+              {state.links.length === 0 ? (
+                <Paper withBorder radius="lg" p="xl">
+                  <Stack align="center" gap="sm" ta="center">
+                    <ThemeIcon variant="light" size="xl" radius="xl">
+                      <IconPlugConnected size={22} />
+                    </ThemeIcon>
+                    <Text fw={600}>{t("emptyTitle")}</Text>
+                    <Text c="dimmed" size="sm">
+                      {t("emptyDescription")}
+                    </Text>
+                  </Stack>
+                </Paper>
+              ) : (
+                <Stack gap="md">
+                  {state.links.map((link) => (
+                    <LinkCard
+                      key={link.id}
+                      link={link}
+                      onDisconnect={onRequestDisconnect}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Stack>
           </Stack>
 
           {state.disconnect.type !== "IDLE" ? (

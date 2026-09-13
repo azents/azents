@@ -135,6 +135,8 @@ class Settings(BaseSettings):
     testenv_api_enabled: bool = False
     testenv_runtime_hook_qa_enabled: bool = False
     testenv_github_platform_validation_base_url: str | None = None
+    testenv_slack_oauth_base_url: str | None = None
+    testenv_discord_oauth_base_url: str | None = None
     testenv_external_channel_gateway_lease_duration_seconds: float | None = None
     testenv_external_channel_gateway_renewal_interval_seconds: float | None = None
     testenv_external_channel_gateway_poll_interval_seconds: float | None = Field(
@@ -555,6 +557,8 @@ class Config(BaseModel):
     testenv_api_enabled: bool = False
     testenv_runtime_hook_qa_enabled: bool = False
     testenv_github_platform_validation_base_url: str | None = None
+    testenv_slack_oauth_base_url: str | None = None
+    testenv_discord_oauth_base_url: str | None = None
     testenv_external_channel_gateway_lease: ExternalChannelGatewayLeaseConfig | None = (
         None
     )
@@ -708,6 +712,8 @@ class Config(BaseModel):
             testenv_github_platform_validation_base_url=(
                 settings.testenv_github_platform_validation_base_url
             ),
+            testenv_slack_oauth_base_url=settings.testenv_slack_oauth_base_url,
+            testenv_discord_oauth_base_url=settings.testenv_discord_oauth_base_url,
             testenv_external_channel_gateway_lease=(
                 ExternalChannelGatewayLeaseConfig(
                     duration_seconds=(

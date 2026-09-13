@@ -40,6 +40,7 @@ from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
+from support.browser_artifact_safety import sanitize_browser_artifact
 from support.consts import REPOSITORY_ROOT
 from support.container_logs import (
     ContainerLogs,
@@ -1182,6 +1183,15 @@ def _configure_azents_server_container(
         .with_env(
             "AZ_TESTENV_SLACK_API_BASE_URL",
             _SLACK_PROVIDER_INTERNAL_API_URL,
+        )
+        .with_env("AZ_TESTENV_API_ENABLED", "true")
+        .with_env(
+            "AZ_TESTENV_SLACK_OAUTH_BASE_URL",
+            "http://slack-fake:8083",
+        )
+        .with_env(
+            "AZ_TESTENV_DISCORD_OAUTH_BASE_URL",
+            "http://discord-fake:8085",
         )
         .with_env("AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET", "true")
         .with_env("AZ_EXTERNAL_CHANNEL_MULTI_APP_ENABLED", "true")
@@ -2811,6 +2821,15 @@ def _capture_browser_failure(
     artifact_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", node_id).strip("-")[:180]
 
     try:
+        driver.execute_script(
+            "window.history.replaceState("
+            "null, document.title, window.location.pathname"
+            ");"
+        )
+    except WebDriverException:
+        pass
+
+    try:
         (browser_root / f"{artifact_name}.png").write_bytes(
             driver.get_screenshot_as_png()
         )
@@ -2822,7 +2841,7 @@ def _capture_browser_failure(
 
     try:
         (browser_root / f"{artifact_name}.html").write_text(
-            driver.page_source,
+            sanitize_browser_artifact(driver.page_source),
             encoding="utf-8",
         )
     except (OSError, WebDriverException) as error:
@@ -2838,7 +2857,7 @@ def _write_browser_capture_error(
 ) -> None:
     """Record a browser evidence failure without masking the original test failure."""
     try:
-        path.write_text(str(error), encoding="utf-8")
+        path.write_text(sanitize_browser_artifact(str(error)), encoding="utf-8")
     except OSError as write_error:
         sys.stderr.write(f"Failed to write browser capture error: {write_error}\n")
 

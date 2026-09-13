@@ -10,9 +10,11 @@ code_paths:
   - python/apps/azents/src/azents/core/system_setting.py
   - python/apps/azents/src/azents/core/github_system_setting.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
+  - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/api/admin/system_setting/**
   - python/apps/azents/src/azents/services/system_setting/**
   - python/apps/azents/src/azents/services/github_platform_system_setting/**
+  - python/apps/azents/src/azents/services/external_account_oauth_system_setting/**
   - python/apps/azents/src/azents/repos/system_setting/**
   - python/apps/azents/src/azents/repos/github_platform_system_setting/**
   - python/apps/azents/src/azents/rdb/models/system_setting.py
@@ -26,6 +28,7 @@ code_paths:
   - infra/charts/azents/values.yaml
   - infra/charts/azents/values.schema.json
   - python/apps/azents/src/azents/api/admin/system/v1/**
+  - python/apps/azents/src/azents/api/admin/system_setting/v1/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
@@ -36,6 +39,8 @@ code_paths:
 api_routes:
   - /system-setting/v1/sections
   - /system-setting/v1/sections/external-channel-files
+  - /system-setting/v1/sections/external-account-oauth/{provider}
+  - /system-setting/v1/sections/external-account-oauth/{provider}/health-check
   - /system-setting/v1/sections/platform-github-app
   - /system-setting/v1/sections/platform-github-app/candidate/validate
   - /system-setting/v1/sections/platform-github-app/candidate/confirm
@@ -45,8 +50,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-10
-spec_version: 5
+last_verified_at: 2026-09-13
+spec_version: 6
 ---
 
 # System Settings
@@ -58,6 +63,7 @@ independent setting families currently use this domain:
 
 - the provider-neutral Section lifecycle, whose first compiled Section is the Platform GitHub App;
 - the direct-activation `external_channel_files` Section for provider-neutral transfer policy;
+- the direct-activation Slack and Discord identity OAuth Sections;
 - archived-session retention under the file-lifecycle API; and
 - the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
   Platform default Provider logical ID used only by exact Runtime selection.
@@ -190,6 +196,25 @@ Platform GitHub App Secret reference. An empty `server.platformGitHubApp.*Key` v
 under Admin-managed database control, while a non-empty Secret key permanently owns the field for the
 receiving processes until the key value is cleared and those processes restart.
 
+## External Account OAuth Sections
+
+`slack_identity_oauth` and `discord_identity_oauth` are direct-activation Sections
+used only for platform-wide User identity linking. Slack stores a non-secret
+`client_id` and write-only `client_secret`; Discord stores a non-secret
+`application_id` and write-only `client_secret`. The effective status is
+`not_configured`, `incomplete`, `invalid`, `ready`, or `unavailable`.
+
+The Admin detail exposes redacted field sources, configuration state, fixed callback
+URL, effective status, and the latest local health result. Existing secret plaintext,
+ciphertext, OAuth state, provider codes, and provider tokens are never returned.
+PATCH requires `expected_version`, uses explicit secret `replace`/`clear` actions,
+rejects writes to environment-owned fields, and appends metadata-only audit events.
+Health checks record only sanitized status, code, message, action hint, and timestamp.
+
+The public account-link provider-availability endpoint exposes only provider,
+redacted status, availability, and callback URL. A provider is connectable only
+when its OAuth Section is ready and its callback URL is configured.
+
 ## External Channel Files Section
 
 `external_channel_files` is schema version 1, has no secret or environment-bound fields,
@@ -305,6 +330,10 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-09-13** — v6. Added direct-activation Slack and Discord identity OAuth
+  Sections, redacted Admin cards, explicit secret actions, callback projections,
+  health checks, and public provider availability.
 
 - **2026-07-30** — v5. Raised the External Channel inbound per-file default and
   configured ceiling to 500 MiB while retaining lower operator policy overrides.

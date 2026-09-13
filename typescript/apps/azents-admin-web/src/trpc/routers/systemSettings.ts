@@ -1,10 +1,13 @@
 import {
   systemSettingsV1CancelPlatformGithubAppCandidate,
+  systemSettingsV1CheckExternalAccountOauthHealth,
   systemSettingsV1CheckPlatformGithubAppHealth,
   systemSettingsV1ConfirmPlatformGithubAppCandidate,
+  systemSettingsV1GetExternalAccountOauthSetting,
   systemSettingsV1GetExternalChannelFilesSetting,
   systemSettingsV1GetPlatformGithubAppSetting,
   systemSettingsV1ListSystemSettingAuditEvents,
+  systemSettingsV1PatchExternalAccountOauthSetting,
   systemSettingsV1PatchExternalChannelFilesSetting,
   systemSettingsV1PatchPlatformGithubAppSetting,
   systemSettingsV1ValidatePlatformGithubAppCandidate,
@@ -13,11 +16,17 @@ import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
 import type {
+  ExternalAccountOAuthPatchRequest,
   ExternalChannelFilesPatchRequest,
   PlatformGitHubAppPatchRequest,
 } from "@azents/admin-client";
 
 const secretActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("replace"), value: z.string().min(1) }),
+  z.object({ action: z.literal("clear") }),
+]);
+
+const externalAccountOAuthSecretActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("replace"), value: z.string().min(1) }),
   z.object({ action: z.literal("clear") }),
 ]);
@@ -55,6 +64,76 @@ export const systemSettingsRouter = router({
             throwOnError: true,
           },
         );
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  getExternalAccountOAuth: protectedProcedure
+    .input(z.object({ provider: z.enum(["slack", "discord"]) }))
+    .query(async ({ ctx, input }) => {
+      const { data } = await systemSettingsV1GetExternalAccountOauthSetting({
+        client: ctx.adminApiClient,
+        path: { provider: input.provider },
+        throwOnError: true,
+      });
+      return data;
+    }),
+
+  patchExternalAccountOAuth: protectedProcedure
+    .input(
+      z.object({
+        provider: z.enum(["slack", "discord"]),
+        expectedVersion: z.number().int().nonnegative(),
+        clientId: z.string().nullable().optional(),
+        applicationId: z.string().nullable().optional(),
+        clientSecret: externalAccountOAuthSecretActionSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const body: ExternalAccountOAuthPatchRequest = {
+          expected_version: input.expectedVersion,
+        };
+        if (Object.hasOwn(input, "clientId")) {
+          body.client_id = input.clientId ?? null;
+        }
+        if (Object.hasOwn(input, "applicationId")) {
+          body.application_id = input.applicationId ?? null;
+        }
+        if (input.clientSecret) {
+          body.client_secret = input.clientSecret;
+        }
+        const { data } = await systemSettingsV1PatchExternalAccountOauthSetting(
+          {
+            client: ctx.adminApiClient,
+            path: { provider: input.provider },
+            body,
+            throwOnError: true,
+          },
+        );
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  checkExternalAccountOAuthHealth: protectedProcedure
+    .input(z.object({ provider: z.enum(["slack", "discord"]) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await systemSettingsV1CheckExternalAccountOauthHealth({
+          client: ctx.adminApiClient,
+          path: { provider: input.provider },
+          throwOnError: true,
+        });
         return data;
       } catch (error) {
         throw mapExpectedError(error, {

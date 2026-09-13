@@ -26,7 +26,6 @@ from azents.core.external_account_link import (
     ExternalAccountLinkState,
     ExternalAccountLinkView,
     ExternalAccountNativeLinkState,
-    ExternalAccountOriginCreated,
 )
 from azents.core.external_model_settings import (
     ExternalModelRejected,
@@ -41,13 +40,18 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_account_link import ExternalAccountLinkService
+from azents.services.external_account_oauth_system_setting.data import (
+    ExternalAccountOAuthEffectiveStatus,
+)
+from azents.services.external_account_oauth_system_setting.service import (
+    ExternalAccountOAuthSystemSettingService,
+)
 from azents.services.external_channel.discord_settings import (
     DiscordSettingsContext,
     DiscordSettingsResponseService,
     _origin_matches,
 )
 from azents.services.external_channel.discord_settings_scope import (
-    DiscordAccountLinkScope,
     DiscordModelSettingsScope,
     DiscordSettingsScope,
     discord_binding_version,
@@ -224,6 +228,10 @@ def _service(
             management_path="/account/external-accounts",
         )
     )
+    account_oauth_settings = AsyncMock(spec=ExternalAccountOAuthSystemSettingService)
+    account_oauth_settings.get_detail.return_value = SimpleNamespace(
+        effective_status=ExternalAccountOAuthEffectiveStatus.READY
+    )
     model_settings_service = AsyncMock(spec=ExternalModelSettingsService)
     service = DiscordSettingsResponseService(
         session_manager=_session_manager,
@@ -233,6 +241,7 @@ def _service(
             wraps=participation,
         ),
         account_link_service=account_link_service,
+        account_oauth_settings=account_oauth_settings,
         model_settings_service=model_settings_service,
         config=config,
     )
@@ -299,7 +308,12 @@ async def test_denied_conversation_renders_only_generic_link_surface() -> None:
     assert "Secret Agent" not in str(data)
     rows = _object_dict_list(data["components"])
     button = _object_dict_list(rows[0]["components"])[0]
-    assert button["label"] == "Connect Azents account · optional"
+    assert button == {
+        "type": 2,
+        "style": 5,
+        "label": "Connect Azents account",
+        "url": "https://azents.example/account/external-accounts/connect/discord",
+    }
 
 
 @pytest.mark.asyncio
@@ -346,49 +360,10 @@ async def test_denied_shared_binding_open_returns_generic_own_link_surface() -> 
     assert data["flags"] == 64
     assert "Conversation settings are unavailable" in str(data["content"])
     assert "Secret Agent" not in str(data)
-    assert "Connect Azents account · optional" in str(data["components"])
+    assert "Connect Azents account" in str(data["components"])
+    assert "optional" not in str(data["components"]).lower()
     assert public_message == original_public_message
     assert "Connect Azents account" not in str(public_message)
-
-
-@pytest.mark.asyncio
-async def test_account_link_start_uses_exact_verified_discord_actor() -> None:
-    """Create native origin only after the signed original interaction matches."""
-    fixture = _service(
-        origin=_origin(),
-        participation=SimpleNamespace(resolve_settings=AsyncMock()),
-    )
-    fixture.account_link_service.create_origin.return_value = (
-        ExternalAccountOriginCreated(
-            origin_id="account-origin-1",
-            expires_at=_NOW + datetime.timedelta(minutes=10),
-            web_path="/external-channel/link/account-origin-1",
-            management_path="/account/external-accounts",
-        )
-    )
-
-    response = await fixture.service.account_link_response(
-        scope=DiscordAccountLinkScope(
-            action="start",
-            origin_interaction_id="interaction-1",
-            origin_id=None,
-        ),
-        code=None,
-        context=_CONTEXT,
-        now=_NOW,
-    )
-
-    assert response.response["type"] == 7
-    actor = fixture.account_link_service.create_origin.await_args.kwargs["actor"]
-    assert actor.connection_id == "connection-1"
-    assert actor.connection_configuration_generation == 2
-    assert actor.provider_tenant_id == "guild-1"
-    assert actor.provider_tenant_display_label == "Guild One"
-    assert actor.provider_user_id == "user-1"
-    assert actor.provider_display_label == "Discord User"
-    assert actor.provider_interaction_id == "provider-interaction-1"
-    assert actor.provider_channel_id == "channel-1"
-    assert actor.provider_thread_id is None
 
 
 @pytest.mark.asyncio
@@ -423,7 +398,7 @@ async def test_model_apply_passes_displayed_selection_fingerprint_once() -> None
 
 @pytest.mark.asyncio
 async def test_inactive_link_omits_model_editor_and_keeps_management() -> None:
-    """Do not present link-dependent editing after Workspace participation loss."""
+    """Do not present link-dependent editing when the projected link is inactive."""
     current = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
@@ -441,14 +416,14 @@ async def test_inactive_link_omits_model_editor_and_keeps_management() -> None:
         ExternalAccountNativeLinkState(
             link=ExternalAccountLinkView(
                 id="link-1",
-                workspace_id="workspace-1",
-                workspace_name="Workspace One",
-                workspace_handle="workspace-one",
+                workspace_id=None,
+                workspace_name=None,
+                workspace_handle=None,
                 user_id="user-1",
                 provider=ExternalChannelProvider.DISCORD,
                 identity_scope="global",
                 provider_user_id="user-1",
-                provider_tenant_display_label="Guild One",
+                provider_tenant_display_label=None,
                 provider_display_label="Discord User",
                 linked_at=_NOW,
                 state=ExternalAccountLinkState.INACTIVE,
@@ -464,8 +439,8 @@ async def test_inactive_link_omits_model_editor_and_keeps_management() -> None:
     )
 
     data = _object_dict(response.response["data"])
-    assert "Linked, but inactive" in str(data["content"])
-    assert "Manage linked account" in str(data["components"])
+    assert "connection needs attention" in str(data["content"])
+    assert "Manage connected account" in str(data["components"])
     assert "ms1:" not in str(data["components"])
     fixture.model_settings_service.open_editor.assert_not_awaited()
 
@@ -500,8 +475,12 @@ async def test_parent_settings_render_current_selects_without_session() -> None:
     rows = _object_dict_list(data["components"])
     assert len(rows) == 3
     account_button = _object_dict_list(rows[2]["components"])[0]
-    assert account_button["label"] == "Connect Azents account · optional"
-    assert str(account_button["custom_id"]).startswith("al1:s:")
+    assert account_button == {
+        "type": 2,
+        "style": 5,
+        "label": "Connect Azents account",
+        "url": "https://azents.example/account/external-accounts/connect/discord",
+    }
     location_select = _object_dict_list(rows[0]["components"])[0]
     response_select = _object_dict_list(rows[1]["components"])[0]
     assert _object_dict_list(location_select["options"]) == [

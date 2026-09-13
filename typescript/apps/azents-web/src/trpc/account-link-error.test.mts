@@ -11,26 +11,26 @@ void test("projects the existing plain elevation dependency response", () => {
   assert.equal(accountLinkFailureReason(error), "elevation_required");
 });
 
-void test("keeps structured membership failure distinct from elevation", () => {
-  const error = new ApiError(403, {
-    detail: {
-      code: "membership_required",
-      message: "Workspace membership is required",
-    },
-  });
-
-  assert.equal(accountLinkFailureReason(error), "membership_required");
-});
-
-void test("projects an unavailable scope as a typed terminal failure", () => {
+void test("projects a structured provider availability failure", () => {
   const error = new ApiError(409, {
     detail: {
-      code: "unavailable",
-      message: "The account link scope is no longer available.",
+      code: "provider_unavailable",
+      message: "Slack account connection is unavailable",
     },
   });
 
-  assert.equal(accountLinkFailureReason(error), "unavailable");
+  assert.equal(accountLinkFailureReason(error), "provider_unavailable");
+});
+
+void test("projects a configuration change as a restartable callback failure", () => {
+  const error = new ApiError(409, {
+    detail: {
+      code: "configuration_changed",
+      message: "Provider configuration changed.",
+    },
+  });
+
+  assert.equal(accountLinkFailureReason(error), "configuration_changed");
 });
 
 void test("does not treat unrelated forbidden responses as elevation", () => {

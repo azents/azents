@@ -4,7 +4,10 @@ import { useCallback, useMemo, useState } from "react";
 import { useElevationModal } from "@/features/security/containers/useElevationModal";
 import { trpc } from "@/trpc/client";
 import { elevationMethodsOrEmpty } from "../elevation-methods";
-import { elevationScreenState } from "../presentation";
+import {
+  elevationScreenState,
+  normalizeProviderAvailability,
+} from "../presentation";
 import type {
   AccountLinkFailureReason,
   ExternalAccountLinkItem,
@@ -21,21 +24,21 @@ export interface ExternalAccountLinksContainerProps {
 }
 
 function linkItem(item: GlobalAccountLinkResponse): ExternalAccountLinkItem {
-  const accountContext = item.provider_tenant_display_label ?? item.provider;
   return {
     id: item.id,
-    accountContextLabel: accountContext,
     provider: item.provider,
-    providerTeamLabel: accountContext,
+    providerTeamLabel: item.provider_tenant_display_label,
     externalDisplayLabel: item.provider_display_label,
     linkedAt: item.linked_at,
-    status: "active",
   };
 }
 
 export function useExternalAccountLinksContainer(): ExternalAccountLinksContainerProps {
   const utils = trpc.useUtils();
   const query = trpc.accountLinks.list.useQuery(void 0, { retry: false });
+  const providersQuery = trpc.accountLinks.listProviders.useQuery(void 0, {
+    retry: false,
+  });
   const [disconnectTarget, setDisconnectTarget] =
     useState<ExternalAccountLinkItem | null>(null);
   const [disconnectError, setDisconnectError] =
@@ -106,6 +109,13 @@ export function useExternalAccountLinksContainer(): ExternalAccountLinksContaine
     () => query.data?.items.map(linkItem) ?? [],
     [query.data?.items],
   );
+  const providers = useMemo(
+    () =>
+      providersQuery.data == null
+        ? null
+        : normalizeProviderAvailability(providersQuery.data.items),
+    [providersQuery.data],
+  );
 
   const state: ExternalAccountLinksState =
     elevationTarget !== null
@@ -124,12 +134,19 @@ export function useExternalAccountLinksContainer(): ExternalAccountLinksContaine
               link: elevationTarget,
               elevation,
             }
-      : query.isLoading
+      : query.isLoading || providersQuery.isLoading
         ? { type: "LOADING" }
-        : query.isError
-          ? { type: "ERROR", message: query.error.message }
+        : query.isError || providersQuery.isError || providers === null
+          ? {
+              type: "ERROR",
+              message:
+                query.error?.message ??
+                providersQuery.error?.message ??
+                "Provider availability is incomplete.",
+            }
           : {
               type: "READY",
+              providers,
               links,
               disconnect:
                 disconnectTarget === null
@@ -161,6 +178,7 @@ export function useExternalAccountLinksContainer(): ExternalAccountLinksContaine
   }, [disconnectTarget, executeUnlink]);
   const onRetry = useCallback((): void => {
     void utils.accountLinks.list.invalidate();
+    void utils.accountLinks.listProviders.invalidate();
     void utils.security.getElevationMethods.invalidate();
   }, [utils]);
 

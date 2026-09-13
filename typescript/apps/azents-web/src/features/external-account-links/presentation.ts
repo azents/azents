@@ -1,11 +1,8 @@
 import type {
-  AccountLinkFailureReason,
-  ExternalAccountCandidateStatus,
-  ExternalAccountLinkStatus,
+  ExternalAccountProvider,
+  ExternalAccountProviderAvailability,
 } from "./types";
-
-export type CandidateNextAction =
-  "check_status" | "confirm" | "connected" | "start_fresh";
+import type { AccountLinkProviderAvailabilityResponse } from "@azents/public-client";
 
 export type ElevationScreenState = "loading" | "ready" | "error";
 
@@ -22,48 +19,24 @@ export function elevationScreenState({
   return isError ? "error" : "loading";
 }
 
-export function preserveLastSafeOrigin<T>(
-  current: T | null,
-  previous: T | null,
-): T | null {
-  return current ?? previous;
+function providerAvailability(
+  provider: ExternalAccountProvider,
+  items: AccountLinkProviderAvailabilityResponse[],
+): ExternalAccountProviderAvailability | null {
+  const item = items.find((candidate) => candidate.provider === provider);
+  return item == null
+    ? null
+    : {
+        provider: item.provider,
+        status: item.status,
+        available: item.available,
+      };
 }
 
-export function candidateNextAction(
-  status: ExternalAccountCandidateStatus,
-): CandidateNextAction {
-  switch (status) {
-    case "pending_provider_proof":
-      return "check_status";
-    case "provider_verified":
-      return "confirm";
-    case "connected":
-      return "connected";
-    case "cancelled":
-    case "expired":
-      return "start_fresh";
-  }
-}
-
-export function accountLinkStatusColor(
-  status: ExternalAccountLinkStatus,
-): "green" | "gray" | "yellow" {
-  switch (status) {
-    case "active":
-      return "green";
-    case "inactive":
-      return "yellow";
-    case "revoked":
-      return "gray";
-  }
-}
-
-export function isRecoverableWithFreshCandidate(
-  reason: AccountLinkFailureReason,
-): boolean {
-  return (
-    reason === "expired" ||
-    reason === "candidate_terminal" ||
-    reason === "resource_not_found"
-  );
+export function normalizeProviderAvailability(
+  items: AccountLinkProviderAvailabilityResponse[],
+): ExternalAccountProviderAvailability[] | null {
+  const slack = providerAvailability("slack", items);
+  const discord = providerAvailability("discord", items);
+  return slack === null || discord === null ? null : [slack, discord];
 }

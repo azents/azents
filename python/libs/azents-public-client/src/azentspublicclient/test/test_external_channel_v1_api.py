@@ -40,13 +40,6 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
-    def test_external_channel_v1_cancel_account_link_candidate(self) -> None:
-        """Test case for external_channel_v1_cancel_account_link_candidate
-
-        Cancel Account Link Candidate
-        """
-        pass
-
     def test_external_channel_v1_clear_multi_discord_channel_default(self) -> None:
         """Test case for external_channel_v1_clear_multi_discord_channel_default
 
@@ -58,20 +51,6 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_clear_multi_slack_channel_default
 
         Clear Multi Slack Channel Default
-        """
-        pass
-
-    def test_external_channel_v1_confirm_account_link_candidate(self) -> None:
-        """Test case for external_channel_v1_confirm_account_link_candidate
-
-        Confirm Account Link Candidate
-        """
-        pass
-
-    def test_external_channel_v1_create_account_link_candidate(self) -> None:
-        """Test case for external_channel_v1_create_account_link_candidate
-
-        Create Account Link Candidate
         """
         pass
 
@@ -114,20 +93,6 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_exchange_account_link_oauth
 
         Exchange Account Link Oauth
-        """
-        pass
-
-    def test_external_channel_v1_get_account_link_candidate(self) -> None:
-        """Test case for external_channel_v1_get_account_link_candidate
-
-        Get Account Link Candidate
-        """
-        pass
-
-    def test_external_channel_v1_get_account_link_origin(self) -> None:
-        """Test case for external_channel_v1_get_account_link_origin
-
-        Get Account Link Origin
         """
         pass
 

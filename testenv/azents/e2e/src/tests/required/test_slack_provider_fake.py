@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
@@ -516,78 +517,195 @@ def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     assert "signed-opaque-metadata" not in rendered
 
 
-def test_slack_fake_keeps_account_link_code_modal_handoff_transient(
+def test_slack_fake_oauth_success_replay_and_redaction(
     slack_fake_url: str,
 ) -> None:
-    """Expose signed proof controls without retaining account or code material."""
-    response = requests.post(
-        f"{slack_fake_url}/api/views.open",
+    """Issue one identity, reject code replay, and retain only safe evidence."""
+    client_id = "private-slack-client"
+    client_secret = "private-slack-secret"
+    redirect_uri = "https://azents.example/oauth/external-account/slack/callback"
+    state = "private-slack-state"
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
         json={
-            "trigger_id": "private-trigger",
-            "view": {
-                "type": "modal",
-                "callback_id": "azents_account_link_code",
-                "private_metadata": "signed-original-actor-origin",
-                "title": {"type": "plain_text", "text": "Connect account"},
-                "blocks": [
-                    {
-                        "type": "input",
-                        "block_id": "azents_account_link_code",
-                        "label": {
-                            "type": "plain_text",
-                            "text": "Private confirmation code",
-                        },
-                        "element": {
-                            "type": "plain_text_input",
-                            "action_id": "value",
-                        },
-                    }
-                ],
-                "submit": {"type": "plain_text", "text": "Verify"},
+            "oauth": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "user_id": "U-PRIVATE-OAUTH",
+                "user_label": "Private Slack Person",
+                "team_id": "T-PRIVATE-OAUTH",
+                "team_label": "Private Slack Team",
             },
         },
         timeout=5,
-    )
-    response.raise_for_status()
+    ).raise_for_status()
 
-    transient = requests.get(
-        f"{slack_fake_url}/__testenv/transient-view",
-        params={"scope": "account_link_code"},
+    authorize = requests.get(
+        f"{slack_fake_url}/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "openid profile",
+            "state": state,
+        },
+        allow_redirects=False,
         timeout=5,
-    ).json()
-    assert transient == {
-        "view_id": "V-E2E-1",
-        "view_hash": "hash-1",
-        "private_metadata": "signed-original-actor-origin",
-        "route_ids": [],
-        "action_ids": ["value"],
-        "input_action_ids": ["value"],
-        "block_ids": ["azents_account_link_code"],
-        "option_values": {},
-        "option_labels": {},
-        "action_values": {},
-        "link_paths": [],
+    )
+    assert authorize.status_code == 302
+    callback = authorize.headers["Location"]
+    callback_query = parse_qs(urlparse(callback).query)
+    code = callback_query["code"][0]
+    assert callback_query["state"] == [state]
+    transient = requests.get(
+        f"{slack_fake_url}/__testenv/transient-oauth",
+        timeout=5,
+    )
+    transient.raise_for_status()
+    assert transient.json() == {"redirect_url": callback}
+
+    token = requests.post(
+        f"{slack_fake_url}/api/openid.connect.token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri,
+        },
+        timeout=5,
+    )
+    token.raise_for_status()
+    access_token = token.json()["access_token"]
+    userinfo = requests.post(
+        f"{slack_fake_url}/api/openid.connect.userInfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=5,
+    )
+    assert userinfo.json() == {
+        "ok": True,
+        "sub": "U-PRIVATE-OAUTH",
+        "name": "Private Slack Person",
+        "https://slack.com/team_id": "T-PRIVATE-OAUTH",
+        "https://slack.com/team_name": "Private Slack Team",
     }
+    replay = requests.post(
+        f"{slack_fake_url}/api/openid.connect.token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri,
+        },
+        timeout=5,
+    )
+    assert replay.json() == {"ok": False, "error": "invalid_code"}
+
     evidence = requests.get(
         f"{slack_fake_url}/__testenv/state",
         timeout=5,
     ).json()
-    assert evidence["views"] == [
-        {
-            "operation": "views.open",
-            "control_scope": "account_link_code",
-            "route_count": 0,
-            "has_submit": True,
-            "outcome": "delivered",
-            "control_count": 1,
-            "input_count": 1,
-            "option_count": 0,
-        }
+    assert [item["outcome"] for item in evidence["oauth"]["requests"]] == [
+        "authorized",
+        "exchanged",
+        "identified",
+        "rejected",
     ]
     rendered = str(evidence)
-    assert "signed-original-actor-origin" not in rendered
-    assert "Private confirmation code" not in rendered
-    assert "private-trigger" not in rendered
+    for secret in (client_secret, state, code, access_token):
+        assert secret not in rendered
+
+
+@pytest.mark.parametrize(
+    ("configuration", "expected_outcome"),
+    [
+        ({"authorize_scenario": "cancel"}, "cancelled"),
+        ({"authorize_scenario": "provider_error"}, "provider_error"),
+        ({"authorize_scenario": "malformed"}, "malformed"),
+    ],
+)
+def test_slack_fake_oauth_controls_authorization_failures(
+    slack_fake_url: str,
+    configuration: dict[str, object],
+    expected_outcome: str,
+) -> None:
+    """Control cancellation and malformed/provider authorization callbacks."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={"oauth": configuration},
+        timeout=5,
+    ).raise_for_status()
+    response = requests.get(
+        f"{slack_fake_url}/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "slack-oauth-client",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/slack/callback"
+            ),
+            "scope": "openid profile",
+            "state": "private-failure-state",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    assert response.status_code == 302
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["oauth"]["requests"][0]["outcome"] == expected_outcome
+    assert "private-failure-state" not in str(evidence)
+
+
+def test_slack_fake_oauth_rejects_invalid_client_and_provider_steps(
+    slack_fake_url: str,
+) -> None:
+    """Reject invalid authorize input plus token and user-info failures."""
+    invalid = requests.get(
+        f"{slack_fake_url}/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "wrong-client",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/slack/callback"
+            ),
+            "scope": "openid profile",
+            "state": "private-invalid-state",
+        },
+        allow_redirects=False,
+        timeout=5,
+    )
+    assert invalid.status_code == 400
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "oauth": {
+                "token_scenario": "rejected",
+                "userinfo_scenario": "rejected",
+            }
+        },
+        timeout=5,
+    ).raise_for_status()
+    rejected_token = requests.post(
+        f"{slack_fake_url}/api/openid.connect.token",
+        data={
+            "client_id": "slack-oauth-client",
+            "client_secret": "slack-oauth-secret",
+            "code": "unknown-code",
+            "redirect_uri": (
+                "https://azents.example/oauth/external-account/slack/callback"
+            ),
+        },
+        timeout=5,
+    )
+    assert rejected_token.json()["ok"] is False
+    rejected_userinfo = requests.post(
+        f"{slack_fake_url}/api/openid.connect.userInfo",
+        headers={"Authorization": "Bearer rejected-token"},
+        timeout=5,
+    )
+    assert rejected_userinfo.status_code == 401
 
 
 def test_slack_fake_keeps_model_draft_controls_and_actions_transient(
@@ -669,43 +787,6 @@ def test_slack_fake_keeps_model_draft_controls_and_actions_transient(
     assert "option-opaque-1" not in rendered
     assert "signed-page-2" not in rendered
     assert "Private model label" not in rendered
-
-    requests.post(
-        f"{slack_fake_url}/api/chat.postMessage",
-        json={
-            "channel": "C-E2E",
-            "text": "Private settings controls",
-            "blocks": [
-                {
-                    "type": "actions",
-                    "block_id": "account",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "action_id": "azents_account_link_start",
-                            "value": "signed-account-origin",
-                        }
-                    ],
-                }
-            ],
-        },
-        timeout=5,
-    ).raise_for_status()
-    action = requests.get(
-        f"{slack_fake_url}/__testenv/transient-action",
-        params={"action_id": "azents_account_link_start"},
-        timeout=5,
-    ).json()
-    assert action == {
-        "action_id": "azents_account_link_start",
-        "block_id": "account",
-        "value": "signed-account-origin",
-    }
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert "signed-account-origin" not in str(evidence)
 
 
 def test_slack_fake_captures_selector_control_without_visible_copy(

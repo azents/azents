@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import ClassVar, NamedTuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 _HTTP_PORT = 8083
 _WEBSOCKET_PORT = 8084
@@ -57,6 +57,283 @@ class _SelectorControlEvidence(NamedTuple):
 
     action_ids: list[str]
     selector_admission_id: str | None
+
+
+class _OAuthResponse(NamedTuple):
+    """One fake OAuth HTTP response."""
+
+    status: int
+    payload: dict[str, object] | None
+    redirect: str | None
+
+
+class SlackOAuthState:
+    """Deterministic Slack OpenID flow with redacted durable evidence."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset OAuth configuration, one-time credentials, and evidence."""
+        with self.lock:
+            self.client_id = "slack-oauth-client"
+            self.client_secret = "slack-oauth-secret"
+            self.redirect_uri = (
+                "https://azents.example/oauth/external-account/slack/callback"
+            )
+            self.authorize_scenario = "success"
+            self.token_scenario = "success"
+            self.userinfo_scenario = "success"
+            self.delay_seconds = 0
+            self.user_id = "U-OAUTH-E2E"
+            self.user_label = "Slack OAuth User"
+            self.team_id = "T-OAUTH-E2E"
+            self.team_label = "Slack OAuth Team"
+            self.requests: list[dict[str, object]] = []
+            self._codes: dict[str, str] = {}
+            self._tokens: set[str] = set()
+            self._handoff: dict[str, object] | None = None
+            self._sequence = 0
+
+    def configure(self, payload: dict[str, object]) -> None:
+        """Apply one bounded test-only OAuth configuration."""
+        allowed = {
+            "client_id",
+            "client_secret",
+            "redirect_uri",
+            "authorize_scenario",
+            "token_scenario",
+            "userinfo_scenario",
+            "delay_seconds",
+            "user_id",
+            "user_label",
+            "team_id",
+            "team_label",
+        }
+        if set(payload) - allowed:
+            raise ValueError("Unsupported Slack OAuth configuration field.")
+        with self.lock:
+            for name in (
+                "client_id",
+                "client_secret",
+                "redirect_uri",
+                "user_id",
+                "user_label",
+                "team_id",
+                "team_label",
+            ):
+                value = payload.get(name)
+                if value is not None:
+                    if not isinstance(value, str) or not value:
+                        raise ValueError(f"OAuth {name} must be a non-empty string.")
+                    setattr(self, name, value)
+            authorize_scenario = payload.get("authorize_scenario")
+            if authorize_scenario is not None:
+                if authorize_scenario not in {
+                    "success",
+                    "cancel",
+                    "provider_error",
+                    "delay",
+                    "malformed",
+                }:
+                    raise ValueError("Unsupported Slack OAuth authorize scenario.")
+                self.authorize_scenario = str(authorize_scenario)
+            for name in ("token_scenario", "userinfo_scenario"):
+                value = payload.get(name)
+                if value is not None:
+                    if value not in {"success", "rejected", "malformed"}:
+                        raise ValueError(f"Unsupported Slack OAuth {name}.")
+                    setattr(self, name, str(value))
+            delay_seconds = payload.get("delay_seconds")
+            if delay_seconds is not None:
+                if (
+                    not isinstance(delay_seconds, int)
+                    or isinstance(delay_seconds, bool)
+                    or not 0 <= delay_seconds <= 5
+                ):
+                    raise ValueError("OAuth delay_seconds must be from 0 to 5.")
+                self.delay_seconds = delay_seconds
+            self.requests = []
+            self._codes = {}
+            self._tokens = set()
+            self._handoff = None
+            self._sequence = 0
+
+    def authorize(self, query: dict[str, list[str]]) -> _OAuthResponse:
+        """Validate fixed Slack OpenID input and issue one callback."""
+        client_id = _query_one(query, "client_id")
+        redirect_uri = _query_one(query, "redirect_uri")
+        state = _query_one(query, "state")
+        client_valid = client_id == self.client_id
+        redirect_valid = redirect_uri == self.redirect_uri
+        scope_valid = _query_one(query, "scope") == "openid profile"
+        valid = (
+            client_valid
+            and redirect_valid
+            and scope_valid
+            and _query_one(query, "response_type") == "code"
+            and isinstance(state, str)
+            and bool(state)
+        )
+        if not valid:
+            self._record(
+                "authorize",
+                "rejected",
+                client_valid=client_valid,
+                redirect_valid=redirect_valid,
+                scope_valid=scope_valid,
+                state_present=bool(state),
+                pkce_present=_query_one(query, "code_challenge") is not None,
+            )
+            return _OAuthResponse(400, {"error": "invalid_request"}, None)
+        scenario = self.authorize_scenario
+        delay_seconds = self.delay_seconds
+        if scenario == "delay":
+            time.sleep(delay_seconds)
+            scenario = "success"
+        assert redirect_uri is not None
+        assert state is not None
+        if scenario == "cancel":
+            callback = _callback_url(
+                redirect_uri,
+                {"error": "access_denied", "state": state},
+            )
+            outcome = "cancelled"
+        elif scenario == "provider_error":
+            callback = _callback_url(
+                redirect_uri,
+                {"error": "server_error", "state": state},
+            )
+            outcome = "provider_error"
+        elif scenario == "malformed":
+            callback = _callback_url(
+                redirect_uri,
+                {"code": "malformed-without-state"},
+            )
+            outcome = "malformed"
+        else:
+            with self.lock:
+                self._sequence += 1
+                code = f"slack-oauth-code-{self._sequence}"
+                self._codes[code] = redirect_uri
+            callback = _callback_url(redirect_uri, {"code": code, "state": state})
+            outcome = "authorized"
+        with self.lock:
+            self._handoff = {"redirect_url": callback}
+        self._record(
+            "authorize",
+            outcome,
+            client_valid=True,
+            redirect_valid=True,
+            scope_valid=True,
+            state_present=True,
+            pkce_present=False,
+        )
+        return _OAuthResponse(302, None, callback)
+
+    def exchange(
+        self,
+        body: dict[str, object],
+        authorization: str,
+    ) -> _OAuthResponse:
+        """Consume one authorization code and return one bearer token."""
+        code = body.get("code")
+        client_id, client_secret = _oauth_client_credentials(body, authorization)
+        client_valid = client_id == self.client_id
+        secret_valid = client_secret == self.client_secret
+        redirect_valid = body.get("redirect_uri") == self.redirect_uri
+        with self.lock:
+            code_redirect = (
+                self._codes.pop(code, None) if isinstance(code, str) else None
+            )
+        code_valid = code_redirect == body.get("redirect_uri")
+        valid = client_valid and secret_valid and redirect_valid and code_valid
+        payload: dict[str, object]
+        if not valid or self.token_scenario == "rejected":
+            outcome = "rejected"
+            payload = {"ok": False, "error": "invalid_code"}
+        elif self.token_scenario == "malformed":
+            outcome = "malformed"
+            payload = {"ok": True}
+        else:
+            token = f"slack-oauth-token-{self._sequence}"
+            with self.lock:
+                self._tokens.add(token)
+            outcome = "exchanged"
+            payload = {
+                "ok": True,
+                "access_token": token,
+                "token_type": "Bearer",
+            }
+        self._record(
+            "token",
+            outcome,
+            client_valid=client_valid,
+            secret_valid=secret_valid,
+            redirect_valid=redirect_valid,
+            code_present=isinstance(code, str) and bool(code),
+            code_valid=code_valid,
+            pkce_present=body.get("code_verifier") is not None,
+        )
+        return _OAuthResponse(200, payload, None)
+
+    def userinfo(self, authorization: str) -> _OAuthResponse:
+        """Return one deterministic identity for a valid bearer token."""
+        token = authorization.removeprefix("Bearer ").strip()
+        with self.lock:
+            token_valid = token in self._tokens
+        if not token_valid or self.userinfo_scenario == "rejected":
+            outcome = "rejected"
+            response = _OAuthResponse(
+                401,
+                {"ok": False, "error": "invalid_auth"},
+                None,
+            )
+        elif self.userinfo_scenario == "malformed":
+            outcome = "malformed"
+            response = _OAuthResponse(200, {"ok": True, "sub": self.user_id}, None)
+        else:
+            outcome = "identified"
+            response = _OAuthResponse(
+                200,
+                {
+                    "ok": True,
+                    "sub": self.user_id,
+                    "name": self.user_label,
+                    "https://slack.com/team_id": self.team_id,
+                    "https://slack.com/team_name": self.team_label,
+                },
+                None,
+            )
+        self._record(
+            "userinfo",
+            outcome,
+            authorization_present=bool(authorization),
+            token_valid=token_valid,
+        )
+        return response
+
+    def transient_handoff(self) -> dict[str, object] | None:
+        """Return the callback URL only through transient test control state."""
+        with self.lock:
+            return dict(self._handoff) if self._handoff is not None else None
+
+    def evidence(self) -> dict[str, object]:
+        """Return OAuth evidence without codes, state, tokens, or secrets."""
+        with self.lock:
+            return {
+                "requests": list(self.requests),
+                "outstanding_code_count": len(self._codes),
+                "active_token_count": len(self._tokens),
+            }
+
+    def _record(self, operation: str, outcome: str, **metadata: object) -> None:
+        """Record only bounded OAuth request-shape observations."""
+        with self.lock:
+            self.requests.append(
+                {"operation": operation, "outcome": outcome, **metadata}
+            )
 
 
 def _object(value: object) -> dict[str, object]:
@@ -105,6 +382,42 @@ def _string(value: object) -> str:
     return value
 
 
+def _query_one(query: dict[str, list[str]], name: str) -> str | None:
+    """Return one exact OAuth query value or reject duplicate values."""
+    values = query.get(name)
+    if values is None or len(values) != 1:
+        return None
+    return values[0]
+
+
+def _callback_url(redirect_uri: str, parameters: dict[str, str]) -> str:
+    """Build one transient provider callback URL."""
+    separator = "&" if "?" in redirect_uri else "?"
+    return f"{redirect_uri}{separator}{urlencode(parameters)}"
+
+
+def _oauth_client_credentials(
+    body: dict[str, object],
+    authorization: str,
+) -> tuple[str | None, str | None]:
+    """Resolve form or Basic client credentials for Slack SDK exchange."""
+    client_id = body.get("client_id")
+    client_secret = body.get("client_secret")
+    if isinstance(client_id, str) and isinstance(client_secret, str):
+        return client_id, client_secret
+    encoded = authorization.removeprefix("Basic ").strip()
+    if not encoded:
+        return None, None
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except ValueError, UnicodeDecodeError:
+        return None, None
+    basic_client_id, separator, basic_client_secret = decoded.partition(":")
+    if not separator:
+        return None, None
+    return basic_client_id, basic_client_secret
+
+
 def _socket(value: object) -> socket.socket:
     """Validate the accepted Socket Mode connection."""
     if not isinstance(value, socket.socket):
@@ -116,11 +429,13 @@ class FakeState:
     """Thread-safe provider scenario and sanitized evidence store."""
 
     def __init__(self) -> None:
+        self.oauth = SlackOAuthState()
         self.lock = Lock()
         self.reset()
 
     def reset(self) -> None:
         """Reset scenarios, provider data, and evidence between journeys."""
+        self.oauth.reset()
         with self.lock:
             self.auth_scenario = "valid"
             self.membership_scenario = "member"
@@ -192,6 +507,7 @@ class FakeState:
     def configure(self, payload: dict[str, object]) -> None:
         """Apply one bounded deterministic provider scenario."""
         allowed = {
+            "oauth",
             "auth_scenario",
             "membership_scenario",
             "history_scenario",
@@ -213,6 +529,9 @@ class FakeState:
         }
         if set(payload) - allowed:
             raise ValueError("Unsupported Slack fake configuration field.")
+        oauth = payload.get("oauth")
+        if oauth is not None:
+            self.oauth.configure(_object(oauth))
         with self.lock:
             for name in (
                 "auth_scenario",
@@ -512,7 +831,7 @@ class FakeState:
                 "has_submit": has_submit,
                 "outcome": "delivered",
             }
-            if control_scope in {"account_link_code", "model"}:
+            if control_scope == "model":
                 action_ids = control_handoff.get("action_ids")
                 input_action_ids = control_handoff.get("input_action_ids")
                 option_values = control_handoff.get("option_values")
@@ -590,6 +909,7 @@ class FakeState:
                 "deliveries": list(self.deliveries),
                 "presence": list(self.presence),
                 "views": list(self.views),
+                "oauth": self.oauth.evidence(),
                 "socket": {
                     "connections": self.socket_connections,
                     "envelope_ids": list(self.socket_envelope_ids),
@@ -626,6 +946,21 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/transient-action":
             action_id = parse_qs(parsed.query).get("action_id", [""])[0]
             self._json_response(200, self.state.transient_action(action_id) or {})
+            return
+        if parsed.path == "/__testenv/transient-oauth":
+            self._json_response(200, self.state.oauth.transient_handoff() or {})
+            return
+        if parsed.path == "/oauth/authorize":
+            self._oauth_response(
+                self.state.oauth.authorize(
+                    parse_qs(parsed.query, keep_blank_values=True)
+                )
+            )
+            return
+        if parsed.path == "/api/openid.connect.userInfo":
+            self._oauth_response(
+                self.state.oauth.userinfo(self.headers.get("Authorization", ""))
+            )
             return
         if parsed.path.startswith("/files/"):
             provider_file_id = parsed.path.removeprefix("/files/")
@@ -694,6 +1029,19 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             self._file_upload(file_id)
             return
         parsed_path = urlparse(self.path)
+        if parsed_path.path == "/api/openid.connect.userInfo":
+            self._oauth_response(
+                self.state.oauth.userinfo(self.headers.get("Authorization", ""))
+            )
+            return
+        if parsed_path.path == "/api/openid.connect.token":
+            self._oauth_response(
+                self.state.oauth.exchange(
+                    self._json_body(),
+                    self.headers.get("Authorization", ""),
+                )
+            )
+            return
         operation = parsed_path.path.removeprefix("/api/")
         query = {
             key: _form_value(key, values)
@@ -740,6 +1088,16 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         """Avoid logging request headers, credentials, or provider message content."""
         del format, args
+
+    def _oauth_response(self, response: _OAuthResponse) -> None:
+        """Write one OAuth response without logging its transient redirect."""
+        if response.redirect is not None:
+            self.send_response(response.status)
+            self.send_header("Location", response.redirect)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._json_response(response.status, response.payload or {})
 
     def _auth_test(self) -> None:
         scenario = self.state.auth_scenario
@@ -1586,8 +1944,6 @@ def _view_control_scope(callback_id: str | None) -> str:
         return "setup"
     if callback_id == "azents_conversation_settings":
         return "settings"
-    if callback_id == "azents_account_link_code":
-        return "account_link_code"
     if callback_id == "azents_model_apply":
         return "model"
     return "unknown"

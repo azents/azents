@@ -14,15 +14,11 @@ from azents.core.external_account_link import (
     ExternalAccountOAuthProviderUnavailable,
 )
 from azents.core.external_account_oauth import (
-    DISCORD_IDENTITY_AUTHORIZE_URL,
-    DISCORD_IDENTITY_TOKEN_URL,
-    DISCORD_IDENTITY_USERINFO_URL,
-    SLACK_IDENTITY_AUTHORIZE_URL,
-    SLACK_IDENTITY_TOKEN_URL,
-    SLACK_IDENTITY_USERINFO_URL,
     ExternalAccountOAuthCallbackContext,
     ExternalAccountOAuthClientConfiguration,
+    ExternalAccountOAuthEndpointConfiguration,
     ExternalAccountOAuthRuntimeConfiguration,
+    external_account_oauth_endpoints,
 )
 from azents.core.external_account_oauth_system_setting import (
     DiscordIdentityOAuthConfig,
@@ -163,7 +159,13 @@ class ExternalAccountOAuthSystemSettingService:
             callback_url = _callback_url(self.config.web_url, provider)
             if callback_url is None:
                 raise _ProviderOAuthUnavailable("callback_url_unavailable")
-            await _check_provider_endpoint(provider)
+            await _check_provider_endpoint(
+                provider,
+                external_account_oauth_endpoints(
+                    ExternalChannelProvider(provider),
+                    self.config,
+                ),
+            )
         except ValueError, ValidationError:
             result = SystemSettingHealthResult(
                 status=SystemSettingHealthStatus.INVALID,
@@ -300,24 +302,21 @@ class _ProviderOAuthUnavailable(Exception):
     """Provider OAuth endpoint or callback is unavailable."""
 
 
-async def _check_provider_endpoint(provider: str) -> None:
+async def _check_provider_endpoint(
+    provider: str,
+    endpoints: ExternalAccountOAuthEndpointConfiguration | None = None,
+) -> None:
     """Check authorization, token, and identity endpoints without credentials."""
-    endpoints = (
-        (
-            SLACK_IDENTITY_AUTHORIZE_URL,
-            SLACK_IDENTITY_TOKEN_URL,
-            SLACK_IDENTITY_USERINFO_URL,
-        )
-        if provider == "slack"
-        else (
-            DISCORD_IDENTITY_AUTHORIZE_URL,
-            DISCORD_IDENTITY_TOKEN_URL,
-            DISCORD_IDENTITY_USERINFO_URL,
-        )
+    resolved_endpoints = endpoints or external_account_oauth_endpoints(
+        ExternalChannelProvider(provider)
     )
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
-            for endpoint in endpoints:
+            for endpoint in (
+                resolved_endpoints.authorization_url,
+                resolved_endpoints.token_url,
+                resolved_endpoints.userinfo_url,
+            ):
                 response = await client.get(endpoint)
                 if response.status_code >= 500:
                     raise _ProviderOAuthUnavailable("provider_endpoint_unreachable")

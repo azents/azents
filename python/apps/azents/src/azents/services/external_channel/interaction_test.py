@@ -1085,7 +1085,7 @@ async def test_denied_settings_never_exposes_participation_error_details() -> No
     )
     assert len(slack.views) == 1
     assert "Secret Agent" not in repr(slack.views)
-    assert "optional account connection" in repr(slack.views)
+    assert "manage your account connection" in repr(slack.views)
 
 
 @pytest.mark.asyncio
@@ -1138,9 +1138,8 @@ async def test_private_view_delivery_failure_has_no_public_fallback() -> None:
         scheduled_task_channel=SimpleNamespace(),
     )
     control = SlackNativeControl(
-        action="azents_account_link_code",
+        action="azents_model_apply",
         metadata="invalid-signed-scope",
-        code="transient-proof",
         option_id=None,
         reasoning_effort=None,
         execution_options=None,
@@ -1152,7 +1151,6 @@ async def test_private_view_delivery_failure_has_no_public_fallback() -> None:
             replace(_handoff(), handler="native_control", native_control=control)
         )
     assert len(slack.views) == 1
-    assert "transient-proof" not in repr(slack.views)
     assert "invalid-signed-scope" not in repr(slack.views)
 
 
