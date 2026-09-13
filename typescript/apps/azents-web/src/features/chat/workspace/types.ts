@@ -10,6 +10,7 @@ import type {
   GitRefEntryResponse,
   ProjectBrowserEntryResponse,
   ProjectBrowserManifestResponse,
+  RuntimeWebServiceResponse,
   SessionWorkspaceProjectResponse,
 } from "@azents/public-client";
 
@@ -67,7 +68,17 @@ export type WorkspaceManifest = {
 
 export type WorkspaceBrowserMode = "projects" | "all_files";
 
-export type WorkspacePanelTab = "workspace" | "metrics" | "settings";
+export type WorkspacePanelTab =
+  "workspace" | "services" | "metrics" | "settings";
+
+export type RuntimeServicesState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | {
+      type: "READY";
+      services: RuntimeWebServiceResponse[];
+      runtimeAvailable: boolean;
+    };
 
 export type WorkspaceProjectBrowserManifest = {
   root: string;

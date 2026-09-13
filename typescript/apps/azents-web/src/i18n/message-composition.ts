@@ -26,6 +26,7 @@ export const MESSAGE_NAMESPACES = [
   "oauthCallback",
   "runtimeLifecycle",
   "runtimeMetrics",
+  "runtimeWeb",
   "security",
   "skills",
   "useCases",

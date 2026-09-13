@@ -23,7 +23,7 @@ import {
 import { safeFetch } from "@/shared/lib/safe-fetch";
 import { ApiError, withApiErrorInterceptor } from "./api-error";
 
-export { COOKIE_NAMES } from "@/shared/lib/cookies";
+export { getAuthCookieNames } from "@/shared/lib/cookies";
 
 export interface Context {
   apiClient: Client;

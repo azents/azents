@@ -30,9 +30,11 @@ import {
   IconTargetArrow,
   IconTerminal2,
   IconTool,
+  IconWorld,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
+import { RuntimeWebServiceRequestCardContainer } from "../containers/RuntimeWebServiceRequestCardContainer";
 import { knownToolPresentation } from "../knownToolPresentation";
 import { toolCallActionMessageKey } from "../toolCallActionPresentation";
 import { ActivityRow } from "./ActivityRow";
@@ -161,6 +163,8 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "deleteScheduledTask":
     case "submitScheduledTaskResult":
       return <IconCalendarClock size={activityRowIconSize} />;
+    case "runtimeWeb":
+      return <IconWorld size={activityRowIconSize} />;
   }
 }
 
@@ -227,6 +231,7 @@ function presentationQualifier(
     case "listScheduledTasks":
     case "deleteScheduledTask":
     case "submitScheduledTaskResult":
+    case "runtimeWeb":
       return presentation.qualifier;
   }
 }
@@ -310,6 +315,10 @@ function detailLabel(
       return t("field.registration");
     case "recovered":
       return t("field.recovered");
+    case "port":
+      return t("field.port");
+    case "url":
+      return t("field.url");
   }
 }
 
@@ -732,6 +741,21 @@ function presentationDetail(
       return <TodoChecklistDetail detail={presentation.detail} t={t} />;
     case "skill":
       return <SkillContentPanel content={presentation.detail.content} />;
+    case "runtimeWeb":
+      return (
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
+            {detailLabel("port", t)}
+          </Text>
+          <Text size="xs">{presentation.detail.port}</Text>
+          <Text size="xs" c="dimmed">
+            {detailLabel("url", t)}
+          </Text>
+          <Text size="xs" style={{ overflowWrap: "anywhere" }}>
+            {presentation.detail.url}
+          </Text>
+        </Stack>
+      );
   }
 }
 
@@ -852,7 +876,7 @@ function GenericToolCallCard({
   );
 }
 
-function SpecializedToolCallCard({
+function StandardSpecializedToolCallCard({
   toolCall,
   presentation,
   hiddenAttachmentUris,
@@ -920,6 +944,39 @@ function SpecializedToolCallCard({
         />
       </Modal>
     </>
+  );
+}
+
+function SpecializedToolCallCard({
+  toolCall,
+  presentation,
+  hiddenAttachmentUris,
+}: {
+  toolCall: ActiveToolCall;
+  presentation: KnownToolPresentation;
+  hiddenAttachmentUris: readonly string[];
+}): ReactElement {
+  if (
+    presentation.action === "runtimeWeb" &&
+    presentation.detail?.type === "runtimeWeb" &&
+    presentation.detail.requestId !== null
+  ) {
+    return (
+      <RuntimeWebServiceRequestCardContainer
+        endpointId={presentation.detail.endpointId}
+        requestId={presentation.detail.requestId}
+        fallbackLabel={presentation.subject}
+        fallbackPort={presentation.detail.port}
+        fallbackUrl={presentation.detail.url}
+      />
+    );
+  }
+  return (
+    <StandardSpecializedToolCallCard
+      toolCall={toolCall}
+      presentation={presentation}
+      hiddenAttachmentUris={hiddenAttachmentUris}
+    />
   );
 }
 

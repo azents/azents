@@ -47,7 +47,8 @@ export type KnownToolAction =
   | "listScheduledTasks"
   | "deleteScheduledTask"
   | "submitScheduledTaskResult"
-  | "toolSearch";
+  | "toolSearch"
+  | "runtimeWeb";
 
 export type KnownToolDetailLabel =
   | "source"
@@ -86,7 +87,9 @@ export type KnownToolDetailLabel =
   | "nextRun"
   | "taskId"
   | "registration"
-  | "recovered";
+  | "recovered"
+  | "port"
+  | "url";
 
 export interface OutputDetail {
   language: string | null;
@@ -150,6 +153,14 @@ export interface SkillDetail {
   content: string;
 }
 
+export interface RuntimeWebDetail {
+  type: "runtimeWeb";
+  endpointId: string;
+  port: number;
+  requestId: string | null;
+  url: string;
+}
+
 export type KnownToolDetail =
   | OutputDetail
   | DiffDetail
@@ -158,6 +169,7 @@ export type KnownToolDetail =
   | SemanticDetail
   | TodoDetail
   | SkillDetail
+  | RuntimeWebDetail
   | null;
 
 export interface KnownToolPresentation {
@@ -228,6 +240,50 @@ function plaintextApplyPatchInput(
   return { base_path: basePath, patch };
 }
 const execCommandInputSchema = z.object({ command: z.string().min(1) });
+const runtimeWebPortInputSchema = z.object({
+  port: z.number().int().min(1).max(65_535),
+  label: z.string().max(120).nullable(),
+});
+const runtimeWebRequestMutationInputSchema = z.object({
+  request_id: z.string().min(1).max(32),
+  expected_revision: z.number().int().min(1),
+});
+const runtimeWebCloseInputSchema = z.object({
+  cycle_id: z.string().min(1).max(32),
+  expected_endpoint_revision: z.number().int().min(0),
+});
+const runtimeWebProjectionSchema = z.object({
+  endpoint_id: z.string().length(32),
+  port: z.number().int().min(1).max(65_535),
+  label: z.string().nullable(),
+  url: z.string().url(),
+  request: z
+    .object({
+      id: z.string().min(1).max(32),
+      state: z.enum(["pending", "approved", "rejected", "cancelled"]),
+      revision: z.number().int().min(1),
+    })
+    .nullable(),
+  cycle: z
+    .object({
+      id: z.string().min(1).max(32),
+    })
+    .nullable(),
+  active: z.boolean(),
+});
+const runtimeWebMetadataSchema = z.object({
+  kind: z.enum([
+    "runtime_web_service_endpoint",
+    "runtime_web_service_request",
+    "runtime_web_service_cycle",
+  ]),
+  endpoint_id: z.string().length(32),
+  port: z.number().int().min(1).max(65_535),
+  url: z.string().url(),
+  request_id: z.string().min(1).max(32).nullable(),
+  request_revision: z.number().int().min(1).nullable(),
+  cycle_id: z.string().min(1).max(32).nullable(),
+});
 const writeStdinInputSchema = z.object({ process_id: z.string().min(1) });
 const presentFileInputSchema = z.object({
   paths: z.array(z.string().min(1)).min(1),
@@ -509,6 +565,13 @@ const scheduledToolNames = new Set([
   "delete_scheduled_task",
   "submit_scheduled_task_result",
 ]);
+const runtimeWebToolNames = new Set([
+  "prepare_web_service",
+  "request_web_service",
+  "list_web_services",
+  "cancel_web_service_request",
+  "close_web_service",
+]);
 
 function scheduledToolSource(toolCall: ActiveToolCall): boolean {
   const source = toolCall.toolkitSource;
@@ -518,6 +581,17 @@ function scheduledToolSource(toolCall: ActiveToolCall): boolean {
     "toolkit_slug" in source &&
     source.toolkit_slug === "scheduled" &&
     scheduledToolNames.has(toolCall.name)
+  );
+}
+
+function runtimeWebToolSource(toolCall: ActiveToolCall): boolean {
+  const source = toolCall.toolkitSource;
+  return (
+    source !== null &&
+    typeof source !== "undefined" &&
+    "toolkit_slug" in source &&
+    source.toolkit_slug === "runtime_web" &&
+    runtimeWebToolNames.has(toolCall.name)
   );
 }
 
@@ -649,6 +723,57 @@ function parsedResult<T extends z.ZodTypeAny>(
   }
   const validated = schema.safeParse(parsed.value);
   return validated.success ? validated.data : null;
+}
+
+function runtimeWebPresentation(
+  toolCall: ActiveToolCall,
+  subject: string,
+  expectedKind:
+    | "runtime_web_service_endpoint"
+    | "runtime_web_service_request"
+    | "runtime_web_service_cycle",
+): KnownToolPresentationResult {
+  if (!completed(toolCall)) {
+    return presentation("runtimeWeb", subject, null, null);
+  }
+  const metadata = runtimeWebMetadataSchema.safeParse(toolCall.resultMetadata);
+  const result = parsedResult(toolCall, runtimeWebProjectionSchema);
+  if (!metadata.success || result === null) {
+    return generic("invalid-output");
+  }
+  const resultRequestId = result.request === null ? null : result.request.id;
+  const resultRequestRevision =
+    result.request === null ? null : result.request.revision;
+  const resultCycleId = result.cycle === null ? null : result.cycle.id;
+  if (
+    metadata.data.kind !== expectedKind ||
+    metadata.data.endpoint_id !== result.endpoint_id ||
+    metadata.data.port !== result.port ||
+    metadata.data.url !== result.url ||
+    metadata.data.request_id !== resultRequestId ||
+    metadata.data.request_revision !== resultRequestRevision ||
+    metadata.data.cycle_id !== resultCycleId
+  ) {
+    return generic("invalid-output");
+  }
+  return presentation(
+    "runtimeWeb",
+    result.label ?? subject,
+    result.active
+      ? result.request !== null && result.request.state === "pending"
+        ? "active-pending"
+        : "active"
+      : result.request === null
+        ? "inactive"
+        : result.request.state,
+    {
+      type: "runtimeWeb",
+      endpointId: result.endpoint_id,
+      port: result.port,
+      requestId: metadata.data.request_id,
+      url: result.url,
+    },
+  );
 }
 
 function patchPresentation(
@@ -793,7 +918,8 @@ export function knownToolPresentation(
   if (
     toolCall.toolkitSource !== null &&
     typeof toolCall.toolkitSource !== "undefined" &&
-    !scheduledToolSource(toolCall)
+    !scheduledToolSource(toolCall) &&
+    !runtimeWebToolSource(toolCall)
   ) {
     return generic("unregistered");
   }
@@ -824,6 +950,69 @@ export function knownToolPresentation(
   }
   try {
     switch (toolCall.name) {
+      case "prepare_web_service": {
+        const input = runtimeWebPortInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        return input.success
+          ? runtimeWebPresentation(
+              toolCall,
+              input.data.label ?? `localhost:${input.data.port}`,
+              "runtime_web_service_endpoint",
+            )
+          : generic("invalid-arguments");
+      }
+      case "request_web_service": {
+        const input = runtimeWebPortInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        return input.success
+          ? runtimeWebPresentation(
+              toolCall,
+              input.data.label ?? `localhost:${input.data.port}`,
+              "runtime_web_service_request",
+            )
+          : generic("invalid-arguments");
+      }
+      case "cancel_web_service_request": {
+        const input = runtimeWebRequestMutationInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        return input.success
+          ? runtimeWebPresentation(
+              toolCall,
+              input.data.request_id,
+              "runtime_web_service_request",
+            )
+          : generic("invalid-arguments");
+      }
+      case "close_web_service": {
+        const input = runtimeWebCloseInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        return input.success
+          ? runtimeWebPresentation(
+              toolCall,
+              input.data.cycle_id,
+              "runtime_web_service_cycle",
+            )
+          : generic("invalid-arguments");
+      }
+      case "list_web_services": {
+        const input = emptyInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? presentation(
+              "runtimeWeb",
+              null,
+              null,
+              typeof toolCall.result === "string" && terminal(toolCall)
+                ? semanticDetail({
+                    sections: [{ label: "result", content: toolCall.result }],
+                  })
+                : null,
+            )
+          : generic("invalid-arguments");
+      }
       case "read": {
         const input = readInputSchema.safeParse(argumentsResult.value);
         return input.success

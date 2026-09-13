@@ -1156,3 +1156,97 @@ void test("falls back for malformed two-field list_agents results", () => {
 
   assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
 });
+
+void test("specializes a strict Runtime Web request from matching metadata", () => {
+  const projection = {
+    endpoint_id: "endpoint000000000000000000000000",
+    port: 3000,
+    label: "Preview app",
+    url: "https://preview.services.example.com",
+    configuration_state: "configured",
+    endpoint_revision: 1,
+    close_barrier: 0,
+    request: {
+      id: "request0000000000000000000000000",
+      state: "pending",
+      revision: 1,
+    },
+    cycle: null,
+    active: false,
+    duration_seconds: 3600,
+    duration_configuration_revision: 1,
+    observed_at: "2026-09-12T00:00:00Z",
+  };
+  const result = knownToolPresentation(
+    toolCall({
+      name: "request_web_service",
+      toolkitSource: {
+        toolkit_config_id: "runtime-web",
+        toolkit_type: "runtime_web",
+        toolkit_name: "Runtime Web",
+        toolkit_slug: "runtime_web",
+      },
+      arguments: JSON.stringify({ port: 3000, label: "Preview app" }),
+      result: JSON.stringify(projection),
+      resultMetadata: {
+        kind: "runtime_web_service_request",
+        endpoint_id: projection.endpoint_id,
+        port: projection.port,
+        url: projection.url,
+        endpoint_revision: 1,
+        request_id: projection.request.id,
+        request_revision: projection.request.revision,
+        cycle_id: null,
+      },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "runtimeWeb",
+      subject: "Preview app",
+      qualifier: "pending",
+      detail: {
+        type: "runtimeWeb",
+        endpointId: projection.endpoint_id,
+        port: 3000,
+        requestId: projection.request.id,
+        url: projection.url,
+      },
+    },
+  });
+});
+
+void test("rejects Runtime Web metadata that does not match the projection", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "request_web_service",
+      arguments: JSON.stringify({ port: 3000, label: null }),
+      result: JSON.stringify({
+        endpoint_id: "endpoint000000000000000000000000",
+        port: 3000,
+        label: null,
+        url: "https://preview.services.example.com",
+        request: {
+          id: "request0000000000000000000000000",
+          state: "pending",
+          revision: 1,
+        },
+        cycle: null,
+        active: false,
+      }),
+      resultMetadata: {
+        kind: "runtime_web_service_request",
+        endpoint_id: "different00000000000000000000000",
+        port: 3000,
+        url: "https://preview.services.example.com",
+        request_id: "request0000000000000000000000000",
+        request_revision: 1,
+        cycle_id: null,
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
+});

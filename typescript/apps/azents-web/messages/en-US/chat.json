@@ -146,6 +146,7 @@
     "subtitle": "Agent Runtime files and projects",
     "openPanel": "Open agent workspace",
     "workspaceTab": "Agent Runtime",
+    "servicesTab": "Services",
     "metricsTab": "Metrics",
     "settingsTab": "Settings",
     "settingsTitle": "Runtime settings",
@@ -394,7 +395,8 @@
       "addScheduledTask": "Created Scheduled Task",
       "listScheduledTasks": "Listed Scheduled Tasks",
       "deleteScheduledTask": "Deleted Scheduled Task",
-      "submitScheduledTaskResult": "Submitted Scheduled Task result"
+      "submitScheduledTaskResult": "Submitted Scheduled Task result",
+      "runtimeWeb": "Managed web service"
     },
     "actionRunning": {
       "read": "Reading file",
@@ -434,7 +436,8 @@
       "addScheduledTask": "Creating Scheduled Task",
       "listScheduledTasks": "Listing Scheduled Tasks",
       "deleteScheduledTask": "Deleting Scheduled Task",
-      "submitScheduledTaskResult": "Submitting Scheduled Task result"
+      "submitScheduledTaskResult": "Submitting Scheduled Task result",
+      "runtimeWeb": "Managing web service"
     },
     "field": {
       "source": "Source",
@@ -473,7 +476,9 @@
       "nextRun": "Next run",
       "taskId": "Task ID",
       "registration": "Channel registration",
-      "recovered": "Recovered"
+      "recovered": "Recovered",
+      "port": "Port",
+      "url": "URL"
     },
     "changeAction": {
       "add": "Added",

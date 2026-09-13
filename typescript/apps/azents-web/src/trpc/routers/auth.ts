@@ -20,6 +20,7 @@ import {
   authV1RequestSignupEmail,
   authV1SendCode,
   authV1VerifyCode,
+  runtimeWebV1RevokeRuntimeWebIdentity,
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import {
@@ -27,6 +28,10 @@ import {
   getRefreshToken,
   setAuthCookiesToHeaders,
 } from "@/shared/lib/cookies";
+import {
+  clearSharedRuntimeWebIdentity,
+  getSharedRuntimeWebIdentity,
+} from "@/shared/lib/runtime-web-auth";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
@@ -51,7 +56,7 @@ export const authRouter = router({
 
   /**
    * auth code verify and JWT issue
-   * - on success az-token, az-refresh, az-token-expires-at set cookies
+   * - on success the environment-specific host authentication cookies are set
    */
   verify: publicProcedure
     .input(
@@ -140,7 +145,7 @@ export const authRouter = router({
 
   /**
    * Password login
-   * - on success az-token, az-refresh, az-token-expires-at set cookies
+   * - on success the environment-specific host authentication cookies are set
    */
   passwordLogin: publicProcedure
     .input(
@@ -299,6 +304,18 @@ export const authRouter = router({
    * - Request session revocation to server, then delete cookies
    */
   logout: publicProcedure.mutation(async ({ ctx }) => {
+    const runtimeWebIdentity = await getSharedRuntimeWebIdentity();
+    if (runtimeWebIdentity !== null) {
+      try {
+        await runtimeWebV1RevokeRuntimeWebIdentity({
+          client: ctx.apiClient,
+          body: { secret: runtimeWebIdentity },
+          throwOnError: true,
+        });
+      } catch {
+        // Primary logout still proceeds when the auxiliary identity is stale.
+      }
+    }
     try {
       await authV1Logout({
         client: ctx.apiClient,
@@ -308,6 +325,7 @@ export const authRouter = router({
       // Delete cookies even when logout fails
     }
 
+    clearSharedRuntimeWebIdentity(ctx.resHeaders);
     clearAuthCookiesToHeaders(ctx.resHeaders);
 
     return { success: true };

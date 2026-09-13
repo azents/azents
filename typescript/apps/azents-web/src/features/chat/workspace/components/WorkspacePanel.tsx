@@ -28,6 +28,7 @@ import {
   IconRefresh,
   IconSettings,
   IconTerminal2,
+  IconWorld,
 } from "@tabler/icons-react";
 import Link from "next/link";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
@@ -37,11 +38,13 @@ import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
+import { RuntimeServicesPanel } from "./RuntimeServicesPanel";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   ProjectRegistrationDialogState,
   ProjectRegistrationMode,
+  RuntimeServicesState,
   WorkspaceBrowserMode,
   WorkspaceEntry,
   WorkspacePanelState,
@@ -53,6 +56,7 @@ import type {
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
+import type { RuntimeWebServiceResponse } from "@azents/public-client";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",
@@ -62,6 +66,18 @@ export interface WorkspacePanelProps {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
+  servicesState?: RuntimeServicesState;
+  servicesMutating?: boolean;
+  preparedRuntimeService?: RuntimeWebServiceResponse | null;
+  servicesMutationError?: string | null;
+  onPrepareRuntimeService?: (port: number, label: string | null) => void;
+  onConfirmCreateRuntimeService?: () => void;
+  onResetPreparedRuntimeService?: () => void;
+  onApproveRuntimeService?: (service: RuntimeWebServiceResponse) => void;
+  onRejectRuntimeService?: (service: RuntimeWebServiceResponse) => void;
+  onCancelRuntimeService?: (service: RuntimeWebServiceResponse) => void;
+  onRequestRuntimeServiceAgain?: (service: RuntimeWebServiceResponse) => void;
+  onCloseRuntimeService?: (service: RuntimeWebServiceResponse) => void;
   defaultTab?: WorkspacePanelTab;
   activeTab?: WorkspacePanelTab;
   navigation?: "internal" | "external";
@@ -132,6 +148,22 @@ export function WorkspacePanel({
   state,
   projectState,
   metricsState,
+  servicesState = {
+    type: "READY",
+    services: [],
+    runtimeAvailable: false,
+  },
+  servicesMutating = false,
+  preparedRuntimeService = null,
+  servicesMutationError = null,
+  onPrepareRuntimeService = (): void => {},
+  onConfirmCreateRuntimeService = (): void => {},
+  onResetPreparedRuntimeService = (): void => {},
+  onApproveRuntimeService = (): void => {},
+  onRejectRuntimeService = (): void => {},
+  onCancelRuntimeService = (): void => {},
+  onRequestRuntimeServiceAgain = (): void => {},
+  onCloseRuntimeService = (): void => {},
   defaultTab = "workspace",
   activeTab = defaultTab,
   navigation = "internal",
@@ -741,6 +773,7 @@ export function WorkspacePanel({
         onChange={(value) => {
           if (
             value === "workspace" ||
+            value === "services" ||
             value === "metrics" ||
             value === "settings"
           ) {
@@ -762,6 +795,15 @@ export function WorkspacePanel({
           >
             <Text component="span" inherit visibleFrom="xs">
               {t("workspaceTab")}
+            </Text>
+          </Tabs.Tab>
+          <Tabs.Tab
+            aria-label={t("servicesTab")}
+            value="services"
+            leftSection={<IconWorld size="1rem" />}
+          >
+            <Text component="span" inherit visibleFrom="xs">
+              {t("servicesTab")}
             </Text>
           </Tabs.Tab>
           {metricsTabAvailable ? (
@@ -796,6 +838,26 @@ export function WorkspacePanel({
           }}
         >
           {renderWorkspacePanel()}
+        </Tabs.Panel>
+        <Tabs.Panel
+          value="services"
+          p="md"
+          style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+        >
+          <RuntimeServicesPanel
+            state={servicesState}
+            mutating={servicesMutating}
+            preparedService={preparedRuntimeService}
+            mutationError={servicesMutationError}
+            onPrepareService={onPrepareRuntimeService}
+            onConfirmCreate={onConfirmCreateRuntimeService}
+            onResetPreparedService={onResetPreparedRuntimeService}
+            onApprove={onApproveRuntimeService}
+            onReject={onRejectRuntimeService}
+            onCancel={onCancelRuntimeService}
+            onRequestAgain={onRequestRuntimeServiceAgain}
+            onClose={onCloseRuntimeService}
+          />
         </Tabs.Panel>
         {metricsTabAvailable ? (
           <Tabs.Panel

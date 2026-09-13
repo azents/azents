@@ -1,0 +1,73 @@
+{
+  "retry": "再試行",
+  "auth": {
+    "title": "Web サービスに接続しています",
+    "description": "Runtime アプリケーションを開く前に、ブラウザーと Azents のサインインを確認しています。",
+    "errorDescription": "Web サービスに安全に接続できませんでした。",
+    "invalidResponse": "認証応答が無効です。",
+    "failed": "Runtime Web 認証に失敗しました。"
+  },
+  "confirmation": {
+    "title": "Web サービスへのアクセスを確認",
+    "subtitle": "この Session の正確なサービス要求だけをここで承認できます。",
+    "loading": "現在のサービス要求を読み込んでいます…",
+    "errorTitle": "Web サービスを読み込めませんでした",
+    "duration": "アクセスは {minutes} 分後に期限切れになります。",
+    "untrustedNotice": "Runtime アプリケーションは Azents によって検証されていません。コンテンツ、ダウンロード、機密情報の要求を信頼しないでください。",
+    "alreadyActive": "このサービスは現在公開中です。開いても有効期限は延長されません。",
+    "stale": "この要求は承認待ちではありません。承認操作なしで現在の状態を表示します。"
+  },
+  "panel": {
+    "tab": "サービス",
+    "title": "Web サービス",
+    "description": "この Session ですでに実行中のアプリケーションを停止せずに公開します。",
+    "loading": "Web サービスを読み込んでいます…",
+    "errorTitle": "Web サービスを読み込めませんでした",
+    "emptyTitle": "Web サービスはまだありません",
+    "emptyDescription": "アプリケーションの準備ができたら、数値の localhost ポートに安定したアドレスを作成します。",
+    "create": "サービスを作成",
+    "createTitle": "Web サービスを作成",
+    "port": "ローカルポート",
+    "portPlaceholder": "3000",
+    "label": "サービス名",
+    "labelPlaceholder": "プレビューアプリ",
+    "continue": "公開を確認",
+    "confirmTitle": "このサービスを公開しますか？",
+    "confirmDescription": "承認された Session メンバーは {minutes} 分間このアドレスにアクセスできます。公開を閉じてもアプリケーションは停止しません。",
+    "cancelDialog": "キャンセル"
+  },
+  "service": {
+    "portLabel": "ポート {port}",
+    "localPort": "localhost:{port}",
+    "expiresAt": "{time} に期限切れ",
+    "endedAt": "{time} に終了"
+  },
+  "status": {
+    "active": "公開中",
+    "pending": "承認待ち",
+    "activePending": "公開中 · 新しい承認待ち",
+    "inactive": "停止中",
+    "expired": "期限切れ",
+    "closed": "公開終了",
+    "unconfigured": "セットアップが必要",
+    "unavailable": "アプリケーションに接続できません"
+  },
+  "actions": {
+    "approve": "承認",
+    "approveDuration": "{minutes} 分間承認",
+    "reject": "拒否",
+    "cancel": "要求をキャンセル",
+    "requestAgain": "再要求",
+    "close": "公開を閉じる",
+    "copy": "URL をコピー",
+    "copied": "URL をコピーしました",
+    "open": "サービスを開く"
+  },
+  "chat": {
+    "request": "Web サービスを要求",
+    "preparing": "Web サービスを準備",
+    "listing": "Web サービスを確認",
+    "closing": "Web サービスを閉じました",
+    "stale": "この Chat 項目は古いため、現在のサービス状態を表示します。"
+  }
+}

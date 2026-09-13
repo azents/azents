@@ -12,7 +12,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { cache } from "react";
-import { COOKIE_NAMES } from "@/shared/lib/cookies";
+import { getAuthCookieNames } from "@/shared/lib/cookies";
 
 export type InitialAuthState =
   { status: "authenticated" } | { status: "unauthenticated" };
@@ -25,8 +25,9 @@ export type InitialAuthState =
 export const getInitialAuthState = cache(
   async (): Promise<InitialAuthState> => {
     const cookieStore = await cookies();
-    const accessToken = cookieStore.get(COOKIE_NAMES.ACCESS_TOKEN)?.value;
-    const refreshToken = cookieStore.get(COOKIE_NAMES.REFRESH_TOKEN)?.value;
+    const names = getAuthCookieNames();
+    const accessToken = cookieStore.get(names.ACCESS_TOKEN)?.value;
+    const refreshToken = cookieStore.get(names.REFRESH_TOKEN)?.value;
 
     // Treat as authenticated when access token or refresh token exists
     // (when only refresh token exists, interceptor refreshes access token automatically)

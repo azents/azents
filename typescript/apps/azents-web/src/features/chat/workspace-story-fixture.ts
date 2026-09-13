@@ -138,6 +138,22 @@ const readyWorkspaceState: WorkspacePanelState = {
 export const workspacePanelStoryFixture: WorkspacePanelContainerOutput = {
   state: readyWorkspaceState,
   metricsState: { type: "LOADING" },
+  servicesState: {
+    type: "READY",
+    services: [],
+    runtimeAvailable: true,
+  },
+  servicesMutating: false,
+  preparedRuntimeService: null,
+  servicesMutationError: null,
+  onPrepareRuntimeService: noop,
+  onConfirmCreateRuntimeService: noop,
+  onResetPreparedRuntimeService: noop,
+  onApproveRuntimeService: noop,
+  onRejectRuntimeService: noop,
+  onCancelRuntimeService: noop,
+  onRequestRuntimeServiceAgain: noop,
+  onCloseRuntimeService: noop,
   runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
   projectState: {
     type: "READY",

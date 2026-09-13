@@ -146,6 +146,7 @@
     "subtitle": "Agent Workspace 파일과 Project",
     "openPanel": "Agent Workspace 열기",
     "workspaceTab": "Agent Runtime",
+    "servicesTab": "서비스",
     "metricsTab": "메트릭",
     "settingsTab": "설정",
     "settingsTitle": "Runtime 설정",
@@ -394,7 +395,8 @@
       "addScheduledTask": "예약 작업 생성",
       "listScheduledTasks": "예약 작업 목록 조회",
       "deleteScheduledTask": "예약 작업 삭제",
-      "submitScheduledTaskResult": "예약 작업 결과 제출"
+      "submitScheduledTaskResult": "예약 작업 결과 제출",
+      "runtimeWeb": "웹 서비스 관리"
     },
     "actionRunning": {
       "read": "파일 읽는 중",
@@ -434,7 +436,8 @@
       "addScheduledTask": "예약 작업 생성 중",
       "listScheduledTasks": "예약 작업 목록 조회 중",
       "deleteScheduledTask": "예약 작업 삭제 중",
-      "submitScheduledTaskResult": "예약 작업 결과 제출 중"
+      "submitScheduledTaskResult": "예약 작업 결과 제출 중",
+      "runtimeWeb": "웹 서비스 관리 중"
     },
     "field": {
       "source": "출처",
@@ -473,7 +476,9 @@
       "nextRun": "다음 실행",
       "taskId": "작업 ID",
       "registration": "채널 등록",
-      "recovered": "복구 여부"
+      "recovered": "복구 여부",
+      "port": "포트",
+      "url": "URL"
     },
     "changeAction": {
       "add": "추가",
