@@ -1,5 +1,6 @@
 import { Box } from "@mantine/core";
 import { useRef, useState } from "react";
+import { expect, within } from "storybook/test";
 import { createChatMessage } from "../story-fixtures";
 import { workspacePanelStoryFixture } from "../workspace-story-fixture";
 import { ChatSessionView } from "./ChatSessionView";
@@ -377,11 +378,39 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Conversation = {} satisfies Story;
+export const Conversation = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const tablist = canvas.getByRole("tablist", { name: "Files" });
+    const firstTab = canvas.getByRole("tab", { name: "Files" });
+    const label = firstTab.querySelector("span");
+    const separator = canvas.getByRole("separator", {
+      name: "Resize session panel",
+    });
+    if (label === null) {
+      throw new Error("Expected the desktop tab label element.");
+    }
+
+    await expect(getComputedStyle(label).display).toBe("none");
+    const initialTablistWidth = tablist.getBoundingClientRect().width;
+    const initialSeparatorLeft = separator.getBoundingClientRect().left;
+    await expect(initialTablistWidth).toBeGreaterThan(0);
+    await expect(initialSeparatorLeft).toBeGreaterThan(0);
+  },
+} satisfies Story;
 
 export const MobilePanel = {
   args: { terminalMobile: true },
   globals: { viewport: { value: "mobile1", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const title = canvasElement.querySelector("[data-session-panel-title]");
+    const panel = title === null ? null : title.closest("[aria-label]");
+    if (title === null || panel === null) {
+      throw new Error("Expected the mobile session panel title.");
+    }
+    await expect(title).toHaveTextContent("Tools");
+    await expect(panel.getBoundingClientRect().top).toBeGreaterThan(0);
+  },
 } satisfies Story;
 
 export const MobileChat = {
@@ -390,6 +419,13 @@ export const MobileChat = {
 
 export const RuntimePanel = {
   args: { panel: { ...args.panel, activeView: "runtime" } },
+  play: async ({ canvasElement }) => {
+    const title = canvasElement.querySelector("[data-session-panel-title]");
+    if (title === null) {
+      throw new Error("Expected the desktop session panel title.");
+    }
+    await expect(title).toHaveTextContent("Runtime");
+  },
 } satisfies Story;
 
 export const TerminalPanel = {

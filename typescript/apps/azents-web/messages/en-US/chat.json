@@ -1,6 +1,7 @@
 {
   "sessionPanel": {
     "title": "Session panel",
+    "mobileTitle": "Tools",
     "toggle": "Toggle session panel",
     "close": "Close session panel",
     "files": "Files",
