@@ -57,6 +57,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
@@ -642,12 +643,12 @@ class TestAgentSessionRepository:
 
         assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
 
-    async def test_lock_by_id_uses_strong_agent_parent_lock(
+    async def test_lock_by_id_does_not_upgrade_existing_agent_write_lock(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Session locks wait behind an existing Agent key-share lock."""
+        """Session locking remains compatible with root-creation FK locks."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
@@ -680,6 +681,11 @@ class TestAgentSessionRepository:
                 rdb_engine,
                 expire_on_commit=False,
             ) as competing_session:
+                locked_agent = await AgentRepository().lock_by_id(
+                    competing_session,
+                    agent_id,
+                )
+                assert locked_agent is not None
                 competing_started.set()
                 locked = await repository.lock_by_id(competing_session, created.id)
                 assert locked is not None
@@ -698,14 +704,8 @@ class TestAgentSessionRepository:
             assert locked_agent_id == agent_id
             competing_lock = asyncio.create_task(lock_session())
             await asyncio.wait_for(competing_started.wait(), timeout=5)
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(
-                    asyncio.shield(competing_lock),
-                    timeout=0.1,
-                )
+            assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
             await agent_holder.commit()
-
-        assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
 
     async def test_root_context_rejects_runtime_removing(
         self,

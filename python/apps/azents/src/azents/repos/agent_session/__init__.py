@@ -1186,7 +1186,7 @@ class AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Lock one AgentSession after its referenced Agent in stable FK order."""
-        if not await self._lock_agent_parent_for_session_strong(
+        if not await self._lock_agent_parent_for_session_write(
             session,
             agent_session_id,
             nowait=False,
@@ -1292,7 +1292,7 @@ class AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Try to lock one Session and its Agent parent without waiting."""
-        if not await self._lock_agent_parent_for_session_strong(
+        if not await self._lock_agent_parent_for_session_write(
             session,
             agent_session_id,
             nowait=True,
@@ -1307,14 +1307,14 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         return None if rdb is None else self._build(rdb)
 
-    async def _lock_agent_parent_for_session_strong(
+    async def _lock_agent_parent_for_session_write(
         self,
         session: AsyncSession,
         agent_session_id: str,
         *,
         nowait: bool,
     ) -> bool:
-        """Lock the Session's Agent parent with a strong row lock."""
+        """Serialize Session writes without blocking Agent FK references."""
         agent_id = await session.scalar(
             sa.select(RDBAgentSession.agent_id).where(
                 RDBAgentSession.id == agent_session_id
@@ -1325,7 +1325,10 @@ class AgentSessionRepository:
         locked_agent_id = await session.scalar(
             sa.select(RDBAgent.id)
             .where(RDBAgent.id == agent_id)
-            .with_for_update(nowait=nowait)
+            # Match AgentRepository.lock_by_id's ``FOR NO KEY UPDATE``.
+            # Escalating to ``FOR UPDATE`` can deadlock with root creation,
+            # which holds an FK key-share lock before its final Agent CAS.
+            .with_for_update(key_share=True, nowait=nowait)
         )
         return locked_agent_id is not None
 
