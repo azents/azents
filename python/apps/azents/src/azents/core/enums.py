@@ -845,6 +845,16 @@ class ExternalChannelProvider(enum.StrEnum):
     DISCORD = "discord"
 
 
+class ExternalAccountOAuthAttemptStatus(enum.StrEnum):
+    """Lifecycle state for one provider identity OAuth attempt."""
+
+    OPEN = "open"
+    CLAIMED = "claimed"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
 class ExternalChannelTransport(enum.StrEnum):
     """Inbound transport selected for one external connection."""
 

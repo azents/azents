@@ -124,12 +124,15 @@ Class | Method | HTTP request | Description
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
 *SystemSettingsV1Api* | [**system_settings_v1_cancel_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
+*SystemSettingsV1Api* | [**system_settings_v1_check_external_account_oauth_health**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_check_external_account_oauth_health) | **POST** /system-setting/v1/sections/external-account-oauth/{provider}/health-check | Check External Account Oauth Health
 *SystemSettingsV1Api* | [**system_settings_v1_check_platform_github_app_health**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_check_platform_github_app_health) | **POST** /system-setting/v1/sections/platform-github-app/health-check | Check Platform Github App Health
 *SystemSettingsV1Api* | [**system_settings_v1_confirm_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
+*SystemSettingsV1Api* | [**system_settings_v1_get_external_account_oauth_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_external_account_oauth_setting) | **GET** /system-setting/v1/sections/external-account-oauth/{provider} | Get External Account Oauth Setting
 *SystemSettingsV1Api* | [**system_settings_v1_get_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_external_channel_files_setting) | **GET** /system-setting/v1/sections/external-channel-files | Get External Channel Files Setting
 *SystemSettingsV1Api* | [**system_settings_v1_get_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_audit_events**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_sections**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
+*SystemSettingsV1Api* | [**system_settings_v1_patch_external_account_oauth_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_external_account_oauth_setting) | **PATCH** /system-setting/v1/sections/external-account-oauth/{provider} | Patch External Account Oauth Setting
 *SystemSettingsV1Api* | [**system_settings_v1_patch_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_external_channel_files_setting) | **PATCH** /system-setting/v1/sections/external-channel-files | Patch External Channel Files Setting
 *SystemSettingsV1Api* | [**system_settings_v1_patch_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_validate_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
@@ -179,6 +182,11 @@ Class | Method | HTTP request | Description
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
+ - [ExternalAccountOAuthDetailResponse](azentsadminclient/docs/ExternalAccountOAuthDetailResponse.md)
+ - [ExternalAccountOAuthFieldResponse](azentsadminclient/docs/ExternalAccountOAuthFieldResponse.md)
+ - [ExternalAccountOAuthHealthResponse](azentsadminclient/docs/ExternalAccountOAuthHealthResponse.md)
+ - [ExternalAccountOAuthPatchRequest](azentsadminclient/docs/ExternalAccountOAuthPatchRequest.md)
+ - [ExternalAccountOAuthSecretActionRequest](azentsadminclient/docs/ExternalAccountOAuthSecretActionRequest.md)
  - [ExternalChannelFilesDetailResponse](azentsadminclient/docs/ExternalChannelFilesDetailResponse.md)
  - [ExternalChannelFilesPatchRequest](azentsadminclient/docs/ExternalChannelFilesPatchRequest.md)
  - [FileLifecycleSettingsResponse](azentsadminclient/docs/FileLifecycleSettingsResponse.md)

@@ -33,6 +33,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_settings_v1_check_external_account_oauth_health(self) -> None:
+        """Test case for system_settings_v1_check_external_account_oauth_health
+
+        Check External Account Oauth Health
+        """
+        pass
+
     def test_system_settings_v1_check_platform_github_app_health(self) -> None:
         """Test case for system_settings_v1_check_platform_github_app_health
 
@@ -44,6 +51,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """Test case for system_settings_v1_confirm_platform_github_app_candidate
 
         Confirm Platform Github App Candidate
+        """
+        pass
+
+    def test_system_settings_v1_get_external_account_oauth_setting(self) -> None:
+        """Test case for system_settings_v1_get_external_account_oauth_setting
+
+        Get External Account Oauth Setting
         """
         pass
 
@@ -72,6 +86,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """Test case for system_settings_v1_list_system_setting_sections
 
         List System Setting Sections
+        """
+        pass
+
+    def test_system_settings_v1_patch_external_account_oauth_setting(self) -> None:
+        """Test case for system_settings_v1_patch_external_account_oauth_setting
+
+        Patch External Account Oauth Setting
         """
         pass
 

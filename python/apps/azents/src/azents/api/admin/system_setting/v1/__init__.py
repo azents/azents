@@ -19,6 +19,9 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingVersionConflict,
 )
+from azents.services.external_account_oauth_system_setting.service import (
+    ExternalAccountOAuthSystemSettingService,
+)
 from azents.services.github_platform_system_setting.service import (
     PlatformGitHubAppSystemSettingService,
 )
@@ -29,6 +32,8 @@ from azents.services.system_setting.service import SystemSettingsService
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    ExternalAccountOAuthDetailResponse,
+    ExternalAccountOAuthPatchRequest,
     ExternalChannelFilesDetailResponse,
     ExternalChannelFilesPatchRequest,
     PlatformGitHubAppConfirmRequest,
@@ -203,6 +208,93 @@ async def patch_external_channel_files_setting(
     except SystemSettingVersionConflict as error:
         _raise_system_setting_error(error)
     return ExternalChannelFilesDetailResponse.from_domain(result.resolved)
+
+
+@router.get("/sections/external-account-oauth/{provider}")
+async def get_external_account_oauth_setting(
+    provider: str,
+    service: Annotated[ExternalAccountOAuthSystemSettingService, Depends()],
+) -> ExternalAccountOAuthDetailResponse:
+    """Return one redacted provider OAuth Section."""
+    try:
+        detail = await service.get_detail(provider)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "unsupported_provider",
+                "message": "The provider OAuth setting is unavailable.",
+            },
+        ) from error
+    return ExternalAccountOAuthDetailResponse.from_domain(detail)
+
+
+@router.patch("/sections/external-account-oauth/{provider}")
+async def patch_external_account_oauth_setting(
+    provider: str,
+    request: ExternalAccountOAuthPatchRequest,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[ExternalAccountOAuthSystemSettingService, Depends()],
+) -> ExternalAccountOAuthDetailResponse:
+    """Patch one provider OAuth Section with optimistic concurrency."""
+    config_patch: dict[str, object] = {}
+    if "client_id" in request.model_fields_set:
+        config_patch["client_id"] = request.client_id
+    if "application_id" in request.model_fields_set:
+        config_patch["application_id"] = request.application_id
+    secret_action = None
+    if "client_secret" in request.model_fields_set:
+        action = request.client_secret
+        if action is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "invalid_system_setting_secret_action",
+                    "message": "Secret fields require an explicit action object.",
+                },
+            )
+        secret_action = SystemSettingSecretAction(
+            action=action.action,
+            value=action.value,
+        )
+    try:
+        await service.patch(
+            provider=provider,
+            expected_version=request.expected_version,
+            config_patch=config_patch,
+            client_secret_action=secret_action,
+            actor_user_id=system_admin.user_id,
+        )
+    except SystemSettingVersionConflict as error:
+        _raise_system_setting_error(error)
+    except (ValueError, ValidationError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_provider_oauth_setting",
+                "message": "The provider OAuth setting is invalid.",
+            },
+        ) from error
+    return ExternalAccountOAuthDetailResponse.from_domain(
+        await service.get_detail(provider)
+    )
+
+
+@router.post("/sections/external-account-oauth/{provider}/health-check")
+async def check_external_account_oauth_health(
+    provider: str,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[ExternalAccountOAuthSystemSettingService, Depends()],
+) -> ExternalAccountOAuthDetailResponse:
+    """Run a local health check for one provider OAuth Section."""
+    try:
+        detail = await service.check_health(
+            provider=provider,
+            actor_user_id=system_admin.user_id,
+        )
+    except SystemSettingEffectiveGenerationChanged as error:
+        _raise_system_setting_error(error)
+    return ExternalAccountOAuthDetailResponse.from_domain(detail)
 
 
 @router.get("/sections/platform-github-app")
