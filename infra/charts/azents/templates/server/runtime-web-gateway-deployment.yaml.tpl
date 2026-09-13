@@ -7,9 +7,6 @@
 {{- if not $control.webTransport.enabled }}
 {{- fail "server.runtimeControl.webTransport.enabled is required when Runtime Web Gateway is enabled" }}
 {{- end }}
-{{- if not $gateway.ingress.enabled }}
-{{- fail "server.runtimeWebGateway.ingress.enabled is required when Runtime Web Gateway is enabled" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
