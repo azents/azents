@@ -43,6 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/inference_profile.py
+  - python/apps/azents/src/azents/core/model_availability.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
@@ -74,6 +75,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/session_execution/**
+  - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
@@ -96,8 +98,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-12
-spec_version: 176
+last_verified_at: 2026-09-13
+spec_version: 177
 ---
 
 # Agent Execution Loop
@@ -429,13 +431,12 @@ snapshot, completes the active run, and is not retried.
 
 Requested profile selection precedence for implicit execution is the Session applied profile then
 Agent `main_model_label`; explicit human input wins over both. The applied profile contains only
-Agent-owned label and nullable effort. The complete prepared Session snapshot additionally contains
-the resolved physical selection, the selected option's context/output/tool settings, effective
-limits, and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
-boundary. If that input changes the profile, the same `AgentRun` rebuilds the next model request from
-the newly prepared Session snapshot. It does not restore an older run-owned model selection or cancel
-the run merely to change profiles. Commands use the implicit selection but have no client-submitted
-profile.
+Agent-owned label and nullable effort. A fresh foreground or compaction operation freezes that
+label's ordered candidate chain in `agent_runs.model_operation_state`. The complete prepared Session
+snapshot contains the current candidate's resolved physical selection, candidate-scoped
+context/output/tool settings, effective limits, and resolution time. Inputs accepted during a
+model/tool turn are applied only at the next fresh operation boundary. Commands use the implicit
+selection but have no client-submitted profile.
 
 Model-call preparation carries that exact turn-local Session snapshot through `RunRequest` and
 `PreparedModelCall`. When provider usage is appended, the `turn_marker` copies the snapshot's public
@@ -443,16 +444,19 @@ applied profile and effective limits. A multi-turn run can therefore contain dif
 marker snapshots after a boundary profile change; it never stamps all turns with one run-start
 selection or queries a later Session value while appending an earlier turn.
 
-The foreground `RunRequest` uses the selected Session settings:
+The foreground `RunRequest` uses the current candidate's selected Session settings:
 `max_output_tokens` is clamped against the selected model capability, enabled
-built-in tools are lowered only from that option, and the effective input window
-combines the selected foreground option with the Agent lightweight option. Each
-option uses its normalized default input window when its cap is unset, treats a
+built-in tools are lowered only from that candidate, and the effective input window
+combines the selected foreground candidate with the Agent lightweight Primary. Each
+candidate uses its normalized default input window when its cap is unset, treats a
 maximum-only snapshot as having that same default, and clamps an explicit cap to
 the normalized maximum before the smaller-window calculation. An explicit empty
-built-in tool list remains all-off. Automatic retry, recovery, and worker takeover
-rebuild from the Session-owned selection and settings snapshots rather than
-rematching the mutable Agent option list.
+built-in tool list remains all-off. Ordinary same-candidate retry rebuilds from the
+Session-owned selection and settings snapshot. Quota progression advances the frozen
+operation cursor and prepares the next compatible candidate without weakening the
+requested effort or execution options. Recovery and Worker takeover preserve the
+frozen chain, cursor, attempted identities, and transferred probe/reservation claims
+rather than rematching the mutable Agent option list.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. The Subagent Tree reads this projection instead of scanning child transcript history. A subagent Run also stores its durable direct-parent delivery state, terminal-result InputBuffer identity, and enqueue time so terminal mailbox delivery remains idempotent after the buffer is promoted and deleted.
 
@@ -480,6 +484,14 @@ existing request because this refresh applies only to model execution. This keep
 and prevents durable failed history until retry is finalized. `max_retries` counts retries after the
 initial attempt, so a budget of three permits four total attempts and terminal attempt numbers remain
 one-based within each model turn.
+
+Normalized `quota_or_billing` bypasses same-candidate retry publication. `RunExecutor` records the
+candidate outcome, renews the Workspace cooldown generation, advances the frozen operation cursor,
+and dispatches the next compatible candidate immediately. Ordinary `rate_limit` and other classified
+provider failures retain the failed-run retry controller. One logical operation never re-enters an
+identity already recorded as quota-attempted. If no eligible candidate remains, the operation
+finalizes with bounded chain-exhaustion diagnostics and the existing manual failed-run retry action
+starts a fresh Run with a newly resolved chain.
 
 Before a non-Stop model failure is recorded or its retry state is published, `RunExecutor` asks the
 live projector to discard that attempt's assistant, reasoning, and provider-tool projections. The
@@ -602,7 +614,14 @@ The pre-lower order is significant. Event attachment/file availability filters r
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
-`AgentWorker` resolves the requested main target before the engine starts. The target label is resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and model catalogs are not consulted. The selected requested target label and nullable effort are persisted when the pending `AgentRun` activates. The complete resolved main-model snapshot, effective context limit, and compaction threshold remain on the Session inference state for the current turn and may be replaced by a later prepared boundary in the same run. The Agent's lightweight snapshot remains the compaction model. The execution core receives physical selections and limits in `RunRequest`, never the target label.
+`AgentWorker` resolves the requested main target before the engine starts. The target label is
+resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and
+model catalogs are not consulted. The selected requested target label and nullable effort are
+persisted when the pending `AgentRun` activates. Fresh foreground and compaction operations freeze
+independent ordered candidate chains. The Session inference state holds the current candidate
+snapshot and effective limits, while the Run operation state owns candidate progression and recovery.
+The execution core receives one physical selection and its limits in each `RunRequest`, never the
+target label or complete fallback order.
 
 The selected lowerer owns the full provider-native request surface: generation options, client
 function tool passthrough, and provider-hosted tool lowering. OpenAI logical requests preserve
@@ -1107,12 +1126,14 @@ backoff are active. A failed attempt appends neither marker nor summary; after s
 and revalidation, one transaction appends the adjacent marker/summary pair and moves the model-input
 head. Provider failures use the owning Run's full retry budget.
 
-Automatic Session title generation follows the same provider routing, typed failure contract, shared
-retry policy, and standard helper dialect in an operation-scoped best-effort loop.
-OpenAI-compatible title calls omit `max_output_tokens`; retries revalidate that the original initial
-prompt still owns automatic title generation. Timeout or exhaustion preserves the deterministic
-initial title and does not fail an otherwise completed Agent Run. The initial prompt may be either
-the ordinary first user message or the exact creation-authorized External Channel human invocation.
+Automatic Session title generation follows the same provider routing and typed failure contract in
+an independent operation-scoped best-effort loop. It freezes the Lightweight label candidate chain,
+keeps envelope fallback and ordinary retry counters candidate-local, and advances immediately on
+normalized `quota_or_billing`. OpenAI-compatible title calls omit `max_output_tokens`; every retry or
+candidate transition revalidates that the original initial prompt still owns automatic title
+generation. Timeout or chain exhaustion preserves the deterministic initial title and does not fail
+an otherwise completed Agent Run. The initial prompt may be either the ordinary first user message or
+the exact creation-authorized External Channel human invocation.
 Only a successful matching `auto_initial` to `auto_generated` commit can trigger the separate
 one-shot Discord thread-title projection, and that provider operation begins after the title
 transaction commits without gating or changing the Agent Run.
@@ -1266,6 +1287,8 @@ Primary checks:
 - `cd testenv/azents/e2e && uv run pyright src/tests/required/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_agent_execution_persistence.py -q -k failed_run`
 - Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_per_prompt_inference_profile.py -q`
+- Model quota fallback E2E: `cd testenv/azents/e2e && uv run pytest -q src/tests/required/public/test_model_quota_fallback.py`
+- Candidate routing and fencing integration: `cd python/apps/azents && uv run pytest -q src/azents/worker/run/executor_test.py src/azents/repos/model_candidate_health/repository_test.py`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and
@@ -1459,6 +1482,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 177) — Added frozen foreground and compaction candidate chains,
+  quota-before-retry progression, Workspace cooldown/probe fencing, chain exhaustion, and immutable
+  actual-candidate provenance.
 - **2026-09-12** (spec_version 176) — Bound engine persistence,
   compaction, and tool admission to durable execution ownership with tree-safe
   database locking.

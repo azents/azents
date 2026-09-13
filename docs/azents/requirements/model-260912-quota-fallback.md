@@ -2,6 +2,7 @@
 title: "Model Quota Fallback Requirements"
 created: 2026-09-12
 updated: 2026-09-12
+implemented: 2026-09-13
 tags: [models, agent, reliability, frontend]
 document_role: primary
 document_type: requirements

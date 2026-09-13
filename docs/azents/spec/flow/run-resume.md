@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
   - python/apps/azents/src/azents/repos/session_execution/**
+  - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/runtime/control_protocol/reconciler.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
@@ -28,8 +29,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-09-12
-spec_version: 35
+last_verified_at: 2026-09-13
+spec_version: 36
 ---
 
 # Run Resume
@@ -77,6 +78,14 @@ generation recorded on the abandoned action.
 | Active event run | pending/running `agent_runs`, activation requested profile, phase, active tools, retry state, and nullable VFS projection, plus the Session inference snapshot | Runtime preserves the run/input boundary, ensures or reuses the immutable managed-file snapshot, resolves or reuses the Session-owned turn state as appropriate, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
 | Leftover operation action | Session has an active buffer-keyed action execution at a new processing boundary | Worker records one cancelled durable snapshot and deletes the live execution before admitting new work; it never invokes the stale handler. |
+
+The active event Run snapshot also includes `model_operation_state`. Its independent foreground and
+compaction slots retain the frozen candidate chains, current cursors, quota-attempted identities,
+candidate outcomes, and transferred probe or Primary-reservation claims. Takeover resumes the current
+logical operation from this state; it does not restart at Primary or rematch changed Agent
+configuration. Stale probe and reservation generations fail closed against PostgreSQL candidate
+health. Empty Redis loses only optional routing/invalidation state and does not erase cooldown,
+operation, or reservation authority.
 
 ## Canonical Recovery And Cutover Replay
 
@@ -367,6 +376,9 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 36) — Added recovery of frozen foreground/compaction candidate
+  operations, attempted-identity cursors, and generation-fenced probe/reservation claims from
+  PostgreSQL when Redis is unavailable or empty.
 - **2026-09-12** (spec_version 35) — Fenced execution persistence and
   operation recovery by durable owner generation and supervised ownership loss
   without stale cleanup.

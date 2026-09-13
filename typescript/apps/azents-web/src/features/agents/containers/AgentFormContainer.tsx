@@ -124,7 +124,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
         props.workspaceModelSettings.default_lightweight_model_label ?? null,
       reasoning_effort: normalizeReasoningEffort(
         null,
-        reasoningEffortLevels(mainOption?.normalized_capabilities),
+        reasoningEffortLevels(
+          mainOption?.candidates[0]?.normalized_capabilities,
+        ),
       ),
     });
     form.resetDirty();
@@ -139,9 +141,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
   const selectedModelEffortLevels = useMemo(
     () =>
       reasoningEffortLevels(
-        selectedMainModelOption?.normalized_capabilities ?? null,
+        selectedMainModelOption?.candidates[0]?.normalized_capabilities ?? null,
       ),
-    [selectedMainModelOption?.normalized_capabilities],
+    [selectedMainModelOption?.candidates],
   );
 
   useEffect(() => {
