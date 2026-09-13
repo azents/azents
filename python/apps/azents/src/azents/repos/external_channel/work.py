@@ -1355,15 +1355,30 @@ class ExternalChannelWorkRepository:
                 )
                 return effect_index
 
-            if message is not None:
-                for part, payload in enumerate(
-                    _reply_parts(
-                        provider=connection.provider,
-                        labels=resource.labels,
-                        text=message,
-                        files=files,
-                    )
-                ):
+            move_tracker_before_reply = (
+                connection.provider is ExternalChannelProvider.DISCORD
+                and mode
+                in {
+                    ExternalChannelActionMode.CONTINUE,
+                    ExternalChannelActionMode.REQUEST_INPUT,
+                }
+                and message is not None
+                and requested_tasks is not None
+                and requested_tasks != work.tasks
+            )
+            reply_parts = (
+                _reply_parts(
+                    provider=connection.provider,
+                    labels=resource.labels,
+                    text=message,
+                    files=files,
+                )
+                if message is not None
+                else ()
+            )
+
+            def append_reply_effects() -> None:
+                for part, payload in enumerate(reply_parts):
                     append_effect(
                         ExternalChannelDeliveryOperation.REPLY,
                         payload,
@@ -1372,6 +1387,9 @@ class ExternalChannelWorkRepository:
                         dependencies=(),
                         projection_host_kind=None,
                     )
+
+            if message is not None and not move_tracker_before_reply:
+                append_reply_effects()
 
             projection_parts = {
                 part.part_ordinal: part for part in work.projection_parts
@@ -1394,9 +1412,6 @@ class ExternalChannelWorkRepository:
                         "A title-only update requires existing Channel Work."
                     )
                 if progress_changed:
-                    tasks_changed = (
-                        requested_tasks is not None and requested_tasks != work.tasks
-                    )
                     next_tasks = (
                         requested_tasks
                         if requested_tasks is not None
@@ -1449,11 +1464,7 @@ class ExternalChannelWorkRepository:
                         desired_pages = tuple(
                             (page.text, page.embeds) for page in rendered_discord.pages
                         )
-                    recreate_discord_tracker = (
-                        connection.provider is ExternalChannelProvider.DISCORD
-                        and tasks_changed
-                        and message is not None
-                    )
+                    recreate_discord_tracker = move_tracker_before_reply
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)
                         if recreate_discord_tracker:
@@ -1636,6 +1647,8 @@ class ExternalChannelWorkRepository:
                             dependencies=(),
                             projection_host_kind=part.host_kind,
                         )
+            if move_tracker_before_reply:
+                append_reply_effects()
             result = ChannelActionTransition(
                 binding_id=binding.id,
                 work_id=work.work_cycle_id,

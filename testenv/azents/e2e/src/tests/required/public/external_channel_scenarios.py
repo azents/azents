@@ -5770,18 +5770,10 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     relocation_deliveries = _objects(relocated_state["deliveries"])[
         quiet_delivery_count:
     ]
-    reply_index = next(
-        index
-        for index, delivery in enumerate(relocation_deliveries)
-        if delivery.get("operation") == "create_message"
-        and delivery.get("outcome") in {"delivered", "created", "duplicate"}
-        and delivery.get("safe_category") is None
-    )
     remove_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
-        if index > reply_index
-        and delivery.get("operation") == "delete_message"
+        if delivery.get("operation") == "delete_message"
         and delivery.get("message_id") == quiet_tracker_message_id
         and delivery.get("outcome") == "delivered"
     )
@@ -5792,6 +5784,14 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         and delivery.get("operation") == "create_message"
         and delivery.get("safe_category") == "activity_tracker"
         and delivery.get("outcome") in {"delivered", "created", "duplicate"}
+    )
+    reply_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if index > create_index
+        and delivery.get("operation") == "create_message"
+        and delivery.get("outcome") in {"delivered", "created", "duplicate"}
+        and delivery.get("safe_category") is None
     )
     recreated_tracker_message_id = _string(
         relocation_deliveries[create_index]["message_id"]
@@ -5806,7 +5806,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         and delivery.get("outcome") == "delivered"
     )
     assert recreated_tracker_message_id != quiet_tracker_message_id
-    assert reply_index < remove_index < create_index < task_only_update_index
+    assert remove_index < create_index < reply_index < task_only_update_index
     assert relocation_deliveries[reply_index].get("suppress_embeds") is True
     assert relocation_deliveries[create_index].get("suppress_embeds") is False
     assert relocation_deliveries[task_only_update_index].get("suppress_embeds") is False

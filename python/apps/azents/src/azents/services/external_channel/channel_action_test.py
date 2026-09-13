@@ -625,7 +625,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
     )
     create = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_CREATE),
-        dependencies=(1,),
+        dependencies=(0,),
         projection_host_kind="standalone",
     )
     create.provider.target.request_payload.pop("provider_message_key", None)
@@ -636,7 +636,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
                 work_id="work-1",
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=5,
-                effects=(reply, remove, create),
+                effects=(remove, create, reply),
             )
         )
     )
@@ -693,11 +693,11 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
     )
 
     assert [outcome.status for outcome in result.outcomes] == [
+        "delivered",
+        "delivered",
         "failed",
-        "delivered",
-        "delivered",
     ]
-    assert "provider_message_key" not in (captured[2].provider.target.request_payload)
+    assert "provider_message_key" not in (captured[1].provider.target.request_payload)
 
 
 @pytest.mark.asyncio
@@ -711,7 +711,7 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     )
     create = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_CREATE),
-        dependencies=(1,),
+        dependencies=(0,),
         projection_host_kind="standalone",
     )
     repository = SimpleNamespace(
@@ -721,16 +721,9 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
                 work_id="work-1",
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=5,
-                effects=(reply, remove, create),
+                effects=(remove, create, reply),
             )
         )
-    )
-    delivered_reply = ProviderEffectOutcome(
-        operation=ExternalChannelDeliveryOperation.REPLY,
-        part=0,
-        status="delivered",
-        reason=None,
-        detail=None,
     )
     failed_cleanup = ProviderEffectOutcome(
         operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
@@ -739,7 +732,14 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
         reason="provider_rejected",
         detail="Cleanup failed.",
     )
-    execute_effect = AsyncMock(side_effect=[delivered_reply, failed_cleanup])
+    delivered_reply = ProviderEffectOutcome(
+        operation=ExternalChannelDeliveryOperation.REPLY,
+        part=0,
+        status="delivered",
+        reason=None,
+        detail=None,
+    )
+    execute_effect = AsyncMock(side_effect=[failed_cleanup, delivered_reply])
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
@@ -774,11 +774,11 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     )
 
     assert [outcome.status for outcome in result.outcomes] == [
-        "delivered",
         "failed",
         "not_attempted",
+        "delivered",
     ]
-    assert result.outcomes[2].reason == "effect_dependency_not_delivered"
+    assert result.outcomes[1].reason == "effect_dependency_not_delivered"
     assert execute_effect.await_count == 2
 
 
