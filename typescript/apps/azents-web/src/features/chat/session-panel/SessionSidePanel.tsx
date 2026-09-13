@@ -64,7 +64,7 @@ export function SessionSidePanelPresentation({
           borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
         }}
       >
-        <Text size="sm" fw={600}>
+        <Text data-session-panel-title size="sm" fw={600}>
           {title}
         </Text>
         <ActionIcon variant="subtle" onClick={onClose} aria-label={closeLabel}>

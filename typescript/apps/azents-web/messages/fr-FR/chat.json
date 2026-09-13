@@ -1,6 +1,7 @@
 {
   "sessionPanel": {
     "title": "Panneau de session",
+    "mobileTitle": "Outils",
     "toggle": "Ouvrir ou fermer le panneau de session",
     "close": "Fermer le panneau de session",
     "files": "Fichiers",

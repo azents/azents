@@ -1,6 +1,7 @@
 {
   "sessionPanel": {
     "title": "세션 패널",
+    "mobileTitle": "도구",
     "toggle": "세션 패널 열기/닫기",
     "close": "세션 패널 닫기",
     "files": "파일",

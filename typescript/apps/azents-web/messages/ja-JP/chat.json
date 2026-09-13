@@ -1,6 +1,7 @@
 {
   "sessionPanel": {
     "title": "セッションパネル",
+    "mobileTitle": "ツール",
     "toggle": "セッションパネルを開く・閉じる",
     "close": "セッションパネルを閉じる",
     "files": "ファイル",

@@ -1,0 +1,39 @@
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.desktopLayout {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.desktopChat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.desktopPanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  z-index: 20;
+}
+
+.mobilePanel {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}

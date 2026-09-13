@@ -40,6 +40,7 @@ import { RuntimeTerminalPanel } from "@/shared/runtime-terminal/components/Runti
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import { SessionSidePanel } from "../session-panel/SessionSidePanel";
 import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
+import classes from "./ChatSessionView.module.css";
 import { ChatView } from "./ChatView";
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
 import type { SessionPanelItem } from "../session-panel/SessionSidePanel";
@@ -135,9 +136,59 @@ export function ChatSessionView({
     panel.activeView === "files" ||
     panel.activeView === "runtime" ||
     panel.activeView === "metrics";
+  const activePanelLabel =
+    panelItems.find((item) => item.id === panel.activeView)?.label ??
+    t("sessionPanel.files");
+  const panelContent = (
+    <SessionSidePanel
+      items={panelItems}
+      activeId={panel.activeView}
+      onSelect={panel.onSelect}
+      onClose={panel.onClose}
+      title={terminalMobile ? t("sessionPanel.mobileTitle") : activePanelLabel}
+      closeLabel={t("sessionPanel.close")}
+      previousTabsLabel={t("sessionPanel.previousTabs")}
+      nextTabsLabel={t("sessionPanel.nextTabs")}
+      mobile={terminalMobile}
+    >
+      <Box
+        h="100%"
+        mih={0}
+        style={{ display: workspaceSelected ? "block" : "none" }}
+      >
+        <WorkspacePanelContainer
+          {...workspacePanel}
+          navigation="external"
+          activeTab={
+            panel.activeView === "runtime"
+              ? "settings"
+              : panel.activeView === "metrics"
+                ? "metrics"
+                : "workspace"
+          }
+        />
+      </Box>
+      <Box
+        h="100%"
+        mih={0}
+        style={{
+          display: panel.activeView === "terminal" ? "flex" : "none",
+          flexDirection: "column",
+        }}
+      >
+        <RuntimeTerminalPanel
+          terminal={terminal}
+          mobile={terminalMobile}
+          embedded
+          onStartRuntime={workspacePanel.onStartRuntime}
+        />
+      </Box>
+      {supportingContent}
+    </SessionSidePanel>
+  );
 
   return (
-    <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
+    <Box className={classes.shell}>
       <AgentSessionHeader
         agent={agent}
         session={headerSession}
@@ -241,19 +292,18 @@ export function ChatSessionView({
       )}
       <Box
         ref={panel.containerRef}
+        className={classes.desktopLayout}
         flex={1}
         mih={0}
         style={{
-          display: "grid",
           gridTemplateColumns:
             !terminalMobile && panel.opened
-              ? `minmax(0, ${panel.chatRatio}fr) ${rem(8)} minmax(${rem(440)}, ${1 - panel.chatRatio}fr)`
+              ? `minmax(0, ${panel.chatRatio}fr) ${rem(8)} minmax(0, ${1 - panel.chatRatio}fr)`
               : "minmax(0, 1fr)",
-          position: "relative",
-          overflow: "hidden",
         }}
       >
         <Box
+          className={classes.desktopChat}
           h="100%"
           mih={0}
           miw={0}
@@ -338,8 +388,39 @@ export function ChatSessionView({
             <IconGripVertical size={rem(8)} />
           </Box>
         )}
-        <FocusTrap active={terminalMobile && panel.opened}>
+        {terminalMobile && (
+          <FocusTrap active={panel.opened}>
+            <Box
+              className={classes.mobilePanel}
+              h="100%"
+              mih={0}
+              miw={0}
+              hidden={!panel.opened}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Escape" &&
+                  !event.defaultPrevented &&
+                  panel.activeView !== "terminal" &&
+                  event.target instanceof Element &&
+                  !event.target.closest('[role="dialog"]')
+                ) {
+                  event.stopPropagation();
+                  panel.onClose();
+                }
+              }}
+              style={{
+                display: panel.opened ? "block" : "none",
+              }}
+            >
+              {panelContent}
+            </Box>
+          </FocusTrap>
+        )}
+      </Box>
+      {!terminalMobile && (
+        <FocusTrap active={panel.opened}>
           <Box
+            className={classes.desktopPanel}
             h="100%"
             mih={0}
             miw={0}
@@ -358,59 +439,13 @@ export function ChatSessionView({
             }}
             style={{
               display: panel.opened ? "block" : "none",
-              ...(terminalMobile
-                ? { position: "absolute", inset: 0, zIndex: 2 }
-                : {}),
+              left: `calc(${panel.chatRatio * 100}% + ${rem(8 * (1 - panel.chatRatio))})`,
             }}
           >
-            <SessionSidePanel
-              items={panelItems}
-              activeId={panel.activeView}
-              onSelect={panel.onSelect}
-              onClose={panel.onClose}
-              title={t("sessionPanel.title")}
-              closeLabel={t("sessionPanel.close")}
-              previousTabsLabel={t("sessionPanel.previousTabs")}
-              nextTabsLabel={t("sessionPanel.nextTabs")}
-              mobile={terminalMobile}
-            >
-              <Box
-                h="100%"
-                mih={0}
-                style={{ display: workspaceSelected ? "block" : "none" }}
-              >
-                <WorkspacePanelContainer
-                  {...workspacePanel}
-                  navigation="external"
-                  activeTab={
-                    panel.activeView === "runtime"
-                      ? "settings"
-                      : panel.activeView === "metrics"
-                        ? "metrics"
-                        : "workspace"
-                  }
-                />
-              </Box>
-              <Box
-                h="100%"
-                mih={0}
-                style={{
-                  display: panel.activeView === "terminal" ? "flex" : "none",
-                  flexDirection: "column",
-                }}
-              >
-                <RuntimeTerminalPanel
-                  terminal={terminal}
-                  mobile={terminalMobile}
-                  embedded
-                  onStartRuntime={workspacePanel.onStartRuntime}
-                />
-              </Box>
-              {supportingContent}
-            </SessionSidePanel>
+            {panelContent}
           </Box>
         </FocusTrap>
-      </Box>
+      )}
     </Box>
   );
 }
