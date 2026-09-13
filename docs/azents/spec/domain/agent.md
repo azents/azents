@@ -100,8 +100,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-12
-spec_version: 76
+last_verified_at: 2026-09-13
+spec_version: 77
 ---
 
 # Agent Domain Spec
@@ -219,10 +219,15 @@ automatically.
 
 The denormalized snapshots remain the Agent defaults. They are fallback inputs only when a Session
 has no applied model profile; an applied Session label takes precedence for future implicit turns.
-Normal human inputs may instead request one label from the same Agent-owned option list for a single
-run. At run activation, the worker resolves that label against the current Agent snapshot without
-querying Workspace defaults or model catalogs. Clients never submit provider, integration, model,
-capability, or token-limit snapshots as run intent.
+When an Agent option update removes an applied label, the same transaction replaces that active
+Session intent with the Agent's current main label and clears fallback-incompatible effort and
+execution-option intent. The current prepared turn snapshot remains authoritative until its next
+model boundary. Normal human inputs may instead request one label from the same Agent-owned option
+list for a single run. At run activation, the worker resolves that label against the current Agent
+snapshot without querying Workspace defaults or model catalogs. A label accepted before an Agent
+option update that becomes stale before preparation is normalized to the current Agent main label
+and persisted on the Session. Clients never submit provider, integration, model, capability, or
+token-limit snapshots as run intent.
 
 Required snapshot fields:
 
@@ -547,7 +552,7 @@ Every inference-bearing input has a requested inference profile: an Agent-owned 
 Before an inference-bearing FIFO head is atomically prepared, runtime resolution:
 
 1. Loads the Agent and rejects missing or disabled Agents.
-2. Resolves the requested label against the Agent's current `selectable_model_options`; missing labels fail with `model_target_not_found` and never fall back to another option.
+2. Resolves the requested label against the Agent's current `selectable_model_options`; a label that was accepted earlier but is now absent falls back to the current Agent main option and replaces the active Session intent, while a label rejected at input admission still fails with `model_target_not_found`.
 3. Validates every non-null requested effort against the selected snapshot's explicit normalized effort list; an empty list rejects every explicit effort, and unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
 4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
 5. Builds the foreground runtime model, output cap, and built-in tool list from the selected option while retaining the Agent's lightweight option for compaction.
@@ -623,6 +628,7 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-13** (spec_version 77) — Reconciled active Session model intents when Agent options remove their labels and added execution-boundary fallback for already accepted stale labels.
 - **2026-09-12** (spec_version 76) — Made automatic model-call retry attempts
   freshly resolve current Session-applied inference intent after backoff while
   preserving the failed attempt snapshot.

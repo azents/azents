@@ -28,6 +28,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.s3.deps import get_s3_service
@@ -43,6 +44,7 @@ from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
 from azents.repos.agent_decommission import AgentDecommissionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
@@ -154,6 +156,23 @@ def _terminal_denied_scope(
     return None
 
 
+def _default_session_reasoning_effort(
+    *,
+    model_parameters: ModelParameters | None,
+    model_selection: AgentModelSelection,
+) -> ModelReasoningEffort | None:
+    """Keep the Agent default effort only when the fallback model supports it."""
+    if model_parameters is None or model_parameters.reasoning_effort is None:
+        return None
+    reasoning = model_selection.normalized_capabilities.reasoning
+    if (
+        not reasoning.supported
+        or model_parameters.reasoning_effort not in reasoning.effort_levels
+    ):
+        return None
+    return model_parameters.reasoning_effort
+
+
 @dataclasses.dataclass
 class AgentService:
     """Agent CRUD service."""
@@ -176,6 +195,10 @@ class AgentService:
     archived_session_retention_repository: Annotated[
         ArchivedSessionRetentionRepository,
         Depends(ArchivedSessionRetentionRepository),
+    ]
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
     ]
     runtime_profile_repository: Annotated[
         RuntimeProfileRepository,
@@ -584,6 +607,16 @@ class AgentService:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        model_configuration_changed = any(
+            field in update
+            for field in (
+                "selectable_model_options",
+                "main_model_label",
+                "lightweight_model_label",
+                "model_selection",
+                "lightweight_model_selection",
+            )
+        )
         terminal_policy_changed = (
             "terminal_enabled" in update
             and update["terminal_enabled"] != existing.terminal_enabled
@@ -818,6 +851,23 @@ class AgentService:
                         available_at=tznow(),
                     )
             result = await self.repository.update_by_id(session, agent_id, repo_update)
+            if result.success and model_configuration_changed:
+                await (
+                    self.agent_session_repository.replace_stale_applied_inference_profiles
+                )(
+                    session,
+                    agent_id=agent_id,
+                    valid_model_target_labels=[
+                        option.label
+                        for option in model_options.selectable_model_options
+                    ],
+                    model_target_label=model_options.main_model_label,
+                    reasoning_effort=_default_session_reasoning_effort(
+                        model_parameters=model_parameters,
+                        model_selection=model_options.model_selection,
+                    ),
+                    enabled_execution_options=[],
+                )
         match result:
             case Success(value):
                 if terminal_policy_changed:

@@ -126,8 +126,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-12
-spec_version: 167
+last_verified_at: 2026-09-13
+spec_version: 168
 ---
 
 # Conversation & Events
@@ -250,7 +250,7 @@ Runtime lifecycle lock or wait condition.
 | `id`                                                                                             | `str(32)`             | UUID7 hex                                                                                                                         |
 | `handle`                                                                                         | string                | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths.             |
 | `workspace_id` / `agent_id`                                                                      | FK                    | Workspace and agent boundary                                                                                                      |
-| `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. |
+| `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. Active Session labels removed by an Agent option update are replaced with the Agent main label and fallback-safe intent. |
 | `applied_profile_generation`                                                                     | bigint                | Monotonic generation incremented by every accepted applied-profile replacement; private external drafts use it to reject stale or ABA saves. |
 | `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Prepared-turn label and effort for the immutable current provider call or retry/recovery; this is not the public applied intent.                    |
 | `current_model_selection` / `current_model_settings`                                            | JSONB \| null         | Complete prepared physical model and model-scoped settings snapshot for the current call.                                                          |
@@ -1156,11 +1156,13 @@ only enabled options supported by the new model. Read-only composers do not expo
 
 Applied Session intent, mailbox-requested intent, original Run intent, and prepared inference state
 retain enabled IDs independently. Requested/applied provenance survives REST, live events, history,
-and reload. An explicit submitted option becoming unavailable before preparation fails validation;
-it is not silently removed. A failed model-call attempt retains its original selection, while its next
-automatic retry attempt freshly resolves the latest Session-applied model, effort, and execution-option
-intent after backoff. Historical missing option state is all-off, and non-empty persisted option intent
-requires a corresponding model target.
+and reload. Input admission rejects a label that is already absent from the current Agent options. If
+an accepted label becomes unavailable before preparation because the Agent options changed, the
+worker falls back to the current Agent main label, replaces the active Session intent, and clears
+fallback-incompatible effort and execution-option intent. A failed model-call attempt retains its
+original selection, while its next automatic retry attempt freshly resolves the latest
+Session-applied model, effort, and execution-option intent after backoff. Historical missing option
+state is all-off, and non-empty persisted option intent requires a corresponding model target.
 
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/retry-failed-run`, and command actions submitted through the
@@ -1344,6 +1346,7 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-13** — v168. Replaced active stale Session model labels when Agent options change and added execution-boundary fallback for already accepted labels that become unavailable.
 - **2026-09-12** — v167. Added the repository-owned applied-profile replacement
   boundary and monotonic generation used to reject stale external native drafts
   while preserving web idempotency and already-prepared model calls.

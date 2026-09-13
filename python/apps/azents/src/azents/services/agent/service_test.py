@@ -168,6 +168,7 @@ def _make_service() -> AgentService:
     workspace_user_repository = AsyncMock()
     agent_decommission_repository = AsyncMock()
     archived_session_retention_repository = AsyncMock()
+    agent_session_repository = AsyncMock()
     runtime_profile_repository = AsyncMock()
     runtime_profile_service = AsyncMock()
     upload_service = AsyncMock()
@@ -186,6 +187,7 @@ def _make_service() -> AgentService:
         workspace_user_repository=workspace_user_repository,
         agent_decommission_repository=agent_decommission_repository,
         archived_session_retention_repository=archived_session_retention_repository,
+        agent_session_repository=agent_session_repository,
         runtime_profile_repository=runtime_profile_repository,
         runtime_profile_service=runtime_profile_service,
         upload_service=upload_service,
@@ -515,6 +517,54 @@ class TestAgentServiceModelSelection:
         assert isinstance(result, Success)
         repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.tool_search_enabled is False
+
+    async def test_model_option_update_reconciles_stale_session_profiles(self) -> None:
+        """Agent model changes replace active stale Session profile labels."""
+        service = _make_service()
+        repository = require_instance(service.repository, AsyncMock)
+        session_repository = require_instance(
+            service.agent_session_repository,
+            AsyncMock,
+        )
+        existing = _make_agent()
+        alternative_selection = make_test_model_selection(model_identifier="gpt-alt")
+        alternative = SelectableModelOption(
+            label="alternative",
+            model_selection=alternative_selection,
+            settings=make_test_model_settings(),
+        )
+        existing = existing.model_copy(
+            update={
+                "selectable_model_options": [
+                    *existing.selectable_model_options,
+                    alternative,
+                ]
+            }
+        )
+        updated = existing.model_copy(
+            update={
+                "main_model_label": "alternative",
+                "model_selection": alternative_selection,
+            }
+        )
+        repository.get_by_id.return_value = existing
+        repository.update_by_id.return_value = Success(updated)
+
+        result = await service.update_by_id(
+            existing.id,
+            {"main_model_label": "alternative"},
+            workspace_id=existing.workspace_id,
+            workspace_user_id="workspace-user-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Success)
+        session_repository.replace_stale_applied_inference_profiles.assert_awaited_once()
+        call = session_repository.replace_stale_applied_inference_profiles.await_args
+        assert call.kwargs["agent_id"] == existing.id
+        assert call.kwargs["valid_model_target_labels"] == ["default", "alternative"]
+        assert call.kwargs["model_target_label"] == "alternative"
+        assert call.kwargs["enabled_execution_options"] == []
 
     async def test_runtime_free_update_cannot_select_runtime_profile(self) -> None:
         """Runtime-free Agents require the dedicated add transition."""

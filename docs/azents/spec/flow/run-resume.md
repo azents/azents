@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-09-12
-spec_version: 35
+last_verified_at: 2026-09-13
+spec_version: 36
 ---
 
 # Run Resume
@@ -317,7 +317,7 @@ worker instead of writing durable failed history.
 
 ## Inference Profile Recovery
 
-Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains the resolved physical selection, effort, effective limits, and resolution time. A pending run independently stores the requested model target label and nullable reasoning effort selected for its first activation. Profile selection is finalized before activation, and the owner-generation-locked activation transaction persists that requested profile with the pending-to-running transition. Recovery uses that durable requested profile to select a recovered pending run's original inference intent; it never reconstructs Session resolved state from it. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next ordinary turn. When recovery observes persisted automatic retry state, it waits for the remaining backoff and then freshly resolves the current Session-applied profile before the next attempt, rebuilding that same run's request and snapshot.
+Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains the resolved physical selection, effort, effective limits, and resolution time. A pending run independently stores the requested model target label and nullable reasoning effort selected for its first activation. Profile selection is finalized before activation, and the owner-generation-locked activation transaction persists that requested profile with the pending-to-running transition. Recovery uses that durable requested profile to select a recovered pending run's original inference intent; it never reconstructs Session resolved state from it. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. If an accepted pending or retry label is removed from the current Agent option list, recovery and preparation use the Agent main option and replace the active Session intent before dispatch. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next ordinary turn. When recovery observes persisted automatic retry state, it waits for the remaining backoff and then freshly resolves the current Session-applied profile before the next attempt, rebuilding that same run's request and snapshot.
 
 Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations before recovery can claim it, then resolves the current Agent routing once at activation. The first child subagent run is precreated with a parent run id and a complete Session inference snapshot. It uses exact inheritance or a statically resolved non-full-history override for its initial Session state. Later child runs resolve the stored session-last-used label normally.
 
@@ -367,6 +367,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 36) — Documented fallback and Session-intent replacement when Agent option updates invalidate accepted pending or retry labels.
 - **2026-09-12** (spec_version 35) — Fenced execution persistence and
   operation recovery by durable owner generation and supervised ownership loss
   without stale cleanup.
