@@ -20,6 +20,38 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    op.execute(
+        sa.text(
+            """
+            UPDATE runtime_web_gateway_identities AS identity
+            SET revoked_at = now()
+            FROM runtime_web_auth_configuration AS configuration
+            WHERE configuration.id = 1
+              AND identity.epoch <> configuration.active_epoch
+              AND identity.revoked_at IS NULL
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM runtime_web_auth_tickets AS ticket
+            USING runtime_web_auth_configuration AS configuration
+            WHERE configuration.id = 1
+              AND ticket.epoch <> configuration.active_epoch
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM runtime_web_auth_bindings AS binding
+            USING runtime_web_auth_configuration AS configuration
+            WHERE configuration.id = 1
+              AND binding.epoch <> configuration.active_epoch
+            """
+        )
+    )
     op.drop_constraint(
         "ck_runtime_web_cycles_duration_configuration_revision",
         "runtime_web_cycles",

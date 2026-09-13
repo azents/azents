@@ -340,6 +340,7 @@ class RuntimeWebGatewayRepository:
         expires_at: datetime.datetime,
     ) -> RuntimeWebIssuedTicket:
         """Issue one ticket only after the broker callback completed."""
+        await self._locked_enabled_configuration(session)
         binding = await session.scalar(
             sa.select(RDBRuntimeWebAuthBinding)
             .where(
@@ -350,7 +351,6 @@ class RuntimeWebGatewayRepository:
             )
             .with_for_update()
         )
-        await self._locked_enabled_configuration(session)
         if (
             binding is None
             or binding.expires_at <= issued_at
@@ -395,6 +395,7 @@ class RuntimeWebGatewayRepository:
         now: datetime.datetime,
     ) -> RuntimeWebRedeemedIdentity:
         """Atomically consume a broker-bound ticket and create the identity."""
+        configuration = await self._locked_enabled_configuration(session)
         ticket = await session.scalar(
             sa.select(RDBRuntimeWebAuthTicket)
             .where(RDBRuntimeWebAuthTicket.secret_hash == ticket_hash)
@@ -410,7 +411,6 @@ class RuntimeWebGatewayRepository:
             )
             .with_for_update()
         )
-        configuration = await self._locked_enabled_configuration(session)
         if (
             binding is None
             or binding.settled_at is not None

@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-09-08
+updated: 2026-09-13
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -98,7 +98,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-13
-spec_version: 17
+spec_version: 18
 ---
 
 # User & Authentication
@@ -384,7 +384,9 @@ auth Session, issues a single-use 30-second ticket, and redeems that ticket only
 the broker's HTTP-only binding cookie. The resulting service-domain identity cookie
 is `Secure`, `HttpOnly`, `SameSite=Strict`, path `/`, and scoped to the configured
 service suffix. Ticket replay, binding mismatch, expired exchange, browser-profile
-mismatch, or configuration-epoch change fails closed.
+mismatch, or a security configuration change fails closed. The Gateway explicitly
+revokes identities and removes pending bindings and tickets when that configuration
+changes.
 
 ### 3.11 Workspace invitation integration
 
@@ -544,6 +546,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-13** (v18) — Replaced Runtime Web configuration-epoch rejection with
+  explicit identity revocation and pending binding and ticket removal when security
+  configuration changes.
 - **2026-09-08** (v16) — Moved Security User/password operations into completed
   DB-only repository transactions; made password setup an atomic upsert and
   revalidated verified-email eligibility in the final password deletion.

@@ -182,6 +182,196 @@ def test_upgrade(alembic_runner: MigrationContext) -> None:
     tests.test_upgrade(alembic_runner)
 
 
+def test_runtime_web_epoch_removal_discards_stale_auth_authority(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Keep records rejected by the prior active epoch rejected after migration."""
+    alembic_runner.migrate_up_to("a779d057128b")
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE runtime_web_auth_configuration
+                SET active_epoch = 2
+                WHERE id = 1
+                """
+            )
+        )
+        connection.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_web_gateway_identities (
+                    id,
+                    secret_hash,
+                    user_id,
+                    auth_session_id,
+                    mode,
+                    epoch,
+                    browser_profile,
+                    issued_at,
+                    expires_at
+                )
+                VALUES
+                    (
+                        'stale-runtime-web-identity',
+                        repeat('a', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'separate_domain',
+                        1,
+                        'chromium-152',
+                        now() - interval '1 minute',
+                        now() + interval '1 hour'
+                    ),
+                    (
+                        'current-runtime-web-identity',
+                        repeat('b', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'separate_domain',
+                        2,
+                        'chromium-152',
+                        now() - interval '1 minute',
+                        now() + interval '1 hour'
+                    )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_web_auth_bindings (
+                    id,
+                    initiation_id,
+                    main_binding_hash,
+                    user_id,
+                    auth_session_id,
+                    endpoint_id,
+                    epoch,
+                    expires_at
+                )
+                VALUES
+                    (
+                        'stale-runtime-web-binding',
+                        'stale-runtime-web-initiation',
+                        repeat('c', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'migration-runtime-endpoint',
+                        1,
+                        now() + interval '1 hour'
+                    ),
+                    (
+                        'current-runtime-web-binding',
+                        'current-runtime-web-initiation',
+                        repeat('d', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'migration-runtime-endpoint',
+                        2,
+                        now() + interval '1 hour'
+                    )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_web_auth_tickets (
+                    id,
+                    binding_id,
+                    secret_hash,
+                    user_id,
+                    auth_session_id,
+                    endpoint_id,
+                    epoch,
+                    issued_at,
+                    expires_at
+                )
+                VALUES
+                    (
+                        'stale-runtime-web-ticket',
+                        'stale-runtime-web-binding',
+                        repeat('e', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'migration-runtime-endpoint',
+                        1,
+                        now(),
+                        now() + interval '5 minutes'
+                    ),
+                    (
+                        'current-runtime-web-ticket',
+                        'current-runtime-web-binding',
+                        repeat('f', 64),
+                        'migration-user',
+                        'migration-auth-session',
+                        'migration-runtime-endpoint',
+                        2,
+                        now(),
+                        now() + interval '5 minutes'
+                    )
+                """
+            )
+        )
+
+    alembic_runner.migrate_up_to("head")
+
+    with alembic_engine.connect() as connection:
+        identity_revocation = {
+            row.id: row.revoked
+            for row in connection.execute(
+                sa.text(
+                    """
+                    SELECT id, revoked_at IS NOT NULL AS revoked
+                    FROM runtime_web_gateway_identities
+                    WHERE id IN (
+                        'stale-runtime-web-identity',
+                        'current-runtime-web-identity'
+                    )
+                    """
+                )
+            ).mappings()
+        }
+        binding_ids = set(
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT id
+                    FROM runtime_web_auth_bindings
+                    WHERE id IN (
+                        'stale-runtime-web-binding',
+                        'current-runtime-web-binding'
+                    )
+                    """
+                )
+            ).scalars()
+        )
+        ticket_ids = set(
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT id
+                    FROM runtime_web_auth_tickets
+                    WHERE id IN (
+                        'stale-runtime-web-ticket',
+                        'current-runtime-web-ticket'
+                    )
+                    """
+                )
+            ).scalars()
+        )
+
+    assert identity_revocation == {
+        "stale-runtime-web-identity": True,
+        "current-runtime-web-identity": False,
+    }
+    assert binding_ids == {"current-runtime-web-binding"}
+    assert ticket_ids == {"current-runtime-web-ticket"}
+
+
 def test_all_check_constraints_are_named(
     alembic_runner: MigrationContext,
 ) -> None:
