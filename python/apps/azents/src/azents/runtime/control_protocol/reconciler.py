@@ -147,16 +147,17 @@ class RuntimeLifecycleReconciler:
             if await self._dispatch_runtime(runtime):
                 dispatched += 1
         lifecycle_runtime_ids = {runtime.id for runtime in runtimes}
-        configuration_runtime_ids = {runtime.id for runtime in configuration_runtimes}
+        configuration_dispatch_ids: set[str] = set()
         for runtime in configuration_runtimes:
             if runtime.id in lifecycle_runtime_ids:
                 continue
             if await self._dispatch_configuration_adoption(runtime):
                 dispatched += 1
+                configuration_dispatch_ids.add(runtime.id)
         for runtime in reconcile_runtimes:
             if (
                 runtime.id in lifecycle_runtime_ids
-                or runtime.id in configuration_runtime_ids
+                or runtime.id in configuration_dispatch_ids
             ):
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
@@ -209,6 +210,8 @@ class RuntimeLifecycleReconciler:
                 and state.desired.status is RuntimeConfigurationStateStatus.READY
                 and state.applied is not None
                 and state.desired.sequence != state.applied.sequence
+                and state.desired.provider_acknowledged_at is not None
+                and state.desired.provider_reported_digest == state.desired.digest
             ):
                 return False
             await self._runtime_repository.mark_provider_observe_requested(
