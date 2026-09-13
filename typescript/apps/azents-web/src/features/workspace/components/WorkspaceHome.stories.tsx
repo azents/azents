@@ -61,8 +61,6 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     id: input.id,
     name: input.name,
     description: input.description,
-    model_selection: modelSelection,
-    lightweight_model_selection: null,
     selectable_model_options: [],
     main_model_label: "default",
     lightweight_model_label: "default",

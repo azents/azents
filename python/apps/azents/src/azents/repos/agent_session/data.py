@@ -22,6 +22,8 @@ from azents.core.inference_profile import (
     SessionAppliedInferenceProfile,
     SessionInferenceState,
 )
+from azents.core.model_availability import PrimaryModelReservation
+from azents.core.model_operation import ModelOperationSnapshot
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,6 +107,14 @@ class AgentSession(BaseModel):
     )
     title_generation_event_id: str | None = Field(
         description="Event ID used for automatic title generation",
+    )
+    primary_model_reservation: PrimaryModelReservation | None = Field(
+        default=None,
+        description="Active one-shot Primary candidate reservation",
+    )
+    title_model_operation_state: ModelOperationSnapshot | None = Field(
+        default=None,
+        description="Durable automatic-title model candidate operation",
     )
     last_user_input_at: datetime.datetime = Field(
         description="Latest user input timestamp or creation-time baseline",

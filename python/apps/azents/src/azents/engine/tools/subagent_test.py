@@ -19,7 +19,11 @@ from azents.broker.types import (
     SessionStopSignal,
     SessionWakeUp,
 )
-from azents.core.agent import SelectableModelOption, SubagentSettings
+from azents.core.agent import (
+    SelectableModelCandidate,
+    SelectableModelOption,
+    SubagentSettings,
+)
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -156,8 +160,14 @@ def _agent() -> Agent:
         selectable_model_options=[
             SelectableModelOption(
                 label="Quality",
-                model_selection=selection,
-                settings=make_test_model_settings(),
+                candidates=[
+                    SelectableModelCandidate(
+                        model_selection=selection,
+                        settings=make_test_model_settings(),
+                    )
+                ],
+                subagent_enabled=True,
+                subagent_guidance=None,
             )
         ],
         main_model_label="Quality",
@@ -979,26 +989,29 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
     toolkit.agent.selectable_model_options.append(
         SelectableModelOption(
             label="Research",
-            model_selection=selection,
-            settings=make_test_model_settings().model_copy(
-                update={
-                    "subagent_guidance": (
-                        "Prefer for repository exploration.\nAvoid broad synthesis."
-                    )
-                }
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=(
+                "Prefer for repository exploration.\nAvoid broad synthesis."
             ),
         )
     )
     toolkit.agent.selectable_model_options.append(
         SelectableModelOption(
             label="Expensive",
-            model_selection=selection,
-            settings=make_test_model_settings().model_copy(
-                update={
-                    "subagent_enabled": False,
-                    "subagent_guidance": "Never advertise this costly target.",
-                }
-            ),
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            subagent_enabled=False,
+            subagent_guidance="Never advertise this costly target.",
         )
     )
 
@@ -1036,7 +1049,7 @@ async def test_spawn_agent_schema_explains_inherit_when_no_targets_are_enabled()
     """Keep inherited spawning available when every explicit target is disabled."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     for option in toolkit.agent.selectable_model_options:
-        option.settings = option.settings.model_copy(update={"subagent_enabled": False})
+        option.subagent_enabled = False
 
     state = await toolkit.update_context(
         TurnContext(
@@ -1384,11 +1397,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         run_repo,
         published_events,
     ) = await _make_toolkit()
-    toolkit.agent.selectable_model_options[
-        0
-    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
-        update={"subagent_enabled": False}
-    )
+    toolkit.agent.selectable_model_options[0].subagent_enabled = False
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1456,8 +1465,14 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     toolkit.agent.selectable_model_options.append(
         SelectableModelOption(
             label="Research",
-            model_selection=selection,
-            settings=make_test_model_settings(),
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
     )
     state = await toolkit.update_context(
@@ -1511,11 +1526,7 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
 ):
     """Effort-only overrides keep the inherited target eligibility boundary."""
     toolkit, repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    toolkit.agent.selectable_model_options[
-        0
-    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
-        update={"subagent_enabled": False}
-    )
+    toolkit.agent.selectable_model_options[0].subagent_enabled = False
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1558,11 +1569,7 @@ async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residu
 ):
     """Disabled labels fail as explicit overrides before child side effects."""
     toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
-    toolkit.agent.selectable_model_options[
-        0
-    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
-        update={"subagent_enabled": False}
-    )
+    toolkit.agent.selectable_model_options[0].subagent_enabled = False
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1620,9 +1627,7 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
     )
     current_agent = agent_repository.agent.model_copy(deep=True)
     current_option = current_agent.selectable_model_options[0]
-    current_option.settings = current_option.settings.model_copy(
-        update={"subagent_enabled": False}
-    )
+    current_option.subagent_enabled = False
     agent_repository.agent = current_agent
 
     with pytest.raises(

@@ -15,6 +15,7 @@ import azents.services.session_title as session_title_module
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
+    SelectableModelCandidate,
     SelectableModelOption,
 )
 from azents.core.credentials import ApiKeySecrets
@@ -35,7 +36,15 @@ from azents.core.enums import (
     LLMModelDeveloper,
     LLMProvider,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcomeReason,
+    ModelOperationKind,
+    build_model_operation,
+    mark_current_candidate_active,
+    mark_current_candidate_quota_and_advance,
+)
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
@@ -48,6 +57,7 @@ from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
     model_provider_failure,
 )
+from azents.engine.run.resolve import ResolvedModelCandidateRuntime
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -57,6 +67,10 @@ from azents.repos.agent_session.data import AgentSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.model_candidate_health.data import (
+    ModelCandidateHealthObservation,
+    ModelCandidateHealthStatus,
+)
 from azents.repos.session_title import SessionTitleRepository
 from azents.repos.session_title.data import SessionTitleGenerationSnapshot
 from azents.services.external_channel.thread_title import (
@@ -353,6 +367,135 @@ class TestSessionTitleHelpers:
 
         assert result == "Generated title"
         assert modes == [expected_mode]
+
+    async def test_title_quota_advances_before_retry_budget(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A title quota switches candidates with a fresh attempt counter."""
+        primary = _model_selection(True).model_copy(
+            update={
+                "llm_provider_integration_id": "integration-primary",
+                "model_identifier": "gpt-primary",
+                "model_display_name": "GPT Primary",
+            }
+        )
+        fallback = _model_selection(True).model_copy(
+            update={
+                "llm_provider_integration_id": "integration-fallback",
+                "model_identifier": "gpt-fallback",
+                "model_display_name": "GPT Fallback",
+            }
+        )
+        option = SelectableModelOption(
+            label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=primary,
+                    settings=make_test_model_settings(),
+                ),
+                SelectableModelCandidate(
+                    model_selection=fallback,
+                    settings=make_test_model_settings(),
+                ),
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+        recorded_at = datetime.datetime.now(datetime.UTC)
+        operation = mark_current_candidate_active(
+            build_model_operation(
+                option=option,
+                profile=RequestedInferenceProfile(
+                    model_target_label=option.label,
+                    reasoning_effort=None,
+                    enabled_execution_options=[],
+                ),
+                kind=ModelOperationKind.TITLE,
+                operation_id="1" * 32,
+                recorded_at=recorded_at,
+            ),
+            reason=ModelOperationCandidateOutcomeReason.SELECTED,
+            recorded_at=recorded_at,
+        )
+        advanced = mark_current_candidate_active(
+            mark_current_candidate_quota_and_advance(
+                operation,
+                recorded_at=recorded_at,
+            ),
+            reason=ModelOperationCandidateOutcomeReason.SELECTED,
+            recorded_at=recorded_at,
+        )
+        initial_snapshot = SessionTitleGenerationSnapshot(
+            agent_id="agent-001",
+            workspace_id="workspace-001",
+            operation=operation,
+        )
+        fallback_snapshot = SessionTitleGenerationSnapshot(
+            agent_id="agent-001",
+            workspace_id="workspace-001",
+            operation=advanced,
+        )
+        service = _title_service(True, max_retries=0)
+        service.session_title_repository.advance_after_quota = AsyncMock(
+            return_value=fallback_snapshot
+        )
+        attempts: list[tuple[str, int]] = []
+
+        async def resolve_runtime(**kwargs: object) -> object:
+            selection = kwargs["selection"]
+            assert isinstance(selection, AgentModelSelection)
+            return Success(
+                ResolvedModelCandidateRuntime(
+                    provider=selection.provider,
+                    provider_integration_id=(selection.llm_provider_integration_id),
+                    model=selection.model_identifier,
+                    credential_kwargs={},
+                    effective_input_tokens=128_000,
+                )
+            )
+
+        async def generate(**kwargs: object) -> str:
+            model = kwargs["model"]
+            attempt_number = kwargs["attempt_number"]
+            assert isinstance(model, str)
+            assert isinstance(attempt_number, int)
+            attempts.append((model, attempt_number))
+            if len(attempts) == 1:
+                raise model_provider_failure(
+                    operation="session_title",
+                    provider=LLMProvider.OPENAI.value,
+                    model=model,
+                    integration="integration-primary",
+                    provider_message="Quota exceeded.",
+                    status_code=402,
+                    provider_code="billing_limit",
+                    provider_error_type="billing_error",
+                    provider_error_param=None,
+                )
+            return "Fallback title"
+
+        monkeypatch.setattr(
+            session_title_module,
+            "resolve_model_candidate_runtime",
+            resolve_runtime,
+        )
+        monkeypatch.setattr(
+            session_title_module,
+            "generate_session_title_with_model",
+            generate,
+        )
+
+        result = await service._generate_title(
+            session_id="session-001",
+            generation_event_id="0" * 32,
+            context="Compare insurance",
+            snapshot=initial_snapshot,
+        )
+
+        assert result == "Fallback title"
+        assert attempts == [("gpt-primary", 1), ("gpt-fallback", 1)]
+        service.session_title_repository.advance_after_quota.assert_awaited_once()
 
     @pytest.mark.parametrize("capability", [True, None])
     async def test_contract_rejection_fallback_is_unknown_only(
@@ -771,7 +914,7 @@ class TestSessionTitleHelpers:
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=title_repository,
-                integration_repository=_IntegrationRepository(),
+                health_repository=_healthy_health_repository(),
                 session_manager=_session_manager,
             ),
             chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
@@ -882,7 +1025,7 @@ class TestSessionTitleHelpers:
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=repository,
-                integration_repository=_IntegrationRepository(),
+                health_repository=_healthy_health_repository(),
                 session_manager=session_manager,
             ),
             chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
@@ -967,11 +1110,19 @@ class TestSessionTitleHelpers:
                 assert active_contexts == 0
                 calls.append("project")
 
-        async def ensure_tokens(**kwargs: object) -> object:
+        async def resolve_runtime(**kwargs: object) -> object:
             del kwargs
             assert active_contexts == 0
             calls.append("oauth")
-            return Success(_integration())
+            return Success(
+                ResolvedModelCandidateRuntime(
+                    provider=LLMProvider.OPENAI,
+                    provider_integration_id="integration-001",
+                    model="gpt-test",
+                    credential_kwargs={"api_key": "test-key"},
+                    effective_input_tokens=128_000,
+                )
+            )
 
         async def generate_title(**kwargs: object) -> str:
             del kwargs
@@ -980,7 +1131,9 @@ class TestSessionTitleHelpers:
             return "Incident response"
 
         monkeypatch.setattr(
-            session_title_module, "ensure_runtime_tokens", ensure_tokens
+            session_title_module,
+            "resolve_model_candidate_runtime",
+            resolve_runtime,
         )
         monkeypatch.setattr(
             session_title_module, "generate_session_title_with_model", generate_title
@@ -989,7 +1142,7 @@ class TestSessionTitleHelpers:
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=WinningRepository(),
-                integration_repository=_IntegrationRepository(),
+                health_repository=_healthy_health_repository(),
                 session_manager=session_manager,
             ),
             chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
@@ -1155,8 +1308,14 @@ class _AgentRepository(AgentRepository):
             selectable_model_options=[
                 SelectableModelOption(
                     label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                    model_selection=selection,
-                    settings=make_test_model_settings(),
+                    candidates=[
+                        SelectableModelCandidate(
+                            model_selection=selection,
+                            settings=make_test_model_settings(),
+                        )
+                    ],
+                    subagent_enabled=True,
+                    subagent_guidance=None,
                 )
             ],
             main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -1175,6 +1334,10 @@ class _AgentRepository(AgentRepository):
             created_at=now,
             updated_at=now,
         )
+
+    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
+        """Return the same test Agent under the repository lock seam."""
+        return await self.get_by_id(session, agent_id)
 
 
 class _IntegrationRepository(LLMProviderIntegrationRepository):
@@ -1253,9 +1416,22 @@ def _session_title_repository(
     return SessionTitleRepository(
         agent_repository=_AgentRepository(strict_json_schema),
         agent_session_repository=_AgentSessionRepository(),
-        integration_repository=_IntegrationRepository(),
+        health_repository=_healthy_health_repository(),
         session_manager=session_manager,
     )
+
+
+def _healthy_health_repository() -> AsyncMock:
+    """Create a background-health repository that always selects Primary."""
+    repository = AsyncMock()
+    repository.snapshot_for_background_in_session.return_value = (
+        ModelCandidateHealthObservation(
+            server_time=datetime.datetime.now(datetime.UTC),
+            status=ModelCandidateHealthStatus.AVAILABLE,
+            health=None,
+        )
+    )
+    return repository
 
 
 def _chatgpt_oauth_runtime_repository(
@@ -1272,10 +1448,38 @@ def _generation_snapshot(
     strict_json_schema: bool | None,
 ) -> SessionTitleGenerationSnapshot:
     """Create a completed title generation database snapshot."""
+    selection = _model_selection(strict_json_schema)
+    option = SelectableModelOption(
+        label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+        candidates=[
+            SelectableModelCandidate(
+                model_selection=selection,
+                settings=make_test_model_settings(),
+            )
+        ],
+        subagent_enabled=True,
+        subagent_guidance=None,
+    )
+    now = datetime.datetime.now(datetime.UTC)
+    operation = build_model_operation(
+        option=option,
+        profile=RequestedInferenceProfile(
+            model_target_label=option.label,
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        ),
+        kind=ModelOperationKind.TITLE,
+        operation_id="0" * 32,
+        recorded_at=now,
+    )
     return SessionTitleGenerationSnapshot(
         agent_id="agent-001",
-        selection=_model_selection(strict_json_schema),
-        integration=_integration(),
+        workspace_id="workspace-001",
+        operation=mark_current_candidate_active(
+            operation,
+            reason=ModelOperationCandidateOutcomeReason.SELECTED,
+            recorded_at=now,
+        ),
     )
 
 
@@ -1318,6 +1522,26 @@ class _AgentSessionRepository(AgentSessionRepository):
             created_at=now,
             updated_at=now,
         )
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        """Return the same Session under the title operation lock seam."""
+        return await self.get_by_id(session, agent_session_id)
+
+    async def set_title_model_operation_state(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        generation_event_id: str,
+        operation: object | None,
+    ) -> AgentSession:
+        """Accept one title operation persistence in helper tests."""
+        del generation_event_id, operation
+        return await self.get_by_id(session, session_id)
 
     async def replace_initial_auto_title(
         self,

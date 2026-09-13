@@ -1,14 +1,15 @@
 # SelectableModelOptionInput
 
-Selectable model option input keyed by label.
+Selectable semantic label input with ordered physical candidates.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** | Selectable model label | 
-**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) | Selectable model selection input | 
-**settings** | [**SelectableModelSettingsInput**](SelectableModelSettingsInput.md) |  | [optional] 
+**candidates** | [**List[SelectableModelCandidateInput]**](SelectableModelCandidateInput.md) | Ordered physical model candidates; first is Primary | 
+**subagent_enabled** | **bool** | Available as an explicit subagent model target | [optional] [default to True]
+**subagent_guidance** | **str** |  | [optional] 
 
 ## Example
 

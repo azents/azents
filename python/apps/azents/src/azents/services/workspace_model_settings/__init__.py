@@ -8,10 +8,9 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
-    DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
-    DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     AgentModelSelectionInput,
+    SelectableModelCandidateInput,
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
@@ -26,7 +25,6 @@ from azents.services.image_generation_catalog import ImageGenerationCatalogServi
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_options import (
     NormalizedSelectableModelOptions,
-    build_legacy_selectable_model_options,
     normalize_selectable_model_options,
     normalize_stored_selectable_model_options,
 )
@@ -104,72 +102,6 @@ class WorkspaceModelSettingsService:
                     return Failure(error)
                 case _:
                     assert_never(options_result)
-        elif (
-            "default_model_selection" in update.model_fields_set
-            or "default_lightweight_model_selection" in update.model_fields_set
-        ):
-            default_model_selection = (
-                current.default_model_selection if current else None
-            )
-            if update.default_model_selection is not None:
-                result = await self._resolve_model_selection_input(
-                    workspace_id,
-                    update.default_model_selection,
-                )
-                match result:
-                    case Success(value):
-                        default_model_selection = value
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(result)
-            elif "default_model_selection" in update.model_fields_set:
-                default_model_selection = None
-
-            if default_model_selection is None:
-                async with self.session_manager() as session:
-                    result = await self.repository.update(
-                        session,
-                        workspace_id,
-                        WorkspaceModelSettingsUpdate(default_model_selection=None),
-                    )
-                match result:
-                    case Success(value):
-                        return Success(self._build_output_from_settings(value))
-                    case Failure(_):
-                        return Failure(
-                            DefaultModelCannotBeCleared(workspace_id=workspace_id)
-                        )
-                    case _:
-                        assert_never(result)
-
-            default_lightweight_model_selection = (
-                current.default_lightweight_model_selection if current else None
-            )
-            if update.default_lightweight_model_selection is not None:
-                result = await self._resolve_model_selection_input(
-                    workspace_id,
-                    update.default_lightweight_model_selection,
-                )
-                match result:
-                    case Success(value):
-                        default_lightweight_model_selection = value
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(result)
-            elif "default_lightweight_model_selection" in update.model_fields_set:
-                default_lightweight_model_selection = default_model_selection
-            if default_lightweight_model_selection is None:
-                default_lightweight_model_selection = default_model_selection
-            assert default_model_selection is not None
-            assert default_lightweight_model_selection is not None
-            model_options = build_legacy_selectable_model_options(
-                model_selection=default_model_selection,
-                lightweight_model_selection=default_lightweight_model_selection,
-                main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
-            )
         elif "default_main_model_label" in update.model_fields_set or (
             "default_lightweight_model_label" in update.model_fields_set
         ):
@@ -221,11 +153,11 @@ class WorkspaceModelSettingsService:
         """Normalize default selectable option inputs into stored snapshots."""
 
         async def resolve_option(
-            option_input: SelectableModelOptionInput,
+            candidate_input: SelectableModelCandidateInput,
         ) -> Result[AgentModelSelection, ModelSelectionNotFound]:
             return await self._resolve_model_selection_input(
                 workspace_id,
-                option_input.model_selection,
+                candidate_input.model_selection,
             )
 
         async def validate_image_generation_config(

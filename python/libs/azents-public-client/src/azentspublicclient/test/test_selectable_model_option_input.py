@@ -36,13 +36,18 @@ class TestSelectableModelOptionInput(unittest.TestCase):
         if include_optional:
             return SelectableModelOptionInput(
                 label = '0',
-                model_selection = { },
-                settings = { }
+                candidates = [
+                    { }
+                    ],
+                subagent_enabled = True,
+                subagent_guidance = ''
             )
         else:
             return SelectableModelOptionInput(
                 label = '0',
-                model_selection = { },
+                candidates = [
+                    { }
+                    ],
         )
         """
 

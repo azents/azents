@@ -323,26 +323,30 @@ export function selectableModelOptionFormValueFromStoredOption(
   option: SelectableModelOption,
   index: number,
 ): SelectableModelOptionFormValue {
+  const primary = option.candidates[0];
+  if (primary == null) {
+    throw new Error("Selectable model option has no candidates");
+  }
   return {
     id: `stored-${index}-${option.label}`,
     label: option.label,
     model_provider_integration_id:
-      option.model_selection.llm_provider_integration_id,
-    model_selection_value: modelSelectionValue(option.model_selection),
-    model_display_name: option.model_selection.model_display_name,
-    model_identifier: option.model_selection.model_identifier,
-    normalized_capabilities: option.model_selection.normalized_capabilities,
-    context_window_tokens: option.settings.context_window_tokens,
-    max_output_tokens: option.settings.max_output_tokens,
-    builtin_tools: option.settings.builtin_tools.map((tool) => tool.name),
+      primary.model_selection.llm_provider_integration_id,
+    model_selection_value: modelSelectionValue(primary.model_selection),
+    model_display_name: primary.model_selection.model_display_name,
+    model_identifier: primary.model_selection.model_identifier,
+    normalized_capabilities: primary.model_selection.normalized_capabilities,
+    context_window_tokens: primary.settings.context_window_tokens,
+    max_output_tokens: primary.settings.max_output_tokens,
+    builtin_tools: primary.settings.builtin_tools.map((tool) => tool.name),
     builtin_tool_configs: Object.fromEntries(
-      option.settings.builtin_tools.map((tool) => [
+      primary.settings.builtin_tools.map((tool) => [
         tool.name,
         tool.config ?? {},
       ]),
     ),
-    subagent_enabled: option.settings.subagent_enabled,
-    subagent_guidance: option.settings.subagent_guidance,
+    subagent_enabled: option.subagent_enabled,
+    subagent_guidance: option.subagent_guidance,
   };
 }
 
@@ -368,17 +372,21 @@ export function selectableModelOptionInputsFromFormValues(
     return [
       {
         label,
-        model_selection: modelSelection,
-        settings: {
-          context_window_tokens: option.context_window_tokens,
-          max_output_tokens: option.max_output_tokens,
-          builtin_tools: option.builtin_tools.map((name) => ({
-            name,
-            config: option.builtin_tool_configs[name] ?? {},
-          })),
-          subagent_enabled: option.subagent_enabled,
-          subagent_guidance: option.subagent_guidance?.trim() || null,
-        },
+        candidates: [
+          {
+            model_selection: modelSelection,
+            settings: {
+              context_window_tokens: option.context_window_tokens,
+              max_output_tokens: option.max_output_tokens,
+              builtin_tools: option.builtin_tools.map((name) => ({
+                name,
+                config: option.builtin_tool_configs[name] ?? {},
+              })),
+            },
+          },
+        ],
+        subagent_enabled: option.subagent_enabled,
+        subagent_guidance: option.subagent_guidance?.trim() || null,
       },
     ];
   });

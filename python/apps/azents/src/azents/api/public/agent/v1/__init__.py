@@ -230,8 +230,6 @@ async def create_agent(
     create_input = AgentCreateInput(
         workspace_id=member.workspace_id,
         name=request_body.name,
-        model_selection=request_body.model_selection,
-        lightweight_model_selection=request_body.lightweight_model_selection,
         selectable_model_options=request_body.selectable_model_options,
         main_model_label=request_body.main_model_label,
         lightweight_model_label=request_body.lightweight_model_label,
@@ -363,12 +361,6 @@ def _build_agent_update_input(
         result["name"] = request_body["name"]
     if "description" in request_body:
         result["description"] = request_body["description"]
-    if "model_selection" in request_body:
-        result["model_selection"] = request_body["model_selection"]
-    if "lightweight_model_selection" in request_body:
-        result["lightweight_model_selection"] = request_body[
-            "lightweight_model_selection"
-        ]
     if "selectable_model_options" in request_body:
         result["selectable_model_options"] = request_body["selectable_model_options"]
     if "main_model_label" in request_body:

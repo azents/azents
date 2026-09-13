@@ -49,7 +49,10 @@ from azents.repos.external_channel.ingress_queue_data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 10, 1, tzinfo=datetime.UTC)
@@ -556,6 +559,12 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         name="Ingress owner Agent",
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     rdb_session.add(agent)
     await rdb_session.flush()

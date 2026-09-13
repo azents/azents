@@ -1,14 +1,15 @@
 # SelectableModelOption
 
-Stored selectable model option keyed by label.
+Stored selectable semantic label with ordered physical candidates.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** | Selectable model label | 
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) | Selectable model selection snapshot | 
-**settings** | [**SelectableModelSettings**](SelectableModelSettings.md) | Stored model-scoped settings | 
+**candidates** | [**List[SelectableModelCandidate]**](SelectableModelCandidate.md) | Ordered physical model candidates; first is Primary | 
+**subagent_enabled** | **bool** | Available as an explicit subagent model target | 
+**subagent_guidance** | **str** |  | 
 
 ## Example
 

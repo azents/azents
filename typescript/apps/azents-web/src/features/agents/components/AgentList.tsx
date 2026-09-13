@@ -27,6 +27,7 @@ import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import type { AgentListContainerOutput } from "../containers/useAgentListContainer";
 import type { AgentResponse } from "@azents/public-client";
@@ -132,7 +133,8 @@ function AgentCard({
   onToggleEnabled: (agent: AgentResponse, enabled: boolean) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents");
-  const modelSummary = formatModelSelectionSummary(agent.model_selection);
+  const primaryModel = agentPrimaryModelSelection(agent);
+  const modelSummary = formatModelSelectionSummary(primaryModel);
 
   return (
     <Card withBorder padding="md">
@@ -140,7 +142,7 @@ function AgentCard({
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
           <Group gap="sm">
             <Badge
-              color={agent.model_selection ? "blue" : "gray"}
+              color={primaryModel ? "blue" : "gray"}
               variant="light"
               size="sm"
             >

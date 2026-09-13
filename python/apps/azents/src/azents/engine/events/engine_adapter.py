@@ -21,6 +21,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
+from azents.core.model_operation import ModelOperationKind
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
 from azents.engine.context.compaction import (
@@ -526,6 +527,14 @@ class AgentEngineAdapter:
                 request.session_id,
             )
 
+        async def commit_compaction(session: AsyncSession) -> None:
+            if context.complete_model_operation_in_session is not None:
+                await context.complete_model_operation_in_session(
+                    session,
+                    ModelOperationKind.COMPACTION,
+                )
+            await clear_tool_working_set(session)
+
         await compactor.compact(
             session_id=request.session_id,
             transcript=transcript,
@@ -543,7 +552,7 @@ class AgentEngineAdapter:
                 providers=hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=clear_tool_working_set,
+            on_committing=commit_compaction,
         )
         yield ephemeral(CompactionComplete())
 
@@ -1001,6 +1010,14 @@ class AgentEngineAdapter:
                 request.session_id,
             )
 
+        async def commit_compaction(session: AsyncSession) -> None:
+            if context.complete_model_operation_in_session is not None:
+                await context.complete_model_operation_in_session(
+                    session,
+                    ModelOperationKind.COMPACTION,
+                )
+            await clear_tool_working_set(session)
+
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -1024,7 +1041,7 @@ class AgentEngineAdapter:
                 providers=run_hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=clear_tool_working_set,
+            on_committing=commit_compaction,
         )
         integration_id = (
             request.inference_state.model_selection.llm_provider_integration_id
@@ -1120,6 +1137,9 @@ class AgentEngineAdapter:
             session_repo=self.session_head_repo,
             terminal_finalization_coordinator=self.terminal_finalization_coordinator,
             system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
+            complete_model_operation_in_session=(
+                context.complete_model_operation_in_session
+            ),
         )
 
         async def execute_run() -> AgentRunStatus:

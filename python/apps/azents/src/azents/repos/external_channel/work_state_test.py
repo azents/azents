@@ -92,8 +92,32 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                         :owner_agent_id, :workspace_id, 'Owner Agent',
                         '{}'::jsonb, '{}'::jsonb,
                         '[
-                            {"label": "main", "model_selection": {}},
-                            {"label": "light", "model_selection": {}}
+                            {
+                                "label": "main",
+                                "candidates": [{
+                                    "model_selection": {},
+                                    "settings": {
+                                        "context_window_tokens": null,
+                                        "max_output_tokens": null,
+                                        "builtin_tools": []
+                                    }
+                                }],
+                                "subagent_enabled": true,
+                                "subagent_guidance": null
+                            },
+                            {
+                                "label": "light",
+                                "candidates": [{
+                                    "model_selection": {},
+                                    "settings": {
+                                        "context_window_tokens": null,
+                                        "max_output_tokens": null,
+                                        "builtin_tools": []
+                                    }
+                                }],
+                                "subagent_enabled": true,
+                                "subagent_guidance": null
+                            }
                         ]'::jsonb,
                         'main', 'light'
                     ),
@@ -101,8 +125,32 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                         :other_agent_id, :workspace_id, 'Other Agent',
                         '{}'::jsonb, '{}'::jsonb,
                         '[
-                            {"label": "main", "model_selection": {}},
-                            {"label": "light", "model_selection": {}}
+                            {
+                                "label": "main",
+                                "candidates": [{
+                                    "model_selection": {},
+                                    "settings": {
+                                        "context_window_tokens": null,
+                                        "max_output_tokens": null,
+                                        "builtin_tools": []
+                                    }
+                                }],
+                                "subagent_enabled": true,
+                                "subagent_guidance": null
+                            },
+                            {
+                                "label": "light",
+                                "candidates": [{
+                                    "model_selection": {},
+                                    "settings": {
+                                        "context_window_tokens": null,
+                                        "max_output_tokens": null,
+                                        "builtin_tools": []
+                                    }
+                                }],
+                                "subagent_enabled": true,
+                                "subagent_guidance": null
+                            }
                         ]'::jsonb,
                         'main', 'light'
                     )

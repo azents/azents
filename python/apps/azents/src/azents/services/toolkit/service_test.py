@@ -669,7 +669,19 @@ async def _seed_slug_race(
                     'Toolkit race Agent',
                     '{}'::jsonb,
                     '{}'::jsonb,
-                    '[{"label":"default","model_selection":{}}]'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
                     'default',
                     'default'
                 )

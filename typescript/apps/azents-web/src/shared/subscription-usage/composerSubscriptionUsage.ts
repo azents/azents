@@ -28,15 +28,13 @@ export function resolveComposerSubscriptionSelection(
   modelTargetLabel: string,
 ): ComposerSubscriptionSelection | null {
   const selected = options.find((option) => option.label === modelTargetLabel);
-  if (
-    !selected ||
-    !supportsSubscriptionUsage(selected.model_selection.provider)
-  ) {
+  const primary = selected?.candidates[0]?.model_selection;
+  if (!primary || !supportsSubscriptionUsage(primary.provider)) {
     return null;
   }
   return {
-    integrationId: selected.model_selection.llm_provider_integration_id,
-    provider: selected.model_selection.provider,
+    integrationId: primary.llm_provider_integration_id,
+    provider: primary.provider,
   };
 }
 

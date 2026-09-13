@@ -86,16 +86,20 @@ function settingsForModel(model: AgentModelSelection): SelectableModelSettings {
     builtin_tools: (
       model.normalized_capabilities.built_in_tools?.supported ?? []
     ).map((name) => ({ name })),
-    subagent_enabled: true,
-    subagent_guidance: null,
   };
 }
 
 const selectableModelOptions: AgentResponse["selectable_model_options"] = [
   {
     label: "Default",
-    model_selection: reasoningModel,
-    settings: settingsForModel(reasoningModel),
+    candidates: [
+      {
+        model_selection: reasoningModel,
+        settings: settingsForModel(reasoningModel),
+      },
+    ],
+    subagent_enabled: true,
+    subagent_guidance: null,
     execution_option_definitions: [
       {
         id: "fast",
@@ -108,8 +112,14 @@ const selectableModelOptions: AgentResponse["selectable_model_options"] = [
   },
   {
     label: "Fast",
-    model_selection: noEffortModel,
-    settings: settingsForModel(noEffortModel),
+    candidates: [
+      {
+        model_selection: noEffortModel,
+        settings: settingsForModel(noEffortModel),
+      },
+    ],
+    subagent_enabled: true,
+    subagent_guidance: null,
     execution_option_definitions: [],
   },
 ];
@@ -608,8 +618,14 @@ export const LongModelLabel = {
     selectableModelOptions: [
       {
         label: "Production reasoning model with a deliberately long label",
-        model_selection: reasoningModel,
-        settings: settingsForModel(reasoningModel),
+        candidates: [
+          {
+            model_selection: reasoningModel,
+            settings: settingsForModel(reasoningModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions:
           selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
@@ -642,8 +658,14 @@ export const EmptyEffortList = {
     selectableModelOptions: [
       {
         label: "Default",
-        model_selection: emptyEffortModel,
-        settings: settingsForModel(emptyEffortModel),
+        candidates: [
+          {
+            model_selection: emptyEffortModel,
+            settings: settingsForModel(emptyEffortModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions: [],
       },
     ],
@@ -663,15 +685,27 @@ export const DesktopFullReasoningEffort = {
     selectableModelOptions: [
       {
         label: "Default",
-        model_selection: fullReasoningModel,
-        settings: settingsForModel(fullReasoningModel),
+        candidates: [
+          {
+            model_selection: fullReasoningModel,
+            settings: settingsForModel(fullReasoningModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions:
           selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
-        model_selection: noEffortModel,
-        settings: settingsForModel(noEffortModel),
+        candidates: [
+          {
+            model_selection: noEffortModel,
+            settings: settingsForModel(noEffortModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions: [],
       },
     ],
@@ -702,15 +736,27 @@ export const DesktopProfileKeyboardNavigation = {
     selectableModelOptions: [
       {
         label: "Default",
-        model_selection: fullReasoningModel,
-        settings: settingsForModel(fullReasoningModel),
+        candidates: [
+          {
+            model_selection: fullReasoningModel,
+            settings: settingsForModel(fullReasoningModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions:
           selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
-        model_selection: noEffortModel,
-        settings: settingsForModel(noEffortModel),
+        candidates: [
+          {
+            model_selection: noEffortModel,
+            settings: settingsForModel(noEffortModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions: [],
       },
     ],
@@ -904,15 +950,27 @@ export const MobileFullReasoningEffort = {
     selectableModelOptions: [
       {
         label: "Default",
-        model_selection: fullReasoningModel,
-        settings: settingsForModel(fullReasoningModel),
+        candidates: [
+          {
+            model_selection: fullReasoningModel,
+            settings: settingsForModel(fullReasoningModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions:
           selectableModelOptions[0]?.execution_option_definitions ?? [],
       },
       {
         label: "Fast",
-        model_selection: noEffortModel,
-        settings: settingsForModel(noEffortModel),
+        candidates: [
+          {
+            model_selection: noEffortModel,
+            settings: settingsForModel(noEffortModel),
+          },
+        ],
+        subagent_enabled: true,
+        subagent_guidance: null,
         execution_option_definitions: [],
       },
     ],

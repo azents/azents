@@ -1,6 +1,6 @@
 # SelectableModelSettingsInput
 
-Optional user settings submitted for one selectable model option.
+Optional user settings submitted for one physical model candidate.
 
 ## Properties
 
@@ -9,8 +9,6 @@ Name | Type | Description | Notes
 **context_window_tokens** | **int** |  | [optional] 
 **max_output_tokens** | **int** |  | [optional] 
 **builtin_tools** | [**List[BuiltinToolConfig]**](BuiltinToolConfig.md) |  | [optional] 
-**subagent_enabled** | **bool** | Available as an explicit subagent model target | [optional] [default to True]
-**subagent_guidance** | **str** |  | [optional] 
 
 ## Example
 

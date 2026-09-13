@@ -1,14 +1,15 @@
 # SelectableModelOptionResponse
 
-Public selectable model option with execution descriptors.
+Public selectable semantic label with ordered candidates.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** |  | 
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
-**settings** | [**SelectableModelSettings**](SelectableModelSettings.md) |  | 
+**candidates** | [**List[SelectableModelCandidateResponse]**](SelectableModelCandidateResponse.md) |  | 
+**subagent_enabled** | **bool** |  | 
+**subagent_guidance** | **str** |  | 
 **execution_option_definitions** | [**List[ModelExecutionOptionDefinition]**](ModelExecutionOptionDefinition.md) |  | 
 
 ## Example

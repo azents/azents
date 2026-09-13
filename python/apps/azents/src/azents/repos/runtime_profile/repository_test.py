@@ -56,7 +56,10 @@ from azents.repos.workspace.data import (
     WorkspaceCreate,
     WorkspaceRuntimeProfileDefaultReplace,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from .data import (
     RuntimeConfigurationDesiredStateWrite,
@@ -276,6 +279,12 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
             name="Configuration evidence Agent",
             model_selection=selection,
             lightweight_model_selection=selection,
+            selectable_model_options=make_test_selectable_model_option_dicts(
+                model_selection=(selection),
+                lightweight_model_selection=(selection),
+            ),
+            main_model_label="default",
+            lightweight_model_label="lightweight",
         )
         session.add(agent)
         await session.flush()
@@ -493,6 +502,12 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
                 model_selection=selection,
                 lightweight_model_selection=selection,
                 runtime_profile_id=workspace_profile.id,
+                selectable_model_options=make_test_selectable_model_option_dicts(
+                    model_selection=(selection),
+                    lightweight_model_selection=(selection),
+                ),
+                main_model_label="default",
+                lightweight_model_label="lightweight",
             )
             session.add(agent)
             await session.flush()
@@ -508,6 +523,12 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
             model_selection=unconfigured_selection,
             lightweight_model_selection=unconfigured_selection,
             runtime_profile_id=None,
+            selectable_model_options=make_test_selectable_model_option_dicts(
+                model_selection=(unconfigured_selection),
+                lightweight_model_selection=(unconfigured_selection),
+            ),
+            main_model_label="default",
+            lightweight_model_label="lightweight",
         )
         session.add(unconfigured)
         await session.flush()
@@ -619,6 +640,12 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
                 lightweight_model_selection=selection,
                 runtime_profile_id=profile.id,
                 runtime_capability=AgentRuntimeCapability.MANAGED,
+                selectable_model_options=make_test_selectable_model_option_dicts(
+                    model_selection=(selection),
+                    lightweight_model_selection=(selection),
+                ),
+                main_model_label="default",
+                lightweight_model_label="lightweight",
             )
             session.add(agent)
             await session.flush()
@@ -819,6 +846,12 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             lightweight_model_selection=selection,
             runtime_profile_id=profile.id,
             runtime_capability=AgentRuntimeCapability.MANAGED,
+            selectable_model_options=make_test_selectable_model_option_dicts(
+                model_selection=(selection),
+                lightweight_model_selection=(selection),
+            ),
+            main_model_label="default",
+            lightweight_model_label="lightweight",
         )
         session.add(agent)
         await session.flush()
@@ -983,6 +1016,12 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             lightweight_model_selection=selection,
             runtime_profile_id=workspace_profile.id,
             runtime_capability=AgentRuntimeCapability.MANAGED,
+            selectable_model_options=make_test_selectable_model_option_dicts(
+                model_selection=(selection),
+                lightweight_model_selection=(selection),
+            ),
+            main_model_label="default",
+            lightweight_model_label="lightweight",
         )
         session.add(agent)
         await session.flush()
@@ -1259,6 +1298,12 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
                 name=f"Recreation exact target {index}",
                 model_selection=selection,
                 lightweight_model_selection=selection,
+                selectable_model_options=make_test_selectable_model_option_dicts(
+                    model_selection=(selection),
+                    lightweight_model_selection=(selection),
+                ),
+                main_model_label="default",
+                lightweight_model_label="lightweight",
             )
             session.add(agent)
             await session.flush()
@@ -1421,6 +1466,12 @@ async def test_recreation_claim_respects_existing_global_concurrency(
                 name=f"Recreation concurrency {index}",
                 model_selection=selection,
                 lightweight_model_selection=selection,
+                selectable_model_options=make_test_selectable_model_option_dicts(
+                    model_selection=(selection),
+                    lightweight_model_selection=(selection),
+                ),
+                main_model_label="default",
+                lightweight_model_label="lightweight",
             )
             session.add(agent)
             await session.flush()

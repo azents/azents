@@ -281,7 +281,7 @@ function effortLevelsForTarget(
   targetLabel: string,
 ): ModelReasoningEffort[] {
   const capabilities = options.find((option) => option.label === targetLabel)
-    ?.model_selection.normalized_capabilities;
+    ?.candidates[0]?.model_selection.normalized_capabilities;
   return reasoningEffortLevels(capabilities);
 }
 
