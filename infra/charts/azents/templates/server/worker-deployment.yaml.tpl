@@ -46,8 +46,10 @@ spec:
               value: "8012"
             - name: AZ_RUNTIME_WEB_GATEWAY_ENABLED
               value: {{ .Values.server.runtimeWebGateway.enabled | quote }}
+            {{- if .Values.server.runtimeWebGateway.enabled }}
             - name: AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX
               value: {{ .Values.server.runtimeWebGateway.serviceSuffix | quote }}
+            {{- end }}
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}

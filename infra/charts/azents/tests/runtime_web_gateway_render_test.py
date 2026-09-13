@@ -72,9 +72,14 @@ def _rendered_resource(rendered: str, *, kind: str, name: str) -> str:
 
 def test_runtime_web_gateway_is_disabled_by_default() -> None:
     rendered = _helm_template()
+    worker = _rendered_resource(rendered, kind="Deployment", name="worker")
 
     assert "name: runtime-web-gateway" not in rendered
     assert "runtime-control-headless" not in rendered
+    assert (
+        'name: AZ_RUNTIME_WEB_GATEWAY_ENABLED\n              value: "false"' in worker
+    )
+    assert "AZ_RUNTIME_WEB_GATEWAY_SERVICE_SUFFIX" not in worker
 
 
 def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> None:
