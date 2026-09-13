@@ -35,7 +35,6 @@ from azents.core.inference_profile import (
     SessionInferenceState,
     validate_requested_profile_against_options,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -280,6 +279,69 @@ class RequestedProfileSelection:
 
     profile: RequestedInferenceProfile
     source: InferenceProfileSource
+
+
+def _agent_default_inference_profile(agent: Agent) -> RequestedInferenceProfile:
+    """Build the Agent default profile from its current main option."""
+    if not agent.selectable_model_options:
+        raise ValueError("Agent has no selectable model options")
+    option = next(
+        (
+            candidate
+            for candidate in agent.selectable_model_options
+            if candidate.label == agent.main_model_label
+        ),
+        agent.selectable_model_options[0],
+    )
+    return RequestedInferenceProfile(
+        model_target_label=option.label,
+        reasoning_effort=(
+            agent.model_parameters.reasoning_effort
+            if agent.model_parameters is not None
+            else None
+        ),
+        enabled_execution_options=[],
+    )
+
+
+def _agent_fallback_inference_profile(agent: Agent) -> RequestedInferenceProfile:
+    """Build a fallback profile with only reasoning supported by the fallback model."""
+    profile = _agent_default_inference_profile(agent)
+    option = next(
+        option
+        for option in agent.selectable_model_options
+        if option.label == profile.model_target_label
+    )
+    reasoning = option.model_selection.normalized_capabilities.reasoning
+    if profile.reasoning_effort is not None and (
+        not reasoning.supported
+        or profile.reasoning_effort not in reasoning.effort_levels
+    ):
+        return profile.model_copy(update={"reasoning_effort": None})
+    return profile
+
+
+def _normalize_profile_selection_for_agent(
+    agent: Agent,
+    selected: RequestedProfileSelection,
+) -> RequestedProfileSelection:
+    """Fallback stale Agent-owned labels to the current Agent default."""
+    if any(
+        option.label == selected.profile.model_target_label
+        for option in agent.selectable_model_options
+    ):
+        return selected
+    fallback = _agent_fallback_inference_profile(agent)
+    if selected.source in {
+        InferenceProfileSource.PARENT_RUN,
+        InferenceProfileSource.SPAWN_OVERRIDE,
+        InferenceProfileSource.RETRY_ORIGINAL,
+    }:
+        return dataclasses.replace(selected, profile=fallback)
+    return RequestedProfileSelection(
+        profile=fallback,
+        source=InferenceProfileSource.AGENT_DEFAULT,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -925,8 +987,12 @@ class RunExecutor:
                     or pending_input.requested_inference_profile is None
                 )
             ):
-                selected_profile = RequestedProfileSelection(
-                    profile=explicit_profile,
+                selected_profile = dataclasses.replace(
+                    await self._select_requested_profile(
+                        agent_id=snapshot.agent_id,
+                        session_id=snapshot.session_id,
+                        explicit_profile=explicit_profile,
+                    ),
                     source=InferenceProfileSource.RETRY_ORIGINAL,
                 )
             else:
@@ -2422,49 +2488,41 @@ class RunExecutor:
         explicit_profile: RequestedInferenceProfile | None,
     ) -> RequestedProfileSelection:
         """Apply explicit, Session-applied, then Agent-default profile precedence."""
-        if explicit_profile is not None:
-            return RequestedProfileSelection(
-                profile=explicit_profile,
-                source=InferenceProfileSource.EXPLICIT_INPUT,
-            )
         async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
+            agent = await self.agent_repository.lock_by_id(session, agent_id)
+            if not isinstance(agent, Agent):
+                raise ValueError("Agent not found")
+            agent_session = await self.agent_session_repository.lock_by_id(
                 session,
                 session_id,
             )
             if not isinstance(agent_session, AgentSession):
                 raise ValueError("AgentSession not found")
-            if agent_session.applied_inference_profile is not None:
-                return RequestedProfileSelection(
+            if agent_session.agent_id != agent_id:
+                raise ValueError("AgentSession does not belong to Agent")
+
+            if explicit_profile is not None:
+                selected = RequestedProfileSelection(
+                    profile=explicit_profile,
+                    source=InferenceProfileSource.EXPLICIT_INPUT,
+                )
+            elif agent_session.applied_inference_profile is not None:
+                applied = agent_session.applied_inference_profile
+                selected = RequestedProfileSelection(
                     profile=RequestedInferenceProfile(
-                        model_target_label=(
-                            agent_session.applied_inference_profile.model_target_label
-                        ),
-                        reasoning_effort=(
-                            agent_session.applied_inference_profile.reasoning_effort
-                        ),
-                        enabled_execution_options=(
-                            agent_session.applied_inference_profile.enabled_execution_options
-                        ),
+                        model_target_label=applied.model_target_label,
+                        reasoning_effort=applied.reasoning_effort,
+                        enabled_execution_options=applied.enabled_execution_options,
                     ),
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if not isinstance(agent, Agent):
-                raise ValueError("Agent not found")
-            return RequestedProfileSelection(
-                profile=RequestedInferenceProfile(
-                    model_target_label=agent.main_model_label,
-                    reasoning_effort=(
-                        ModelReasoningEffort(agent.model_parameters.reasoning_effort)
-                        if agent.model_parameters is not None
-                        and agent.model_parameters.reasoning_effort is not None
-                        else None
-                    ),
-                    enabled_execution_options=[],
-                ),
-                source=InferenceProfileSource.AGENT_DEFAULT,
-            )
+            else:
+                selected = RequestedProfileSelection(
+                    profile=_agent_default_inference_profile(agent),
+                    source=InferenceProfileSource.AGENT_DEFAULT,
+                )
+
+            return _normalize_profile_selection_for_agent(agent, selected)
 
     async def _prepare_fresh_main_model_turn(
         self,
@@ -2509,20 +2567,10 @@ class RunExecutor:
                 )
             else:
                 selected = RequestedProfileSelection(
-                    profile=RequestedInferenceProfile(
-                        model_target_label=agent.main_model_label,
-                        reasoning_effort=(
-                            ModelReasoningEffort(
-                                agent.model_parameters.reasoning_effort
-                            )
-                            if agent.model_parameters is not None
-                            and agent.model_parameters.reasoning_effort is not None
-                            else None
-                        ),
-                        enabled_execution_options=[],
-                    ),
+                    profile=_agent_default_inference_profile(agent),
                     source=InferenceProfileSource.AGENT_DEFAULT,
                 )
+            selected = _normalize_profile_selection_for_agent(agent, selected)
 
             resolved = await resolve_invoke_input_with_profile(
                 invoke_input,
@@ -2579,32 +2627,53 @@ class RunExecutor:
                 if locked_session.agent_id != agent_id:
                     raise ValueError("AgentSession does not belong to Agent")
 
+                stale_profile_was_replaced = False
                 if override is not None and override.source in override_sources:
-                    expected = override.profile
+                    expected_selection = _normalize_profile_selection_for_agent(
+                        locked_agent,
+                        override,
+                    )
+                    expected = expected_selection.profile
+                    stale_profile_was_replaced = expected != override.profile
                 elif locked_session.applied_inference_profile is not None:
                     applied = locked_session.applied_inference_profile
-                    expected = RequestedInferenceProfile(
-                        model_target_label=applied.model_target_label,
-                        reasoning_effort=applied.reasoning_effort,
-                        enabled_execution_options=applied.enabled_execution_options,
-                    )
-                else:
-                    expected = RequestedInferenceProfile(
-                        model_target_label=locked_agent.main_model_label,
-                        reasoning_effort=(
-                            ModelReasoningEffort(
-                                locked_agent.model_parameters.reasoning_effort
-                            )
-                            if locked_agent.model_parameters is not None
-                            and locked_agent.model_parameters.reasoning_effort
-                            is not None
-                            else None
+                    applied_selection = RequestedProfileSelection(
+                        profile=RequestedInferenceProfile(
+                            model_target_label=applied.model_target_label,
+                            reasoning_effort=applied.reasoning_effort,
+                            enabled_execution_options=(
+                                applied.enabled_execution_options
+                            ),
                         ),
-                        enabled_execution_options=[],
+                        source=InferenceProfileSource.SESSION_LAST_USED,
                     )
+                    expected_selection = _normalize_profile_selection_for_agent(
+                        locked_agent,
+                        applied_selection,
+                    )
+                    expected = expected_selection.profile
+                    stale_profile_was_replaced = expected != applied_selection.profile
+                else:
+                    expected = _agent_default_inference_profile(locked_agent)
 
                 if expected != selected.profile:
                     continue
+                if stale_profile_was_replaced and (
+                    override is None
+                    or override.source
+                    not in {
+                        InferenceProfileSource.PARENT_RUN,
+                        InferenceProfileSource.SPAWN_OVERRIDE,
+                    }
+                ):
+                    await self.agent_session_repository.set_applied_inference_profile(
+                        session,
+                        session_id=session_id,
+                        model_target_label=expected.model_target_label,
+                        reasoning_effort=expected.reasoning_effort,
+                        enabled_execution_options=expected.enabled_execution_options,
+                    )
+
                 option = validate_requested_profile_against_options(
                     locked_agent.selectable_model_options,
                     expected,

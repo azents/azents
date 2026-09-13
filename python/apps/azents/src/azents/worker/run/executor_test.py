@@ -744,6 +744,7 @@ class _AgentSessionRepository:
         self.inference_state = inference_state
         self.owner_generation = owner_generation
         self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
+        self.applied_profile_updates: list[SessionAppliedInferenceProfile] = []
         self.cleared_commands: list[tuple[str, str]] = []
         self.current_session_agent = current_session_agent
         self.tree_session_agents = tree_session_agents or []
@@ -785,6 +786,26 @@ class _AgentSessionRepository:
         del session, session_id
         self.inference_state = inference_state
         return SimpleNamespace(inference_state=inference_state)
+
+    async def set_applied_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: list[ModelExecutionOptionId],
+    ) -> object:
+        """Record a fallback applied profile replacement."""
+        del session, session_id
+        profile = SessionAppliedInferenceProfile(
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+            enabled_execution_options=enabled_execution_options,
+        )
+        self.applied_inference_profile = profile
+        self.applied_profile_updates.append(profile)
+        return SimpleNamespace(applied_inference_profile=profile)
 
     async def list_session_agent_tree(
         self,
@@ -3175,6 +3196,73 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
     )
     assert prepared.value.inference_state.model_selection.model_identifier == "gpt-4o"
     assert session_repository.inference_state is prepared.value.inference_state
+    assert session_repository.applied_profile_updates == []
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_falls_back_and_persists_stale_session_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A removed Session label resolves through and replaces the Agent default."""
+    session_repository = _AgentSessionRepository()
+    session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+        model_target_label="removed",
+        reasoning_effort=ModelReasoningEffort.HIGH,
+        enabled_execution_options=[],
+    )
+    executor = _executor(agent_session_repository=session_repository)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        _resolve_success,
+    )
+
+    prepared = await executor._prepare_fresh_main_model_turn(
+        agent_id="agent-001",
+        session_id="session-001",
+        owner_generation=1,
+        invoke_input=InvokeInput(
+            agent_id="agent-001",
+            session_id="session-001",
+            messages=[],
+        ),
+        override=None,
+    )
+
+    assert isinstance(prepared, Success)
+    assert prepared.value.profile.model_target_label == "default"
+    assert prepared.value.profile.reasoning_effort is None
+    assert session_repository.applied_profile_updates == [
+        SessionAppliedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_select_requested_profile_falls_back_for_stale_pending_profile() -> None:
+    """A queued profile removed after admission uses the current Agent default."""
+    session_repository = _AgentSessionRepository()
+    executor = _executor(agent_session_repository=session_repository)
+
+    selected = await executor._select_requested_profile(
+        agent_id="agent-001",
+        session_id="session-001",
+        explicit_profile=RequestedInferenceProfile(
+            model_target_label="removed",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        ),
+    )
+
+    assert selected.profile == RequestedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+        enabled_execution_options=[],
+    )
+    assert session_repository.applied_profile_updates == []
 
 
 @pytest.mark.asyncio

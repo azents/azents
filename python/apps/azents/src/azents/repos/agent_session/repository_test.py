@@ -217,6 +217,82 @@ class TestAgentSessionRepository:
         assert first.applied_profile_generation == 1
         assert second.applied_profile_generation == 2
 
+    async def test_replaces_stale_active_profiles_with_the_agent_default(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Only active Sessions with removed labels use the new default profile."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "stale-applied-profile",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "stale-applied-profile",
+        )
+        repository = AgentSessionRepository()
+        stale = await repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        valid = await repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title="valid",
+            ),
+        )
+        await repository.set_applied_inference_profile(
+            rdb_session,
+            session_id=stale.id,
+            model_target_label="removed",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        )
+        await repository.set_applied_inference_profile(
+            rdb_session,
+            session_id=valid.id,
+            model_target_label="default",
+            reasoning_effort=ModelReasoningEffort.MEDIUM,
+            enabled_execution_options=[ModelExecutionOptionId.FAST],
+        )
+
+        replaced = await repository.replace_stale_applied_inference_profiles(
+            rdb_session,
+            agent_id=agent_id,
+            valid_model_target_labels=["default"],
+            model_target_label="default",
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        )
+
+        assert replaced == 1
+        stale_after = await repository.get_by_id(rdb_session, stale.id)
+        valid_after = await repository.get_by_id(rdb_session, valid.id)
+        assert stale_after is not None
+        assert valid_after is not None
+        assert stale_after.applied_inference_profile is not None
+        assert stale_after.applied_inference_profile.model_target_label == "default"
+        assert stale_after.applied_inference_profile.reasoning_effort is None
+        assert stale_after.applied_inference_profile.enabled_execution_options == []
+        assert stale_after.applied_profile_generation == 2
+        assert valid_after.applied_inference_profile is not None
+        assert valid_after.applied_inference_profile.model_target_label == "default"
+        assert valid_after.applied_inference_profile.reasoning_effort == (
+            ModelReasoningEffort.MEDIUM
+        )
+        assert valid_after.applied_profile_generation == 1
+
     async def test_root_context_without_runtime_uses_none_binding(
         self,
         rdb_session: AsyncSession,

@@ -99,7 +99,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-13
-spec_version: 176
+spec_version: 177
 ---
 
 # Agent Execution Loop
@@ -425,9 +425,13 @@ run. A canonical human `user_message` stores the immutable requested target labe
 requested effort accepted with that input. It does not copy the resolved physical selection or the
 applied model display name from the prepared Session snapshot. Exact applied public provenance belongs
 to the `turn_marker` for each provider call, so requested intent remains stable after reload while
-applied provenance can differ at later turn boundaries. Resolution failure is a handled preparation
-failure: it consumes that head, appends a user-safe `system_error`, preserves the previous Session
-snapshot, completes the active run, and is not retried.
+applied provenance can differ at later turn boundaries. If an accepted Session or pending/retry
+profile label is absent from the current Agent option list, the worker replaces it with the Agent
+main option, persists the fallback Session intent when it owns that intent, and clears
+fallback-incompatible effort and execution-option settings. Resolution failure remains a handled
+preparation failure for labels rejected at admission or other unresolved profile errors: it consumes
+that head, appends a user-safe `system_error`, preserves the previous Session snapshot, completes the
+active run, and is not retried.
 
 Requested profile selection precedence for implicit execution is the Session applied profile then
 Agent `main_model_label`; explicit human input wins over both. The applied profile contains only
@@ -1461,6 +1465,7 @@ icon.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 177) — Added active Session model-label reconciliation and execution-boundary fallback for accepted stale profiles after Agent option updates.
 - **2026-09-12** (spec_version 176) — Bound engine persistence,
   compaction, and tool admission to durable execution ownership with tree-safe
   database locking.

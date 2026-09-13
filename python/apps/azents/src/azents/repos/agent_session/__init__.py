@@ -2028,6 +2028,47 @@ class AgentSessionRepository:
         await session.flush()
         return self._build(rdb)
 
+    async def replace_stale_applied_inference_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        valid_model_target_labels: Sequence[str],
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+        enabled_execution_options: Sequence[ModelExecutionOptionId],
+    ) -> int:
+        """Replace active Session profiles whose labels left the Agent option list."""
+        if not valid_model_target_labels:
+            raise ValueError("Agent must have at least one valid model target label")
+
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.applied_model_target_label.is_not(None),
+                ~RDBAgentSession.applied_model_target_label.in_(
+                    valid_model_target_labels
+                ),
+            )
+            .values(
+                applied_model_target_label=model_target_label,
+                applied_reasoning_effort=reasoning_effort,
+                applied_enabled_execution_options=[
+                    option.value for option in enabled_execution_options
+                ],
+                applied_profile_generation=(
+                    RDBAgentSession.applied_profile_generation + 1
+                ),
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBAgentSession.id)
+        )
+        replaced_session_ids = result.scalars().all()
+        await session.flush()
+        return len(replaced_session_ids)
+
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
         updated_id = await session.scalar(
