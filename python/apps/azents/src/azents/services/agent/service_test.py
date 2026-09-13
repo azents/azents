@@ -542,8 +542,14 @@ class TestAgentServiceModelSelection:
         alternative_selection = make_test_model_selection(model_identifier="gpt-alt")
         alternative = SelectableModelOption(
             label="alternative",
-            model_selection=alternative_selection,
-            settings=make_test_model_settings(),
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=alternative_selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
         existing = existing.model_copy(
             update={

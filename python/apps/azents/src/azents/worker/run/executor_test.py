@@ -3445,6 +3445,7 @@ async def test_prepare_fresh_turn_falls_back_and_persists_stale_session_profile(
     prepared = await executor._prepare_fresh_main_model_turn(
         agent_id="agent-001",
         session_id="session-001",
+        run_id="run-001",
         owner_generation=1,
         invoke_input=InvokeInput(
             agent_id="agent-001",

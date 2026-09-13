@@ -352,7 +352,7 @@ def _session_profile_fallback(
         if agent.model_parameters is not None
         else None
     )
-    reasoning = option.model_selection.normalized_capabilities.reasoning
+    reasoning = option.candidates[0].model_selection.normalized_capabilities.reasoning
     if reasoning_effort is not None and (
         not reasoning.supported or reasoning_effort not in reasoning.effort_levels
     ):

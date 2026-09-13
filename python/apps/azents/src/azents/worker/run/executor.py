@@ -37,7 +37,6 @@ from azents.core.inference_profile import (
     SessionInferenceState,
     validate_requested_profile_against_options,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
@@ -339,7 +338,7 @@ def _agent_fallback_inference_profile(agent: Agent) -> RequestedInferenceProfile
         for option in agent.selectable_model_options
         if option.label == profile.model_target_label
     )
-    reasoning = option.model_selection.normalized_capabilities.reasoning
+    reasoning = option.candidates[0].model_selection.normalized_capabilities.reasoning
     if profile.reasoning_effort is not None and (
         not reasoning.supported
         or profile.reasoning_effort not in reasoning.effort_levels
