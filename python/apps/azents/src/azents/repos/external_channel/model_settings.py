@@ -542,7 +542,9 @@ class ExternalModelSettingsRepository:
                     ]
                 ),
                 new_model_target_label=profile.model_target_label,
-                new_model_display_name=selected.model_selection.model_display_name,
+                new_model_display_name=(
+                    selected.candidates[0].model_selection.model_display_name
+                ),
                 new_reasoning_effort=profile.reasoning_effort,
                 new_enabled_execution_options=[
                     value.value for value in profile.enabled_execution_options
@@ -572,12 +574,14 @@ class ExternalModelSettingsRepository:
                 provider_thread_id=provider_thread_id,
                 actor_display_name=authorized.link.provider_display_label,
                 model_label=profile.model_target_label,
-                model_display_name=selected.model_selection.model_display_name,
+                model_display_name=(
+                    selected.candidates[0].model_selection.model_display_name
+                ),
                 reasoning_effort=profile.reasoning_effort,
                 enabled_execution_option_labels=[
                     definition.label
                     for definition in list_model_execution_option_definitions(
-                        provider=selected.model_selection.provider,
+                        provider=selected.candidates[0].model_selection.provider,
                         supported=profile.enabled_execution_options,
                     )
                 ],
@@ -1001,18 +1005,24 @@ class ExternalModelSettingsRepository:
             "option_id": option_id,
             "target_label": option.label,
             "label": option.label,
-            "model_display_name": option.model_selection.model_display_name,
+            "model_display_name": option.candidates[
+                0
+            ].model_selection.model_display_name,
             "reasoning_efforts": [
                 value.value
                 for value in (
-                    option.model_selection.normalized_capabilities.reasoning.effort_levels
+                    option.candidates[
+                        0
+                    ].model_selection.normalized_capabilities.reasoning.effort_levels
                 )
             ],
             "execution_options": [
                 definition.model_dump(mode="json")
                 for definition in list_model_execution_option_definitions(
-                    provider=option.model_selection.provider,
-                    supported=option.model_selection.supported_execution_options,
+                    provider=option.candidates[0].model_selection.provider,
+                    supported=option.candidates[
+                        0
+                    ].model_selection.supported_execution_options,
                 )
             ],
         }

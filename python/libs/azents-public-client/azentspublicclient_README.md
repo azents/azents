@@ -121,6 +121,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
+*ChatV1Api* | [**chat_v1_cancel_agent_session_primary_model_reservation**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cancel_agent_session_primary_model_reservation) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel | Cancel Agent Session Primary Model Reservation
 *ChatV1Api* | [**chat_v1_cleanup_session_git_worktree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
 *ChatV1Api* | [**chat_v1_create_agent_workspace_directory**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_agent_workspace_directory) | **POST** /chat/v1/agents/{agent_id}/workspace/directories | Create Agent Workspace Directory
 *ChatV1Api* | [**chat_v1_create_input**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
@@ -136,6 +137,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
 *ChatV1Api* | [**chat_v1_get_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
+*ChatV1Api* | [**chat_v1_get_agent_session_model_availability**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 *ChatV1Api* | [**chat_v1_get_agent_session_sidebar**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
@@ -159,6 +161,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_replace_session_model_profile**](azentspublicclient/docs/ChatV1Api.md#chat_v1_replace_session_model_profile) | **PUT** /chat/v1/sessions/{session_id}/model-profile | Replace Session Model Profile
+*ChatV1Api* | [**chat_v1_reserve_agent_session_primary_model**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reserve_agent_session_primary_model) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation | Reserve Agent Session Primary Model
 *ChatV1Api* | [**chat_v1_restore_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_restore_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/restore | Restore Agent Session
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
@@ -393,9 +396,12 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeSystemMetricsSampleResponse](azentspublicclient/docs/AgentRuntimeSystemMetricsSampleResponse.md)
  - [AgentSessionCreateRequest](azentspublicclient/docs/AgentSessionCreateRequest.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
+ - [AgentSessionModelAvailabilityResponse](azentspublicclient/docs/AgentSessionModelAvailabilityResponse.md)
  - [AgentSessionPageResponse](azentspublicclient/docs/AgentSessionPageResponse.md)
  - [AgentSessionPinUpdateRequest](azentspublicclient/docs/AgentSessionPinUpdateRequest.md)
  - [AgentSessionPrimaryKind](azentspublicclient/docs/AgentSessionPrimaryKind.md)
+ - [AgentSessionPrimaryModelCancelRequest](azentspublicclient/docs/AgentSessionPrimaryModelCancelRequest.md)
+ - [AgentSessionPrimaryModelReserveRequest](azentspublicclient/docs/AgentSessionPrimaryModelReserveRequest.md)
  - [AgentSessionProductMode](azentspublicclient/docs/AgentSessionProductMode.md)
  - [AgentSessionProjectDefaultsResponse](azentspublicclient/docs/AgentSessionProjectDefaultsResponse.md)
  - [AgentSessionProjectDefaultsResponseItemsInner](azentspublicclient/docs/AgentSessionProjectDefaultsResponseItemsInner.md)
@@ -626,6 +632,7 @@ Class | Method | HTTP request | Description
  - [MemoryScope](azentspublicclient/docs/MemoryScope.md)
  - [MemoryUpdateRequest](azentspublicclient/docs/MemoryUpdateRequest.md)
  - [ModelBuiltInToolCapabilities](azentspublicclient/docs/ModelBuiltInToolCapabilities.md)
+ - [ModelCandidateIdentity](azentspublicclient/docs/ModelCandidateIdentity.md)
  - [ModelCapabilities](azentspublicclient/docs/ModelCapabilities.md)
  - [ModelCatalogEntryListResponse](azentspublicclient/docs/ModelCatalogEntryListResponse.md)
  - [ModelCatalogEntryResponse](azentspublicclient/docs/ModelCatalogEntryResponse.md)
@@ -670,6 +677,7 @@ Class | Method | HTTP request | Description
  - [PreviewPasswordResetTokenResponse](azentspublicclient/docs/PreviewPasswordResetTokenResponse.md)
  - [PreviewSignupTokenRequest](azentspublicclient/docs/PreviewSignupTokenRequest.md)
  - [PreviewSignupTokenResponse](azentspublicclient/docs/PreviewSignupTokenResponse.md)
+ - [PrimaryModelReservation](azentspublicclient/docs/PrimaryModelReservation.md)
  - [ProjectBrowserEmptyStateResponse](azentspublicclient/docs/ProjectBrowserEmptyStateResponse.md)
  - [ProjectBrowserEntryCapabilitiesResponse](azentspublicclient/docs/ProjectBrowserEntryCapabilitiesResponse.md)
  - [ProjectBrowserEntryResponse](azentspublicclient/docs/ProjectBrowserEntryResponse.md)
@@ -750,6 +758,9 @@ Class | Method | HTTP request | Description
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
  - [SelectableInfrastructureProfileListResponse](azentspublicclient/docs/SelectableInfrastructureProfileListResponse.md)
  - [SelectableInfrastructureProfileResponse](azentspublicclient/docs/SelectableInfrastructureProfileResponse.md)
+ - [SelectableModelCandidate](azentspublicclient/docs/SelectableModelCandidate.md)
+ - [SelectableModelCandidateInput](azentspublicclient/docs/SelectableModelCandidateInput.md)
+ - [SelectableModelCandidateResponse](azentspublicclient/docs/SelectableModelCandidateResponse.md)
  - [SelectableModelOption](azentspublicclient/docs/SelectableModelOption.md)
  - [SelectableModelOptionInput](azentspublicclient/docs/SelectableModelOptionInput.md)
  - [SelectableModelOptionResponse](azentspublicclient/docs/SelectableModelOptionResponse.md)

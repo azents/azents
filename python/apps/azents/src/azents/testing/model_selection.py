@@ -3,6 +3,7 @@
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
+    SelectableModelCandidate,
     SelectableModelOption,
     SelectableModelSettings,
     default_selectable_model_settings,
@@ -49,14 +50,42 @@ def make_test_model_selection_dict(
     ).model_dump(mode="json")
 
 
+def make_test_selectable_model_option_dicts(
+    *,
+    model_selection: dict[str, object],
+    lightweight_model_selection: dict[str, object],
+) -> list[dict[str, object]]:
+    """Create canonical selectable model option JSONB values for tests."""
+
+    def option(label: str, selection: dict[str, object]) -> dict[str, object]:
+        return {
+            "label": label,
+            "candidates": [
+                {
+                    "model_selection": selection,
+                    "settings": {
+                        "context_window_tokens": None,
+                        "max_output_tokens": None,
+                        "builtin_tools": [],
+                    },
+                }
+            ],
+            "subagent_enabled": True,
+            "subagent_guidance": None,
+        }
+
+    return [
+        option(DEFAULT_MAIN_MODEL_OPTION_LABEL, model_selection),
+        option("lightweight", lightweight_model_selection),
+    ]
+
+
 def make_test_model_settings() -> SelectableModelSettings:
     """Create empty model-scoped settings for tests."""
     return SelectableModelSettings(
         context_window_tokens=None,
         max_output_tokens=None,
         builtin_tools=[],
-        subagent_enabled=True,
-        subagent_guidance=None,
     )
 
 
@@ -69,7 +98,13 @@ def make_test_selectable_model_options(
     return [
         SelectableModelOption(
             label=label,
-            model_selection=selection,
-            settings=default_selectable_model_settings(selection),
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=default_selectable_model_settings(selection),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
     ]

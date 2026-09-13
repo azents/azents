@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from azents.core.agent import (
     AgentModelSelection,
-    AgentModelSelectionInput,
     SelectableModelOption,
     SelectableModelOptionInput,
 )
@@ -38,12 +37,6 @@ class WorkspaceModelSettingsOutput(BaseModel):
 class WorkspaceModelSettingsUpdateInput(BaseModel):
     """Workspace model settings update input."""
 
-    default_model_selection: AgentModelSelectionInput | None = Field(
-        default=None, description="Default main model selection input"
-    )
-    default_lightweight_model_selection: AgentModelSelectionInput | None = Field(
-        default=None, description="Default lightweight model selection input"
-    )
     default_selectable_model_options: list[SelectableModelOptionInput] | None = Field(
         default=None, description="Ordered default selectable model option inputs"
     )

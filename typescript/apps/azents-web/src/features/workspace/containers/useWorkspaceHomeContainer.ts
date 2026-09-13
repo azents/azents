@@ -9,6 +9,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
+import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import { trpc } from "@/trpc/client";
 import type {
@@ -32,7 +33,9 @@ function enrich(agent: AgentResponse): EnrichedAgent {
   return {
     ...agent,
     lastActiveAt: agent.updated_at,
-    modelSummary: formatModelSelectionSummary(agent.model_selection),
+    modelSummary: formatModelSelectionSummary(
+      agentPrimaryModelSelection(agent),
+    ),
   };
 }
 

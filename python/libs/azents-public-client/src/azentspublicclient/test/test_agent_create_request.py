@@ -36,8 +36,6 @@ class TestAgentCreateRequest(unittest.TestCase):
         if include_optional:
             return AgentCreateRequest(
                 name = '',
-                model_selection = { },
-                lightweight_model_selection = { },
                 selectable_model_options = [
                     { }
                     ],

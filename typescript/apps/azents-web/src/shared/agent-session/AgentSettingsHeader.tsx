@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { type ReactNode } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "@/shared/agent-session/AgentFocusedShellMobileNav";
+import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -22,7 +23,9 @@ export function AgentSettingsHeader({
 }: AgentSettingsHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const mobileNav = useAgentFocusedShellMobileNav();
-  const modelSummary = formatModelSelectionSummary(agent.model_selection);
+  const modelSummary = formatModelSelectionSummary(
+    agentPrimaryModelSelection(agent),
+  );
 
   return (
     <Box

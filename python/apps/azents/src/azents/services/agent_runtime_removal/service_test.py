@@ -52,7 +52,10 @@ from azents.repos.agent_runtime_removal_finalizer import (
 from azents.repos.agent_runtime_removal_scope import (
     AgentRuntimeRemovalScopeRepository,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import AgentRuntimeRemovalService
 from .data import (
@@ -88,6 +91,12 @@ async def _seed_managed_agent(
         model_selection=selection,
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.MANAGED,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

@@ -8,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
+    SelectableModelCandidate,
     SelectableModelOption,
     default_selectable_model_settings,
 )
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
+from azents.repos.model_candidate_chain_cutover import (
+    mark_model_candidate_chain_write,
+)
 
 from .data import (
     DefaultModelCannotBeCleared,
@@ -103,6 +107,8 @@ class WorkspaceModelSettingsRepository:
                 "default_lightweight_model_label"
             ]
         if values:
+            if "default_selectable_model_options" in values:
+                await mark_model_candidate_chain_write(session)
             await session.execute(
                 sa.update(RDBWorkspaceModelSettings)
                 .where(RDBWorkspaceModelSettings.workspace_id == workspace_id)
@@ -128,14 +134,21 @@ class WorkspaceModelSettingsRepository:
                 default_selectable_model_options=[
                     SelectableModelOption(
                         label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                        model_selection=selection,
-                        settings=default_selectable_model_settings(selection),
+                        candidates=[
+                            SelectableModelCandidate(
+                                model_selection=selection,
+                                settings=default_selectable_model_settings(selection),
+                            )
+                        ],
+                        subagent_enabled=True,
+                        subagent_guidance=None,
                     ).model_dump(mode="json")
                 ],
                 default_main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                 default_lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             )
             session.add(row)
+            await mark_model_candidate_chain_write(session)
             await session.flush()
             await session.refresh(row)
             return self._build(row)
@@ -146,12 +159,19 @@ class WorkspaceModelSettingsRepository:
             row.default_selectable_model_options = [
                 SelectableModelOption(
                     label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                    model_selection=selection,
-                    settings=default_selectable_model_settings(selection),
+                    candidates=[
+                        SelectableModelCandidate(
+                            model_selection=selection,
+                            settings=default_selectable_model_settings(selection),
+                        )
+                    ],
+                    subagent_enabled=True,
+                    subagent_guidance=None,
                 ).model_dump(mode="json")
             ]
             row.default_main_model_label = DEFAULT_MAIN_MODEL_OPTION_LABEL
             row.default_lightweight_model_label = DEFAULT_MAIN_MODEL_OPTION_LABEL
+            await mark_model_candidate_chain_write(session)
             await session.flush()
             await session.refresh(row)
         return self._build(row)

@@ -178,38 +178,50 @@ def _setup_profile_agent(
         "selectable_model_options": [
             {
                 "label": "Quality",
-                "model_selection": selection(
-                    _string(
-                        by_identifier["gpt-5.5"].get("provider_model_identifier"),
-                        label="Quality provider model identifier",
-                    )
-                ),
-                "settings": {
-                    "context_window_tokens": 96_000,
-                    "max_output_tokens": 12_000,
-                    "builtin_tools": [
-                        {"name": "web_search"},
-                        {"name": "image_generation"},
-                    ],
-                    "subagent_enabled": False,
-                    "subagent_guidance": "Reserve for complex synthesis.",
-                },
+                "candidates": [
+                    {
+                        "model_selection": selection(
+                            _string(
+                                by_identifier["gpt-5.5"].get(
+                                    "provider_model_identifier"
+                                ),
+                                label="Quality provider model identifier",
+                            )
+                        ),
+                        "settings": {
+                            "context_window_tokens": 96_000,
+                            "max_output_tokens": 12_000,
+                            "builtin_tools": [
+                                {"name": "web_search"},
+                                {"name": "image_generation"},
+                            ],
+                        },
+                    }
+                ],
+                "subagent_enabled": False,
+                "subagent_guidance": "Reserve for complex synthesis.",
             },
             {
                 "label": "Fast",
-                "model_selection": selection(
-                    _string(
-                        by_identifier["gpt-5.5-mini"].get("provider_model_identifier"),
-                        label="Fast provider model identifier",
-                    )
-                ),
-                "settings": {
-                    "context_window_tokens": 32_000,
-                    "max_output_tokens": 4_000,
-                    "builtin_tools": [],
-                    "subagent_enabled": True,
-                    "subagent_guidance": "Prefer for bounded investigation.",
-                },
+                "candidates": [
+                    {
+                        "model_selection": selection(
+                            _string(
+                                by_identifier["gpt-5.5-mini"].get(
+                                    "provider_model_identifier"
+                                ),
+                                label="Fast provider model identifier",
+                            )
+                        ),
+                        "settings": {
+                            "context_window_tokens": 32_000,
+                            "max_output_tokens": 4_000,
+                            "builtin_tools": [],
+                        },
+                    }
+                ],
+                "subagent_enabled": True,
+                "subagent_guidance": "Prefer for bounded investigation.",
             },
         ],
         "main_model_label": "Quality",
@@ -234,8 +246,12 @@ def _setup_profile_agent(
             label="created selectable model options",
         )
     }
+    quality_candidates = _objects(
+        created_options["Quality"].get("candidates"),
+        label="Quality candidates",
+    )
     quality_selection = _object(
-        created_options["Quality"].get("model_selection"),
+        quality_candidates[0].get("model_selection"),
         label="Quality model selection",
     )
     assert quality_selection.get("supported_execution_options") == ["fast"]
@@ -250,8 +266,12 @@ def _setup_profile_agent(
     assert _string(quality_definition.get("label"), label="option label")
     assert _string(quality_definition.get("description"), label="option description")
     assert _string(quality_definition.get("cost_hint"), label="option cost hint")
+    fast_candidates = _objects(
+        created_options["Fast"].get("candidates"),
+        label="Fast candidates",
+    )
     fast_selection = _object(
-        created_options["Fast"].get("model_selection"),
+        fast_candidates[0].get("model_selection"),
         label="Fast model selection",
     )
     assert fast_selection.get("supported_execution_options") == []

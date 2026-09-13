@@ -440,6 +440,13 @@ class AgentRunParentResultDeliveryState(enum.StrEnum):
     ENQUEUED = "enqueued"
 
 
+class ModelCandidateClaimKind(enum.StrEnum):
+    """Exclusive recovery claim held for one physical model candidate."""
+
+    RESERVATION = "reservation"
+    PROBE = "probe"
+
+
 class AgentSessionStatus(enum.StrEnum):
     """AgentSession lifecycle status."""
 

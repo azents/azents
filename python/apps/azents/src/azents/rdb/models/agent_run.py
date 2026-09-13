@@ -139,6 +139,12 @@ class RDBAgentRun(RDBModel):
         nullable=True,
         default=None,
     )
+    model_operation_state: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     vfs_projection: Mapped[dict[str, JSONValue] | None] = mapped_column(
         JSONB,
         nullable=True,

@@ -564,7 +564,7 @@ class TestResolveInvokeInput:
     ) -> None:
         """Validate default image intent before refreshing provider credentials."""
         agent = _make_agent()
-        selection = agent.selectable_model_options[0].model_selection
+        selection = agent.selectable_model_options[0].candidates[0].model_selection
         selection.normalized_capabilities.built_in_tools.supported = [
             "image_generation"
         ]
@@ -572,10 +572,8 @@ class TestResolveInvokeInput:
             context_window_tokens=None,
             max_output_tokens=None,
             builtin_tools=[BuiltinToolConfig(name="image_generation", config={})],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
-        agent.selectable_model_options[0].settings = settings
+        agent.selectable_model_options[0].candidates[0].settings = settings
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent
         integration_repository = AsyncMock()
@@ -619,16 +617,14 @@ class TestResolveInvokeInput:
     ) -> None:
         """Pass current conversation capability into pre-dispatch validation."""
         agent = _make_agent()
-        selection = agent.selectable_model_options[0].model_selection
+        selection = agent.selectable_model_options[0].candidates[0].model_selection
         selection.normalized_capabilities.built_in_tools.supported = []
         settings = SelectableModelSettings(
             context_window_tokens=None,
             max_output_tokens=None,
             builtin_tools=[BuiltinToolConfig(name="image_generation", config={})],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
-        agent.selectable_model_options[0].settings = settings
+        agent.selectable_model_options[0].candidates[0].settings = settings
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent
         integration_repository = AsyncMock()
@@ -678,7 +674,7 @@ class TestResolveInvokeInput:
     ) -> None:
         """Reject stale explicit image intent before provider credential I/O."""
         agent = _make_agent()
-        selection = agent.selectable_model_options[0].model_selection
+        selection = agent.selectable_model_options[0].candidates[0].model_selection
         selection.normalized_capabilities.built_in_tools.supported = [
             "image_generation"
         ]
@@ -691,10 +687,8 @@ class TestResolveInvokeInput:
                     config={"model": "gpt-image-2.5-flare"},
                 )
             ],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
-        agent.selectable_model_options[0].settings = settings
+        agent.selectable_model_options[0].candidates[0].settings = settings
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent
         integration_repository = AsyncMock()
@@ -733,7 +727,7 @@ class TestResolveInvokeInput:
     async def test_profile_revalidates_effective_image_settings(self) -> None:
         """Profile resolution validates the settings owned by its selected target."""
         agent = _make_agent()
-        selection = agent.selectable_model_options[0].model_selection
+        selection = agent.selectable_model_options[0].candidates[0].model_selection
         selection.normalized_capabilities.built_in_tools.supported = [
             "image_generation"
         ]
@@ -746,10 +740,8 @@ class TestResolveInvokeInput:
                     config={"model": "gpt-image-2.5-flare"},
                 )
             ],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
-        agent.selectable_model_options[0].settings = settings
+        agent.selectable_model_options[0].candidates[0].settings = settings
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent
         integration_repository = AsyncMock()
@@ -794,7 +786,7 @@ class TestResolveInvokeInput:
     async def test_resolved_profile_revalidates_persisted_image_settings(self) -> None:
         """Recovered Session settings cannot bypass image catalog validation."""
         agent = _make_agent()
-        selection = agent.selectable_model_options[0].model_selection
+        selection = agent.selectable_model_options[0].candidates[0].model_selection
         selection.normalized_capabilities.built_in_tools.supported = [
             "image_generation"
         ]
@@ -807,8 +799,6 @@ class TestResolveInvokeInput:
                     config={"model": "gpt-image-2.5-flare"},
                 )
             ],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent
@@ -846,20 +836,18 @@ class TestResolveInvokeInput:
         """Use option-owned output, tool, and context settings at runtime."""
         agent = _make_agent()
         main_option = agent.selectable_model_options[0]
+        main_candidate = main_option.candidates[0]
         main_context = (
-            main_option.model_selection.normalized_capabilities.context_window
+            main_candidate.model_selection.normalized_capabilities.context_window
         )
         main_context.max_input_tokens = 128_000
         main_context.max_output_tokens = 8_000
-        main_option.model_selection.normalized_capabilities.built_in_tools.supported = [
-            "web_search"
-        ]
-        main_option.settings = SelectableModelSettings(
+        main_capabilities = main_candidate.model_selection.normalized_capabilities
+        main_capabilities.built_in_tools.supported = ["web_search"]
+        main_candidate.settings = SelectableModelSettings(
             context_window_tokens=32_000,
             max_output_tokens=20_000,
             builtin_tools=[BuiltinToolConfig(name="web_search")],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
         lightweight_selection = make_test_model_selection(
             integration_id="integ-1",
@@ -873,12 +861,10 @@ class TestResolveInvokeInput:
             lightweight_selection,
             label="lightweight",
         )[0]
-        lightweight_option.settings = SelectableModelSettings(
+        lightweight_option.candidates[0].settings = SelectableModelSettings(
             context_window_tokens=16_000,
             max_output_tokens=None,
             builtin_tools=[],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
         agent.selectable_model_options.append(lightweight_option)
         agent.lightweight_model_selection = lightweight_selection
@@ -914,12 +900,11 @@ class TestResolveInvokeInput:
     async def test_rejects_stale_unsupported_model_settings(self) -> None:
         """Defensive runtime validation blocks unsupported persisted tool intent."""
         agent = _make_agent()
-        agent.selectable_model_options[0].settings = SelectableModelSettings(
+        candidate = agent.selectable_model_options[0].candidates[0]
+        candidate.settings = SelectableModelSettings(
             context_window_tokens=None,
             max_output_tokens=None,
             builtin_tools=[BuiltinToolConfig(name="web_search")],
-            subagent_enabled=True,
-            subagent_guidance=None,
         )
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent

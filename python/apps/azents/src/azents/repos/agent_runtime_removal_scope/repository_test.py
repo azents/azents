@@ -49,7 +49,10 @@ from azents.rdb.models.session_agent_context import (
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import AgentRuntimeRemovalScopeRepository
 
@@ -72,6 +75,12 @@ async def _seed_agent(
         lightweight_model_selection=selection,
         runtime_capability=AgentRuntimeCapability.REMOVING,
         runtime_capability_version=2,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(selection),
+            lightweight_model_selection=(selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

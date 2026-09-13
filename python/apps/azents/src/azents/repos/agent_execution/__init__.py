@@ -20,6 +20,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_operation import ModelOperationState
 from azents.core.vfs import VfsProjection
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
@@ -106,6 +107,15 @@ def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
             )
         )
     return serialized
+
+
+def _serialize_model_operation_state(
+    state: ModelOperationState | None,
+) -> dict[str, JSONValue] | None:
+    """Serialize strict operation state while preserving nullable slots."""
+    if state is None:
+        return None
+    return _JSON_OBJECT_ADAPTER.validate_python(state.model_dump(mode="json"))
 
 
 class EventTranscriptRepository:
@@ -538,6 +548,9 @@ class AgentRunRepository:
             requested_enabled_execution_options=[],
             phase=create.phase,
             status=create.status,
+        )
+        rdb.model_operation_state = _serialize_model_operation_state(
+            create.model_operation_state
         )
         if create.id is not None:
             rdb.id = create.id
@@ -1095,6 +1108,10 @@ class AgentRunRepository:
                 if patch.retry_state is not None
                 else None
             )
+        if "model_operation_state" in values:
+            values["model_operation_state"] = _serialize_model_operation_state(
+                patch.model_operation_state
+            )
         if values:
             await session.execute(
                 sa.update(RDBAgentRun).where(RDBAgentRun.id == run_id).values(**values)
@@ -1339,6 +1356,7 @@ class AgentRunRepository:
         rdb.active_tool_calls = []
         rdb.model_call_started_at = None
         rdb.retry_state = None
+        rdb.model_operation_state = None
         rdb.ended_at = ended_at
         rdb.last_completed_event_id = last_completed_event_id
         rdb.terminal_result_event_id = terminal_result_event_id
@@ -1397,6 +1415,11 @@ class AgentRunRepository:
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None
+            else None,
+            model_operation_state=ModelOperationState.model_validate(
+                rdb.model_operation_state
+            )
+            if rdb.model_operation_state is not None
             else None,
             vfs_projection=VfsProjection.model_validate(rdb.vfs_projection)
             if rdb.vfs_projection is not None

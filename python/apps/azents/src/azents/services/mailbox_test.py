@@ -128,6 +128,7 @@ from azents.services.vfs import VfsResolvedFile
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
+    make_test_selectable_model_option_dicts,
 )
 
 from .mailbox import (
@@ -208,6 +209,24 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{slug}-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

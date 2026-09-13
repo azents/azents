@@ -3,7 +3,9 @@
 import hashlib
 import json
 
+import pytest
 import sqlalchemy as sa
+import sqlalchemy.exc as sa_exc
 from pytest_alembic import tests
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
@@ -11,7 +13,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "0c879fdb6720f7ccce212511226351477b64f400359636311fcba3a0e4acb071"
+    "ce520875740f58ce43b34b7cc00820fe3236196d7a246ad6cf2efa7e9150e732"
 )
 
 
@@ -196,6 +198,199 @@ def test_all_check_constraints_are_named(
 
     assert check_constraints
     assert all(constraint.name is not None for constraint in check_constraints)
+
+
+def test_selectable_model_candidate_chain_data_migration(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Lift legacy singular options and restore them on a safe downgrade."""
+    alembic_runner.migrate_up_to("c05bc1b811fa")
+    selection = {
+        "llm_provider_integration_id": "integration-1",
+        "provider": "openai",
+        "model_identifier": "model-1",
+    }
+    legacy_options = [
+        {
+            "label": "default",
+            "model_selection": selection,
+            "settings": {
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 4_000,
+                "builtin_tools": [],
+                "subagent_enabled": False,
+                "subagent_guidance": "Use for focused work.",
+            },
+        }
+    ]
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES ('workspace-1', 'Workspace', 'workspace')
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label
+                )
+                VALUES (
+                    'agent-1', 'workspace-1', 'Agent',
+                    CAST(:selection AS jsonb), CAST(:selection AS jsonb),
+                    CAST(:options AS jsonb), 'default', 'default'
+                )
+                """
+            ),
+            {
+                "selection": json.dumps(selection),
+                "options": json.dumps(legacy_options),
+            },
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspace_model_settings (
+                    workspace_id, default_model_selection,
+                    default_lightweight_model_selection,
+                    default_selectable_model_options,
+                    default_main_model_label,
+                    default_lightweight_model_label
+                )
+                VALUES (
+                    'workspace-1', CAST(:selection AS jsonb),
+                    CAST(:selection AS jsonb), CAST(:options AS jsonb),
+                    'default', 'default'
+                )
+                """
+            ),
+            {
+                "selection": json.dumps(selection),
+                "options": json.dumps(legacy_options),
+            },
+        )
+
+    alembic_runner.migrate_up_to("fae69c6c3540")
+    with alembic_engine.connect() as connection:
+        agent_options = connection.execute(
+            sa.text("SELECT selectable_model_options FROM agents WHERE id = 'agent-1'")
+        ).scalar_one()
+        workspace_options = connection.execute(
+            sa.text(
+                """
+                SELECT default_selectable_model_options
+                FROM workspace_model_settings
+                WHERE workspace_id = 'workspace-1'
+                """
+            )
+        ).scalar_one()
+        constraint_definition = connection.execute(
+            sa.text(
+                """
+                SELECT pg_get_constraintdef(oid, true)
+                FROM pg_constraint
+                WHERE conname = 'ck_agents_selectable_model_options_shape'
+                """
+            )
+        ).scalar_one()
+        foundation_columns = set(
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT table_name, column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND (
+                        (table_name = 'agent_runs'
+                         AND column_name = 'model_operation_state')
+                        OR
+                        (table_name = 'agent_sessions'
+                         AND column_name IN (
+                            'primary_model_reservation',
+                            'title_model_operation_state'
+                         ))
+                      )
+                    """
+                )
+            ).tuples()
+        )
+        cutover = connection.execute(
+            sa.text(
+                """
+                SELECT schema_version, new_format_written_at
+                FROM model_candidate_chain_cutovers
+                WHERE id = 1
+                """
+            )
+        ).one()
+        health_table_exists = connection.execute(
+            sa.text("SELECT to_regclass('public.model_candidate_health')")
+        ).scalar_one()
+
+    expected_options = [
+        {
+            "label": "default",
+            "subagent_enabled": False,
+            "subagent_guidance": "Use for focused work.",
+            "candidates": [
+                {
+                    "model_selection": selection,
+                    "settings": {
+                        "context_window_tokens": 32_000,
+                        "max_output_tokens": 4_000,
+                        "builtin_tools": [],
+                    },
+                }
+            ],
+        }
+    ]
+    assert agent_options == expected_options
+    assert workspace_options == expected_options
+    assert '"candidates".size()' in constraint_definition
+    assert foundation_columns == {
+        ("agent_runs", "model_operation_state"),
+        ("agent_sessions", "primary_model_reservation"),
+        ("agent_sessions", "title_model_operation_state"),
+    }
+    assert cutover == (1, None)
+    assert health_table_exists == "model_candidate_health"
+
+    alembic_runner.migrate_down_to("c05bc1b811fa")
+    with alembic_engine.connect() as connection:
+        downgraded = connection.execute(
+            sa.text("SELECT selectable_model_options FROM agents WHERE id = 'agent-1'")
+        ).scalar_one()
+    assert downgraded == legacy_options
+
+
+def test_candidate_chain_downgrade_rejects_post_cutover_writes(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """The first canonical configuration write makes rollback fail closed."""
+    alembic_runner.migrate_up_to("fae69c6c3540")
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE model_candidate_chain_cutovers
+                SET new_format_written_at = now()
+                WHERE id = 1
+                """
+            )
+        )
+
+    with pytest.raises(
+        sa_exc.DBAPIError,
+        match="Cannot downgrade after canonical model configuration writes",
+    ):
+        alembic_runner.migrate_down_to("c05bc1b811fa")
 
 
 def test_baseline_schema_and_seed_state(

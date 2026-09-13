@@ -28,6 +28,7 @@ from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
 )
 
@@ -155,8 +156,9 @@ def _setup_project_browser(
         handle=workspace_handle,
         agent_create_request=AgentCreateRequest(
             name=f"Project Browser Agent {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=runtime_profile_id,
         ),

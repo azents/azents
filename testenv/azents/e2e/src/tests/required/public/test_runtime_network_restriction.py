@@ -59,6 +59,7 @@ from support.strict_network_control_plane import (
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
     wait_until,
 )
@@ -137,8 +138,9 @@ def test_strict_network_modes_reach_applied_control_plane_state(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Strict Network {mode} {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=profile.id,
         ),

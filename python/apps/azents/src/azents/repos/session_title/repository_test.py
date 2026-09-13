@@ -1,5 +1,6 @@
 """Session title operation repository tests."""
 
+import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -8,11 +9,22 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionTitleSource
+from azents.core.model_operation import ModelOperationKind
+from azents.repos.model_candidate_health.data import (
+    ModelCandidateHealthObservation,
+    ModelCandidateHealthStatus,
+)
 from azents.repos.session_title import SessionTitleRepository
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_selectable_model_options,
+)
 
 
-async def test_load_generation_snapshot_uses_one_completed_database_operation() -> None:
-    """The eligible title owner, model selection, and integration share one context."""
+async def test_load_generation_snapshot_freezes_title_operation_in_one_context() -> (
+    None
+):
+    """The title owner, chain selection, and persistence share one transaction."""
     events: list[str] = []
     session: AsyncSession = AsyncMock(spec=AsyncSession)
 
@@ -24,25 +36,39 @@ async def test_load_generation_snapshot_uses_one_completed_database_operation() 
         finally:
             events.append("exit")
 
-    agent_session_repository = AsyncMock()
-    agent_session_repository.get_by_id.return_value = SimpleNamespace(
+    agent_session = SimpleNamespace(
         agent_id="agent-1",
         title_source=AgentSessionTitleSource.AUTO_INITIAL,
         title_generation_event_id="event-1",
+        title_model_operation_state=None,
     )
-    selection = SimpleNamespace(llm_provider_integration_id="integration-1")
+    agent_session_repository = AsyncMock()
+    agent_session_repository.lock_by_id.return_value = agent_session
+    agent_session_repository.set_title_model_operation_state.return_value = (
+        agent_session
+    )
+    selection = make_test_model_selection(integration_id="integration-1")
+    options = make_test_selectable_model_options(selection)
     agent_repository = AsyncMock()
-    agent_repository.get_by_id.return_value = SimpleNamespace(
+    agent_repository.lock_by_id.return_value = SimpleNamespace(
         id="agent-1",
-        lightweight_model_selection=selection,
+        workspace_id="workspace-1",
+        lightweight_model_label="default",
+        selectable_model_options=options,
     )
-    integration = SimpleNamespace(enabled=True)
-    integration_repository = AsyncMock()
-    integration_repository.get_by_id_with_secrets.return_value = integration
+    health_repository = AsyncMock()
+    now = datetime.datetime.now(datetime.UTC)
+    health_repository.snapshot_for_background_in_session.return_value = (
+        ModelCandidateHealthObservation(
+            server_time=now,
+            status=ModelCandidateHealthStatus.AVAILABLE,
+            health=None,
+        )
+    )
     repository = SessionTitleRepository(
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
-        integration_repository=integration_repository,
+        health_repository=health_repository,
         session_manager=session_manager,
     )
 
@@ -53,15 +79,16 @@ async def test_load_generation_snapshot_uses_one_completed_database_operation() 
 
     assert snapshot is not None
     assert snapshot.agent_id == "agent-1"
-    assert snapshot.selection is selection
-    assert snapshot.integration is integration
+    assert snapshot.workspace_id == "workspace-1"
+    assert snapshot.operation.kind is ModelOperationKind.TITLE
+    assert snapshot.operation.current_candidate.model_selection is selection
     assert events == ["enter", "exit"]
-    agent_session_repository.get_by_id.assert_awaited_once_with(session, "session-1")
-    agent_repository.get_by_id.assert_awaited_once_with(session, "agent-1")
-    integration_repository.get_by_id_with_secrets.assert_awaited_once_with(
+    agent_session_repository.lock_by_id.assert_awaited_once_with(
         session,
-        "integration-1",
+        "session-1",
     )
+    agent_repository.lock_by_id.assert_awaited_once_with(session, "agent-1")
+    agent_session_repository.set_title_model_operation_state.assert_awaited_once()
 
 
 async def test_replace_initial_auto_title_commits_as_one_repository_operation() -> None:
@@ -83,7 +110,7 @@ async def test_replace_initial_auto_title_commits_as_one_repository_operation() 
     repository = SessionTitleRepository(
         agent_repository=AsyncMock(),
         agent_session_repository=agent_session_repository,
-        integration_repository=AsyncMock(),
+        health_repository=AsyncMock(),
         session_manager=session_manager,
     )
 

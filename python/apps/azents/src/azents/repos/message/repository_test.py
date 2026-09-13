@@ -14,7 +14,10 @@ from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.message import MessageRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 _JSON_PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(
     dict[str, JSONValue]
@@ -49,6 +52,12 @@ async def _create_agent_session(session: AsyncSession) -> str:
         name="Message pagination test agent",
         model_selection=model_selection,
         lightweight_model_selection=model_selection,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(model_selection),
+            lightweight_model_selection=(model_selection),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

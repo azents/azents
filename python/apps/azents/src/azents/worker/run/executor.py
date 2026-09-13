@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,13 +30,24 @@ from azents.core.enums import (
     EventKind,
 )
 from azents.core.inference_profile import (
+    AppliedModelRoute,
     InferenceProfileFailureCode,
     InferenceProfileSource,
     RequestedInferenceProfile,
     SessionInferenceState,
-    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.llm_mapping import to_runtime_model
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcomeStatus,
+    ModelOperationChainExhaustedError,
+    ModelOperationKind,
+    ModelOperationSnapshot,
+    ModelOperationState,
+    build_model_operation,
+    mark_current_candidate_quota_and_advance,
+    mark_model_operation_succeeded,
+)
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -46,7 +58,10 @@ from azents.core.tools import (
     ToolkitExecutionMode,
     ToolkitProvider,
 )
-from azents.engine.context.window import compute_auto_compaction_threshold_tokens
+from azents.engine.context.window import (
+    compute_auto_compaction_threshold_tokens,
+    resolve_model_input_tokens,
+)
 from azents.engine.events.action_messages import OperationAction
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
@@ -98,6 +113,7 @@ from azents.engine.run.input import InvokeInput
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
     UnclassifiedModelProviderError,
     model_provider_error_log_fields,
@@ -109,6 +125,7 @@ from azents.engine.run.resolve import (
     resolve_agent_tools,
     resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
+    resolve_model_candidate_runtime,
 )
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
@@ -147,6 +164,7 @@ from azents.repos.action_execution.data import (
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
@@ -154,6 +172,8 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.toolkit import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
@@ -178,6 +198,9 @@ from azents.services.mailbox import (
     ScheduledMailboxAdmission,
     TurnEffect,
     fold_turn_eligibility,
+)
+from azents.services.model_candidate_selection import (
+    select_model_operation_candidate,
 )
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
@@ -290,6 +313,13 @@ class ProfileResolutionFailure:
     message: str
 
 
+@dataclasses.dataclass(frozen=True)
+class ModelCandidateChainExhausted:
+    """No compatible candidate remains in one frozen model operation."""
+
+    operation: ModelOperationSnapshot
+
+
 class ProfileResolutionRuntimeError(UserVisibleRuntimeError):
     """Deterministic profile failure that must not enter automatic retry."""
 
@@ -314,6 +344,14 @@ class OperationActionProcessResult:
 
     context_invalidated: bool
     complete_run: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelQuotaAdvanceResult:
+    """Durable quota progression result for one Run operation slot."""
+
+    operation: ModelOperationSnapshot
+    exhausted: bool
 
 
 def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
@@ -388,6 +426,9 @@ class RunExecutor:
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
+    ]
+    model_candidate_health_repository: Annotated[
+        ModelCandidateHealthRepository, Depends(ModelCandidateHealthRepository)
     ]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
@@ -1118,10 +1159,15 @@ class RunExecutor:
         )
 
         run_request: RunRequest | None = None
-        if turn_inference_state is None:
+        if (
+            turn_inference_state is None
+            or agent_run.model_operation_state is not None
+            and agent_run.model_operation_state.foreground is not None
+        ):
             prepared = await self._prepare_fresh_main_model_turn(
                 agent_id=snapshot.agent_id,
                 session_id=snapshot.session_id,
+                run_id=run_id,
                 owner_generation=owner_generation,
                 invoke_input=invoke_input,
                 override=selected_profile,
@@ -1300,6 +1346,19 @@ class RunExecutor:
             if isinstance(event, SubagentTreeChanged):
                 await dispatch_tree_change_to_tree(event)
 
+        async def complete_model_operation_in_session(
+            session: AsyncSession,
+            operation_kind: ModelOperationKind,
+        ) -> None:
+            await self._complete_model_operation_success_in_session(
+                session,
+                session_id=snapshot.session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                workspace_id=snapshot.workspace_id,
+                operation_kind=operation_kind,
+            )
+
         turn_action_bridge_boundary = TurnActionBridgeBoundary()
         run_context = RunContext(
             run_id=run_id,
@@ -1318,6 +1377,7 @@ class RunExecutor:
                 owner_generation=owner_generation,
             ),
             mailbox_activity_observer=mailbox_activity_observer,
+            complete_model_operation_in_session=(complete_model_operation_in_session),
         )
         context = ToolkitContext(
             session_id=snapshot.session_id,
@@ -1631,6 +1691,7 @@ class RunExecutor:
             prepared = await self._prepare_fresh_main_model_turn(
                 agent_id=snapshot.agent_id,
                 session_id=snapshot.session_id,
+                run_id=run_id,
                 owner_generation=owner_generation,
                 invoke_input=invoke_input,
                 override=None,
@@ -1642,6 +1703,54 @@ class RunExecutor:
             apply_fresh_main_model_turn(prepared.value)
             if inference_profile != previous_profile:
                 await publish_live_run()
+
+        async def apply_quota_candidate(
+            operation: ModelOperationSnapshot,
+        ) -> None:
+            """Rebuild the active request from the advanced durable candidate."""
+            nonlocal run_request
+            if operation.kind is ModelOperationKind.FOREGROUND:
+                prepared = await self._prepare_fresh_main_model_turn(
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
+                    run_id=run_id,
+                    owner_generation=owner_generation,
+                    invoke_input=invoke_input,
+                    override=selected_profile,
+                )
+                if prepared.failure:
+                    raise ProfileResolutionRuntimeError(
+                        _profile_resolution_failure(prepared.error)
+                    )
+                apply_fresh_main_model_turn(prepared.value)
+                return
+            if operation.kind is not ModelOperationKind.COMPACTION:
+                raise RuntimeError("Run request cannot apply this operation kind")
+            current_request = run_request
+            if current_request is None:
+                raise RuntimeError("Active model request is not prepared")
+            candidate = operation.current_candidate
+            runtime = await resolve_model_candidate_runtime(
+                agent_id=snapshot.agent_id,
+                workspace_id=current_request.workspace_id,
+                selection=candidate.model_selection,
+                settings=candidate.settings,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+            )
+            if runtime.failure:
+                raise ProfileResolutionRuntimeError(
+                    _profile_resolution_failure(runtime.error)
+                )
+            value = runtime.value
+            run_request = dataclasses.replace(
+                current_request,
+                compaction_provider_integration_id=value.provider_integration_id,
+                compaction_model=value.model,
+                compaction_provider=value.provider,
+                compaction_credential_kwargs=value.credential_kwargs,
+                compaction_max_input_tokens=value.effective_input_tokens,
+            )
 
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
@@ -1931,9 +2040,11 @@ class RunExecutor:
                         prepared = await self._prepare_fresh_main_model_turn(
                             agent_id=snapshot.agent_id,
                             session_id=snapshot.session_id,
+                            run_id=run_id,
                             owner_generation=owner_generation,
                             invoke_input=invoke_input,
                             override=selected_profile,
+                            replace_operation=True,
                         )
                         if prepared.failure:
                             raise ProfileResolutionRuntimeError(
@@ -1968,6 +2079,82 @@ class RunExecutor:
                         owner_generation=owner_generation,
                     )
                     if await record_user_stop_if_requested():
+                        break
+                    if (
+                        isinstance(exc, ModelProviderFailure)
+                        and exc.category
+                        is ModelProviderFailureCategory.QUOTA_OR_BILLING
+                    ):
+                        progression = await self._advance_model_operation_after_quota(
+                            session_id=snapshot.session_id,
+                            run_id=run_id,
+                            owner_generation=owner_generation,
+                            workspace_id=run_request.workspace_id,
+                            failure=exc,
+                        )
+                        active_model_call_started_at = None
+                        current_retry_state = None
+                        live_retry_state = None
+                        attempt_number = 1
+                        if not progression.exhausted:
+                            await apply_quota_candidate(progression.operation)
+                            await publish_live_run()
+                            continue
+                        exhausted_attempt = FailedRunAttempt(
+                            user_message=(
+                                "All compatible model candidates are temporarily "
+                                "unavailable."
+                            ),
+                            internal_message=(
+                                "Model candidate chain exhausted after a quota or "
+                                "billing failure."
+                            ),
+                            error_type=ModelCandidateChainExhausted.__name__,
+                            source=failed_attempt_source,
+                            visibility="user_visible",
+                            attempt_number=1,
+                            occurred_at=datetime.datetime.now(datetime.UTC),
+                            retryability="non_retryable",
+                            failure_code=(
+                                InferenceProfileFailureCode.MODEL_CANDIDATE_CHAIN_EXHAUSTED.value
+                            ),
+                        )
+                        retry_state = await self._record_failed_run_attempt(
+                            session_id=snapshot.session_id,
+                            run_id=run_id,
+                            owner_generation=owner_generation,
+                            attempt=exhausted_attempt,
+                            previous_retry_state=None,
+                        )
+                        current_retry_state = retry_state
+                        live_retry_state = retry_state
+                        await publish_live_run()
+                        if await record_user_stop_if_requested():
+                            break
+                        finalization_reason = _failed_run_finalization_reason(
+                            retry_state
+                        )
+                        if finalization_reason is None:
+                            raise RuntimeError(
+                                "Exhausted model chain remained retryable"
+                            ) from exc
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        finalized = await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=snapshot.session_id,
+                                owner_generation=owner_generation,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason=finalization_reason,
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        if finalized is None:
+                            await record_user_stop()
+                        else:
+                            run_completed = True
                         break
                     retry_state = await self._record_failed_run_attempt(
                         session_id=snapshot.session_id,
@@ -2466,16 +2653,273 @@ class RunExecutor:
                 source=InferenceProfileSource.AGENT_DEFAULT,
             )
 
+    async def _advance_model_operation_after_quota(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        workspace_id: str,
+        failure: ModelProviderFailure,
+    ) -> ModelQuotaAdvanceResult:
+        """Renew candidate health and advance before the generic retry budget."""
+        if failure.operation == "sampling":
+            operation_kind = ModelOperationKind.FOREGROUND
+        elif failure.operation == "compaction":
+            operation_kind = ModelOperationKind.COMPACTION
+        else:
+            raise ValueError("Run quota transition received an unsupported operation")
+
+        async with self.session_manager() as session:
+            await self.session_lifecycle.assert_owner_generation(
+                session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            locked_session = await self.agent_session_repository.lock_by_id(
+                session,
+                session_id,
+            )
+            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
+                session,
+                run_id,
+            )
+            if locked_session is None or locked_run is None:
+                raise ValueError("AgentSession or AgentRun not found")
+            state = locked_run.model_operation_state
+            if state is None:
+                raise CanonicalExecutionWorkDriftError(
+                    "Quota failure has no durable model operation"
+                )
+            operation = (
+                state.foreground
+                if operation_kind is ModelOperationKind.FOREGROUND
+                else state.compaction
+            )
+            if operation is None:
+                raise CanonicalExecutionWorkDriftError(
+                    "Quota failure has no matching model operation slot"
+                )
+            candidate = operation.current_candidate
+            selection = candidate.model_selection
+            runtime_model = to_runtime_model(
+                selection.provider,
+                selection.model_identifier,
+            )
+            if (
+                failure.integration != selection.llm_provider_integration_id
+                or failure.provider != selection.provider.value
+                or failure.model != runtime_model
+            ):
+                raise CanonicalExecutionWorkDriftError(
+                    "Quota failure does not match the active model candidate"
+                )
+            identity = ModelCandidateIdentity(
+                workspace_id=workspace_id,
+                llm_provider_integration_id=(selection.llm_provider_integration_id),
+                model_identifier=selection.model_identifier,
+            )
+            claim = operation.transferred_probe_claim
+            if claim is None:
+                observation = (
+                    await self.model_candidate_health_repository.renew_quota_in_session(
+                        session,
+                        identity,
+                    )
+                )
+            else:
+                health_repository = self.model_candidate_health_repository
+                renew_claimed_quota = health_repository.renew_claimed_quota_in_session
+                (
+                    _,
+                    observation,
+                ) = await renew_claimed_quota(
+                    session,
+                    identity,
+                    expected_generation=claim.health_generation,
+                    expected_claim_kind=claim.kind,
+                    expected_owner_id=claim.claim_owner_id,
+                    expected_claim_token=claim.claim_token,
+                )
+            exhausted = False
+            try:
+                advanced = mark_current_candidate_quota_and_advance(
+                    operation,
+                    recorded_at=observation.server_time,
+                )
+                selected = await select_model_operation_candidate(
+                    session,
+                    operation=advanced,
+                    workspace_id=workspace_id,
+                    health_repository=self.model_candidate_health_repository,
+                    recorded_at=observation.server_time,
+                    session_id=(
+                        session_id
+                        if operation_kind is ModelOperationKind.FOREGROUND
+                        else None
+                    ),
+                    reservation=(
+                        locked_session.primary_model_reservation
+                        if operation_kind is ModelOperationKind.FOREGROUND
+                        else None
+                    ),
+                )
+                resulting_operation = selected.operation
+                if selected.reservation_consumed:
+                    reservation = locked_session.primary_model_reservation
+                    if reservation is None:
+                        raise CanonicalExecutionWorkDriftError(
+                            "Transferred reservation disappeared"
+                        )
+                    set_reservation = (
+                        self.agent_session_repository.set_primary_model_reservation
+                    )
+                    cleared = await set_reservation(
+                        session,
+                        session_id=session_id,
+                        reservation=None,
+                        expected_reservation_generation=(
+                            reservation.reservation_generation
+                        ),
+                    )
+                    if cleared is None:
+                        raise CanonicalExecutionWorkDriftError(
+                            "Transferred reservation changed"
+                        )
+            except ModelOperationChainExhaustedError as exc:
+                resulting_operation = exc.operation
+                exhausted = True
+            next_state = ModelOperationState(
+                foreground=(
+                    resulting_operation
+                    if operation_kind is ModelOperationKind.FOREGROUND
+                    else state.foreground
+                ),
+                compaction=(
+                    resulting_operation
+                    if operation_kind is ModelOperationKind.COMPACTION
+                    else state.compaction
+                ),
+            )
+            await self.session_lifecycle.agent_run_repository.update(
+                session,
+                run_id,
+                AgentRunPatch(
+                    model_operation_state=next_state,
+                    retry_state=None,
+                    model_call_started_at=None,
+                ),
+            )
+        return ModelQuotaAdvanceResult(
+            operation=resulting_operation,
+            exhausted=exhausted,
+        )
+
+    async def _complete_model_operation_success(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        workspace_id: str,
+        operation_kind: ModelOperationKind,
+    ) -> None:
+        """Settle an exact probe success and close the matching operation."""
+        async with self.session_manager() as session:
+            await self._complete_model_operation_success_in_session(
+                session,
+                session_id=session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                workspace_id=workspace_id,
+                operation_kind=operation_kind,
+            )
+
+    async def _complete_model_operation_success_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        workspace_id: str,
+        operation_kind: ModelOperationKind,
+    ) -> None:
+        """Settle operation success inside the caller's output transaction."""
+        await self.session_lifecycle.assert_owner_generation(
+            session,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
+        locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
+            session,
+            run_id,
+        )
+        if locked_run is None or locked_run.model_operation_state is None:
+            return
+        state = locked_run.model_operation_state
+        operation = (
+            state.foreground
+            if operation_kind is ModelOperationKind.FOREGROUND
+            else state.compaction
+        )
+        if operation is None or operation.terminal_reason is not None:
+            return
+        current_outcome = operation.outcomes[operation.cursor]
+        if current_outcome.status is not ModelOperationCandidateOutcomeStatus.ACTIVE:
+            return
+        claim = operation.transferred_probe_claim
+        if claim is not None:
+            candidate = operation.current_candidate
+            selection = candidate.model_selection
+            complete_probe = (
+                self.model_candidate_health_repository.complete_probe_success_in_session
+            )
+            await complete_probe(
+                session,
+                ModelCandidateIdentity(
+                    workspace_id=workspace_id,
+                    llm_provider_integration_id=(selection.llm_provider_integration_id),
+                    model_identifier=selection.model_identifier,
+                ),
+                expected_generation=claim.health_generation,
+                expected_owner_id=claim.claim_owner_id,
+                expected_claim_token=claim.claim_token,
+            )
+        succeeded = mark_model_operation_succeeded(
+            operation,
+            recorded_at=datetime.datetime.now(datetime.UTC),
+        )
+        next_state = ModelOperationState(
+            foreground=(
+                succeeded
+                if operation_kind is ModelOperationKind.FOREGROUND
+                else state.foreground
+            ),
+            compaction=(
+                None
+                if operation_kind is ModelOperationKind.COMPACTION
+                else state.compaction
+            ),
+        )
+        await self.session_lifecycle.agent_run_repository.update(
+            session,
+            run_id,
+            AgentRunPatch(model_operation_state=next_state),
+        )
+
     async def _prepare_fresh_main_model_turn(
         self,
         *,
         agent_id: str,
         session_id: str,
+        run_id: str,
         owner_generation: int,
         invoke_input: InvokeInput,
         override: RequestedProfileSelection | None,
+        replace_operation: bool = False,
     ) -> Result[FreshTurnPreparation, object]:
-        """Resolve and commit one current main-model turn under final fences."""
+        """Select a frozen candidate and commit its current physical route."""
         override_sources = {
             InferenceProfileSource.PARENT_RUN,
             InferenceProfileSource.SPAWN_OVERRIDE,
@@ -2524,43 +2968,6 @@ class RunExecutor:
                     source=InferenceProfileSource.AGENT_DEFAULT,
                 )
 
-            resolved = await resolve_invoke_input_with_profile(
-                invoke_input,
-                requested_profile=selected.profile,
-                agent_repository=self.agent_repository,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-                exchange_file_service=self.exchange_file_service,
-                model_file_service=self.model_file_service,
-                image_generation_catalog_service=(
-                    self.image_generation_catalog_service
-                ),
-            )
-            if resolved.failure:
-                return Failure(resolved.error)
-
-            resolved_profile = resolved.value
-            inference_state = SessionInferenceState(
-                model_target_label=selected.profile.model_target_label,
-                model_selection=resolved_profile.model_selection,
-                model_settings=resolved_profile.model_settings,
-                reasoning_effort=(
-                    selected.profile.reasoning_effort
-                    if selected.profile.reasoning_effort is not None
-                    else resolved_profile.reasoning_effort
-                ),
-                enabled_execution_options=selected.profile.enabled_execution_options,
-                effective_context_window_tokens=(
-                    resolved_profile.run_request.effective_max_input_tokens
-                ),
-                effective_auto_compaction_threshold_tokens=(
-                    compute_auto_compaction_threshold_tokens(
-                        resolved_profile.run_request.effective_max_input_tokens
-                    )
-                ),
-                resolved_at=datetime.datetime.now(datetime.UTC),
-            )
-
             async with self.session_manager() as session:
                 locked_agent = await self.agent_repository.lock_by_id(
                     session,
@@ -2570,14 +2977,22 @@ class RunExecutor:
                     session,
                     session_id,
                 )
-                if locked_agent is None or locked_session is None:
-                    raise ValueError("AgentSession or Agent not found")
+                locked_run = (
+                    await self.session_lifecycle.agent_run_repository.lock_by_id(
+                        session,
+                        run_id,
+                    )
+                )
+                if locked_agent is None or locked_session is None or locked_run is None:
+                    raise ValueError("AgentSession, Agent, or AgentRun not found")
                 if locked_session.owner_generation != owner_generation:
                     raise CanonicalExecutionOwnerGenerationStaleError(
                         "Session owner generation is stale"
                     )
                 if locked_session.agent_id != agent_id:
                     raise ValueError("AgentSession does not belong to Agent")
+                if locked_run.session_id != session_id:
+                    raise ValueError("AgentRun does not belong to AgentSession")
 
                 if override is not None and override.source in override_sources:
                     expected = override.profile
@@ -2605,13 +3020,315 @@ class RunExecutor:
 
                 if expected != selected.profile:
                     continue
-                option = validate_requested_profile_against_options(
-                    locked_agent.selectable_model_options,
-                    expected,
+                option = next(
+                    (
+                        candidate
+                        for candidate in locked_agent.selectable_model_options
+                        if candidate.label == expected.model_target_label
+                    ),
+                    None,
                 )
+                if option is None:
+                    return Failure(
+                        ModelTargetNotFound(
+                            model_target_label=expected.model_target_label
+                        )
+                    )
+                operation_state = (
+                    locked_run.model_operation_state
+                    or ModelOperationState(
+                        foreground=None,
+                        compaction=None,
+                    )
+                )
+                existing = operation_state.foreground
                 if (
-                    option.model_selection != inference_state.model_selection
-                    or option.settings != inference_state.model_settings
+                    replace_operation
+                    or existing is None
+                    or existing.semantic_label != expected.model_target_label
+                    or existing.requested_reasoning_effort != expected.reasoning_effort
+                    or existing.requested_execution_options
+                    != expected.enabled_execution_options
+                    or existing.terminal_reason is not None
+                ):
+                    operation = build_model_operation(
+                        option=option,
+                        profile=expected,
+                        kind=ModelOperationKind.FOREGROUND,
+                        operation_id=uuid7().hex,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                    )
+                else:
+                    operation = existing
+                try:
+                    selection = await select_model_operation_candidate(
+                        session,
+                        operation=operation,
+                        workspace_id=locked_agent.workspace_id,
+                        health_repository=self.model_candidate_health_repository,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                        session_id=session_id,
+                        reservation=locked_session.primary_model_reservation,
+                    )
+                except ModelOperationChainExhaustedError as exc:
+                    exhausted_state = ModelOperationState(
+                        foreground=exc.operation,
+                        compaction=operation_state.compaction,
+                    )
+                    await self.session_lifecycle.agent_run_repository.update(
+                        session,
+                        run_id,
+                        AgentRunPatch(model_operation_state=exhausted_state),
+                    )
+                    return Failure(ModelCandidateChainExhausted(exc.operation))
+                lightweight_option = next(
+                    (
+                        candidate
+                        for candidate in locked_agent.selectable_model_options
+                        if candidate.label == locked_agent.lightweight_model_label
+                    ),
+                    None,
+                )
+                if lightweight_option is None:
+                    return Failure(
+                        ModelTargetNotFound(
+                            model_target_label=locked_agent.lightweight_model_label
+                        )
+                    )
+                compaction_operation = operation_state.compaction
+                if (
+                    compaction_operation is None
+                    or compaction_operation.terminal_reason is not None
+                ):
+                    compaction_profile = RequestedInferenceProfile(
+                        model_target_label=lightweight_option.label,
+                        reasoning_effort=None,
+                        enabled_execution_options=[],
+                    )
+                    compaction_operation = build_model_operation(
+                        option=lightweight_option,
+                        profile=compaction_profile,
+                        kind=ModelOperationKind.COMPACTION,
+                        operation_id=uuid7().hex,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                    )
+                try:
+                    compaction_selection = await select_model_operation_candidate(
+                        session,
+                        operation=compaction_operation,
+                        workspace_id=locked_agent.workspace_id,
+                        health_repository=self.model_candidate_health_repository,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                        session_id=None,
+                        reservation=None,
+                    )
+                except ModelOperationChainExhaustedError as exc:
+                    exhausted_state = ModelOperationState(
+                        foreground=selection.operation,
+                        compaction=exc.operation,
+                    )
+                    await self.session_lifecycle.agent_run_repository.update(
+                        session,
+                        run_id,
+                        AgentRunPatch(model_operation_state=exhausted_state),
+                    )
+                    return Failure(ModelCandidateChainExhausted(exc.operation))
+                next_operation_state = ModelOperationState(
+                    foreground=selection.operation,
+                    compaction=compaction_selection.operation,
+                )
+                await self.session_lifecycle.agent_run_repository.update(
+                    session,
+                    run_id,
+                    AgentRunPatch(model_operation_state=next_operation_state),
+                )
+                if selection.reservation_consumed:
+                    set_reservation = (
+                        self.agent_session_repository.set_primary_model_reservation
+                    )
+                    cleared = await set_reservation(
+                        session,
+                        session_id=session_id,
+                        reservation=None,
+                        expected_reservation_generation=(
+                            locked_session.primary_model_reservation.reservation_generation
+                            if locked_session.primary_model_reservation is not None
+                            else None
+                        ),
+                    )
+                    if cleared is None:
+                        raise CanonicalExecutionWorkDriftError(
+                            "Primary reservation changed during transfer"
+                        )
+
+            candidate = selection.candidate
+            if candidate.ordinal == 1:
+                primary = await resolve_invoke_input_with_profile(
+                    invoke_input,
+                    requested_profile=selected.profile,
+                    agent_repository=self.agent_repository,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                    image_generation_catalog_service=(
+                        self.image_generation_catalog_service
+                    ),
+                )
+                if primary.failure:
+                    return Failure(primary.error)
+                if (
+                    primary.value.model_selection == candidate.model_selection
+                    and primary.value.model_settings == candidate.settings
+                ):
+                    resolved_request = primary.value.run_request
+                else:
+                    frozen = await resolve_invoke_input_with_resolved_profile(
+                        invoke_input,
+                        resolved_model_selection=candidate.model_selection,
+                        resolved_model_settings=candidate.settings,
+                        resolved_reasoning_effort=selected.profile.reasoning_effort,
+                        resolved_enabled_execution_options=(
+                            selected.profile.enabled_execution_options
+                        ),
+                        agent_repository=self.agent_repository,
+                        integration_repository=self.integration_repository,
+                        session_manager=self.session_manager,
+                        exchange_file_service=self.exchange_file_service,
+                        model_file_service=self.model_file_service,
+                        image_generation_catalog_service=(
+                            self.image_generation_catalog_service
+                        ),
+                    )
+                    if frozen.failure:
+                        return Failure(frozen.error)
+                    resolved_request = frozen.value
+            else:
+                resolved = await resolve_invoke_input_with_resolved_profile(
+                    invoke_input,
+                    resolved_model_selection=candidate.model_selection,
+                    resolved_model_settings=candidate.settings,
+                    resolved_reasoning_effort=selected.profile.reasoning_effort,
+                    resolved_enabled_execution_options=(
+                        selected.profile.enabled_execution_options
+                    ),
+                    agent_repository=self.agent_repository,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                    image_generation_catalog_service=(
+                        self.image_generation_catalog_service
+                    ),
+                )
+                if resolved.failure:
+                    return Failure(resolved.error)
+                resolved_request = resolved.value
+            compaction_candidate = compaction_selection.candidate
+            compaction_model = to_runtime_model(
+                compaction_candidate.model_selection.provider,
+                compaction_candidate.model_selection.model_identifier,
+            )
+            compaction_capabilities = (
+                compaction_candidate.model_selection.normalized_capabilities
+            )
+            compaction_context_window = compaction_capabilities.context_window
+            compaction_input_tokens = resolve_model_input_tokens(
+                compaction_context_window.default_input_tokens,
+                compaction_context_window.max_input_tokens,
+                compaction_model,
+                compaction_candidate.settings.context_window_tokens,
+            ).effective_input_tokens
+            if (
+                resolved_request.compaction_provider_integration_id
+                != compaction_candidate.model_selection.llm_provider_integration_id
+                or resolved_request.compaction_model != compaction_model
+                or resolved_request.compaction_provider
+                != compaction_candidate.model_selection.provider
+                or resolved_request.compaction_max_input_tokens
+                != compaction_input_tokens
+            ):
+                compaction_runtime = await resolve_model_candidate_runtime(
+                    agent_id=agent_id,
+                    workspace_id=resolved_request.workspace_id,
+                    selection=compaction_candidate.model_selection,
+                    settings=compaction_candidate.settings,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                )
+                if compaction_runtime.failure:
+                    return Failure(compaction_runtime.error)
+                runtime = compaction_runtime.value
+                resolved_request = dataclasses.replace(
+                    resolved_request,
+                    compaction_provider_integration_id=(
+                        runtime.provider_integration_id
+                    ),
+                    compaction_model=runtime.model,
+                    compaction_provider=runtime.provider,
+                    compaction_credential_kwargs=runtime.credential_kwargs,
+                    compaction_max_input_tokens=runtime.effective_input_tokens,
+                )
+            effective_context_window_tokens = (
+                resolved_request.effective_max_input_tokens
+            )
+            effective_compaction_threshold_tokens = (
+                compute_auto_compaction_threshold_tokens(
+                    effective_context_window_tokens
+                )
+            )
+            inference_state = SessionInferenceState(
+                model_target_label=selected.profile.model_target_label,
+                model_selection=candidate.model_selection,
+                model_settings=candidate.settings,
+                reasoning_effort=selected.profile.reasoning_effort,
+                enabled_execution_options=selected.profile.enabled_execution_options,
+                effective_context_window_tokens=effective_context_window_tokens,
+                effective_auto_compaction_threshold_tokens=(
+                    effective_compaction_threshold_tokens
+                ),
+                resolved_at=datetime.datetime.now(datetime.UTC),
+                applied_model_route=AppliedModelRoute(
+                    operation_id=selection.operation.operation_id,
+                    operation_kind="foreground",
+                    candidate_ordinal=candidate.ordinal,
+                    candidate_role=candidate.role.value,
+                    provider=candidate.model_selection.provider,
+                    llm_provider_integration_id=(
+                        candidate.model_selection.llm_provider_integration_id
+                    ),
+                    model_identifier=candidate.model_selection.model_identifier,
+                    model_display_name=candidate.model_selection.model_display_name,
+                    effective_context_window_tokens=effective_context_window_tokens,
+                    effective_auto_compaction_threshold_tokens=(
+                        effective_compaction_threshold_tokens
+                    ),
+                ),
+            )
+            async with self.session_manager() as session:
+                locked_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    session_id,
+                )
+                locked_run = (
+                    await self.session_lifecycle.agent_run_repository.lock_by_id(
+                        session,
+                        run_id,
+                    )
+                )
+                if locked_session is None or locked_run is None:
+                    raise ValueError("AgentSession or AgentRun not found")
+                if locked_session.owner_generation != owner_generation:
+                    raise CanonicalExecutionOwnerGenerationStaleError(
+                        "Session owner generation is stale"
+                    )
+                persisted = locked_run.model_operation_state
+                if (
+                    persisted is None
+                    or persisted.foreground is None
+                    or persisted.foreground.operation_id
+                    != selection.operation.operation_id
+                    or persisted.foreground.cursor != selection.operation.cursor
                 ):
                     continue
                 await self.agent_session_repository.set_inference_state(
@@ -2621,7 +3338,7 @@ class RunExecutor:
                 )
             return Success(
                 FreshTurnPreparation(
-                    run_request=resolved_profile.run_request,
+                    run_request=resolved_request,
                     inference_state=inference_state,
                     profile=selected.profile,
                     source=selected.source,
@@ -3167,6 +3884,11 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
 
 def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
     """Map internal routing errors to safe durable failure details."""
+    if isinstance(error, ModelCandidateChainExhausted):
+        return ProfileResolutionFailure(
+            code=InferenceProfileFailureCode.MODEL_CANDIDATE_CHAIN_EXHAUSTED,
+            message="All compatible model candidates are temporarily unavailable.",
+        )
     if isinstance(error, ModelTargetNotFound):
         return ProfileResolutionFailure(
             code=InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND,

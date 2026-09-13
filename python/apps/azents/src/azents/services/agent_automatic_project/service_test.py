@@ -44,7 +44,10 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.session_workspace_project import InvalidProjectPath
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import AgentAutomaticProjectService
 from .data import (
@@ -254,6 +257,24 @@ async def _create_fixture(
                 provider=LLMProvider.ANTHROPIC,
                 model_identifier=f"{handle}-model",
             ),
+            selectable_model_options=make_test_selectable_model_option_dicts(
+                model_selection=(
+                    make_test_model_selection_dict(
+                        integration_id=integration.id,
+                        provider=LLMProvider.ANTHROPIC,
+                        model_identifier=f"{handle}-model",
+                    )
+                ),
+                lightweight_model_selection=(
+                    make_test_model_selection_dict(
+                        integration_id=integration.id,
+                        provider=LLMProvider.ANTHROPIC,
+                        model_identifier=f"{handle}-model",
+                    )
+                ),
+            ),
+            main_model_label="default",
+            lightweight_model_label="lightweight",
         )
         session.add(agent)
         await session.flush()

@@ -834,8 +834,12 @@ def _configure_agent_model_options(
             timeout=10,
         )
     )
-    selection = agent.get("model_selection")
-    assert isinstance(selection, dict)
+    options = _list(agent.get("selectable_model_options"))
+    assert options
+    first_option = _object(options[0])
+    candidates = _list(first_option.get("candidates"))
+    assert candidates
+    selection = _object(_object(candidates[0]).get("model_selection"))
     integration_id = selection.get("llm_provider_integration_id")
     assert isinstance(integration_id, str)
     entries_url = (
@@ -888,17 +892,37 @@ def _configure_agent_model_options(
             "selectable_model_options": [
                 {
                     "label": "Quality",
-                    "model_selection": model_selection(
-                        str(by_identifier["gpt-5.5"]["provider_model_identifier"])
-                    ),
-                    "settings": {"builtin_tools": []},
+                    "candidates": [
+                        {
+                            "model_selection": model_selection(
+                                str(
+                                    by_identifier["gpt-5.5"][
+                                        "provider_model_identifier"
+                                    ]
+                                )
+                            ),
+                            "settings": {"builtin_tools": []},
+                        }
+                    ],
+                    "subagent_enabled": True,
+                    "subagent_guidance": None,
                 },
                 {
                     "label": "Fast",
-                    "model_selection": model_selection(
-                        str(by_identifier["gpt-5.5-mini"]["provider_model_identifier"])
-                    ),
-                    "settings": {"builtin_tools": []},
+                    "candidates": [
+                        {
+                            "model_selection": model_selection(
+                                str(
+                                    by_identifier["gpt-5.5-mini"][
+                                        "provider_model_identifier"
+                                    ]
+                                )
+                            ),
+                            "settings": {"builtin_tools": []},
+                        }
+                    ],
+                    "subagent_enabled": True,
+                    "subagent_guidance": None,
                 },
             ],
             "main_model_label": "Quality",

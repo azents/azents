@@ -30,59 +30,12 @@ import {
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
+import {
+  agentCreateInputSchema,
+  agentUpdateInputSchema,
+} from "../model-settings-input-schemas";
 
-const agentTypeEnum = z.enum(["public", "private"]);
 const memoryScopeEnum = z.enum(["agent", "user"]);
-
-const modelSelectionInputSchema = z
-  .object({
-    llm_provider_integration_id: z.string().min(1),
-    model_identifier: z.string().min(1),
-  })
-  .nullable();
-
-const builtinToolConfigSchema = z.object({
-  name: z.string().min(1),
-  config: z.record(z.string(), z.unknown()).optional().default({}),
-});
-
-const selectableModelSettingsInputSchema = z.object({
-  context_window_tokens: z.number().int().positive().nullable().optional(),
-  max_output_tokens: z.number().int().positive().nullable().optional(),
-  builtin_tools: z.array(builtinToolConfigSchema).nullable().optional(),
-  subagent_enabled: z.boolean().optional(),
-  subagent_guidance: z.string().max(500).nullable().optional(),
-});
-
-const selectableModelOptionInputSchema = z.object({
-  label: z.string().min(1),
-  model_selection: z.object({
-    llm_provider_integration_id: z.string().min(1),
-    model_identifier: z.string().min(1),
-  }),
-  settings: selectableModelSettingsInputSchema.nullable().optional(),
-});
-
-const subagentSettingsSchema = z.object({
-  max_subagents: z.number().int().min(0),
-  max_depth: z.number().int().min(0),
-});
-
-const modelParametersSchema = z
-  .object({
-    temperature: z.number().min(0).max(2).nullable().optional(),
-    context_window_tokens: z.number().int().positive().nullable().optional(),
-    max_output_tokens: z.number().int().positive().nullable().optional(),
-    top_p: z.number().min(0).max(1).nullable().optional(),
-    top_k: z.number().int().positive().nullable().optional(),
-    stop_sequences: z.array(z.string()).max(4).nullable().optional(),
-    reasoning_effort: z
-      .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
-      .nullable()
-      .optional(),
-    builtin_tools: z.array(builtinToolConfigSchema).optional(),
-  })
-  .nullable();
 
 export const agentRouter = router({
   /** workspace of Agent list fetch */
@@ -131,31 +84,7 @@ export const agentRouter = router({
 
   /** Agent create */
   create: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        name: z.string().min(1).max(100),
-        description: z.string().optional(),
-        model_selection: modelSelectionInputSchema.optional(),
-        lightweight_model_selection: modelSelectionInputSchema.optional(),
-        selectable_model_options: z
-          .array(selectableModelOptionInputSchema)
-          .optional(),
-        main_model_label: z.string().nullable().optional(),
-        lightweight_model_label: z.string().nullable().optional(),
-        model_parameters: modelParametersSchema.optional(),
-        system_prompt: z.string().optional(),
-        enabled: z.boolean().optional(),
-        type: agentTypeEnum.optional(),
-        runtime_profile_id: z.string().min(1).nullable().optional(),
-        terminal_enabled: z.boolean().optional(),
-        memory_enabled: z.boolean().optional(),
-        tool_search_enabled: z.boolean().optional(),
-        max_turns: z.number().int().positive().nullable().optional(),
-        auto_archive_ttl_days: z.number().int().positive().optional(),
-        subagent_settings: subagentSettingsSchema.optional(),
-      }),
-    )
+    .input(agentCreateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await agentV1CreateAgent({
@@ -163,9 +92,6 @@ export const agentRouter = router({
           path: { handle: input.handle },
           body: {
             name: input.name,
-            model_selection: input.model_selection ?? null,
-            lightweight_model_selection:
-              input.lightweight_model_selection ?? null,
             selectable_model_options: input.selectable_model_options,
             main_model_label: input.main_model_label,
             lightweight_model_label: input.lightweight_model_label,
@@ -197,37 +123,7 @@ export const agentRouter = router({
 
   /** Agent update */
   update: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        name: z.string().min(1).max(100).optional(),
-        description: z.string().nullable().optional(),
-        model_selection: modelSelectionInputSchema.optional(),
-        lightweight_model_selection: modelSelectionInputSchema.optional(),
-        selectable_model_options: z
-          .array(selectableModelOptionInputSchema)
-          .optional(),
-        main_model_label: z.string().nullable().optional(),
-        lightweight_model_label: z.string().nullable().optional(),
-        model_parameters: modelParametersSchema.optional(),
-        system_prompt: z.string().nullable().optional(),
-        enabled: z.boolean().optional(),
-        type: agentTypeEnum.optional(),
-        runtime_profile_id: z.string().min(1).nullable().optional(),
-        expected_runtime_profile_selection_version: z
-          .number()
-          .int()
-          .positive()
-          .optional(),
-        terminal_enabled: z.boolean().optional(),
-        memory_enabled: z.boolean().optional(),
-        tool_search_enabled: z.boolean().optional(),
-        max_turns: z.number().int().positive().nullable().optional(),
-        auto_archive_ttl_days: z.number().int().positive().optional(),
-        subagent_settings: subagentSettingsSchema.optional(),
-      }),
-    )
+    .input(agentUpdateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await agentV1UpdateAgent({
@@ -236,15 +132,6 @@ export const agentRouter = router({
           body: {
             name: input.name,
             description: input.description,
-            ...("model_selection" in input
-              ? { model_selection: input.model_selection }
-              : {}),
-            ...("lightweight_model_selection" in input
-              ? {
-                  lightweight_model_selection:
-                    input.lightweight_model_selection,
-                }
-              : {}),
             ...("selectable_model_options" in input
               ? { selectable_model_options: input.selectable_model_options }
               : {}),

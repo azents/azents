@@ -23,6 +23,9 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
+from azents.repos.model_candidate_chain_cutover import (
+    mark_model_candidate_chain_write,
+)
 from azents.services.uploads.schema import StoredImage
 
 from .data import (
@@ -85,6 +88,7 @@ class AgentRepository:
             auto_archive_ttl_days=create.auto_archive_ttl_days,
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
+        await mark_model_candidate_chain_write(session)
         session.add(rdb_agent)
         await session.flush()
         session.add(RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id))
@@ -292,6 +296,8 @@ class AgentRepository:
                 mode="json"
             )
 
+        if "selectable_model_options" in db_values:
+            await mark_model_candidate_chain_write(session)
         await session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)
         )

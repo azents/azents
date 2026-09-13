@@ -91,31 +91,37 @@ const baseAgent: AgentResponse = {
   id: "agent-1",
   name: "Snapshot Agent",
   description: "Exercises model selection snapshot settings.",
-  model_selection: mainSelection,
-  lightweight_model_selection: lightweightSelection,
   selectable_model_options: [
     {
       label: "default",
-      model_selection: mainSelection,
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [{ name: "web_search" }],
-        subagent_enabled: true,
-        subagent_guidance: "Use for complex synthesis tasks.",
-      },
+      candidates: [
+        {
+          model_selection: mainSelection,
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [{ name: "web_search" }],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: "Use for complex synthesis tasks.",
       execution_option_definitions: [],
     },
     {
       label: "lightweight",
-      model_selection: lightweightSelection,
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        subagent_enabled: false,
-        subagent_guidance: null,
-      },
+      candidates: [
+        {
+          model_selection: lightweightSelection,
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+          },
+        },
+      ],
+      subagent_enabled: false,
+      subagent_guidance: null,
       execution_option_definitions: [],
     },
   ],
@@ -279,8 +285,6 @@ export const UnsupportedCapabilities = {
       type: "EDIT",
       agent: {
         ...baseAgent,
-        model_selection: lightweightSelection,
-        lightweight_model_selection: null,
         effective_context_window_tokens: 128_000,
         effective_auto_compaction_threshold_tokens: 115_200,
         model_parameters: null,

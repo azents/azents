@@ -27,6 +27,11 @@ from azents.core.inference_profile import (
     default_historical_execution_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_availability import (
+    CancelPrimaryModelReservationRequest,
+    ReservePrimaryModelRequest,
+    SessionModelAvailability,
+)
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -2027,6 +2032,26 @@ class AgentSessionUnreadTerminalRunAcknowledgeRequest(BaseModel):
     """Observed terminal Run boundary acknowledged as reviewed."""
 
     through_run_id: str = Field(description="Observed terminal AgentRun ID")
+
+
+class AgentSessionModelAvailabilityResponse(SessionModelAvailability):
+    """Authoritative Session model availability response."""
+
+    @classmethod
+    def from_domain(
+        cls,
+        availability: SessionModelAvailability,
+    ) -> "AgentSessionModelAvailabilityResponse":
+        """Convert the core availability projection to its public response."""
+        return cls.model_validate(availability.model_dump())
+
+
+class AgentSessionPrimaryModelReserveRequest(ReservePrimaryModelRequest):
+    """Request one exact Primary recovery reservation."""
+
+
+class AgentSessionPrimaryModelCancelRequest(CancelPrimaryModelReservationRequest):
+    """Cancel one exact Session reservation generation."""
 
 
 class AgentSessionResponse(BaseModel):

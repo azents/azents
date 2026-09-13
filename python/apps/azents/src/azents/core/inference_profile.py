@@ -2,7 +2,7 @@
 
 import datetime
 import enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -18,6 +18,7 @@ from azents.core.agent import (
     SelectableModelOption,
     SelectableModelSettings,
 )
+from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
@@ -73,6 +74,7 @@ class InferenceProfileFailureCode(enum.StrEnum):
 
     MODEL_TARGET_NOT_FOUND = "model_target_not_found"
     MODEL_TARGET_RESOLUTION_FAILED = "model_target_resolution_failed"
+    MODEL_CANDIDATE_CHAIN_EXHAUSTED = "model_candidate_chain_exhausted"
     REASONING_EFFORT_UNSUPPORTED = "reasoning_effort_unsupported"
     EXECUTION_OPTION_UNSUPPORTED = "execution_option_unsupported"
     IMAGE_INTEGRATION_DISABLED = "integration_disabled"
@@ -157,6 +159,23 @@ class SessionAppliedInferenceProfile(BaseModel):
     )
 
 
+class AppliedModelRoute(BaseModel):
+    """Immutable physical model route used by one logical model operation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation_id: str = Field(min_length=1)
+    operation_kind: Literal["foreground", "compaction", "title"]
+    candidate_ordinal: int = Field(ge=1, le=5)
+    candidate_role: Literal["primary", "fallback"]
+    provider: LLMProvider
+    llm_provider_integration_id: str = Field(min_length=1)
+    model_identifier: str = Field(min_length=1)
+    model_display_name: str = Field(min_length=1)
+    effective_context_window_tokens: int = Field(gt=0)
+    effective_auto_compaction_threshold_tokens: int = Field(gt=0)
+
+
 def validate_requested_profile_against_options(
     options: list[SelectableModelOption],
     profile: RequestedInferenceProfile,
@@ -175,12 +194,14 @@ def validate_requested_profile_against_options(
     if (
         profile.reasoning_effort is not None
         and profile.reasoning_effort
-        not in option.model_selection.normalized_capabilities.reasoning.effort_levels
+        not in option.candidates[
+            0
+        ].model_selection.normalized_capabilities.reasoning.effort_levels
     ):
         raise ValueError("Reasoning effort is not supported by model target")
     validate_execution_options(
-        provider=option.model_selection.provider,
-        supported=option.model_selection.supported_execution_options,
+        provider=option.candidates[0].model_selection.provider,
+        supported=option.candidates[0].model_selection.supported_execution_options,
         enabled=profile.enabled_execution_options,
     )
     return option
@@ -199,6 +220,10 @@ class SessionInferenceState(BaseModel):
     effective_context_window_tokens: int = Field(gt=0)
     effective_auto_compaction_threshold_tokens: int = Field(gt=0)
     resolved_at: datetime.datetime
+    applied_model_route: AppliedModelRoute | None = Field(
+        default=None,
+        description="Physical candidate route applied to the current model call",
+    )
 
     _validate_enabled_execution_options = field_validator("enabled_execution_options")(
         _canonical_enabled_execution_options

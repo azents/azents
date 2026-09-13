@@ -36,10 +36,15 @@ class TestSelectableModelOptionResponse(unittest.TestCase):
         if include_optional:
             return SelectableModelOptionResponse(
                 label = '',
-                model_selection = {
-                    'key' : null
-                    },
-                settings = { },
+                candidates = [
+                    azentspublicclient.models.selectable_model_candidate_response.SelectableModelCandidateResponse(
+                        model_selection = {
+                            'key' : null
+                            }, 
+                        settings = { }, )
+                    ],
+                subagent_enabled = True,
+                subagent_guidance = '',
                 execution_option_definitions = [
                     { }
                     ]
@@ -47,10 +52,15 @@ class TestSelectableModelOptionResponse(unittest.TestCase):
         else:
             return SelectableModelOptionResponse(
                 label = '',
-                model_selection = {
-                    'key' : null
-                    },
-                settings = { },
+                candidates = [
+                    azentspublicclient.models.selectable_model_candidate_response.SelectableModelCandidateResponse(
+                        model_selection = {
+                            'key' : null
+                            }, 
+                        settings = { }, )
+                    ],
+                subagent_enabled = True,
+                subagent_guidance = '',
                 execution_option_definitions = [
                     { }
                     ],

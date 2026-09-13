@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelectionInput,
+    SelectableModelCandidate,
+    SelectableModelCandidateInput,
     SelectableModelOption,
+    SelectableModelOptionInput,
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -112,8 +115,14 @@ def _make_agent(
         selectable_model_options=[
             SelectableModelOption(
                 label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
-                model_selection=selection,
-                settings=make_test_model_settings(),
+                candidates=[
+                    SelectableModelCandidate(
+                        model_selection=selection,
+                        settings=make_test_model_settings(),
+                    )
+                ],
+                subagent_enabled=True,
+                subagent_guidance=None,
             )
         ],
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -154,6 +163,21 @@ def _avatar(key: str) -> StoredImage:
         thumbnails=StoredImageThumbnails(large=file),
         original=None,
         uploaded_at=_NOW,
+    )
+
+
+def _model_option_input() -> SelectableModelOptionInput:
+    """Create one canonical selectable label input."""
+    return SelectableModelOptionInput(
+        label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+        candidates=[
+            SelectableModelCandidateInput(
+                model_selection=AgentModelSelectionInput(
+                    llm_provider_integration_id="integ-1",
+                    model_identifier="gpt-4o",
+                )
+            )
+        ],
     )
 
 
@@ -329,16 +353,13 @@ class TestAgentServiceModelSelection:
             AgentCreateInput(
                 workspace_id="ws-1",
                 name="agent",
-                model_selection=AgentModelSelectionInput(
-                    llm_provider_integration_id="integ-1",
-                    model_identifier="gpt-4o",
-                ),
+                selectable_model_options=[_model_option_input()],
             ),
             creator_workspace_user_id="wu-1",
         )
 
         assert isinstance(result, Success)
-        settings_repo.set_default_model_if_empty.assert_awaited_once()
+        settings_repo.set_default_model_if_empty.assert_not_awaited()
         repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.runtime_profile_id is None
         assert repository_create.runtime_capability is AgentRuntimeCapability.NONE
@@ -400,10 +421,7 @@ class TestAgentServiceModelSelection:
             AgentCreateInput(
                 workspace_id="ws-1",
                 name="agent",
-                model_selection=AgentModelSelectionInput(
-                    llm_provider_integration_id="integ-1",
-                    model_identifier="gpt-4o",
-                ),
+                selectable_model_options=[_model_option_input()],
                 runtime_profile_id="profile-1",
             ),
             creator_workspace_user_id="wu-1",
@@ -460,10 +478,7 @@ class TestAgentServiceModelSelection:
             AgentCreateInput(
                 workspace_id="ws-1",
                 name="agent",
-                model_selection=AgentModelSelectionInput(
-                    llm_provider_integration_id="integ-1",
-                    model_identifier="gpt-4o",
-                ),
+                selectable_model_options=[_model_option_input()],
                 runtime_profile_id="profile-1",
             ),
             creator_workspace_user_id="wu-1",
@@ -503,10 +518,7 @@ class TestAgentServiceModelSelection:
             AgentCreateInput(
                 workspace_id="ws-1",
                 name="agent",
-                model_selection=AgentModelSelectionInput(
-                    llm_provider_integration_id="integ-1",
-                    model_identifier="gpt-4o",
-                ),
+                selectable_model_options=[_model_option_input()],
                 tool_search_enabled=False,
             ),
             creator_workspace_user_id="wu-1",

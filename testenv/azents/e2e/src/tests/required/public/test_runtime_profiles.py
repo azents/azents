@@ -89,6 +89,7 @@ from support.runtime_profiles import (
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
+    single_candidate_model_options,
     unique,
     wait_until,
 )
@@ -773,8 +774,9 @@ def test_empty_valkey_recovers_runtime_with_higher_generation_and_new_work(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Empty Valkey {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=profile_id,
         ),
@@ -905,8 +907,9 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Unconfigured {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
         ),
         _headers=headers,
@@ -955,8 +958,9 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Omitted Profile {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
         ),
         _headers=headers,
@@ -965,8 +969,9 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Explicit {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=explicit_profile_id,
         ),
@@ -1450,8 +1455,9 @@ def run_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
         handle=handle,
         agent_create_request=AgentCreateRequest(
             name=f"Runtime Profile Delete Agent {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
+            selectable_model_options=single_candidate_model_options(model_selection),
+            main_model_label="default",
+            lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=profile.id,
         ),

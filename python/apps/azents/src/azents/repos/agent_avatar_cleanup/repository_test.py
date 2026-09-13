@@ -18,7 +18,10 @@ from azents.services.uploads.schema import (
     StoredImageFile,
     StoredImageThumbnails,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import AgentAvatarCleanupRepository
 
@@ -60,6 +63,12 @@ async def _create_agent(
         model_selection=make_test_model_selection_dict(),
         lightweight_model_selection=make_test_model_selection_dict(),
         avatar=avatar.model_dump(mode="json") if avatar is not None else None,
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(make_test_model_selection_dict()),
+            lightweight_model_selection=(make_test_model_selection_dict()),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

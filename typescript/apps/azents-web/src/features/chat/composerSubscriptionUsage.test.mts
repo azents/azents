@@ -35,14 +35,18 @@ const modelSelection = {
 const options: AgentResponse["selectable_model_options"] = [
   {
     label: "Default",
-    model_selection: modelSelection,
-    settings: {
-      context_window_tokens: null,
-      max_output_tokens: null,
-      builtin_tools: [],
-      subagent_enabled: true,
-      subagent_guidance: null,
-    },
+    candidates: [
+      {
+        model_selection: modelSelection,
+        settings: {
+          context_window_tokens: null,
+          max_output_tokens: null,
+          builtin_tools: [],
+        },
+      },
+    ],
+    subagent_enabled: true,
+    subagent_guidance: null,
     execution_option_definitions: [],
   },
 ];
@@ -81,50 +85,62 @@ void test("selected model resolves and switches its provider integration", () =>
     ...options,
     {
       label: "Fast",
-      model_selection: {
-        ...modelSelection,
-        llm_provider_integration_id: "integration-xai",
-        provider: "xai_oauth",
-      },
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        subagent_enabled: true,
-        subagent_guidance: null,
-      },
+      candidates: [
+        {
+          model_selection: {
+            ...modelSelection,
+            llm_provider_integration_id: "integration-xai",
+            provider: "xai_oauth",
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: null,
       execution_option_definitions: [],
     },
     {
       label: "OpenRouter",
-      model_selection: {
-        ...modelSelection,
-        llm_provider_integration_id: "integration-openrouter",
-        provider: "openrouter",
-      },
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        subagent_enabled: true,
-        subagent_guidance: null,
-      },
+      candidates: [
+        {
+          model_selection: {
+            ...modelSelection,
+            llm_provider_integration_id: "integration-openrouter",
+            provider: "openrouter",
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: null,
       execution_option_definitions: [],
     },
     {
       label: "Kimi",
-      model_selection: {
-        ...modelSelection,
-        llm_provider_integration_id: "integration-kimi",
-        provider: "kimi_oauth",
-      },
-      settings: {
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-        subagent_enabled: true,
-        subagent_guidance: null,
-      },
+      candidates: [
+        {
+          model_selection: {
+            ...modelSelection,
+            llm_provider_integration_id: "integration-kimi",
+            provider: "kimi_oauth",
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: null,
       execution_option_definitions: [],
     },
   ];
@@ -166,18 +182,22 @@ void test("selected model resolves and switches its provider integration", () =>
       [
         {
           label: "API key",
-          model_selection: {
-            ...modelSelection,
-            llm_provider_integration_id: "integration-openai",
-            provider: "openai",
-          },
-          settings: {
-            context_window_tokens: null,
-            max_output_tokens: null,
-            builtin_tools: [],
-            subagent_enabled: true,
-            subagent_guidance: null,
-          },
+          candidates: [
+            {
+              model_selection: {
+                ...modelSelection,
+                llm_provider_integration_id: "integration-openai",
+                provider: "openai",
+              },
+              settings: {
+                context_window_tokens: null,
+                max_output_tokens: null,
+                builtin_tools: [],
+              },
+            },
+          ],
+          subagent_enabled: true,
+          subagent_guidance: null,
           execution_option_definitions: [],
         },
       ],

@@ -28,7 +28,10 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 async def _create_agent_session(
@@ -64,6 +67,24 @@ async def _create_agent_session(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{handle}-model-id",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model-id",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model-id",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

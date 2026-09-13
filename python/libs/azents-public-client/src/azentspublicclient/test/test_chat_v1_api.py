@@ -54,6 +54,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_cancel_agent_session_primary_model_reservation(self) -> None:
+        """Test case for chat_v1_cancel_agent_session_primary_model_reservation
+
+        Cancel Agent Session Primary Model Reservation
+        """
+        pass
+
     def test_chat_v1_cleanup_session_git_worktree(self) -> None:
         """Test case for chat_v1_cleanup_session_git_worktree
 
@@ -156,6 +163,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_get_agent_session_context
 
         Get Agent Session Context
+        """
+        pass
+
+    def test_chat_v1_get_agent_session_model_availability(self) -> None:
+        """Test case for chat_v1_get_agent_session_model_availability
+
+        Get Agent Session Model Availability
         """
         pass
 
@@ -317,6 +331,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_replace_session_model_profile
 
         Replace Session Model Profile
+        """
+        pass
+
+    def test_chat_v1_reserve_agent_session_primary_model(self) -> None:
+        """Test case for chat_v1_reserve_agent_session_primary_model
+
+        Reserve Agent Session Primary Model
         """
         pass
 

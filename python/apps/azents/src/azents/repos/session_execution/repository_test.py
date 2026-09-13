@@ -33,7 +33,10 @@ from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.data import ToolkitStateUpsert
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 from . import CanonicalExecutionSnapshotError, SessionExecutionRepository
 
@@ -76,6 +79,24 @@ async def _create_execution_subject(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{handle}-model",
         ),
+        selectable_model_options=make_test_selectable_model_option_dicts(
+            model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model",
+                )
+            ),
+            lightweight_model_selection=(
+                make_test_model_selection_dict(
+                    integration_id=integration.id,
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier=f"{handle}-model",
+                )
+            ),
+        ),
+        main_model_label="default",
+        lightweight_model_label="lightweight",
     )
     session.add(agent)
     await session.flush()

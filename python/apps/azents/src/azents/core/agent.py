@@ -49,6 +49,7 @@ class AgentModelSelection(BaseModel):
 
 
 MAX_SELECTABLE_MODEL_OPTIONS = 10
+MAX_SELECTABLE_MODEL_CANDIDATES = 5
 MAX_SELECTABLE_MODEL_LABEL_LENGTH = 80
 MAX_SUBAGENT_GUIDANCE_LENGTH = 500
 DEFAULT_MAIN_MODEL_OPTION_LABEL = "default"
@@ -67,7 +68,7 @@ class BuiltinToolConfig(BaseModel):
 
 
 class SelectableModelSettingsInput(BaseModel):
-    """Optional user settings submitted for one selectable model option."""
+    """Optional user settings submitted for one physical model candidate."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -85,19 +86,10 @@ class SelectableModelSettingsInput(BaseModel):
         default=None,
         description="Enabled built-in tools; omitted enables every supported tool",
     )
-    subagent_enabled: bool = Field(
-        default=True,
-        description="Available as an explicit subagent model target",
-    )
-    subagent_guidance: str | None = Field(
-        default=None,
-        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
-        description="Optional parent-model guidance for explicit subagent selection",
-    )
 
 
 class SelectableModelSettings(BaseModel):
-    """Stored user settings for one selectable model option."""
+    """Stored user settings for one physical model candidate."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,17 +104,37 @@ class SelectableModelSettings(BaseModel):
     builtin_tools: list[BuiltinToolConfig] = Field(
         description="Enabled built-in tools",
     )
-    subagent_enabled: bool = Field(
-        description="Available as an explicit subagent model target",
+
+
+class SelectableModelCandidateInput(BaseModel):
+    """Physical model candidate input inside one selectable label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_selection: AgentModelSelectionInput = Field(
+        description="Physical model selection input"
     )
-    subagent_guidance: str | None = Field(
-        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
-        description="Optional parent-model guidance for explicit subagent selection",
+    settings: SelectableModelSettingsInput | None = Field(
+        default=None,
+        description="Model-scoped settings; omitted uses capability defaults",
+    )
+
+
+class SelectableModelCandidate(BaseModel):
+    """Stored physical model candidate inside one selectable label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_selection: AgentModelSelection = Field(
+        description="Physical model selection snapshot"
+    )
+    settings: SelectableModelSettings = Field(
+        description="Stored model-scoped settings"
     )
 
 
 class SelectableModelOptionInput(BaseModel):
-    """Selectable model option input keyed by label."""
+    """Selectable semantic label input with ordered physical candidates."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -131,26 +143,39 @@ class SelectableModelOptionInput(BaseModel):
         max_length=MAX_SELECTABLE_MODEL_LABEL_LENGTH,
         description="Selectable model label",
     )
-    model_selection: AgentModelSelectionInput = Field(
-        description="Selectable model selection input"
+    candidates: list[SelectableModelCandidateInput] = Field(
+        min_length=1,
+        max_length=MAX_SELECTABLE_MODEL_CANDIDATES,
+        description="Ordered physical model candidates; first is Primary",
     )
-    settings: SelectableModelSettingsInput | None = Field(
+    subagent_enabled: bool = Field(
+        default=True,
+        description="Available as an explicit subagent model target",
+    )
+    subagent_guidance: str | None = Field(
         default=None,
-        description="Model-scoped settings; omitted uses capability defaults",
+        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
+        description="Optional parent-model guidance for explicit subagent selection",
     )
 
 
 class SelectableModelOption(BaseModel):
-    """Stored selectable model option keyed by label."""
+    """Stored selectable semantic label with ordered physical candidates."""
 
     model_config = ConfigDict(extra="forbid")
 
     label: str = Field(description="Selectable model label")
-    model_selection: AgentModelSelection = Field(
-        description="Selectable model selection snapshot"
+    candidates: list[SelectableModelCandidate] = Field(
+        min_length=1,
+        max_length=MAX_SELECTABLE_MODEL_CANDIDATES,
+        description="Ordered physical model candidates; first is Primary",
     )
-    settings: SelectableModelSettings = Field(
-        description="Stored model-scoped settings"
+    subagent_enabled: bool = Field(
+        description="Available as an explicit subagent model target",
+    )
+    subagent_guidance: str | None = Field(
+        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
+        description="Optional parent-model guidance for explicit subagent selection",
     )
 
 
@@ -167,8 +192,6 @@ def default_selectable_model_settings(
                 selection.normalized_capabilities.built_in_tools.supported
             )
         ],
-        subagent_enabled=True,
-        subagent_guidance=None,
     )
 
 

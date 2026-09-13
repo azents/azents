@@ -307,8 +307,6 @@ async def test_explicit_pin_requires_current_catalog_generation(
                 config={"model": "gpt-image-2.5-flare", "quality": "high"},
             )
         ],
-        subagent_enabled=True,
-        subagent_guidance=None,
     )
 
     assert (
@@ -375,8 +373,6 @@ async def test_disabled_integration_rejects_default_with_recovery_guidance(
         context_window_tokens=None,
         max_output_tokens=None,
         builtin_tools=[BuiltinToolConfig(name="image_generation", config={})],
-        subagent_enabled=True,
-        subagent_guidance=None,
     )
 
     assert await service.validate_option(
@@ -415,8 +411,6 @@ async def test_runtime_rejects_image_tool_missing_from_conversation_capabilities
                 config={"model": "gpt-image-2.5-flare"},
             )
         ],
-        subagent_enabled=True,
-        subagent_guidance=None,
     )
 
     runtime_error = await service.validate_runtime(
