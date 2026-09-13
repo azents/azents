@@ -45,6 +45,23 @@ class ExternalAccountOAuthClientConfiguration:
     client_secret: str
 
 
+@dataclass(frozen=True)
+class ExternalAccountOAuthCallbackContext:
+    """Callback identity needed to classify and claim an OAuth attempt."""
+
+    setting_generation: str
+    redirect_uri: str
+
+
+@dataclass(frozen=True)
+class ExternalAccountOAuthRuntimeConfiguration:
+    """Ready provider configuration for one authenticated OAuth operation."""
+
+    client: ExternalAccountOAuthClientConfiguration
+    setting_generation: str
+    redirect_uri: str
+
+
 class ExternalAccountOAuthProviderError(Exception):
     """Sanitized provider OAuth failure."""
 

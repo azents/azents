@@ -177,7 +177,7 @@ export function useExternalAccountLinkConfirmationContainer({
         onSuccess: (result): void => {
           if (result.type === "SUCCESS") {
             setConnected({
-              workspaceName: result.data.workspace_name,
+              workspaceName: result.data.workspace_name ?? result.data.provider,
               provider: result.data.provider,
               externalDisplayLabel: result.data.provider_display_label,
             });

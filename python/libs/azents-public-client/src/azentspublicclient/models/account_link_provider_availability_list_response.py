@@ -19,15 +19,15 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.account_link_response import AccountLinkResponse
+from azentspublicclient.models.account_link_provider_availability_response import AccountLinkProviderAvailabilityResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AccountLinkListResponse(BaseModel):
+class AccountLinkProviderAvailabilityListResponse(BaseModel):
     """
-    Current User's Workspace external account links.
+    Redacted provider availability list.
     """ # noqa: E501
-    items: List[AccountLinkResponse]
+    items: List[AccountLinkProviderAvailabilityResponse]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["items"]
 
@@ -49,7 +49,7 @@ class AccountLinkListResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AccountLinkListResponse from a JSON string"""
+        """Create an instance of AccountLinkProviderAvailabilityListResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -88,7 +88,7 @@ class AccountLinkListResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AccountLinkListResponse from a dict"""
+        """Create an instance of AccountLinkProviderAvailabilityListResponse from a dict"""
         if obj is None:
             return None
 
@@ -96,7 +96,7 @@ class AccountLinkListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [AccountLinkResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "items": [AccountLinkProviderAvailabilityResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

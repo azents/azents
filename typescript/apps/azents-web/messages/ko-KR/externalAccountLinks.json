@@ -1,6 +1,6 @@
 {
   "title": "외부 계정",
-  "description": "각 Workspace에서 Azents 계정에 연결된 Slack 및 Discord 계정을 확인합니다.",
+  "description": "Azents 계정에 연결된 Slack 및 Discord 외부 계정을 확인합니다.",
   "loading": "외부 계정을 불러오는 중...",
   "loadErrorTitle": "외부 계정을 불러오지 못했습니다",
   "retry": "다시 시도",
@@ -9,6 +9,7 @@
   "emptyTitle": "연결된 외부 계정이 없습니다",
   "emptyDescription": "계정을 연결하려면 Slack 또는 Discord의 비공개 대화 설정에서 시작하세요.",
   "workspace": "Workspace",
+  "accountContext": "외부 계정",
   "linkedAt": "연결 시각",
   "providerTeam": "{provider} · {team}",
   "providers": {
@@ -24,11 +25,11 @@
   "disconnect": "연결 해제",
   "disconnected": "연결 해제됨",
   "cancel": "취소",
-  "elevationDisconnect": "{workspace}에서 {account}의 연결을 해제하려면 본인 확인이 필요합니다.",
+  "elevationDisconnect": "Azents 계정에서 {account}의 연결을 해제하려면 본인 확인이 필요합니다.",
   "disconnectDialog": {
     "title": "외부 계정 연결을 해제할까요?",
-    "description": "{workspace}에서 Azents 계정과 {account}의 연결을 해제합니다.",
-    "impact": "이 Workspace에서는 앞으로 연결 기반 기능을 사용할 수 없습니다. 기존 게스트 접근 권한, 메시지, 기록, 공유 설정, 허용 및 차단 상태는 그대로 유지됩니다.",
+    "description": "Azents 계정에서 {account}의 연결을 해제합니다.",
+    "impact": "앞으로 이 연결된 외부 계정이 필요한 기능을 사용할 수 없습니다. 기존 게스트 접근 권한, 메시지, 기록, 공유 설정, 허용 및 차단 상태는 그대로 유지됩니다.",
     "confirm": "계정 연결 해제"
   },
   "candidateStatus": {

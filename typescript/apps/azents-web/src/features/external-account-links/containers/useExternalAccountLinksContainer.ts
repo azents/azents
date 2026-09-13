@@ -10,7 +10,7 @@ import type {
   ExternalAccountLinkItem,
   ExternalAccountLinksState,
 } from "../types";
-import type { AccountLinkResponse } from "@azents/public-client";
+import type { GlobalAccountLinkResponse } from "@azents/public-client";
 
 export interface ExternalAccountLinksContainerProps {
   state: ExternalAccountLinksState;
@@ -20,16 +20,16 @@ export interface ExternalAccountLinksContainerProps {
   onRetry: () => void;
 }
 
-function linkItem(item: AccountLinkResponse): ExternalAccountLinkItem {
+function linkItem(item: GlobalAccountLinkResponse): ExternalAccountLinkItem {
+  const accountContext = item.provider_tenant_display_label ?? item.provider;
   return {
     id: item.id,
-    workspaceName: item.workspace_name,
-    workspaceHandle: item.workspace_handle,
+    accountContextLabel: accountContext,
     provider: item.provider,
-    providerTeamLabel: item.provider_tenant_display_label,
+    providerTeamLabel: accountContext,
     externalDisplayLabel: item.provider_display_label,
     linkedAt: item.linked_at,
-    status: item.state,
+    status: "active",
   };
 }
 

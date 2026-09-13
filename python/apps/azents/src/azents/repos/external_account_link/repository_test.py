@@ -69,10 +69,10 @@ async def _cleanup_committed_link_test_rows(
 
 
 @pytest.mark.asyncio
-async def test_link_protocol_preserves_guest_and_projects_lost_membership_inactive(
+async def test_link_protocol_reuses_global_link_after_membership_loss(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Complete both proofs without changing the canonical guest principal."""
+    """Complete both proofs without changing guest principal or global reuse."""
     fixture = await _create_fixture(rdb_session_manager)
     repository = ExternalAccountLinkRepository(rdb_session_manager)
     now = datetime.datetime(2026, 9, 12, 12, tzinfo=datetime.UTC)
@@ -158,7 +158,7 @@ async def test_link_protocol_preserves_guest_and_projects_lost_membership_inacti
         await WorkspaceUserRepository().delete(session, fixture.workspace_user_id)
 
     listed = await repository.list_links(user_id=fixture.user_id, now=now)
-    assert [item.state for item in listed] == [ExternalAccountLinkState.INACTIVE]
+    assert [item.state for item in listed] == [ExternalAccountLinkState.ACTIVE]
     revoked = await repository.unlink(
         user_id=fixture.user_id,
         auth_session_id=fixture.auth_session_id,

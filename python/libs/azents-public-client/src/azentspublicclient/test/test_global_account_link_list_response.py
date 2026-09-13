@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.account_link_list_response import AccountLinkListResponse
+from azentspublicclient.models.global_account_link_list_response import GlobalAccountLinkListResponse
 
-class TestAccountLinkListResponse(unittest.TestCase):
-    """AccountLinkListResponse unit test stubs"""
+class TestGlobalAccountLinkListResponse(unittest.TestCase):
+    """GlobalAccountLinkListResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,50 +25,44 @@ class TestAccountLinkListResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> AccountLinkListResponse:
-        """Test AccountLinkListResponse
+    def make_instance(self, include_optional) -> GlobalAccountLinkListResponse:
+        """Test GlobalAccountLinkListResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `AccountLinkListResponse`
+        # uncomment below to create an instance of `GlobalAccountLinkListResponse`
         """
-        model = AccountLinkListResponse()
+        model = GlobalAccountLinkListResponse()
         if include_optional:
-            return AccountLinkListResponse(
+            return GlobalAccountLinkListResponse(
                 items = [
-                    azentspublicclient.models.account_link_response.AccountLinkResponse(
+                    azentspublicclient.models.global_account_link_response.GlobalAccountLinkResponse(
                         id = '', 
-                        workspace_id = '', 
-                        workspace_name = '', 
-                        workspace_handle = '', 
                         provider = 'slack', 
                         identity_scope = '', 
+                        provider_user_id = '', 
                         provider_tenant_display_label = '', 
                         provider_display_label = '', 
-                        linked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        state = 'active', )
+                        linked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
         else:
-            return AccountLinkListResponse(
+            return GlobalAccountLinkListResponse(
                 items = [
-                    azentspublicclient.models.account_link_response.AccountLinkResponse(
+                    azentspublicclient.models.global_account_link_response.GlobalAccountLinkResponse(
                         id = '', 
-                        workspace_id = '', 
-                        workspace_name = '', 
-                        workspace_handle = '', 
                         provider = 'slack', 
                         identity_scope = '', 
+                        provider_user_id = '', 
                         provider_tenant_display_label = '', 
                         provider_display_label = '', 
-                        linked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        state = 'active', )
+                        linked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )
         """
 
-    def testAccountLinkListResponse(self):
-        """Test AccountLinkListResponse"""
+    def testGlobalAccountLinkListResponse(self):
+        """Test GlobalAccountLinkListResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

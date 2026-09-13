@@ -1,6 +1,6 @@
 {
   "title": "External accounts",
-  "description": "Review the Slack and Discord identities connected to your Azents account in each Workspace.",
+  "description": "Review the Slack and Discord identities connected to your Azents account.",
   "loading": "Loading external accounts...",
   "loadErrorTitle": "Could not load external accounts",
   "retry": "Try again",
@@ -9,6 +9,7 @@
   "emptyTitle": "No external accounts connected",
   "emptyDescription": "Start from private Conversation settings in Slack or Discord when you want to connect an account.",
   "workspace": "Workspace",
+  "accountContext": "Provider account",
   "linkedAt": "Connected",
   "providerTeam": "{provider} · {team}",
   "providers": {
@@ -24,11 +25,11 @@
   "disconnect": "Disconnect",
   "disconnected": "Disconnected",
   "cancel": "Cancel",
-  "elevationDisconnect": "Verify your identity to disconnect {account} from {workspace}.",
+  "elevationDisconnect": "Verify your identity to disconnect {account} from your Azents account.",
   "disconnectDialog": {
     "title": "Disconnect external account?",
-    "description": "Disconnect {account} from your Azents account in {workspace}.",
-    "impact": "Future link-dependent controls will stop working in this Workspace. Existing guest access, messages, history, shared settings, grants, and blocks are preserved.",
+    "description": "Disconnect {account} from your Azents account.",
+    "impact": "Future controls that rely on this linked identity will stop working. Existing guest access, messages, history, shared settings, grants, and blocks are preserved.",
     "confirm": "Disconnect account"
   },
   "candidateStatus": {

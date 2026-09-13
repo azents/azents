@@ -15,8 +15,7 @@ type Story = StoryObj<typeof meta>;
 
 const slackLink: ExternalAccountLinkItem = {
   id: "link-slack",
-  workspaceName: "Product Studio",
-  workspaceHandle: "product-studio",
+  accountContextLabel: "Acme Slack",
   provider: "slack",
   providerTeamLabel: "Acme Slack",
   externalDisplayLabel: "Alex Morgan",
@@ -26,8 +25,7 @@ const slackLink: ExternalAccountLinkItem = {
 
 const inactiveDiscordLink: ExternalAccountLinkItem = {
   id: "link-discord",
-  workspaceName: "Community Lab",
-  workspaceHandle: "community-lab",
+  accountContextLabel: "Discord",
   provider: "discord",
   providerTeamLabel: "Azents Builders",
   externalDisplayLabel: "alex_dev",
