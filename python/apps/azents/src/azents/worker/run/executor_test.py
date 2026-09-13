@@ -53,7 +53,7 @@ from azents.core.inference_profile import (
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_operation import ModelOperationState
+from azents.core.model_operation import ModelOperationKind, ModelOperationState
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -3540,6 +3540,96 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
 
 
 @pytest.mark.asyncio
+async def test_prepare_compaction_recreates_slot_after_prior_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each later compaction persists a distinct active operation before dispatch."""
+    lifecycle = _SessionLifecycle()
+    original_agent = _default_agent()
+    executor = _executor(session_lifecycle=lifecycle, agent=original_agent)
+    agent_repository = executor.agent_repository
+    assert isinstance(agent_repository, _AgentRepository)
+    resolved = await _resolve_success()
+    assert isinstance(resolved, Success)
+
+    async def resolve_compaction_candidate(
+        *,
+        selection: AgentModelSelection,
+        **kwargs: object,
+    ) -> object:
+        del kwargs
+        return Success(
+            ResolvedModelCandidateRuntime(
+                provider=selection.provider,
+                provider_integration_id=selection.llm_provider_integration_id,
+                model=to_runtime_model(
+                    selection.provider,
+                    selection.model_identifier,
+                ),
+                credential_kwargs={"api_key": "compaction"},
+                effective_input_tokens=128_000,
+            )
+        )
+
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_model_candidate_runtime",
+        resolve_compaction_candidate,
+    )
+
+    first_request = await executor._prepare_compaction_model_request(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        current_request=resolved.value.run_request,
+    )
+    first_state = lifecycle.agent_run_repository.run.model_operation_state
+    assert first_state is not None
+    assert first_state.compaction is not None
+    first_operation_id = first_state.compaction.operation_id
+
+    agent_repository.agent = original_agent.model_copy(
+        update={"lightweight_model_label": "removed-label"}
+    )
+    resumed_request = await executor._prepare_compaction_model_request(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        current_request=first_request,
+    )
+    assert resumed_request.compaction_model == first_request.compaction_model
+    agent_repository.agent = original_agent
+
+    async with executor.session_manager() as session:
+        await executor._complete_model_operation_success_in_session(
+            session,
+            session_id="session-001",
+            run_id="run-001",
+            owner_generation=1,
+            workspace_id="workspace-001",
+            operation_kind=ModelOperationKind.COMPACTION,
+        )
+    completed_state = lifecycle.agent_run_repository.run.model_operation_state
+    assert completed_state is not None
+    assert completed_state.compaction is None
+
+    second_request = await executor._prepare_compaction_model_request(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        current_request=first_request,
+    )
+    second_state = lifecycle.agent_run_repository.run.model_operation_state
+    assert second_state is not None
+    assert second_state.compaction is not None
+    assert second_state.compaction.operation_id != first_operation_id
+    assert second_request.compaction_model == first_request.compaction_model
+
+
+@pytest.mark.asyncio
 async def test_execute_new_implicit_run_remaps_same_label_to_current_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -6062,7 +6152,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
     """A Primary quota dispatches fallback without consuming retry budget."""
     primary = make_test_model_selection(
         integration_id="integration-primary",
-        model_identifier="gpt-primary",
+        model_identifier=f"gpt primary/{'x' * 120}",
     )
     fallback = make_test_model_selection(
         integration_id="integration-fallback",

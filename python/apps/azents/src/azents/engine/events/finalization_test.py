@@ -1,12 +1,24 @@
 """Failed-run event-store tests."""
 
 import datetime
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import SelectableModelCandidate, SelectableModelOption
 from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcomeReason,
+    ModelOperationChainExhaustedError,
+    ModelOperationKind,
+    ModelOperationState,
+    build_model_operation,
+    mark_current_candidate_active,
+    mark_current_candidate_quota_and_advance,
+)
 from azents.engine.events.finalization import FailedRunEventStore
 from azents.engine.events.protocols import TranscriptRepository
 from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
@@ -14,6 +26,10 @@ from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 
 
 class _TranscriptRepository:
@@ -39,10 +55,16 @@ class _TranscriptRepository:
 class _RunRepository:
     """RunStateRepository test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, run: object | None = None) -> None:
+        self.run = run
         self.terminal_calls: list[
             tuple[str, AgentRunStatus, str | None, str | None, str | None]
         ] = []
+
+    async def get_by_id(self, session: AsyncSession, run_id: str) -> object | None:
+        """Return the configured pre-terminal Run state."""
+        del session, run_id
+        return self.run
 
     async def mark_terminal_if_running(
         self,
@@ -181,3 +203,73 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
         )
     ]
     assert coordinator.run_ids == ["run-001".rjust(32, "0")]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_event_store_retains_terminal_candidate_outcomes() -> None:
+    """Chain exhaustion evidence survives AgentRun operation-state clearing."""
+    now = datetime.datetime.now(datetime.UTC)
+    selection = make_test_model_selection()
+    operation = build_model_operation(
+        option=SelectableModelOption(
+            label="default",
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=make_test_model_settings(),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        ),
+        profile=RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        ),
+        kind=ModelOperationKind.FOREGROUND,
+        operation_id="o" * 32,
+        recorded_at=now,
+    )
+    active = mark_current_candidate_active(
+        operation,
+        reason=ModelOperationCandidateOutcomeReason.SELECTED,
+        recorded_at=now,
+    )
+    with pytest.raises(ModelOperationChainExhaustedError) as exhausted:
+        mark_current_candidate_quota_and_advance(active, recorded_at=now)
+    run_repo = _RunRepository(
+        SimpleNamespace(
+            model_operation_state=ModelOperationState(
+                foreground=exhausted.value.operation,
+                compaction=None,
+            )
+        )
+    )
+    store = FailedRunEventStore(
+        transcript_repo=cast(TranscriptRepository, _TranscriptRepository()),
+        run_repo=cast(AgentRunRepository, run_repo),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            _TerminalFinalizationCoordinator(),
+        ),
+    )
+
+    result = await store.append_terminal_failed_run(
+        cast(AsyncSession, _Session()),
+        session_id="session-001",
+        run_id="run-001".rjust(32, "0"),
+        user_message="All model candidates are unavailable.",
+        retry_state=_retry_state(),
+        reason="non_retryable",
+    )
+
+    payload = result.error_event.payload
+    assert isinstance(payload, SystemErrorPayload)
+    assert payload.failure is not None
+    assert payload.failure.model_operation is not None
+    assert payload.failure.model_operation.operation_id == "o" * 32
+    assert payload.failure.model_operation.terminal_reason.value == "chain_exhausted"
+    assert (
+        payload.failure.model_operation.outcomes[0].status.value == "quota_or_billing"
+    )

@@ -30,6 +30,7 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     LLMProvider,
+    ModelCandidateClaimKind,
     RuntimeRunnerState,
     SessionAgentKind,
     SessionWorkingFolderBindingState,
@@ -37,6 +38,10 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_availability import (
+    ModelCandidateIdentity,
+    PrimaryModelReservation,
+)
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
@@ -49,6 +54,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -723,6 +729,190 @@ class TestAgentSessionRepository:
         refreshed = await repo.get_by_id(rdb_session, created.id)
         assert refreshed is not None
         assert refreshed.owner_generation == 2
+
+    async def test_primary_reservation_generation_survives_cleared_payload(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stale cancellation cannot match a later reservation lifetime."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "primary-reservation-generation-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "primary-reservation-generation",
+        )
+        integration_id = await rdb_session.scalar(
+            sa.select(RDBLLMProviderIntegration.id).where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id
+            )
+        )
+        assert integration_id is not None
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        candidate = ModelCandidateIdentity(
+            llm_provider_integration_id=integration_id,
+            model_identifier="primary-reservation-generation-id",
+        )
+        first = PrimaryModelReservation(
+            semantic_label="Default",
+            candidate=candidate,
+            health_generation=1,
+            reservation_generation=1,
+            claim_token="1" * 32,
+            created_at=now,
+            expires_at=now + datetime.timedelta(minutes=5),
+        )
+        second = first.model_copy(
+            update={
+                "health_generation": 2,
+                "reservation_generation": 2,
+                "claim_token": "2" * 32,
+            }
+        )
+
+        assert (
+            await repo.set_primary_model_reservation(
+                rdb_session,
+                session_id=created.id,
+                reservation=first,
+                expected_reservation_generation=None,
+            )
+            is not None
+        )
+        assert (
+            await repo.set_primary_model_reservation(
+                rdb_session,
+                session_id=created.id,
+                reservation=None,
+                expected_reservation_generation=1,
+            )
+            is not None
+        )
+        stored_second = await repo.set_primary_model_reservation(
+            rdb_session,
+            session_id=created.id,
+            reservation=second,
+            expected_reservation_generation=None,
+        )
+        assert stored_second is not None
+        assert stored_second.primary_model_reservation_generation == 2
+        assert (
+            await repo.set_primary_model_reservation(
+                rdb_session,
+                session_id=created.id,
+                reservation=None,
+                expected_reservation_generation=1,
+            )
+            is None
+        )
+        refreshed = await repo.get_by_id(rdb_session, created.id)
+        assert refreshed is not None
+        assert refreshed.primary_model_reservation == second
+        assert refreshed.primary_model_reservation_generation == 2
+
+    async def test_archive_tree_releases_primary_reservation_health_claim(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Archiving releases the exact Session-owned recovery claim."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "archive-primary-reservation-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "archive-primary-reservation",
+        )
+        integration_id = await rdb_session.scalar(
+            sa.select(RDBLLMProviderIntegration.id).where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id
+            )
+        )
+        assert integration_id is not None
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        reservation = PrimaryModelReservation(
+            semantic_label="Default",
+            candidate=ModelCandidateIdentity(
+                llm_provider_integration_id=integration_id,
+                model_identifier="archive-primary-reservation-id",
+            ),
+            health_generation=7,
+            reservation_generation=1,
+            claim_token="a" * 32,
+            created_at=now,
+            expires_at=now + datetime.timedelta(minutes=5),
+        )
+        rdb_session.add(
+            RDBModelCandidateHealth(
+                workspace_id=workspace_id,
+                llm_provider_integration_id=integration_id,
+                model_identifier=reservation.candidate.model_identifier,
+                generation=reservation.health_generation,
+                cooldown_until=now - datetime.timedelta(seconds=1),
+                claim_kind=ModelCandidateClaimKind.RESERVATION,
+                claim_owner_id=created.id,
+                claim_token=reservation.claim_token,
+                claim_until=reservation.expires_at,
+            )
+        )
+        assert (
+            await repo.set_primary_model_reservation(
+                rdb_session,
+                session_id=created.id,
+                reservation=reservation,
+                expected_reservation_generation=None,
+            )
+            is not None
+        )
+
+        await repo.archive_tree(
+            rdb_session,
+            root_session_id=created.id,
+            session_ids=[created.id],
+            archived_at=now,
+            purge_after=None,
+            policy_revision=1,
+            retention_days=None,
+        )
+
+        health = await rdb_session.get(
+            RDBModelCandidateHealth,
+            (
+                workspace_id,
+                integration_id,
+                reservation.candidate.model_identifier,
+            ),
+        )
+        assert health is not None
+        assert health.claim_kind is None
+        assert health.claim_owner_id is None
+        assert health.claim_token is None
+        assert health.claim_until is None
 
     async def test_claim_owner_generation_rejects_active_child_of_archived_root(
         self,

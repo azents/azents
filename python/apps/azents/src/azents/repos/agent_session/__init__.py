@@ -28,6 +28,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
+    ModelCandidateClaimKind,
     SessionAgentKind,
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
@@ -46,6 +47,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -1703,16 +1705,23 @@ class AgentSessionRepository:
                 ].astext.cast(sa.BigInteger)
                 == expected_reservation_generation
             )
+        values: dict[str, object] = {
+            "primary_model_reservation": (
+                reservation.model_dump(mode="json") if reservation is not None else None
+            )
+        }
+        if reservation is not None:
+            predicates.append(
+                RDBAgentSession.primary_model_reservation_generation
+                < reservation.reservation_generation
+            )
+            values["primary_model_reservation_generation"] = (
+                reservation.reservation_generation
+            )
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(*predicates)
-            .values(
-                primary_model_reservation=(
-                    reservation.model_dump(mode="json")
-                    if reservation is not None
-                    else None
-                )
-            )
+            .values(**values)
             .returning(RDBAgentSession)
         )
         rdb = result.scalar_one_or_none()
@@ -1794,6 +1803,10 @@ class AgentSessionRepository:
         end_reason: AgentSessionEndReason | None = None,
     ) -> None:
         """Archive a complete root tree and snapshot policy on its root."""
+        await self._release_primary_model_reservations(
+            session,
+            session_ids=session_ids,
+        )
         await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id.in_(session_ids))
@@ -1871,6 +1884,10 @@ class AgentSessionRepository:
         end_reason: AgentSessionEndReason | None = None,
     ) -> None:
         """Transition one AgentSession to archived state for legacy callers."""
+        await self._release_primary_model_reservations(
+            session,
+            session_ids=[agent_session_id],
+        )
         await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
@@ -1883,6 +1900,52 @@ class AgentSessionRepository:
             )
         )
         await session.flush()
+
+    async def _release_primary_model_reservations(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> None:
+        """Release exact candidate-health claims before archiving Sessions."""
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBAgentSession.id,
+                    RDBAgentSession.workspace_id,
+                    RDBAgentSession.primary_model_reservation,
+                )
+                .where(
+                    RDBAgentSession.id.in_(session_ids),
+                    RDBAgentSession.primary_model_reservation.is_not(None),
+                )
+                .with_for_update()
+            )
+        ).all()
+        for session_id, workspace_id, reservation_payload in rows:
+            reservation = PrimaryModelReservation.model_validate(reservation_payload)
+            await session.execute(
+                sa.update(RDBModelCandidateHealth)
+                .where(
+                    RDBModelCandidateHealth.workspace_id == workspace_id,
+                    RDBModelCandidateHealth.llm_provider_integration_id
+                    == reservation.candidate.llm_provider_integration_id,
+                    RDBModelCandidateHealth.model_identifier
+                    == reservation.candidate.model_identifier,
+                    RDBModelCandidateHealth.generation == reservation.health_generation,
+                    RDBModelCandidateHealth.claim_kind
+                    == ModelCandidateClaimKind.RESERVATION,
+                    RDBModelCandidateHealth.claim_owner_id == session_id,
+                    RDBModelCandidateHealth.claim_token == reservation.claim_token,
+                )
+                .values(
+                    claim_kind=None,
+                    claim_owner_id=None,
+                    claim_token=None,
+                    claim_until=None,
+                    updated_at=sa.func.clock_timestamp(),
+                )
+            )
 
     async def claim_lifecycle_start(
         self,
@@ -2712,6 +2775,9 @@ class AgentSessionRepository:
                 PrimaryModelReservation.model_validate(rdb.primary_model_reservation)
                 if rdb.primary_model_reservation is not None
                 else None
+            ),
+            primary_model_reservation_generation=(
+                rdb.primary_model_reservation_generation
             ),
             title_model_operation_state=(
                 ModelOperationSnapshot.model_validate(rdb.title_model_operation_state)

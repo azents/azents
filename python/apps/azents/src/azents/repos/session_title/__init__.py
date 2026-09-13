@@ -162,9 +162,9 @@ class SessionTitleRepository:
             candidate = operation.current_candidate
             selection = candidate.model_selection
             if (
-                failure.integration != selection.llm_provider_integration_id
-                or failure.provider != selection.provider.value
-                or failure.model
+                failure.route_integration != selection.llm_provider_integration_id
+                or failure.route_provider != selection.provider.value
+                or failure.route_model
                 != to_runtime_model(selection.provider, selection.model_identifier)
             ):
                 return None

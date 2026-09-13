@@ -1359,6 +1359,18 @@ class RunExecutor:
                 operation_kind=operation_kind,
             )
 
+        async def prepare_compaction_request(
+            current_request: RunRequest,
+        ) -> RunRequest:
+            """Persist a fresh Lightweight operation before each compaction."""
+            return await self._prepare_compaction_model_request(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                current_request=current_request,
+            )
+
         turn_action_bridge_boundary = TurnActionBridgeBoundary()
         run_context = RunContext(
             run_id=run_id,
@@ -1378,6 +1390,7 @@ class RunExecutor:
             ),
             mailbox_activity_observer=mailbox_activity_observer,
             complete_model_operation_in_session=(complete_model_operation_in_session),
+            prepare_compaction_request=prepare_compaction_request,
         )
         context = ToolkitContext(
             session_id=snapshot.session_id,
@@ -2707,9 +2720,9 @@ class RunExecutor:
                 selection.model_identifier,
             )
             if (
-                failure.integration != selection.llm_provider_integration_id
-                or failure.provider != selection.provider.value
-                or failure.model != runtime_model
+                failure.route_integration != selection.llm_provider_integration_id
+                or failure.route_provider != selection.provider.value
+                or failure.route_model != runtime_model
             ):
                 raise CanonicalExecutionWorkDriftError(
                     "Quota failure does not match the active model candidate"
@@ -3346,6 +3359,133 @@ class RunExecutor:
             )
         raise CanonicalExecutionWorkDriftError(
             "Agent or Session model state changed during fresh turn preparation"
+        )
+
+    async def _prepare_compaction_model_request(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        current_request: RunRequest,
+    ) -> RunRequest:
+        """Persist and resolve the current Lightweight compaction operation."""
+        async with self.session_manager() as session:
+            locked_agent = await self.agent_repository.lock_by_id(session, agent_id)
+            locked_session = await self.agent_session_repository.lock_by_id(
+                session,
+                session_id,
+            )
+            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
+                session,
+                run_id,
+            )
+            if locked_agent is None or locked_session is None or locked_run is None:
+                raise ValueError("AgentSession, Agent, or AgentRun not found")
+            if locked_session.owner_generation != owner_generation:
+                raise CanonicalExecutionOwnerGenerationStaleError(
+                    "Session owner generation is stale"
+                )
+            if locked_session.agent_id != agent_id:
+                raise ValueError("AgentSession does not belong to Agent")
+            if locked_run.session_id != session_id:
+                raise ValueError("AgentRun does not belong to AgentSession")
+            if locked_agent.workspace_id != current_request.workspace_id:
+                raise ValueError("Run request does not belong to Agent Workspace")
+
+            operation_state = locked_run.model_operation_state or ModelOperationState(
+                foreground=None,
+                compaction=None,
+            )
+            operation = operation_state.compaction
+            if operation is None or operation.terminal_reason is not None:
+                option = next(
+                    (
+                        candidate
+                        for candidate in locked_agent.selectable_model_options
+                        if candidate.label == locked_agent.lightweight_model_label
+                    ),
+                    None,
+                )
+                if option is None:
+                    raise ProfileResolutionRuntimeError(
+                        _profile_resolution_failure(
+                            ModelTargetNotFound(
+                                model_target_label=locked_agent.lightweight_model_label
+                            )
+                        )
+                    )
+                profile = RequestedInferenceProfile(
+                    model_target_label=option.label,
+                    reasoning_effort=None,
+                    enabled_execution_options=[],
+                )
+                operation = build_model_operation(
+                    option=option,
+                    profile=profile,
+                    kind=ModelOperationKind.COMPACTION,
+                    operation_id=uuid7().hex,
+                    recorded_at=datetime.datetime.now(datetime.UTC),
+                )
+            try:
+                selection = await select_model_operation_candidate(
+                    session,
+                    operation=operation,
+                    workspace_id=locked_agent.workspace_id,
+                    health_repository=self.model_candidate_health_repository,
+                    recorded_at=datetime.datetime.now(datetime.UTC),
+                    session_id=None,
+                    reservation=None,
+                )
+            except ModelOperationChainExhaustedError as exc:
+                await self.session_lifecycle.agent_run_repository.update(
+                    session,
+                    run_id,
+                    AgentRunPatch(
+                        model_operation_state=ModelOperationState(
+                            foreground=operation_state.foreground,
+                            compaction=exc.operation,
+                        )
+                    ),
+                )
+                raise ProfileResolutionRuntimeError(
+                    _profile_resolution_failure(
+                        ModelCandidateChainExhausted(exc.operation)
+                    )
+                ) from exc
+            await self.session_lifecycle.agent_run_repository.update(
+                session,
+                run_id,
+                AgentRunPatch(
+                    model_operation_state=ModelOperationState(
+                        foreground=operation_state.foreground,
+                        compaction=selection.operation,
+                    )
+                ),
+            )
+            candidate = selection.candidate
+
+        runtime = await resolve_model_candidate_runtime(
+            agent_id=agent_id,
+            workspace_id=current_request.workspace_id,
+            selection=candidate.model_selection,
+            settings=candidate.settings,
+            integration_repository=self.integration_repository,
+            session_manager=self.session_manager,
+        )
+        if runtime.failure:
+            raise ProfileResolutionRuntimeError(
+                _profile_resolution_failure(runtime.error)
+            )
+        value = runtime.value
+        return dataclasses.replace(
+            current_request,
+            compaction_provider_integration_id=value.provider_integration_id,
+            compaction_model=value.model,
+            compaction_provider=value.provider,
+            compaction_credential_kwargs=value.credential_kwargs,
+            compaction_max_input_tokens=value.effective_input_tokens,
         )
 
     async def _publish_session_agent_tree_changes(

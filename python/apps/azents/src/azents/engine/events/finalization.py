@@ -55,10 +55,26 @@ class FailedRunEventStore:
             session,
             run_id=run_id,
         )
+        run = await self.run_repo.get_by_id(session, run_id)
+        terminal_operations = (
+            []
+            if run is None or run.model_operation_state is None
+            else [
+                operation
+                for operation in (
+                    run.model_operation_state.foreground,
+                    run.model_operation_state.compaction,
+                )
+                if operation is not None and operation.terminal_reason is not None
+            ]
+        )
+        if len(terminal_operations) > 1:
+            raise RuntimeError("Failed Run has multiple terminal model operations")
         metadata = FailedRunFailureMetadata.from_retry_state(
             retry_state,
             finalization_reason=reason,
             action_hint=action_hint,
+            model_operation=terminal_operations[0] if terminal_operations else None,
         )
         error_event = await self.transcript_repo.append(
             session,

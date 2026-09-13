@@ -131,6 +131,9 @@ class ModelProviderFailure(ModelCallError):
     provider: str
     integration: str | None
     model: str
+    route_provider: str
+    route_integration: str | None
+    route_model: str
     failure_code: str
     fingerprint: str
 
@@ -198,6 +201,9 @@ class ModelProviderFailure(ModelCallError):
         self.provider = safe_provider
         self.integration = safe_integration
         self.model = safe_model
+        self.route_provider = provider
+        self.route_integration = integration
+        self.route_model = model
         self.failure_code = f"model_provider_{category.value}"
         self.fingerprint = model_provider_failure_fingerprint(self)
 

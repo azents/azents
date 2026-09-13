@@ -519,7 +519,7 @@ class ManualCompactor(Protocol):
         compaction_id: str,
         summarize: "SummaryGenerator",
         on_started: Callable[[], Awaitable[None]] | None = None,
-        summary_context_window_tokens: int | None = None,
+        summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
         on_committing: CompactionCommitAction | None = None,

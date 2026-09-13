@@ -260,7 +260,7 @@ class EventAutoCompactionFilter:
         session_id: str,
         compactor: ManualCompactor,
         summarize: SummaryGenerator,
-        max_input_tokens: int,
+        max_input_tokens: int | Callable[[], int],
         auto_compaction_threshold_tokens: int | None,
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
@@ -271,10 +271,15 @@ class EventAutoCompactionFilter:
         self.compactor = compactor
         self.summarize = summarize
         self._max_input_tokens = max_input_tokens
+        initial_max_input_tokens = (
+            max_input_tokens
+            if isinstance(max_input_tokens, int)
+            else max_input_tokens()
+        )
         self._threshold_tokens = (
             auto_compaction_threshold_tokens
             if auto_compaction_threshold_tokens is not None
-            else compute_auto_compaction_threshold_tokens(max_input_tokens)
+            else compute_auto_compaction_threshold_tokens(initial_max_input_tokens)
         )
         self.compaction_id_factory = compaction_id_factory
         self.on_compaction_started = on_compaction_started
@@ -377,7 +382,7 @@ class EventCompactor:
         compaction_id: str,
         summarize: SummaryGenerator,
         on_started: Callable[[], Awaitable[None]] | None = None,
-        summary_context_window_tokens: int | None = None,
+        summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
         on_committing: CompactionCommitAction | None = None,
@@ -397,8 +402,15 @@ class EventCompactor:
         if on_started is not None:
             await on_started()
 
+        if summary_context_window_tokens is None or isinstance(
+            summary_context_window_tokens,
+            int,
+        ):
+            resolved_context_window_tokens = summary_context_window_tokens
+        else:
+            resolved_context_window_tokens = summary_context_window_tokens()
         summary_budget = compute_summary_budget(
-            summary_context_window_tokens or self.summary_context_window_tokens
+            resolved_context_window_tokens or self.summary_context_window_tokens
         )
         summary = await summarize(old_events, summary_budget)
         if not summary.strip():

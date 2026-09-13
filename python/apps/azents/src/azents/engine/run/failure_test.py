@@ -56,6 +56,7 @@ def test_provider_retry_state_hides_diagnostics_from_public_presentation() -> No
     metadata = FailedRunFailureMetadata.from_retry_state(
         retry_state,
         finalization_reason="retry_exhausted",
+        model_operation=None,
     )
 
     assert metadata.error_kind == "model_provider"
@@ -93,6 +94,7 @@ def test_runtime_retry_state_preserves_existing_public_diagnostics() -> None:
     metadata = FailedRunFailureMetadata.from_retry_state(
         retry_state,
         finalization_reason="retry_exhausted",
+        model_operation=None,
     )
 
     assert metadata.error_kind == "runtime"
