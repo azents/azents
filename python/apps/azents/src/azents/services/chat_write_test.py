@@ -329,6 +329,7 @@ def _failed_run_system_error_payload() -> dict[str, JSONValue]:
         failure=FailedRunFailureMetadata.from_retry_state(
             retry_state,
             finalization_reason="retry_exhausted",
+            model_operation=None,
         ),
     ).model_dump(mode="json", exclude_none=True)
 

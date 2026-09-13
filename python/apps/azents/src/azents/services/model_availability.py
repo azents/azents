@@ -165,9 +165,7 @@ class SessionModelAvailabilityService:
                             candidate=expected,
                             health_generation=health.generation,
                             reservation_generation=(
-                                1
-                                if current is None
-                                else current.reservation_generation + 1
+                                context.session.primary_model_reservation_generation + 1
                             ),
                             claim_token=health.claim_token,
                             created_at=claim.observation.server_time,
@@ -324,13 +322,16 @@ class SessionModelAvailabilityService:
                 if primary_observation.health is not None
                 else None
             )
-        else:
+        elif primary_observation.status is ModelCandidateHealthStatus.CLAIMED:
             state = "probing"
             deadline = (
                 primary_observation.health.claim_until
                 if primary_observation.health is not None
                 else None
             )
+        else:
+            state = "probing"
+            deadline = None
         fallback_display = await self._first_usable_fallback_display(context)
         selection = context.primary.model_selection
         return SessionModelAvailability(

@@ -213,6 +213,9 @@ class RunContext:
     complete_model_operation_in_session: (
         Callable[[AsyncSession, ModelOperationKind], Awaitable[None]] | None
     ) = None
+    prepare_compaction_request: Callable[[RunRequest], Awaitable[RunRequest]] | None = (
+        None
+    )
 
 
 class AgentEngineProtocol(Protocol):

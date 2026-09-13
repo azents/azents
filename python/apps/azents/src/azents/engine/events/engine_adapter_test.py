@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import dataclasses
 import datetime
 import functools
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
@@ -544,7 +545,7 @@ class _Compactor:
         compaction_id: str,
         summarize: SummaryGenerator,
         on_started: Callable[[], Awaitable[None]] | None = None,
-        summary_context_window_tokens: int | None = None,
+        summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
         on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
@@ -553,9 +554,16 @@ class _Compactor:
         self.reason = reason
         if on_started is not None:
             await on_started()
+        if summary_context_window_tokens is None or isinstance(
+            summary_context_window_tokens,
+            int,
+        ):
+            resolved_context_window_tokens = summary_context_window_tokens
+        else:
+            resolved_context_window_tokens = summary_context_window_tokens()
         summary = await summarize(
             transcript,
-            compute_summary_budget(summary_context_window_tokens),
+            compute_summary_budget(resolved_context_window_tokens),
         )
         if summary_enricher is not None:
             summary = await summary_enricher(
@@ -600,7 +608,7 @@ class _FailingCompactor:
         compaction_id: str,
         summarize: SummaryGenerator,
         on_started: Callable[[], Awaitable[None]] | None = None,
-        summary_context_window_tokens: int | None = None,
+        summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
         on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
@@ -2490,6 +2498,19 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         tool_names=["service__probe"]
     )
     captured_prompts: dict[str, str] = {}
+    prepared_requests: list[RunRequest] = []
+
+    async def prepare_compaction_request(request: RunRequest) -> RunRequest:
+        """Replace the compaction route before summary dispatch."""
+        prepared_requests.append(request)
+        return dataclasses.replace(
+            request,
+            compaction_provider=LLMProvider.ANTHROPIC,
+            compaction_provider_integration_id="integration-prepared",
+            compaction_model="claude-prepared",
+            compaction_credential_kwargs={"api_key": "prepared"},
+            compaction_max_input_tokens=8_000,
+        )
 
     async def summarize(
         *,
@@ -2504,14 +2525,12 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         session_id: str | None = None,
     ) -> str:
         """Replace summary model call."""
-        del (
-            provider,
-            provider_integration_id,
-            model,
-            credential_kwargs,
-            max_output_tokens,
-            session_id,
-        )
+        captured_prompts["provider"] = provider.value
+        captured_prompts["provider_integration_id"] = provider_integration_id or ""
+        captured_prompts["model"] = model
+        captured_prompts["api_key"] = str(credential_kwargs["api_key"])
+        captured_prompts["max_output_tokens"] = str(max_output_tokens)
+        del session_id
         captured_prompts["system_prompt"] = system_prompt
         captured_prompts["user_prompt"] = user_prompt
         return f"summary::{conversation_text}"
@@ -2548,7 +2567,10 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 inference_state=None,
                 compaction_provider_integration_id=None,
             ),
-            _run_context(),
+            dataclasses.replace(
+                _run_context(),
+                prepare_compaction_request=prepare_compaction_request,
+            ),
         )
     ]
 
@@ -2565,6 +2587,12 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert (
         "existing checkpoint as the previous state" in captured_prompts["user_prompt"]
     )
+    assert len(prepared_requests) == 1
+    assert captured_prompts["provider"] == "anthropic"
+    assert captured_prompts["provider_integration_id"] == "integration-prepared"
+    assert captured_prompts["model"] == "claude-prepared"
+    assert captured_prompts["api_key"] == "prepared"
+    assert captured_prompts["max_output_tokens"] == "4000"
     assert (await store.load("agent-1", "session-1")).tool_names == []
 
 

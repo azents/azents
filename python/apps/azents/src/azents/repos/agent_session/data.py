@@ -112,6 +112,11 @@ class AgentSession(BaseModel):
         default=None,
         description="Active one-shot Primary candidate reservation",
     )
+    primary_model_reservation_generation: int = Field(
+        default=0,
+        ge=0,
+        description="Monotonic Primary reservation generation high-water mark",
+    )
     title_model_operation_state: ModelOperationSnapshot | None = Field(
         default=None,
         description="Durable automatic-title model candidate operation",

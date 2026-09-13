@@ -5,6 +5,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcome,
+    ModelOperationKind,
+    ModelOperationSnapshot,
+    ModelOperationTerminalReason,
+)
 from azents.engine.run.errors import ModelStreamCallKind
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
@@ -239,6 +245,7 @@ class FailedRunFailureMetadata(BaseModel):
     failure_code: str | None = Field(default=None)
     action_hint: str | None = Field(default=None)
     attempts: list[FailedRunAttemptSummary] = Field(default_factory=list)
+    model_operation: "FailedRunModelOperationSummary | None" = Field(default=None)
 
     @classmethod
     def from_retry_state(
@@ -247,6 +254,7 @@ class FailedRunFailureMetadata(BaseModel):
         *,
         finalization_reason: FailedRunFinalizationReason,
         action_hint: str | None = None,
+        model_operation: ModelOperationSnapshot | None,
     ) -> "FailedRunFailureMetadata":
         """Build terminal metadata from the latest retry state."""
         return cls(
@@ -259,4 +267,37 @@ class FailedRunFailureMetadata(BaseModel):
             failure_code=retry_state.public_failure_code,
             action_hint=action_hint,
             attempts=retry_state.public_attempts(),
+            model_operation=(
+                FailedRunModelOperationSummary.from_operation(model_operation)
+                if model_operation is not None
+                else None
+            ),
+        )
+
+
+class FailedRunModelOperationSummary(BaseModel):
+    """Bounded final candidate outcomes retained after Run terminalization."""
+
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(min_length=32, max_length=32)
+    kind: ModelOperationKind
+    semantic_label: str = Field(min_length=1)
+    outcomes: list[ModelOperationCandidateOutcome] = Field(min_length=1, max_length=5)
+    terminal_reason: ModelOperationTerminalReason
+
+    @classmethod
+    def from_operation(
+        cls,
+        operation: ModelOperationSnapshot,
+    ) -> "FailedRunModelOperationSummary":
+        """Copy only final bounded candidate outcome evidence."""
+        if operation.terminal_reason is None:
+            raise ValueError("Terminal failure metadata requires a terminal operation")
+        return cls(
+            operation_id=operation.operation_id,
+            kind=operation.kind,
+            semantic_label=operation.semantic_label,
+            outcomes=operation.outcomes,
+            terminal_reason=operation.terminal_reason,
         )
