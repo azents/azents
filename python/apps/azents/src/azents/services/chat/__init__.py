@@ -569,7 +569,7 @@ class ChatSessionService:
             or locked_session.status is not AgentSessionStatus.ACTIVE
         ):
             return agent_session
-        locked_agent = await self.agent_repository.get_by_id(
+        locked_agent = await self.agent_repository.lock_by_id(
             session,
             locked_session.agent_id,
         )
