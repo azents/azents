@@ -2037,6 +2037,14 @@ class AgentSessionUnreadTerminalRunAcknowledgeRequest(BaseModel):
 class AgentSessionModelAvailabilityResponse(SessionModelAvailability):
     """Authoritative Session model availability response."""
 
+    @classmethod
+    def from_domain(
+        cls,
+        availability: SessionModelAvailability,
+    ) -> "AgentSessionModelAvailabilityResponse":
+        """Convert the core availability projection to its public response."""
+        return cls.model_validate(availability.model_dump())
+
 
 class AgentSessionPrimaryModelReserveRequest(ReservePrimaryModelRequest):
     """Request one exact Primary recovery reservation."""

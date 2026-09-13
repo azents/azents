@@ -2198,7 +2198,7 @@ async def get_agent_session_model_availability(
     )
     match result:
         case Success(availability):
-            return AgentSessionModelAvailabilityResponse.model_validate(availability)
+            return AgentSessionModelAvailabilityResponse.from_domain(availability)
         case Failure(SessionModelAvailabilityNotFound()):
             raise HTTPException(status_code=404, detail="Session not found.")
         case _:
@@ -2228,7 +2228,7 @@ async def reserve_agent_session_primary_model(
     )
     if result.success:
         return JSONResponse(
-            content=AgentSessionModelAvailabilityResponse.model_validate(
+            content=AgentSessionModelAvailabilityResponse.from_domain(
                 result.value
             ).model_dump(mode="json")
         )
@@ -2239,7 +2239,7 @@ async def reserve_agent_session_primary_model(
         case SessionModelReservationConflict(availability=availability):
             return JSONResponse(
                 status_code=409,
-                content=AgentSessionModelAvailabilityResponse.model_validate(
+                content=AgentSessionModelAvailabilityResponse.from_domain(
                     availability
                 ).model_dump(mode="json"),
             )
@@ -2269,7 +2269,7 @@ async def cancel_agent_session_primary_model_reservation(
     )
     if result.success:
         return JSONResponse(
-            content=AgentSessionModelAvailabilityResponse.model_validate(
+            content=AgentSessionModelAvailabilityResponse.from_domain(
                 result.value
             ).model_dump(mode="json")
         )
@@ -2280,7 +2280,7 @@ async def cancel_agent_session_primary_model_reservation(
         case SessionModelReservationConflict(availability=availability):
             return JSONResponse(
                 status_code=409,
-                content=AgentSessionModelAvailabilityResponse.model_validate(
+                content=AgentSessionModelAvailabilityResponse.from_domain(
                     availability
                 ).model_dump(mode="json"),
             )
