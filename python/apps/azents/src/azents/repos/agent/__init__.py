@@ -93,7 +93,11 @@ class AgentRepository:
 
     async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
         """Fetch Agent by ID."""
-        rdb_agent = await session.get(RDBAgent, agent_id)
+        rdb_agent = await session.get(
+            RDBAgent,
+            agent_id,
+            populate_existing=True,
+        )
         if rdb_agent is None:
             return None
         return self._build_row(rdb_agent)

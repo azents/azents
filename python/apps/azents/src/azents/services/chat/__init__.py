@@ -560,12 +560,6 @@ class ChatSessionService:
         agent = await self.agent_repository.get_by_id(session, agent_session.agent_id)
         if agent is None or not _session_profile_is_stale(agent, agent_session):
             return agent_session
-        locked_agent = await self.agent_repository.lock_by_id(
-            session,
-            agent_session.agent_id,
-        )
-        if locked_agent is None or not locked_agent.selectable_model_options:
-            return agent_session
         locked_session = await self.agent_session_repository.lock_by_id(
             session,
             agent_session.id,
@@ -575,7 +569,15 @@ class ChatSessionService:
             or locked_session.status is not AgentSessionStatus.ACTIVE
         ):
             return agent_session
-        if not _session_profile_is_stale(locked_agent, locked_session):
+        locked_agent = await self.agent_repository.get_by_id(
+            session,
+            locked_session.agent_id,
+        )
+        if (
+            locked_agent is None
+            or not locked_agent.selectable_model_options
+            or not _session_profile_is_stale(locked_agent, locked_session)
+        ):
             return locked_session
         model_target_label, reasoning_effort = _session_profile_fallback(locked_agent)
         return await self.agent_session_repository.set_applied_inference_profile(
