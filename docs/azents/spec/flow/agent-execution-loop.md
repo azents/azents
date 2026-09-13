@@ -20,6 +20,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/model_transport.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
+  - python/apps/azents/src/azents/engine/run/failure.py
+  - python/apps/azents/src/azents/engine/run/provider_failure.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
@@ -45,6 +47,7 @@ code_paths:
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_availability.py
+  - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/agent_session_input.py

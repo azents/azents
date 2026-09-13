@@ -7,7 +7,6 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
   - proto/azents/runtime_control/v1/**
-  - proto/azents/runtime_web/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
@@ -47,6 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/api/public/runtime_web/**
   - python/apps/azents/src/azents/runtime_web_gateway/**
+  - python/apps/azents/bin/runtime-web-gateway.sh
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents/src/azents/worker/health.py
   - python/apps/azents/src/azents/utils/logging.py

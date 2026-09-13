@@ -7,7 +7,6 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
   - proto/azents/runtime_control/v1/**
-  - proto/azents/runtime_web/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
