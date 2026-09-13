@@ -1990,17 +1990,22 @@ def run_web_external_account_link_management(
             (By.CSS_SELECTOR, '[data-testid="external-account-links"]')
         )
     )
-    disconnected_row = wait.until(
-        ec.visibility_of_element_located(
+    wait.until(
+        ec.invisibility_of_element_located(
             (
                 By.CSS_SELECTOR,
                 f'[data-testid="external-account-link-{linked.link_id}"]',
             )
         )
     )
-    wait.until(lambda _: "Disconnected" in disconnected_row.text)
+    empty_state = wait.until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//*[normalize-space()='No external accounts connected']")
+        )
+    )
+    assert empty_state.is_displayed()
 
-    def authoritative_revoked() -> bool:
+    def authoritative_active_list_empty() -> bool:
         listed = _json_response(
             requests.get(
                 _link_url(azents_public_server_url, "account-links"),
@@ -2008,17 +2013,12 @@ def run_web_external_account_link_management(
                 timeout=10,
             )
         )
-        return any(
-            isinstance(item, dict)
-            and item.get("id") == linked.link_id
-            and item.get("state") == "revoked"
-            for item in _list(listed["items"])
-        )
+        return _list(listed["items"]) == []
 
     wait_until(
-        authoritative_revoked,
+        authoritative_active_list_empty,
         timeout=15,
         interval=0.2,
-        message="Web disconnect did not reach authoritative revoked state",
+        message="Web disconnect did not remove the link from the active list",
     )
     browser_driver.set_window_size(1280, 844)

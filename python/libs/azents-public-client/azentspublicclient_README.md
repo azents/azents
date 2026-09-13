@@ -555,6 +555,7 @@ Class | Method | HTTP request | Description
  - [GitWorktreeWorkspaceItemResponse](azentspublicclient/docs/GitWorktreeWorkspaceItemResponse.md)
  - [GlobalAccountLinkListResponse](azentspublicclient/docs/GlobalAccountLinkListResponse.md)
  - [GlobalAccountLinkResponse](azentspublicclient/docs/GlobalAccountLinkResponse.md)
+ - [GlobalAccountLinkUnlinkResponse](azentspublicclient/docs/GlobalAccountLinkUnlinkResponse.md)
  - [GoalAction](azentspublicclient/docs/GoalAction.md)
  - [GoalStateResponse](azentspublicclient/docs/GoalStateResponse.md)
  - [GoalStatusUpdateRequest](azentspublicclient/docs/GoalStatusUpdateRequest.md)
