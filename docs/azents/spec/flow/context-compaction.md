@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
+  - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/repos/scheduled_task/presentation.py
   - python/apps/azents/src/azents/engine/run/commands.py
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -24,8 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-09-12
-spec_version: 40
+last_verified_at: 2026-09-13
+spec_version: 41
 ---
 
 # Context Compaction
@@ -41,13 +42,14 @@ fallback fill missing limits. An unset option cap uses that resolved default; an
 explicit option cap is clamped to the resolved maximum.
 
 For each prepared inference-bearing input, runtime then takes the prompt-selected
-foreground option's resolved effective window and the Agent lightweight option's
+foreground candidate's resolved effective window and the Agent lightweight Primary's
 resolved effective window and uses the smaller value as
 `effective_max_input_tokens`. An option context cap is stored as intent and may be
-larger than its current model maximum; the maximum still wins. Effective
-lightweight resolution uses the Agent's stored lightweight option model
-snapshot and settings. Workspace defaults are copied into the Agent only at create time and are not read
-by runtime compaction. Automatic compaction threshold is then computed by
+larger than its current model maximum; the maximum still wins. Effective lightweight resolution
+starts from the Agent's stored lightweight label Primary candidate and settings. A required
+compaction operation freezes the label's ordered candidate chain separately from foreground
+sampling. Workspace defaults are copied into the Agent only at create time and are not read by
+runtime compaction. Automatic compaction threshold is then computed by
 `compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for one model-call attempt. After an automatic retry backoff, the next model attempt freshly resolves the current Session-applied profile and may replace both values before execution; recovered retry state follows the same boundary. A later prepared profile may also replace them at the next ordinary turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
 model-visible token estimate for events appended after that marker. If no turn marker exists, it falls
 back to estimating the full selected transcript.
@@ -76,8 +78,8 @@ from current durable history.
 
 Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
 ChatGPT OAuth use an operation-scoped official OpenAI SDK client; other providers use the shared
-LiteLLM Responses helper. The compaction model is resolved from the Agent lightweight option
-snapshot. Its model-scoped context cap participates in the effective input window, while its
+LiteLLM Responses helper. The compaction model is resolved from the current candidate in the frozen
+Agent lightweight chain. Its model-scoped context cap participates in the effective input window, while its
 model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
 
 Compaction summary generation is not user-facing streaming output, although the transport uses a
@@ -87,12 +89,14 @@ standard OpenAI-compatible helper sends ordinary user input plus top-level instr
 `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
 Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
 LiteLLM helper. Both adapter families preserve only a bounded redacted provider message and typed safe
-diagnostics for classified provider failures. An automatic classified compaction provider failure
-consumes the active model turn's standard full retry budget regardless of category; the next attempt
-rebuilds from current durable history. An unclassified provider outcome bypasses compaction provider
-retry state and follows the ordinary internal-error path. Manual compaction uses its command Run's same
-failed-run controller and fresh budget. Provider retry hints are diagnostic and do not replace the
-standard backoff schedule.
+diagnostics for classified provider failures. A normalized compaction `quota_or_billing` failure
+records the candidate outcome, shares its Workspace cooldown, and advances immediately to the next
+compatible frozen lightweight candidate without consuming same-candidate retry. Other classified
+compaction provider failures consume the active model turn's standard full retry budget; the next
+attempt rebuilds from current durable history while preserving the compaction operation slot. An
+unclassified provider outcome bypasses compaction provider retry state and follows the ordinary
+internal-error path. Manual compaction uses its command Run's same failed-run controller and fresh
+operation chain. Provider retry hints are diagnostic and do not replace the standard backoff schedule.
 
 The summary budget is based on the model context window:
 
@@ -296,6 +300,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-13** (spec_version 41) — Added an independent frozen Lightweight candidate chain for
+  compaction, quota-before-retry progression, shared Workspace cooldown, and recovery-preserved
+  compaction cursor state.
 - **2026-09-12** (spec_version 40) — Allowed freshly resolved retry profiles to
   replace effective context and compaction thresholds before the next model
   attempt.

@@ -2265,6 +2265,10 @@ export function useChatSessionContainer(
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
     void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
     void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
+    void utils.chat.getAgentSessionModelAvailability.invalidate({
+      agentId: agent.id,
+      sessionId,
+    });
   }, [agent.id, sessionId, sessionRunState, utils.chat]);
 
   useEffect(() => {

@@ -1,7 +1,8 @@
 ---
 title: "Model Quota Fallback Design"
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-13
+implemented: 2026-09-13
 tags: [models, backend, engine, api, frontend, reliability]
 document_role: primary
 document_type: design
@@ -30,7 +31,8 @@ Compaction resolves the Agent Lightweight model inside the foreground Run and us
 - `REQ-2`, `REQ-3`, `REQ-5` → bounded AgentRun operation slots and quota-before-retry progression (`ADR-D2`, `ADR-D6`; M4–M6).
 - `REQ-4` → PostgreSQL cooldown/probe authority (`ADR-D3`; M7).
 - `REQ-6` → fenced Session reservation and DB-derived availability (`ADR-D5`; M8, M10).
-- `REQ-8` → bounded route provenance, diagnostics, metrics, and deterministic E2E (`ADR-D7`; M9, M11).
+- `REQ-8` → bounded route provenance, diagnostics, metrics, and layered deterministic verification
+  (`ADR-D7`, `ADR-D8`; M9, M11).
 
 ## Architecture and Ownership
 
@@ -190,45 +192,86 @@ Composer model intent remains label-only. Primary-derived effort and execution-o
 
 Run retry/exhaustion UI consumes bounded terminal chain metadata and keeps the existing manual `Retry run` action distinct from Primary reservation. REST and WebSocket decode treat authoritative null/absence and generations consistently with current live-state replacement rules. Storybook covers each pure chain, badge, reservation, conflict, exhaustion, read-only, error, and mobile state.
 
-## M11. Deterministic E2E-First Test Strategy
+## M11. Credential-Free E2E-First Layered Test Strategy
 
-### Primary verification matrix
+All verification described here is required CI evidence. E2E remains the primary layer for
+observable product behavior, while deterministic integration tests own exact internal concurrency
+and recovery interleavings.
 
-Required credential-free E2E covers:
+### Required product-path E2E
 
-1. migrated one-candidate rows consumed through the clean v1 Agent/Workspace chain API, plus chain CRUD, reorder, copy, validation, and read-only authorization;
-2. Workspace chain deep-copy to a new Agent and later default independence;
-3. foreground Primary quota followed by compatible fallback success with one durable answer and no inline marker;
-4. reasoning/execution incompatibility skip and unchanged explicit request;
-5. quota versus ordinary rate-limit behavior;
-6. same logical operation never calling an already quota-attempted candidate again;
-7. Workspace cooldown shared by concurrent Sessions;
-8. cooldown expiry with one half-open winner, busy skips, crash/lease expiry, and stale-completion fencing;
-9. worker shutdown/handover preserving foreground and compaction slots, cursor, retry state, and probe ownership;
-10. User Stop and manual failed-run retry fresh-chain behavior;
-11. Primary reserve, idempotency, conflict, cancel, expiry, stale Primary, transfer, success, and renewed quota;
-12. a concurrently dispatched quota result advancing candidate-health generation after reservation creation, revoking `primary_next`, rejecting stale transfer, and converging through REST/live invalidation;
-13. Lightweight compaction fallback, stale-plan safety, and foreground-slot independence;
-14. Lightweight title fallback, envelope compatibility, deterministic-title retention, and manual-title race;
-15. chain exhaustion terminal diagnostics and Retry entry;
-16. immutable actual-candidate turn provenance and explicit details presentation;
-17. Redis unavailable/empty recovery from PostgreSQL authority;
-18. desktop Agent/Workspace editor and Composer picker states;
-19. mobile candidate cards, Drawer recovery action, keyboard/non-pointer reorder alternative, and scroll reachability.
+Credential-free public API and browser E2E covers:
 
-The migration transform and database constraints are primarily verified by migration/schema
-integration tests. Required E2E starts from a migrated representative state and proves that the new
-application consumes and updates it correctly; it does not replace the migration harness.
+1. migrated one-candidate state consumed through the clean v1 chain API;
+2. Agent/Workspace chain CRUD, reorder, settings copy, validation, authorization, and
+   Workspace-to-Agent independence;
+3. Primary `quota_or_billing` followed by compatible fallback success with one durable response,
+   unchanged request intent, actual-candidate provenance, and no assistant-bubble marker;
+4. representative incompatibility skip, ordinary rate-limit distinction, and same-operation
+   quota-candidate non-repetition;
+5. Workspace cooldown observed across separate Sessions and representative post-cooldown recovery;
+6. Primary reservation create, idempotent read, cancel, transfer, success/re-quota reconciliation,
+   and user-safe conflict responses;
+7. chain exhaustion and manual failed-run recovery presentation;
+8. representative Lightweight compaction and automatic-title fallback outcomes;
+9. authoritative availability convergence through public Session/live reads;
+10. desktop Agent/Workspace chain editing and Composer `Fallback` / `Primary next` presentation;
+11. mobile candidate editing and recovery controls, including non-pointer reorder and scroll
+    reachability.
 
-### Test substrate
+E2E scenarios use the deterministic provider fake only to produce controlled provider outcomes and
+bounded request-journal evidence. They create product state through supported APIs and documented
+test fixtures, not feature-test database writes.
 
-Extend the deterministic model-provider fake or AIMock matching so scripted outcomes select integration/model and expose attempt-admitted/release barriers plus a request journal. Add DB-time injection or a bounded test control for cooldown/reservation deadlines. Use explicit Worker shutdown/handover controls and authoritative API/DB state polling. Fixed sleeps never establish ordering.
+### Required deterministic integration verification
 
-The provider fake is a prerequisite/evidence surface, not a second product implementation. Required CI uses no live provider credential. Optional live quota tests may diagnose provider classification but cannot satisfy acceptance criteria.
+Repository, service, and Worker integration tests cover:
 
-### Supporting checks
+1. migration transforms, database constraints, and strict nested decoding;
+2. candidate-health quota generation renewal and older-claim revocation;
+3. half-open single-flight CAS, busy outcomes, probe lease expiry, and stale success/failure
+   fencing;
+4. reservation idempotency, transfer, cancel, expiry, exact owner/generation checks, and
+   transaction rollback;
+5. the concurrent newer-quota race that removes `primary_next`, rejects stale transfer, and
+   conditionally cleans the Session reservation;
+6. foreground and compaction operation-state serialization, cursor preservation, retry separation,
+   and Worker handover/recovery;
+7. quota interception before generic retry publication and User Stop precedence;
+8. compaction candidate progression, stale-plan revalidation, and foreground-slot independence;
+9. title candidate progression, independent retry counters, generation ownership, and
+   manual-title/supersession races;
+10. Redis-unavailable or restored-empty reconstruction from PostgreSQL;
+11. bounded provenance, terminal diagnostics, redaction, and metrics-cardinality invariants.
 
-Repository and unit tests cover typed validation, migration transforms/checks, catalog snapshot construction, exact duplicate identity, operation-state serialization, owner/generation CAS, retry interception order, title counters, live/public schema decoding, metrics cardinality, and redaction. Run backend Ruff, configured type checker, focused/full pytest as appropriate; regenerate OpenAPI/Python client and run TypeScript format, lint, typecheck, build, Storybook/static checks, public API E2E, Web E2E, code review, and spec review.
+Concurrency tests use production repository/transaction code, explicit admitted/release barriers,
+controlled database deadlines, and authoritative state assertions. Fixed sleeps do not establish
+ordering.
+
+### Coverage accountability
+
+Every `REQ-8` scenario has one primary required evidence owner and may have a complementary layer.
+Representative E2E proves that the integrated product path reaches the internal authorities;
+deterministic integration tests prove exhaustive timing-sensitive outcomes. Exhaustive internal
+permutations are not duplicated in E2E unless the additional product-boundary evidence is material.
+Removing an E2E case requires preserving the observable journey and retaining required deterministic
+verification of the displaced contract.
+
+| Required evidence group | Primary required owner | Complementary evidence |
+| --- | --- | --- |
+| Clean chain API, Workspace-to-Agent independence, validation | `test_model_selection.py` required E2E | Agent/Workspace service and migration tests |
+| Primary quota, compatible fallback, one answer, route provenance, reservation | `test_model_quota_fallback.py` required E2E | `worker/run/executor_test.py`, `repos/model_candidate_health/repository_test.py` |
+| Candidate operation shape, duplicate/non-repetition, exhaustion | `core/model_operation_test.py` | quota fallback required E2E |
+| Half-open CAS, busy/expiry/stale completion, reservation generation and rollback | `repos/model_candidate_health/repository_test.py` | public availability/reservation E2E |
+| Frozen foreground/compaction preparation, quota-before-retry, Stop precedence | `worker/run/executor_test.py` | required fallback E2E |
+| Title candidate progression and manual-title ownership | `services/session_title_test.py` | deterministic initial-title E2E |
+| Desktop/mobile editor and open-Session recovery convergence | `test_model_quota_fallback_web.py` browser E2E | Web unit tests and Storybook states |
+| Migration transform and nested database constraints | model quota migration/schema integration tests | migrated representative chain API E2E |
+
+Optional live-provider quota tests remain diagnostic only and cannot satisfy acceptance criteria.
+Required validation includes backend Ruff, the configured type checker, focused/full pytest,
+migration checks, generated-client verification, TypeScript format/lint/typecheck/build,
+Storybook/static checks, public API E2E, browser E2E, code review, and spec review.
 
 ## Security, Permissions, and Data Safety
 
@@ -309,7 +352,7 @@ No provider adapter, failure taxonomy, canonical transcript, existing tool-call 
 
 ## Design Authority
 
-- Design revision: `2`
+- Design revision: `3`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -323,7 +366,7 @@ No provider adapter, failure taxonomy, canonical transcript, existing tool-call 
 | M8 | Bounded Session Primary reservation, transfer, and DB-derived availability | `model-260912/REQ-4`, `REQ-6`; `ADR-D5` | `decided` |
 | M9 | Immutable applied-route provenance, bounded terminal diagnostics, and low-cardinality telemetry | `model-260912/REQ-8`; `ADR-D7` | `decided` |
 | M10 | Shared nested settings editor and Composer/picker/mobile recovery presentation | `model-260912/REQ-1`, `REQ-6`; `ADR-D4`, `ADR-D5` | `derived` |
-| M11 | Credential-free deterministic provider fake and E2E-first acceptance matrix | `model-260912/REQ-8`; `ADR-D7`; current E2E-primary Spec | `decided` |
+| M11 | Credential-free E2E-first layered verification: product-visible and representative cross-boundary E2E plus deterministic integration ownership of internal races and recovery | `model-260912/REQ-8`; `ADR-D7`, `ADR-D8`; current E2E-primary Spec | `decided` |
 | M12 | Existing label intent, provider classification, canonical transcript, retry finalizer, Stop, and authorization boundaries retained | `model-260912/REQ-2`, `REQ-3`, `REQ-5`; current Agent, conversation, execution-loop, run-resume, and compaction Specs | `existing` |
 
 Authority audit result: every Requirement has at least one mechanism, every material mechanism has confirmed Requirement/ADR or unchanged Spec authority, and no optional second routing, cooldown, mutation, or response authority remains.
@@ -332,14 +375,16 @@ Authority audit result: every Requirement has at least one mechanism, every mate
 
 - Mode: `Autonomous`
 - Decision owner: delegated autonomous technical decision owner
-- Approved on: 2026-09-12
-- Approved Design revision: `2`
+- Approved on: 2026-09-13
+- Approved Design revision: `3`
 - Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12`
 - Approved scope: Agent/Workspace label-local candidate chains and migration; clean public v1
   cutover; durable foreground, compaction, and title routing state; quota-before-retry progression;
   PostgreSQL cooldown, half-open probe, and Session Primary reservation generation fencing;
   DB-derived availability and stale-reservation convergence; bounded applied-route provenance and
-  diagnostics; desktop/mobile configuration and recovery UI; credential-free deterministic E2E
-  evidence; and coordinated rollout/removal.
+  diagnostics; desktop/mobile configuration and recovery UI; credential-free product-path E2E;
+  deterministic PostgreSQL/Worker integration verification for exact concurrency, fencing, and
+  restart behavior; and coordinated rollout/removal. Every `REQ-8` scenario remains required CI
+  evidence; live credentials and fixed-sleep ordering are not acceptance authority.
 - Authority audit: passed for `REQ-1` through `REQ-8` and `M1` through `M12`.
 - Feasibility and removal/replacement audits: passed with no blocked Requirement.
