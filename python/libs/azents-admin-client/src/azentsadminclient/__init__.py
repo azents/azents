@@ -57,6 +57,11 @@ __all__ = [
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
     "ErrorLevel",
+    "ExternalAccountOAuthDetailResponse",
+    "ExternalAccountOAuthFieldResponse",
+    "ExternalAccountOAuthHealthResponse",
+    "ExternalAccountOAuthPatchRequest",
+    "ExternalAccountOAuthSecretActionRequest",
     "ExternalChannelFilesDetailResponse",
     "ExternalChannelFilesPatchRequest",
     "FileLifecycleSettingsResponse",
@@ -235,6 +240,11 @@ from azentsadminclient.models.docker_container_resources import DockerContainerR
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
 from azentsadminclient.models.error_level import ErrorLevel as ErrorLevel
+from azentsadminclient.models.external_account_o_auth_detail_response import ExternalAccountOAuthDetailResponse as ExternalAccountOAuthDetailResponse
+from azentsadminclient.models.external_account_o_auth_field_response import ExternalAccountOAuthFieldResponse as ExternalAccountOAuthFieldResponse
+from azentsadminclient.models.external_account_o_auth_health_response import ExternalAccountOAuthHealthResponse as ExternalAccountOAuthHealthResponse
+from azentsadminclient.models.external_account_o_auth_patch_request import ExternalAccountOAuthPatchRequest as ExternalAccountOAuthPatchRequest
+from azentsadminclient.models.external_account_o_auth_secret_action_request import ExternalAccountOAuthSecretActionRequest as ExternalAccountOAuthSecretActionRequest
 from azentsadminclient.models.external_channel_files_detail_response import ExternalChannelFilesDetailResponse as ExternalChannelFilesDetailResponse
 from azentsadminclient.models.external_channel_files_patch_request import ExternalChannelFilesPatchRequest as ExternalChannelFilesPatchRequest
 from azentsadminclient.models.file_lifecycle_settings_response import FileLifecycleSettingsResponse as FileLifecycleSettingsResponse

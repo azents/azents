@@ -3107,6 +3107,158 @@
         ]
       }
     },
+    "/system-setting/v1/sections/external-account-oauth/{provider}": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get External Account Oauth Setting",
+        "description": "Return one redacted provider OAuth Section.",
+        "operationId": "system_settings_v1_get_external_account_oauth_setting",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAccountOAuthDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch External Account Oauth Setting",
+        "description": "Patch one provider OAuth Section with optimistic concurrency.",
+        "operationId": "system_settings_v1_patch_external_account_oauth_setting",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAccountOAuthPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAccountOAuthDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system-setting/v1/sections/external-account-oauth/{provider}/health-check": {
+      "post": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Check External Account Oauth Health",
+        "description": "Run a local health check for one provider OAuth Section.",
+        "operationId": "system_settings_v1_check_external_account_oauth_health",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAccountOAuthDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system-setting/v1/sections/platform-github-app": {
       "get": {
         "tags": [
@@ -5007,6 +5159,255 @@
         ],
         "title": "ErrorLevel",
         "description": "Test error level."
+      },
+      "ExternalAccountOAuthDetailResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "effective_status": {
+            "type": "string",
+            "title": "Effective Status"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalAccountOAuthFieldResponse"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalAccountOAuthHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "provider",
+          "schema_version",
+          "admin_version",
+          "effective_status",
+          "callback_url",
+          "fields",
+          "health"
+        ],
+        "title": "ExternalAccountOAuthDetailResponse",
+        "description": "Redacted provider OAuth System Settings detail."
+      },
+      "ExternalAccountOAuthFieldResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "secret": {
+            "type": "boolean",
+            "title": "Secret"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
+          },
+          "fallback_configured": {
+            "type": "boolean",
+            "title": "Fallback Configured"
+          },
+          "fallback_last_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Last Changed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "secret",
+          "value",
+          "configured",
+          "source",
+          "fallback_configured",
+          "fallback_last_changed_at"
+        ],
+        "title": "ExternalAccountOAuthFieldResponse",
+        "description": "Redacted provider OAuth field projection."
+      },
+      "ExternalAccountOAuthHealthResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SystemSettingHealthStatus"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "code",
+          "message",
+          "action_hint",
+          "checked_at"
+        ],
+        "title": "ExternalAccountOAuthHealthResponse",
+        "description": "Provider OAuth health projection."
+      },
+      "ExternalAccountOAuthPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalAccountOAuthSecretActionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "ExternalAccountOAuthPatchRequest",
+        "description": "Optimistic provider OAuth System Settings patch."
+      },
+      "ExternalAccountOAuthSecretActionRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SystemSettingSecretActionType"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "ExternalAccountOAuthSecretActionRequest",
+        "description": "Explicit provider OAuth client-secret replacement or clearing action."
       },
       "ExternalChannelFilesDetailResponse": {
         "properties": {

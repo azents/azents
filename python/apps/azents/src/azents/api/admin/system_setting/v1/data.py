@@ -23,6 +23,9 @@ from azents.core.system_setting import (
     SystemSettingValidationStatus,
 )
 from azents.repos.system_setting.data import StoredSystemSettingAuditEvent
+from azents.services.external_account_oauth_system_setting.data import (
+    ExternalAccountOAuthDetail,
+)
 from azents.services.github_platform_system_setting.data import (
     PlatformGitHubAppBindingState,
     PlatformGitHubAppCandidateState,
@@ -324,3 +327,101 @@ class SystemSettingAuditEventListResponse(BaseModel):
 
     items: list[SystemSettingAuditEventResponse]
     total: int
+
+
+class ExternalAccountOAuthSecretActionRequest(BaseModel):
+    """Explicit provider OAuth client-secret replacement or clearing action."""
+
+    action: SystemSettingSecretActionType
+    value: str | None = None
+
+    @model_validator(mode="after")
+    def validate_action(self) -> Self:
+        """Require plaintext only for replacement."""
+        if self.action is SystemSettingSecretActionType.REPLACE and self.value is None:
+            raise ValueError("Secret replacement requires a value.")
+        if (
+            self.action is SystemSettingSecretActionType.CLEAR
+            and self.value is not None
+        ):
+            raise ValueError("Secret clear cannot include a value.")
+        return self
+
+
+class ExternalAccountOAuthPatchRequest(BaseModel):
+    """Optimistic provider OAuth System Settings patch."""
+
+    expected_version: int = Field(ge=0)
+    client_id: str | None = None
+    application_id: str | None = None
+    client_secret: ExternalAccountOAuthSecretActionRequest | None = None
+
+
+class ExternalAccountOAuthFieldResponse(BaseModel):
+    """Redacted provider OAuth field projection."""
+
+    name: str
+    secret: bool
+    value: str | None
+    configured: bool
+    source: SystemSettingFieldSource
+    fallback_configured: bool
+    fallback_last_changed_at: datetime.datetime | None
+
+
+class ExternalAccountOAuthHealthResponse(BaseModel):
+    """Provider OAuth health projection."""
+
+    status: SystemSettingHealthStatus
+    code: str | None
+    message: str | None
+    action_hint: str | None
+    checked_at: datetime.datetime
+
+
+class ExternalAccountOAuthDetailResponse(BaseModel):
+    """Redacted provider OAuth System Settings detail."""
+
+    section: str
+    provider: str
+    schema_version: int
+    admin_version: int
+    effective_status: str
+    callback_url: str | None
+    fields: list[ExternalAccountOAuthFieldResponse]
+    health: ExternalAccountOAuthHealthResponse | None
+
+    @classmethod
+    def from_domain(cls, detail: ExternalAccountOAuthDetail) -> Self:
+        """Build a response from the provider OAuth projection."""
+        return cls(
+            section=detail.section,
+            provider=detail.provider,
+            schema_version=detail.schema_version,
+            admin_version=detail.admin_version,
+            effective_status=detail.effective_status.value,
+            callback_url=detail.callback_url,
+            fields=[
+                ExternalAccountOAuthFieldResponse(
+                    name=field.name,
+                    secret=field.secret,
+                    value=field.value,
+                    configured=field.configured,
+                    source=field.source,
+                    fallback_configured=field.fallback_configured,
+                    fallback_last_changed_at=field.fallback_last_changed_at,
+                )
+                for field in detail.fields
+            ],
+            health=(
+                ExternalAccountOAuthHealthResponse(
+                    status=detail.health.status,
+                    code=detail.health.code,
+                    message=detail.health.message,
+                    action_hint=detail.health.action_hint,
+                    checked_at=detail.health.checked_at,
+                )
+                if detail.health is not None
+                else None
+            ),
+        )
