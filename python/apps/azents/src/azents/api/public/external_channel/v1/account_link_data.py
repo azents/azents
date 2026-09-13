@@ -49,6 +49,21 @@ class GlobalAccountLinkResponse(BaseModel):
         )
 
 
+class GlobalAccountLinkUnlinkResponse(BaseModel):
+    """Terminal result for disconnecting one global provider identity."""
+
+    id: str
+    state: ExternalAccountLinkState
+
+    @classmethod
+    def from_view(
+        cls,
+        view: ExternalAccountLinkView,
+    ) -> "GlobalAccountLinkUnlinkResponse":
+        """Build a sanitized terminal disconnect response."""
+        return cls(id=view.id, state=view.state)
+
+
 class GlobalAccountLinkListResponse(BaseModel):
     """Active global provider identities owned by the current User."""
 

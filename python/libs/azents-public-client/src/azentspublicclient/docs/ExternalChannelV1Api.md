@@ -4447,7 +4447,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_unlink_account_link**
-> GlobalAccountLinkResponse external_channel_v1_unlink_account_link(link_id)
+> GlobalAccountLinkUnlinkResponse external_channel_v1_unlink_account_link(link_id)
 
 Unlink Account Link
 
@@ -4459,7 +4459,7 @@ Terminally disconnect one elevated owner's link.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.global_account_link_response import GlobalAccountLinkResponse
+from azentspublicclient.models.global_account_link_unlink_response import GlobalAccountLinkUnlinkResponse
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -4505,7 +4505,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**GlobalAccountLinkResponse**](GlobalAccountLinkResponse.md)
+[**GlobalAccountLinkUnlinkResponse**](GlobalAccountLinkUnlinkResponse.md)
 
 ### Authorization
 

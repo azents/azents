@@ -248,6 +248,7 @@ azentspublicclient/docs/GitRefPreviewResponse.md
 azentspublicclient/docs/GitWorktreeWorkspaceItemResponse.md
 azentspublicclient/docs/GlobalAccountLinkListResponse.md
 azentspublicclient/docs/GlobalAccountLinkResponse.md
+azentspublicclient/docs/GlobalAccountLinkUnlinkResponse.md
 azentspublicclient/docs/GoalAction.md
 azentspublicclient/docs/GoalStateResponse.md
 azentspublicclient/docs/GoalStatusUpdateRequest.md
@@ -802,6 +803,7 @@ azentspublicclient/models/git_ref_preview_response.py
 azentspublicclient/models/git_worktree_workspace_item_response.py
 azentspublicclient/models/global_account_link_list_response.py
 azentspublicclient/models/global_account_link_response.py
+azentspublicclient/models/global_account_link_unlink_response.py
 azentspublicclient/models/goal_action.py
 azentspublicclient/models/goal_state_response.py
 azentspublicclient/models/goal_status_update_request.py
@@ -1343,6 +1345,7 @@ azentspublicclient/test/test_git_ref_preview_response.py
 azentspublicclient/test/test_git_worktree_workspace_item_response.py
 azentspublicclient/test/test_global_account_link_list_response.py
 azentspublicclient/test/test_global_account_link_response.py
+azentspublicclient/test/test_global_account_link_unlink_response.py
 azentspublicclient/test/test_goal_action.py
 azentspublicclient/test/test_goal_state_response.py
 azentspublicclient/test/test_goal_status_update_request.py

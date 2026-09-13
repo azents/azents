@@ -46,6 +46,7 @@ from .account_link_data import (
     AccountLinkResponse,
     GlobalAccountLinkListResponse,
     GlobalAccountLinkResponse,
+    GlobalAccountLinkUnlinkResponse,
 )
 
 router = APIRouter()
@@ -141,7 +142,7 @@ async def unlink_account_link(
     service: Annotated[ExternalAccountLinkService, Depends()],
     *,
     link_id: str,
-) -> GlobalAccountLinkResponse:
+) -> GlobalAccountLinkUnlinkResponse:
     """Terminally disconnect one elevated owner's link."""
     try:
         link = await service.unlink(
@@ -152,7 +153,7 @@ async def unlink_account_link(
         )
     except ExternalAccountLinkError as error:
         _translate_error(error)
-    return GlobalAccountLinkResponse.from_view(link)
+    return GlobalAccountLinkUnlinkResponse.from_view(link)
 
 
 @router.get("/account-link-origins/{origin_id}", deprecated=True)

@@ -5798,7 +5798,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GlobalAccountLinkResponse"
+                  "$ref": "#/components/schemas/GlobalAccountLinkUnlinkResponse"
                 }
               }
             }
@@ -25374,6 +25374,24 @@
         ],
         "title": "GlobalAccountLinkResponse",
         "description": "Active global provider identity owned by the current User."
+      },
+      "GlobalAccountLinkUnlinkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ExternalAccountLinkState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "GlobalAccountLinkUnlinkResponse",
+        "description": "Terminal result for disconnecting one global provider identity."
       },
       "GoalAction": {
         "properties": {

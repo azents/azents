@@ -40,6 +40,7 @@ from azentspublicclient.models.external_channel_transport import ExternalChannel
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
 from azentspublicclient.models.global_account_link_list_response import GlobalAccountLinkListResponse
 from azentspublicclient.models.global_account_link_response import GlobalAccountLinkResponse
+from azentspublicclient.models.global_account_link_unlink_response import GlobalAccountLinkUnlinkResponse
 from azentspublicclient.models.managed_access_response import ManagedAccessResponse
 from azentspublicclient.models.managed_approval_request import ManagedApprovalRequest
 from azentspublicclient.models.managed_binding import ManagedBinding
@@ -15726,7 +15727,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> GlobalAccountLinkResponse:
+    ) -> GlobalAccountLinkUnlinkResponse:
         """Unlink Account Link
 
         Terminally disconnect one elevated owner's link.
@@ -15764,7 +15765,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "GlobalAccountLinkResponse",
+            '200': "GlobalAccountLinkUnlinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -15794,7 +15795,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[GlobalAccountLinkResponse]:
+    ) -> ApiResponse[GlobalAccountLinkUnlinkResponse]:
         """Unlink Account Link
 
         Terminally disconnect one elevated owner's link.
@@ -15832,7 +15833,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "GlobalAccountLinkResponse",
+            '200': "GlobalAccountLinkUnlinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -15900,7 +15901,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "GlobalAccountLinkResponse",
+            '200': "GlobalAccountLinkUnlinkResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
