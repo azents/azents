@@ -7,6 +7,8 @@ domain: external-channel
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7e77cf7a8877_add_provider_identity_oauth_foundation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e905bfe74372_globalize_external_account_links.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/c05bc1b811fa_add_external_account_linking_and_native_.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/102901c54450_drop_legacy_external_account_link_proof_.py
   - python/apps/azents/src/azents/core/external_account_link.py
@@ -29,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/rdb/models/external_account_link.py
+  - python/apps/azents/src/azents/rdb/models/external_account_oauth.py
   - python/apps/azents/src/azents/rdb/models/external_model_settings.py
   - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/repos/external_account_oauth/**
