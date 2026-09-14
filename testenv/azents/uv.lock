@@ -497,6 +497,7 @@ dev = [
     { name = "mypy-protobuf", specifier = ">=5.1.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "redis", specifier = ">=8.1.0" },
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "ty", specifier = ">=0.0.74" },
     { name = "types-grpcio", specifier = ">=1.83.0.20260730" },

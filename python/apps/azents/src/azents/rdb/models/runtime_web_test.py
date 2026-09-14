@@ -133,3 +133,29 @@ def test_runtime_web_transport_routes_are_exact_and_lease_fenced() -> None:
         "lease_generation",
         "lease_expires_at",
     }.issubset(route.columns.keys())
+
+
+def test_runtime_web_session_route_is_one_per_runtime_and_epoch_fenced() -> None:
+    """Keep the inactive replacement Owner route metadata-only and exact."""
+    route = RDBModel.metadata.tables["runtime_web_session_routes"]
+    constraints = {constraint.name for constraint in route.constraints}
+
+    assert route.primary_key.columns.keys() == ["runtime_id"]
+    assert "uq_runtime_web_session_routes_session_lease" in constraints
+    assert "uq_runtime_web_session_routes_join_nonce_hash" in constraints
+    assert {
+        "desired_generation",
+        "runner_generation",
+        "owner_replica_id",
+        "owner_boot_id",
+        "owner_address",
+        "session_lease_id",
+        "lease_generation",
+        "join_nonce_hash",
+        "protocol_fingerprint",
+        "lease_expires_at",
+        "draining_at",
+    }.issubset(route.columns.keys())
+    assert {foreign_key.target_fullname for foreign_key in route.foreign_keys} == {
+        "agent_runtimes.id"
+    }

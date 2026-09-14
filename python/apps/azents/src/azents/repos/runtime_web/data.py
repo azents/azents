@@ -142,6 +142,23 @@ class RuntimeWebTunnelRoute(BaseModel):
     admission_lease_id: str
 
 
+class RuntimeWebSessionRoute(BaseModel):
+    """Current exact Owner lease for one Runtime generation."""
+
+    runtime_id: str = Field(min_length=1, max_length=32)
+    desired_generation: int = Field(ge=1)
+    runner_generation: int = Field(ge=1)
+    owner_replica_id: str = Field(min_length=1, max_length=255)
+    owner_boot_id: str = Field(min_length=1, max_length=128)
+    owner_address: str = Field(min_length=1, max_length=255)
+    session_lease_id: str = Field(min_length=1, max_length=32)
+    lease_generation: int = Field(ge=1)
+    join_nonce_hash: str = Field(min_length=64, max_length=64)
+    protocol_fingerprint: str = Field(min_length=64, max_length=64)
+    lease_expires_at: datetime.datetime
+    draining_at: datetime.datetime | None
+
+
 def derived_operation_key(operation_key: str, suffix: str) -> str:
     """Derive a bounded collision-resistant key from one complete parent key."""
     material = f"{len(operation_key)}:{operation_key}:{suffix}"

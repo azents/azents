@@ -51,6 +51,7 @@ def main() -> None:
         / "runtime_control"
         / "v1"
         / "runtime_web_transport.proto",
+        proto_root / "azents" / "runtime_control" / "v1" / "runtime_web_session.proto",
         proto_root
         / "azents"
         / "runtime_control"
