@@ -5,13 +5,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -27,7 +26,6 @@ from azents.core.enums import (
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_model_settings import ExternalModelActorContext
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -35,18 +33,11 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.services.external_channel.credentials import (
-    ExternalChannelCredentialsCodec,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
-)
-from azents.services.external_channel.ingestion_replay import (
-    ExternalChannelIngestionReplayService,
 )
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
@@ -58,24 +49,18 @@ from azents.services.external_channel.interaction import (
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationError,
-    ExternalChannelParticipationService,
     ExternalChannelParticipationSettings,
-)
-from azents.services.external_channel.provider_control import (
-    ExternalChannelProviderControlService,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorSelection,
-    ExternalChannelSelectorService,
 )
 from azents.services.external_channel.selector_state import (
     ExternalChannelSelectorState,
     projection_with_selector_state,
 )
 from azents.services.external_channel.slack_events import (
-    SlackConversationClient,
     SlackInteractionView,
     SlackInteractionViewResult,
 )
@@ -329,7 +314,7 @@ def _processor(
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, _Session())
+        yield _Session()  # ty: ignore[invalid-yield] # Focused session double implements only execute().
 
     async def decorate(
         *, view: SlackInteractionView, **kwargs: object
@@ -340,31 +325,19 @@ def _processor(
     native_settings.decorate.side_effect = decorate
     return ExternalChannelInteractionProcessor(
         native_settings=native_settings,
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
-        selector_service=cast(ExternalChannelSelectorService, selector),
-        credentials_codec=cast(ExternalChannelCredentialsCodec, _Credentials()),
-        slack_client=cast(SlackConversationClient, slack),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            provider_control or _ProviderControl(),
-        ),
-        ingestion_replay_service=cast(
-            ExternalChannelIngestionReplayService,
-            replay or _Replay(),
-        ),
-        participation_service=cast(
-            ExternalChannelParticipationService,
-            participation or SimpleNamespace(),
-        ),
+        session_manager=session_manager,
+        repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements exercised operations.
+        selector_service=selector,  # ty: ignore[invalid-argument-type] # Focused selector double implements exercised operations.
+        credentials_codec=_Credentials(),  # ty: ignore[invalid-argument-type] # Focused codec implements only decrypt().
+        slack_client=slack,  # ty: ignore[invalid-argument-type] # Focused Slack double implements exercised provider calls.
+        provider_control=provider_control or _ProviderControl(),  # ty: ignore[invalid-argument-type] # Focused provider double implements exercised controls.
+        ingestion_replay_service=replay or _Replay(),  # ty: ignore[invalid-argument-type] # Focused replay double implements one replay operation.
+        participation_service=participation or SimpleNamespace(),  # ty: ignore[invalid-argument-type] # Focused participation double is unused in these cases.
         scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
         scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
-        config=cast(
-            Config,
-            SimpleNamespace(
-                auth=SimpleNamespace(jwt=SimpleNamespace(secret_key=_SECRET))
-            ),
-        ),
+        config=SimpleNamespace(
+            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key=_SECRET))
+        ),  # ty: ignore[invalid-argument-type] # Focused config exposes only the signing secret.
     )
 
 
@@ -594,7 +567,8 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
     assert isinstance(selector.calls[0]["now"], datetime.datetime)
     view = slack.views[0]
     route_block = view.blocks[1]
-    element = cast(dict[str, object], route_block["element"])
+    element = route_block["element"]
+    assert isinstance(element, dict)
     assert element["options"] == [
         {
             "text": {"type": "plain_text", "text": "Alpha"},
@@ -696,24 +670,14 @@ async def test_empty_catalog_opens_explicit_safe_state() -> None:
     ],
 )
 async def test_provider_modal_outcomes_are_safe(
-    status: str,
+    status: Literal["expired", "rejected", "unknown"],
     exception: type[Exception],
 ) -> None:
     repository = _Repository()
     selector = _Selector(_catalog())
     slack = _Slack(
         SlackInteractionViewResult(
-            status=cast(
-                Literal[
-                    "opened",
-                    "updated",
-                    "expired",
-                    "conflict",
-                    "rejected",
-                    "unknown",
-                ],
-                status,
-            ),
+            status=status,
             error_kind="provider_result",
             error_summary="provider detail must not escape",
         )

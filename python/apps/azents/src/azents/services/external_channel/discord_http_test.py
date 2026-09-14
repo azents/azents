@@ -7,14 +7,13 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import NamedTuple, cast
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -25,7 +24,6 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
@@ -33,9 +31,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionService,
     DiscordHTTPIngressService,
@@ -46,20 +42,13 @@ from azents.services.external_channel.discord_interaction import (
     DiscordInteractionInvalidPayload,
     DiscordInteractionUnauthorized,
 )
-from azents.services.external_channel.discord_selector import (
-    DiscordSelectorResponseService,
-)
 from azents.services.external_channel.discord_settings import (
     DiscordSettingsContext,
-    DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_model_settings_custom_id,
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
-)
-from azents.services.external_channel.shortcut_source import (
-    ExternalChannelShortcutSourceService,
 )
 from azents.services.scheduled_task.control import (
     ScheduledTaskProviderControlResult,
@@ -98,7 +87,7 @@ def _scheduled_task() -> ScheduledTask:
 def test_scheduled_task_cancel_confirmation_is_ephemeral() -> None:
     """Discord cancellation requires one explicit provider-native second step."""
     response = _scheduled_task_cancel_confirmation_response(
-        task=cast(ScheduledTask, SimpleNamespace(title="Daily report")),
+        task=_scheduled_task(),
         confirm_locator="st1:c:task:binding:signature",
     )
 
@@ -162,15 +151,12 @@ class _AdmissionDouble:
         principal: ExternalChannelPrincipalCreate,
     ) -> ExternalChannelInteractionAdmission:
         self.inputs.append((create, principal))
-        return cast(
-            ExternalChannelInteractionAdmission,
-            SimpleNamespace(
-                interaction=SimpleNamespace(
-                    id="interaction-row-1",
-                    principal_id="principal-1",
-                ),
-                created=True,
+        return SimpleNamespace(  # ty: ignore[invalid-return-type] # Focused result exposes only fields consumed by this service.
+            interaction=SimpleNamespace(
+                id="interaction-row-1",
+                principal_id="principal-1",
             ),
+            created=True,
         )
 
     async def begin_interaction_provider_mutation(
@@ -379,6 +365,8 @@ class _DiscordHTTPServiceFixture(NamedTuple):
     service: DiscordHTTPAdmissionService
     repository: _RepositoryDouble
     shortcut_source: _ShortcutSourceDouble
+    settings_response: _SettingsResponseDouble
+    interaction_response: _InteractionResponseDouble
 
 
 def _service(
@@ -391,7 +379,7 @@ def _service(
 ) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, object())
+        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
 
     repository = _RepositoryDouble(configuration)
     shortcut_source = _ShortcutSourceDouble()
@@ -400,27 +388,20 @@ def _service(
     interaction_response = _InteractionResponseDouble()
     return _DiscordHTTPServiceFixture(
         service=DiscordHTTPAdmissionService(
-            session_manager=cast(SessionManager[AsyncSession], session_manager),
-            repository=cast(ExternalChannelRepository, repository),
-            admission_service=cast(ExternalChannelAdmissionService, admission),
-            shortcut_source_service=cast(
-                ExternalChannelShortcutSourceService,
-                shortcut_source,
-            ),
-            selector_response_service=cast(
-                DiscordSelectorResponseService,
-                selector_response,
-            ),
-            settings_response_service=cast(
-                DiscordSettingsResponseService,
-                settings_response,
-            ),
+            session_manager=session_manager,
+            repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
+            shortcut_source_service=shortcut_source,  # ty: ignore[invalid-argument-type] # Focused shortcut double implements ensure().
+            selector_response_service=selector_response,  # ty: ignore[invalid-argument-type] # Focused response double implements initial_response().
+            settings_response_service=settings_response,  # ty: ignore[invalid-argument-type] # Focused settings double implements exercised component methods.
             scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
             scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
             interaction_response_client=interaction_response,
         ),
         repository=repository,
         shortcut_source=shortcut_source,
+        settings_response=settings_response,
+        interaction_response=interaction_response,
     )
 
 
@@ -439,25 +420,17 @@ def _ingress_service(
 ) -> _DiscordHTTPIngressFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, object())
+        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
 
     resolver = _DispatcherResolverDouble(dispatcher)
     return _DiscordHTTPIngressFixture(
         service=DiscordHTTPIngressService(
-            session_manager=cast(SessionManager[AsyncSession], session_manager),
-            repository=cast(
-                ExternalChannelRepository,
-                _RepositoryDouble(configuration),
-            ),
-            admission_service=cast(ExternalChannelAdmissionService, admission),
-            config=cast(
-                Config,
-                SimpleNamespace(
-                    auth=SimpleNamespace(
-                        jwt=SimpleNamespace(secret_key="settings-secret")
-                    )
-                ),
-            ),
+            session_manager=session_manager,
+            repository=_RepositoryDouble(configuration),  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
+            config=SimpleNamespace(
+                auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
+            ),  # ty: ignore[invalid-argument-type] # Focused config exposes only the signing secret.
             dispatcher_resolver=resolver,  # ty: ignore[invalid-argument-type] # Focused resolver exposes only the exercised context manager.
         ),
         resolver=resolver,
@@ -701,7 +674,7 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     """A verified Guild interaction commits provenance before acknowledgement."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, repository, _ = _service(
+    service, repository, _, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -751,7 +724,7 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
     """The selected source becomes canonical before the transient selector claim."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, shortcut_source = _service(
+    service, _, shortcut_source, _, _ = _service(
         configuration=_configuration(
             private_key.public_key().public_bytes_raw().hex(),
             app_mode=ExternalChannelAppMode.MULTI,
@@ -802,7 +775,7 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
     """A component delegates opaque scope without storing selector or route input."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, _ = _service(
+    service, _, _, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -842,7 +815,7 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
     """Return all cleanup deliveries without raising after the settings commit."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, _ = _service(
+    service, _, _, settings_response, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         cleanup_plans=("presence-delete-1", "progress-delete-1"),
@@ -870,10 +843,6 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
     )
     assert result.control_delivery_connection_id == "connection-1"
     assert admission.finished_interaction_ids == ["interaction-row-1"]
-    settings_response = cast(
-        _SettingsResponseDouble,
-        service.settings_response_service,
-    )
     assert settings_response.component_calls[0]["interaction_id"] == "interaction-row-1"
     assert settings_response.component_calls[0]["selected_value"] == "all_messages"
 
@@ -883,7 +852,7 @@ async def test_model_multiselect_dispatches_complete_request_local_values() -> N
     """Pass execution selections to the actor-owned draft without guest mutation."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, _ = _service(
+    service, _, _, settings_response, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -904,10 +873,6 @@ async def test_model_multiselect_dispatches_complete_request_local_values() -> N
         "type": 7,
         "data": {"content": "Private model control.", "components": []},
     }
-    settings_response = cast(
-        _SettingsResponseDouble,
-        service.settings_response_service,
-    )
     assert settings_response.model_calls[0]["selected_values"] == ("fast",)
     assert settings_response.component_calls == []
 
@@ -918,15 +883,11 @@ async def test_private_completion_delivery_failure_marks_interaction_failed() ->
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
+    dispatcher, _, _, _, interaction_response = _service(
         configuration=configuration,
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
         scheduled_task_channel=SimpleNamespace(),
-    )
-    interaction_response = cast(
-        _InteractionResponseDouble,
-        dispatcher.interaction_response_client,
     )
     interaction_response.edit_original = AsyncMock(
         side_effect=RuntimeError("private delivery failed")
@@ -960,15 +921,11 @@ async def test_private_model_apply_ack_precedes_delayed_completion() -> None:
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
+    dispatcher, _, _, settings_response, interaction_response = _service(
         configuration=configuration,
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
         scheduled_task_channel=SimpleNamespace(),
-    )
-    settings_response = cast(
-        _SettingsResponseDouble,
-        dispatcher.settings_response_service,
     )
     settings_response.model_started = asyncio.Event()
     settings_response.model_release = asyncio.Event()
@@ -1004,10 +961,6 @@ async def test_private_model_apply_ack_precedes_delayed_completion() -> None:
     await completion
 
     assert len(settings_response.model_calls) == 1
-    interaction_response = cast(
-        _InteractionResponseDouble,
-        dispatcher.interaction_response_client,
-    )
     assert len(interaction_response.calls) == 1
 
 
@@ -1017,7 +970,7 @@ async def test_setup_component_acknowledges_before_resolving_dispatcher() -> Non
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
+    dispatcher, _, _, _, _ = _service(
         configuration=configuration,
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -1057,7 +1010,7 @@ async def test_duplicate_setup_component_does_not_schedule_background_work() -> 
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble(claimed=False)
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
+    dispatcher, _, _, _, _ = _service(
         configuration=configuration,
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -1090,7 +1043,7 @@ async def test_setup_component_without_token_fails_before_mutation_claim() -> No
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
     configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
-    dispatcher, _, _ = _service(
+    dispatcher, _, _, _, _ = _service(
         configuration=configuration,
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -1127,7 +1080,7 @@ async def test_background_setup_completes_response_and_cleanup_delivery() -> Non
     admission = _AdmissionDouble()
     first_plan = make_provider_effect_plan("presence-delete")
     second_plan = make_provider_effect_plan("progress-delete")
-    service, _, _ = _service(
+    service, _, _, _, response_client = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         cleanup_plans=(first_plan, second_plan),
@@ -1169,10 +1122,6 @@ async def test_background_setup_completes_response_and_cleanup_delivery() -> Non
 
     await service.run_settings_component_handoff(handoff)
 
-    response_client = cast(
-        _InteractionResponseDouble,
-        service.interaction_response_client,
-    )
     assert response_client.calls == [
         {
             "application_id": "app-1",
@@ -1217,7 +1166,7 @@ async def test_scheduled_task_confirm_delete_prepares_notice_after_ack() -> None
         prepare_deletion=AsyncMock(return_value=plan),
         execute_deletion_plan=AsyncMock(),
     )
-    service, _, _ = _service(
+    service, _, _, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=scheduled_task_control,
@@ -1265,7 +1214,7 @@ async def test_ping_skips_durable_interaction_admission() -> None:
     """Discord endpoint PING authenticates but has no canonical interaction record."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, _ = _service(
+    service, _, _, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=SimpleNamespace(),
@@ -1295,7 +1244,7 @@ async def test_unsupported_or_cross_scope_interactions_fail_before_admission() -
     """Unsupported types and cross-scope identities cannot create work."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _, _ = _service(
+    service, _, _, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         scheduled_task_control=SimpleNamespace(),

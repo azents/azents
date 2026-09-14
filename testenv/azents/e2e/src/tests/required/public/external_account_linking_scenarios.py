@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import azentsadminclient
@@ -135,7 +135,7 @@ def _request_count(fake_url: str, operation: str) -> int:
 
 
 def _admin_token(admin_api_client: azentsadminclient.ApiClient) -> str:
-    token = cast(Any, admin_api_client).configuration.access_token
+    token = admin_api_client.configuration.access_token
     if not isinstance(token, str) or not token:
         raise AssertionError("Admin API client is not authenticated.")
     return token
@@ -809,12 +809,9 @@ def run_web_external_account_oauth_management(
     row_selector = f'[data-testid="external-account-link-{link_id}"]'
     row = wait.until(ec.visibility_of_element_located((By.CSS_SELECTOR, row_selector)))
     assert "Connected" in row.text
-    overflow = cast(
-        bool,
-        browser_driver.execute_script(
-            "return document.documentElement.scrollWidth > "
-            "document.documentElement.clientWidth;"
-        ),
+    overflow = browser_driver.execute_script(
+        "return document.documentElement.scrollWidth > "
+        "document.documentElement.clientWidth;"
     )
     assert overflow is False
     row.find_element(By.XPATH, ".//button[normalize-space()='Disconnect']").click()

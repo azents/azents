@@ -6,7 +6,7 @@ Provides toolkit-level OAuth2 connection endpoints and connection test endpoints
 import json
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, NamedTuple, assert_never, cast
+from typing import Annotated, Any, NamedTuple, assert_never
 
 import httpx
 from azcommon.result import Result
@@ -1618,10 +1618,8 @@ async def _resolve_test_credentials(
             saved: dict[str, object] = {}
             if toolkit.credentials is not None:
                 try:
-                    parsed: object = json.loads(toolkit.credentials)
-                    if isinstance(parsed, dict):
-                        saved = cast(dict[str, object], parsed)
-                except json.JSONDecodeError, TypeError:
+                    saved = _credentials_adapter.validate_json(toolkit.credentials)
+                except ValidationError:
                     pass
 
             # Override with form-entered values, ignoring empty strings

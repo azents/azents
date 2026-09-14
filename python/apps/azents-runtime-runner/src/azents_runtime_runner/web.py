@@ -309,10 +309,10 @@ class RunnerWebTransportManager:
             not in _WEBSOCKET_HANDSHAKE_HEADERS
         ]
         timeout = aiohttp.ClientWSTimeout(
-            ws_receive=self._remaining(  # ty: ignore[unknown-argument]
+            ws_receive=self._remaining(  # ty: ignore[unknown-argument] # aiohttp accepts float | None but its metadata omits the constructor parameter.
                 tunnel.identity.transport_deadline_at
             ),
-            ws_close=5.0,  # ty: ignore[unknown-argument]
+            ws_close=5.0,  # ty: ignore[unknown-argument] # aiohttp accepts this documented timeout parameter at runtime.
         )
         async with self.http_session_factory() as session:
             async with session.ws_connect(

@@ -26,7 +26,7 @@ export default async function AgentDetailLayout({
         style={{
           display: "flex",
           flexDirection: "column",
-          height: "calc(100dvh - var(--app-shell-header-offset, 0px))",
+          height: "calc(100dvh - var(--app-shell-header-offset, 0rem))",
           minHeight: 0,
           overflow: "hidden",
         }}

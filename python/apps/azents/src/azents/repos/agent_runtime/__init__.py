@@ -1,6 +1,7 @@
 """AgentRuntime repository."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -42,6 +43,13 @@ from .data import (
     AgentRuntimeFailurePatch,
     AgentRuntimeLifecycleCommand,
 )
+
+
+class AgentRuntimeConfigurationAttachment(NamedTuple):
+    """One Runtime and its attached desired configuration state."""
+
+    runtime: AgentRuntime
+    state: RuntimeConfigurationState
 
 
 class AgentRuntimeRepository:
@@ -222,7 +230,7 @@ class AgentRuntimeRepository:
         workspace_runtime_profile_id: str,
         workspace_runtime_profile_version: int,
         write: RuntimeConfigurationDesiredStateWrite,
-    ) -> tuple[AgentRuntime, RuntimeConfigurationState] | None:
+    ) -> AgentRuntimeConfigurationAttachment | None:
         """Attach current desired state only while every source snapshot is current."""
         runtime = await session.scalar(
             sa.select(RDBAgentRuntime)
@@ -312,7 +320,10 @@ class AgentRuntimeRepository:
             and state_row.desired_document == document
             and state_row.desired_reason_code == write.reason_code
         ):
-            return self._build(runtime), _build_configuration_state(state_row)
+            return AgentRuntimeConfigurationAttachment(
+                runtime=self._build(runtime),
+                state=_build_configuration_state(state_row),
+            )
         next_sequence = runtime.configuration_sequence + 1
         now = datetime.datetime.now(datetime.UTC)
         runtime.configuration_sequence = next_sequence
@@ -354,7 +365,10 @@ class AgentRuntimeRepository:
             state_row.runner_observed_at = None
             state_row.updated_at = now
         await session.flush()
-        return self._build(runtime), _build_configuration_state(state_row)
+        return AgentRuntimeConfigurationAttachment(
+            runtime=self._build(runtime),
+            state=_build_configuration_state(state_row),
+        )
 
     async def provider_report_matches_binding(
         self,

@@ -61,9 +61,9 @@ def test_model_listing_accepts_completed_integration_catalog(
     response = _catalog_response(payload)
     monkeypatch.setattr(utils.http_requests, "get", Mock(return_value=response))
 
-    assert (
-        utils.list_ready_integration_models(
-            "http://server", "token", "workspace", "integration"
-        )
-        == payload
+    result = utils.list_ready_integration_models(
+        "http://server", "token", "workspace", "integration"
     )
+    assert result.catalog_scope == "integration"
+    assert result.latest_attempt_status == "succeeded"
+    assert result.entries[0].provider_model_identifier == "gpt-5.5"

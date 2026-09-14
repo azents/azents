@@ -1,33 +1,29 @@
 "use client";
 
-/**
- * OAuth2 callback result client component.
- *
- * Receives token exchange result from server and sends to window.opener via postMessage,
- * then renders success/failure UI.
- */
+/** Send the OAuth result to the opener and render the callback outcome. */
 
 import { Alert, Anchor, Stack, Text } from "@mantine/core";
 import { IconCheck, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
 
-interface CallbackResultProps {
+interface OAuthMcpCallbackResultProps {
   success: boolean;
   message: string | null;
-  returnHref?: string | null;
+  returnHref: string | null;
 }
 
-export function CallbackResult({
+export function OAuthMcpCallbackResult({
   success,
   message,
-  returnHref = null,
-}: CallbackResultProps): React.ReactElement {
+  returnHref,
+}: OAuthMcpCallbackResultProps): React.ReactElement {
   const t = useTranslations("oauth");
 
   useEffect(() => {
-    const opener = window.opener as Window | null;
-    if (opener) {
+    const opener: unknown = window.opener;
+    if (isWindowMessageTarget(opener)) {
       opener.postMessage(
         { type: "azents-oauth-callback", success },
         window.location.origin,

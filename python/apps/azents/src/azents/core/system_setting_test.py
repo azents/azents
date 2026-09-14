@@ -16,6 +16,7 @@ from azents.core.system_setting import (
     SystemSettingGenerationHasher,
     SystemSettingMissingSchemaMigration,
     SystemSettingNewerSchemaVersion,
+    SystemSettingPayload,
     SystemSettingRegistry,
     SystemSettingSection,
 )
@@ -67,14 +68,20 @@ def test_payload_migrations_run_sequentially_without_persisting_on_read() -> Non
     def migrate_v1(
         config: dict[str, Any],
         secrets: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return ({"endpoint": config["legacy_endpoint"]}, secrets)
+    ) -> SystemSettingPayload:
+        return SystemSettingPayload(
+            config={"endpoint": config["legacy_endpoint"]},
+            secrets=secrets,
+        )
 
     def migrate_v2(
         config: dict[str, Any],
         secrets: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return (config, {"token": secrets["legacy_token"]})
+    ) -> SystemSettingPayload:
+        return SystemSettingPayload(
+            config=config,
+            secrets={"token": secrets["legacy_token"]},
+        )
 
     definition = _definition(
         schema_version=3,

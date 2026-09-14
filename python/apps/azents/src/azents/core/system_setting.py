@@ -9,7 +9,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 
@@ -113,8 +113,15 @@ class SystemSettingEnvironmentBinding:
     target: SystemSettingFieldTarget
 
 
+class SystemSettingPayload(NamedTuple):
+    """One versioned System Settings payload."""
+
+    config: dict[str, Any]
+    secrets: dict[str, Any]
+
+
 SystemSettingPayloadMigrator = Callable[
-    [dict[str, Any], dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]
+    [dict[str, Any], dict[str, Any]], SystemSettingPayload
 ]
 SystemSettingLocalValidator = Callable[[BaseModel, BaseModel], None]
 
@@ -141,7 +148,7 @@ class SystemSettingDefinition:
         schema_version: int,
         config: dict[str, Any],
         secrets: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ) -> SystemSettingPayload:
         """Migrate persisted payloads in memory to the compiled schema version."""
         if schema_version > self.schema_version:
             raise SystemSettingNewerSchemaVersion(
@@ -166,7 +173,10 @@ class SystemSettingDefinition:
                 migrated_secrets,
             )
             current_version += 1
-        return migrated_config, migrated_secrets
+        return SystemSettingPayload(
+            config=migrated_config,
+            secrets=migrated_secrets,
+        )
 
 
 @dataclass(frozen=True)

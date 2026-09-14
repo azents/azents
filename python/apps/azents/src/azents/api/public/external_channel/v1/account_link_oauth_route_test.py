@@ -1,7 +1,7 @@
 """Public global account-link OAuth route contract tests."""
 
 import datetime
-from typing import Any, cast
+from typing import NamedTuple
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -94,9 +94,15 @@ class _SettingsService:
         )
 
 
+class _ClientContext(NamedTuple):
+    client: TestClient
+    oauth_service: _OAuthService
+    app: FastAPI
+
+
 def _client(
     oauth_service: _OAuthService | None = None,
-) -> tuple[TestClient, _OAuthService]:
+) -> _ClientContext:
     service = oauth_service or _OAuthService()
     app = FastAPI()
     app.include_router(router, prefix="/external-channel/v1")
@@ -105,24 +111,21 @@ def _client(
         session_id="session-1",
         elevated=True,
     )
-    app.dependency_overrides[ExternalAccountLinkService] = lambda: cast(
-        Any,
-        _LinkService(),
+    app.dependency_overrides[ExternalAccountLinkService] = _LinkService
+    app.dependency_overrides[ExternalAccountOAuthService] = lambda: service
+    app.dependency_overrides[ExternalAccountOAuthSystemSettingService] = (
+        _SettingsService
     )
-    app.dependency_overrides[ExternalAccountOAuthService] = lambda: cast(
-        Any,
-        service,
+    return _ClientContext(
+        client=TestClient(app),
+        oauth_service=service,
+        app=app,
     )
-    app.dependency_overrides[ExternalAccountOAuthSystemSettingService] = lambda: cast(
-        Any,
-        _SettingsService(),
-    )
-    return TestClient(app), service
 
 
 def test_global_list_omits_workspace_ownership_fields() -> None:
     """Global account responses never present a Workspace as link owner."""
-    client, _ = _client()
+    client = _client().client
     response = client.get("/external-channel/v1/account-links")
 
     assert response.status_code == 200
@@ -143,7 +146,7 @@ def test_global_list_omits_workspace_ownership_fields() -> None:
 
 def test_oauth_start_and_exchange_are_authenticated_contracts() -> None:
     """Start returns a URL and exchange returns one global link projection."""
-    client, _ = _client()
+    client = _client().client
 
     start = client.post("/external-channel/v1/account-links/oauth/discord/start")
     exchange = client.post(
@@ -163,7 +166,7 @@ def test_oauth_conflict_is_nondisclosing() -> None:
     """Conflict responses never disclose an existing owner's identity."""
     service = _OAuthService()
     service.conflict = True
-    client, _ = _client(service)
+    client = _client(service).client
 
     response = client.post(
         "/external-channel/v1/account-links/oauth/discord/exchange",
@@ -190,17 +193,10 @@ def test_unlink_unavailable_is_a_stable_conflict_response() -> None:
         session_id="session-1",
         elevated=True,
     )
-    app.dependency_overrides[ExternalAccountLinkService] = lambda: cast(
-        Any,
-        link_service,
-    )
-    app.dependency_overrides[ExternalAccountOAuthService] = lambda: cast(
-        Any,
-        _OAuthService(),
-    )
-    app.dependency_overrides[ExternalAccountOAuthSystemSettingService] = lambda: cast(
-        Any,
-        _SettingsService(),
+    app.dependency_overrides[ExternalAccountLinkService] = lambda: link_service
+    app.dependency_overrides[ExternalAccountOAuthService] = _OAuthService
+    app.dependency_overrides[ExternalAccountOAuthSystemSettingService] = (
+        _SettingsService
     )
 
     response = TestClient(app).delete(
@@ -218,8 +214,8 @@ def test_unlink_unavailable_is_a_stable_conflict_response() -> None:
 
 def test_legacy_origin_and_candidate_routes_are_absent_from_openapi() -> None:
     """Phase 3 exposes only the provider OAuth replacement flow."""
-    client, _ = _client()
-    paths = cast(Any, client.app).openapi()["paths"]
+    context = _client()
+    paths = context.app.openapi()["paths"]
 
     assert not any("account-link-origins" in path for path in paths)
     assert not any("account-link-candidates" in path for path in paths)

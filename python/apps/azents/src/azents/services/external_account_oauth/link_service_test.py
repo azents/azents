@@ -1,7 +1,6 @@
 """Tests for authenticated provider identity OAuth orchestration."""
 
 import datetime
-from typing import Any, cast
 
 import pytest
 
@@ -152,9 +151,9 @@ def _service(
     links: _FakeLinks,
 ) -> ExternalAccountOAuthService:
     return ExternalAccountOAuthService(
-        attempts=cast(Any, attempts),
-        links=cast(Any, links),
-        settings=cast(Any, _FakeSettings()),
+        attempts=attempts,  # ty: ignore[invalid-argument-type] # Focused fake implements only exercised attempt operations.
+        links=links,  # ty: ignore[invalid-argument-type] # Focused fake implements only exercised link operations.
+        settings=_FakeSettings(),  # ty: ignore[invalid-argument-type] # Focused fake implements only provider detail lookup.
     )
 
 
@@ -167,7 +166,7 @@ async def test_start_creates_authenticated_pkce_attempt_and_provider_url(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda *_: cast(Any, _FakeAdapter()),
+        lambda *_: _FakeAdapter(),
     )
     service = _service(
         attempts,
@@ -206,7 +205,7 @@ async def test_exchange_finalizes_global_link_without_retaining_provider_materia
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda *_: cast(Any, _FakeAdapter()),
+        lambda *_: _FakeAdapter(),
     )
     service = _service(
         attempts,
@@ -234,7 +233,7 @@ async def test_provider_failure_is_sanitized_and_attempt_is_failed(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda *_: cast(Any, _FakeAdapter(failure=True)),
+        lambda *_: _FakeAdapter(failure=True),
     )
     service = _service(
         attempts,
@@ -261,7 +260,7 @@ async def test_global_owner_conflict_is_generic(
     monkeypatch.setattr(
         link_service_module,
         "_adapter",
-        lambda *_: cast(Any, _FakeAdapter()),
+        lambda *_: _FakeAdapter(),
     )
     service = _service(
         attempts,
