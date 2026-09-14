@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow
+from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow, QueueLane
 from azents_runtime_control.runtime_web_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
@@ -28,6 +28,7 @@ from azents_runtime_control.runtime_web_session import (
 from azents.runtime_web_gateway.web_session_bridge import (
     PersistentGatewaySessionTransport,
     RuntimeWebBrowserStreamBridge,
+    _outbound_lane,
 )
 from azents.runtime_web_gateway.web_session_pool import (
     GatewayStreamHandler,
@@ -335,6 +336,44 @@ async def test_browser_consumption_returns_absolute_response_credit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_websocket_control_payload_does_not_return_application_credit() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    transport = _CaptureTransport()
+    await pool.register(
+        identity=_identity(),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=transport,
+    )
+    bridge = await RuntimeWebBrowserStreamBridge.open(
+        pool=pool,
+        stream_id=1,
+        authority=_authority(),
+        request_head=_head(StreamProtocol.WEBSOCKET),
+    )
+    await bridge.receive(_accepted_response())
+    response_head = _response()
+    response_head.response_head.status = 101
+    await bridge.receive(response_head)
+    ping = _response()
+    ping.frame_sequence = 1
+    ping.websocket.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    ping.websocket.opcode = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+    )
+    ping.websocket.final = True
+    ping.websocket.data = b"ping"
+    await bridge.receive(ping)
+    sent_before = len(transport.sent)
+
+    assert (await bridge.next_event()).payload == "response_head"
+    assert (await bridge.next_event()).websocket_opcode is WebSocketOpcode.PING
+    assert len(transport.sent) == sent_before
+    assert bridge.response_credit.session.sent_total == 0
+
+
+@pytest.mark.asyncio
 async def test_bridge_preserves_raw_http_head_and_releases_terminal_stream() -> None:
     pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
     transport = _CaptureTransport()
@@ -516,6 +555,71 @@ class _DuplexStream:
         return exchange()
 
 
+class _PausedDuplexStream:
+    def __init__(self) -> None:
+        self.sent: asyncio.Queue[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
+            asyncio.Queue()
+        )
+        self.release_requests = asyncio.Event()
+
+    def __call__(
+        self,
+        request_iterator: AsyncIterator[
+            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        ],
+        /,
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+        assert metadata is None
+
+        async def exchange() -> AsyncIterator[
+            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        ]:
+            hello = await anext(request_iterator)
+            await self.sent.put(hello)
+            yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                protocol_fingerprint=hello.protocol_fingerprint,
+                session_id=hello.session_id,
+                peer_boot_id="control-boot",
+                session_accepted=(runtime_web_session_pb2.RuntimeWebSessionAccepted()),
+            )
+            await self.release_requests.wait()
+            async for request in request_iterator:
+                await self.sent.put(request)
+
+        return exchange()
+
+
+def _gateway_hello() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id="gateway-session",
+        peer_boot_id="gateway-boot",
+        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        ),
+    )
+
+
+def _data_envelope_with_size(
+    size_bytes: int,
+) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    payload_bytes = size_bytes
+    while True:
+        envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+        envelope.data.direction = (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        )
+        envelope.data.data = b"x" * payload_bytes
+        difference = envelope.ByteSize() - size_bytes
+        if difference == 0:
+            return envelope
+        payload_bytes -= difference
+        if payload_bytes <= 0:
+            raise AssertionError("Requested envelope size is too small")
+
+
 @pytest.mark.asyncio
 async def test_persistent_transport_multiplexes_without_replay() -> None:
     stream = _DuplexStream()
@@ -582,6 +686,121 @@ async def test_persistent_transport_multiplexes_without_replay() -> None:
     await asyncio.wait_for(stream.response_yielded.wait(), timeout=1)
     assert transport.active
     assert await transport.close() == ()
+
+
+@pytest.mark.asyncio
+async def test_persistent_transport_prioritizes_control_over_queued_data() -> None:
+    stream = _PausedDuplexStream()
+    transport = PersistentGatewaySessionTransport(stream)
+    await transport.start(_gateway_hello(), timeout_seconds=1)
+    await stream.sent.get()
+
+    data = _data_envelope_with_size(SESSION_WINDOW_BYTES // 32)
+    cancel = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    cancel.cancel.reason = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+    )
+    for _ in range(32):
+        await transport.send(data)
+    latency = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    latency.direction_end.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    latency_task = asyncio.create_task(transport.send(latency))
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(asyncio.shield(latency_task), timeout=0.01)
+    await asyncio.wait_for(transport.send(cancel), timeout=1)
+
+    assert transport.outbound_bytes == SESSION_WINDOW_BYTES + cancel.ByteSize()
+    assert transport.outbound_items[QueueLane.DATA] == 32
+    assert transport.outbound_items[QueueLane.LATENCY] == 0
+    assert transport.outbound_items[QueueLane.CONTROL] == 1
+    stream.release_requests.set()
+
+    assert (await stream.sent.get()).WhichOneof("payload") == "cancel"
+    assert (await stream.sent.get()).WhichOneof("payload") == "data"
+    latency_task.cancel()
+    await asyncio.gather(latency_task, return_exceptions=True)
+    await transport.close()
+
+
+def test_persistent_transport_routes_websocket_controls_to_latency_lane() -> None:
+    ping = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    ping.websocket.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    ping.websocket.opcode = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+    )
+    ping.websocket.final = True
+    ping.websocket.data = b"ping"
+
+    assert _outbound_lane(ping) is QueueLane.LATENCY
+
+
+@pytest.mark.asyncio
+async def test_persistent_transport_handles_session_frames_before_stream_lookup() -> (
+    None
+):
+    stream = _DuplexStream()
+    transport = PersistentGatewaySessionTransport(stream)
+    await transport.start(_gateway_hello(), timeout_seconds=1)
+    await stream.sent.get()
+
+    request = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    request.cancel.reason = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+    )
+    await transport.send(request)
+    await stream.sent.get()
+    await stream.responses.put(
+        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+            session_id="gateway-session",
+            peer_boot_id="control-boot",
+            heartbeat=runtime_web_session_pb2.RuntimeWebSessionHeartbeat(
+                monotonic_sequence=9
+            ),
+        )
+    )
+
+    acknowledgement = await stream.sent.get()
+    assert acknowledgement.stream_id == 0
+    assert acknowledgement.heartbeat_ack.monotonic_sequence == 9
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_transport_session_error_closes_without_stream_lookup() -> (
+    None
+):
+    stream = _DuplexStream()
+    transport = PersistentGatewaySessionTransport(stream)
+    await transport.start(_gateway_hello(), timeout_seconds=1)
+    await stream.sent.get()
+
+    request = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    request.cancel.reason = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+    )
+    await transport.send(request)
+    await stream.sent.get()
+    session_error = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id="gateway-session",
+        peer_boot_id="control-boot",
+    )
+    session_error.session_error.reason = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+    )
+    await stream.responses.put(session_error)
+    assert transport.receiver is not None
+    await asyncio.wait_for(transport.receiver, timeout=1)
+
+    assert not transport.active
+    assert isinstance(transport.failure, RuntimeError)
+    assert "session error" in str(transport.failure)
+    await transport.close()
 
 
 @pytest.mark.asyncio

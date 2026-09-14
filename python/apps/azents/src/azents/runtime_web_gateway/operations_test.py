@@ -368,9 +368,13 @@ async def test_drain_callback_failures_are_reported_after_force_cleanup() -> Non
 @pytest.mark.asyncio
 async def test_drain_caller_cancellation_waits_for_force_cleanup() -> None:
     resources = RuntimeWebGatewayResourceTracker(_limits(active_exchanges=1))
+    close_started = asyncio.Event()
+    permit_close = asyncio.Event()
 
     async def close(reason: CloseReason) -> None:
         assert reason is CloseReason.SERVICE_DRAIN
+        close_started.set()
+        await permit_close.wait()
 
     coordinator = RuntimeWebDrainCoordinator(
         policy=RuntimeWebDrainPolicy(
@@ -390,8 +394,9 @@ async def test_drain_caller_cancellation_waits_for_force_cleanup() -> None:
     assert registration is not None
 
     drain = asyncio.create_task(coordinator.drain())
-    await asyncio.sleep(0)
+    await asyncio.wait_for(close_started.wait(), timeout=1)
     drain.cancel()
+    permit_close.set()
     with pytest.raises(asyncio.CancelledError):
         await drain
 
