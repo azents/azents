@@ -7,6 +7,7 @@ import pytest
 from azents_runtime_control.runner_terminal import (
     RunnerTerminalExit,
     RunnerTerminalHeartbeat,
+    RunnerTerminalHeartbeatAcknowledgement,
     RunnerTerminalIdentity,
     RunnerTerminalInputAcknowledgement,
     RunnerTerminalInputFrame,
@@ -21,6 +22,7 @@ from azents_runtime_control.runner_terminal import (
 from azents.runtime.control_protocol.grpc.runner_terminal_broker import (
     _TERMINAL_OUTPUT_RATE_BYTES_PER_SECOND,
     CoordinatedRuntimeRunnerTerminalBroker,
+    CoordinatedRuntimeRunnerTerminalStream,
     _OutputRateLimiter,
 )
 from azents.runtime.control_protocol.grpc.runner_terminal_server import (
@@ -287,6 +289,47 @@ async def test_terminating_stream_waits_for_runner_exit_without_reading_input() 
     final = await store.get_terminal("terminal-1", current_time=_NOW)
     assert final is not None
     assert final.lifecycle is RuntimeTerminalLifecycle.EXITED
+
+
+@pytest.mark.asyncio
+async def test_store_change_does_not_discard_concurrently_ready_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve one outbound control that completes beside the store wait."""
+    store = InMemoryRuntimeTerminalCoordinationStore()
+    await store.admit_or_get(_admission(), admitted_at=_NOW)
+    broker = CoordinatedRuntimeRunnerTerminalBroker(
+        store=store,
+        clock=lambda: _NOW,
+        monotonic_clock=lambda: 0.0,
+    )
+    stream = await broker.connect(
+        _registration(),
+        authority=_authority(),
+        connected_at=_NOW,
+    )
+    assert isinstance(stream, CoordinatedRuntimeRunnerTerminalStream)
+    await stream.receive(RunnerTerminalHeartbeat(monotonic_sequence=1))
+
+    original_wait = asyncio.wait
+
+    async def store_change_snapshot(
+        tasks: tuple[asyncio.Task[object], asyncio.Task[object]],
+        *,
+        return_when: str,
+    ) -> tuple[set[asyncio.Task[object]], set[asyncio.Task[object]]]:
+        outbound_task, change_task = tasks
+        await original_wait(tasks, return_when=asyncio.ALL_COMPLETED)
+        return {change_task}, {outbound_task}
+
+    monkeypatch.setattr(
+        "azents.runtime.control_protocol.grpc.runner_terminal_broker.asyncio.wait",
+        store_change_snapshot,
+    )
+
+    control = await stream._wait_for_outbound_or_change()
+
+    assert control == RunnerTerminalHeartbeatAcknowledgement(monotonic_sequence=1)
 
 
 @pytest.mark.asyncio

@@ -286,22 +286,28 @@ async def _control_messages(
 ) -> AsyncIterator[runtime_runner_terminal_pb2.TerminalControlMessage]:
     frames = stream.control_frames().__aiter__()
     while True:
-        control_task = asyncio.create_task(_next_control_frame(frames))
-        done, _pending = await asyncio.wait(
-            (control_task, inbound_task),
-            return_when=asyncio.FIRST_COMPLETED,
+        control_task = asyncio.create_task(
+            _next_control_frame(frames),
+            name="runner-terminal-control-frame",
         )
-        if inbound_task in done:
-            control_task.cancel()
+        try:
+            done, _pending = await asyncio.wait(
+                (control_task, inbound_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if inbound_task in done:
+                await inbound_task
+                return
+            try:
+                frame = control_task.result()
+            except StopAsyncIteration:
+                return
+            yield runner_terminal_control_to_message(frame)
+        finally:
+            if not control_task.done():
+                control_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await control_task
-            await inbound_task
-            return
-        try:
-            frame = control_task.result()
-        except StopAsyncIteration:
-            return
-        yield runner_terminal_control_to_message(frame)
 
 
 async def _next_control_frame(
