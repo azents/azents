@@ -3,7 +3,7 @@
 import datetime
 import json
 from collections.abc import Awaitable, Callable
-from typing import Annotated, NamedTuple, TypeVar
+from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 
 import sqlalchemy as sa
 from fastapi import Depends

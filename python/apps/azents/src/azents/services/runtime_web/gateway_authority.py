@@ -16,6 +16,7 @@ from azents.core.enums import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.runtime_web.data import RuntimeWebEndpoint
 from azents.repos.runtime_web.gateway_data import (
@@ -145,19 +146,11 @@ class RuntimeWebGatewayAuthorityService:
                 session,
                 endpoint.agent_id,
             )
-            runtime_ready = (
-                runtime is not None
-                and runtime.desired_state is RuntimeDesiredState.RUNNING
-                and runtime.provider_observed_state
-                is RuntimeProviderObservedState.RUNNING
-                and runtime.runner_state is RuntimeRunnerState.READY
-                and runtime.desired_generation >= 1
-                and runtime.runner_generation == runtime.desired_generation
-            )
-            if not runtime_ready or runtime is None:
+            if not _runtime_ready(runtime):
                 raise RuntimeWebGatewayAuthorityError(
                     RuntimeWebGatewayAuthorityCode.RUNTIME_UNAVAILABLE
                 )
+            assert runtime is not None
             return RuntimeWebGatewayAuthority(
                 identity=identity,
                 endpoint=endpoint,
@@ -393,3 +386,16 @@ class RuntimeWebGatewayAuthorityService:
         if not isinstance(now, datetime.datetime):
             raise RuntimeError("Database did not return current timestamp")
         return now
+
+
+def _runtime_ready(runtime: AgentRuntime | None) -> bool:
+    """Return whether current Provider and Runner evidence can serve Runtime Web."""
+    return (
+        runtime is not None
+        and runtime.desired_state is RuntimeDesiredState.RUNNING
+        and runtime.desired_generation >= 1
+        and runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING
+        and runtime.provider_observed_generation == runtime.desired_generation
+        and runtime.runner_state is RuntimeRunnerState.READY
+        and runtime.runner_generation >= 1
+    )

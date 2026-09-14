@@ -3,9 +3,16 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
 from azents_runtime_control.runner_web import RunnerWebProtocol
 
+from azents.core.enums import (
+    RuntimeDesiredState,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
+)
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_web.data import RuntimeWebCycle, RuntimeWebEndpoint
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebGatewayAuthority,
@@ -13,7 +20,49 @@ from azents.repos.runtime_web.gateway_data import (
 )
 from azents.services.runtime_web.gateway_authority import (
     RuntimeWebGatewayAuthorityService,
+    _runtime_ready,
 )
+
+
+def _runtime(**updates: object) -> AgentRuntime:
+    now = datetime(2026, 9, 13, tzinfo=UTC)
+    runtime = AgentRuntime(
+        id="t" * 32,
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        terminal_delete_acknowledgement_kind=None,
+        desired_state=RuntimeDesiredState.RUNNING,
+        desired_generation=552,
+        provider_observed_state=RuntimeProviderObservedState.RUNNING,
+        provider_observed_generation=552,
+        runner_state=RuntimeRunnerState.READY,
+        runner_generation=987_654_321,
+        created_at=now,
+        updated_at=now,
+    )
+    return runtime.model_copy(update=updates)
+
+
+def test_runtime_ready_accepts_independent_kubernetes_runner_generation() -> None:
+    """Accept a ready Runner whose generation is independent from lifecycle."""
+    assert _runtime_ready(_runtime())
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"desired_state": RuntimeDesiredState.STOPPED},
+        {"provider_observed_state": RuntimeProviderObservedState.STOPPED},
+        {"provider_observed_generation": 551},
+        {"runner_state": RuntimeRunnerState.UNKNOWN},
+        {"runner_generation": 0},
+    ],
+)
+def test_runtime_ready_rejects_stale_or_missing_runtime_evidence(
+    updates: dict[str, object],
+) -> None:
+    """Reject stale Provider evidence and unavailable Runner connections."""
+    assert not _runtime_ready(_runtime(**updates))
 
 
 def test_http_tunnel_preserves_approval_beyond_transport_deadline() -> None:
@@ -69,8 +118,8 @@ def test_http_tunnel_preserves_approval_beyond_transport_deadline() -> None:
         request=None,
         cycle=cycle,
         runtime_id="t" * 32,
-        desired_generation=4,
-        runner_generation=4,
+        desired_generation=552,
+        runner_generation=987_654_321,
         active=True,
         runtime_ready=True,
     )
@@ -87,9 +136,13 @@ def test_http_tunnel_preserves_approval_beyond_transport_deadline() -> None:
     )
 
     http_deadline = now + timedelta(minutes=10)
+    assert http_identity.desired_generation == 552
+    assert http_identity.runner_generation == 987_654_321
     assert http_identity.registration_deadline_at == now + timedelta(seconds=10)
     assert http_identity.approval_deadline_at == cycle_expires_at
     assert http_identity.transport_deadline_at == http_deadline
     assert http_identity.approval_deadline_at > http_identity.transport_deadline_at
+    assert websocket_identity.desired_generation == 552
+    assert websocket_identity.runner_generation == 987_654_321
     assert websocket_identity.approval_deadline_at == cycle_expires_at
     assert websocket_identity.transport_deadline_at == cycle_expires_at
