@@ -2,7 +2,6 @@
 title: "Heavy-Workload Runtime Web Services Requirements"
 created: 2026-09-14
 updated: 2026-09-14
-implemented: 2026-09-14
 tags: [runtime-web, transport, performance, reliability]
 document_role: primary
 document_type: requirements

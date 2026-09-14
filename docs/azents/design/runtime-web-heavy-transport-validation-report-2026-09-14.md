@@ -19,13 +19,19 @@ and [runtimeweb-260914/DESIGN](runtimeweb-260914-heavy-workload-services.md) rev
 
 The delivered stack is:
 
-- PR `#1826`, commit `1e05bcaed38bea7c83eabb0bf3aae57b5ee027b8`: inactive persistent protocol, Owner, Runner, credit, scheduling, and capacity foundation;
-- PR `#1827`, commit `0626db889c9d1bebf927cbb246e9871fe0bef3e8`: inactive Gateway, one-hop relay, operations, and Helm foundation;
-- PR `#1830`, commits `60d9121467d6165669dc14d58f0f22d94623de96` and
-  `4e527b36018363a4053afcb6f31063e7d28262f6`: replacement activation,
-  destructive migration, legacy removal, independent process hard ceilings, typed
-  Runner aggregate telemetry, and validation substrate; and
-- Phase 4 branch `feat/runtime-web-heavy-transport-4-specs-cleanup`: configurable low-default E2E workload, Living Spec promotion, implemented snapshot marker, validation record, and temporary-plan cleanup.
+- PR `#1826`, head `f8e62b9908e5bf17860fa2d05b6d0392bbe59621`: inactive
+  persistent protocol, Owner, Runner, credit, scheduling, capacity, and generation
+  lifecycle foundation;
+- PR `#1827`, head `76edbcbca88b7b9d632ed2df8700b6a7463ca16d`: inactive
+  Gateway, one-hop relay, operations, Helm foundation, and control/credit boundary
+  corrections;
+- PR `#1830`, head `ef5a965c1bd211e00ba51f5b74382717755f1d28`:
+  replacement activation, destructive migration, legacy removal, independent
+  process hard ceilings, typed Runner aggregate telemetry, review corrections, and
+  validation substrate; and
+- Phase 4 branch `feat/runtime-web-heavy-transport-4-specs-cleanup`: configurable
+  low-default E2E workload, Living Spec promotion, validation record, explicit
+  outstanding external performance gates, and temporary-plan cleanup.
 
 No PR was merged and no live deployment, Kubernetes write, restart, operator cutover,
 or production migration was performed.
@@ -153,8 +159,9 @@ content retention, and browser identity behavior did not change.
 ## Cleanup and Final Assessment
 
 The feature implementation plan and all four phase execution plans are removed after
-Spec promotion. The Requirements and Design use the matching
-`implemented: 2026-09-14` date. The accepted ADR remains unchanged.
+Spec promotion. The Requirements and Design intentionally remain without an
+`implemented` marker because the external REQ-14 performance and scale gates above
+are not yet represented as passed. The accepted ADR remains unchanged.
 
 The recurring E2E still emits an existing `StopAsyncIteration` teardown log from the
 unchanged Runner Terminal server after successful test completion. The Runtime Web

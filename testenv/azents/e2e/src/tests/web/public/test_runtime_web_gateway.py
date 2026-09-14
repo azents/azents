@@ -139,7 +139,7 @@ _BROWSER_SCRIPT_TIMEOUT_SECONDS = _bounded_workload_value(
     default=120,
     maximum=7_200,
 )
-_REJECTED_REQUEST_CONTENT_LENGTH = 64 * 1024 * 1024
+_REJECTED_REQUEST_CONTENT_LENGTH = _BROWSER_TRANSFER_BYTES
 logger = logging.getLogger(__name__)
 
 
@@ -486,6 +486,10 @@ def _runtime_web_gateway_container(
         .with_env("AZ_RUNTIME_WEB_GATEWAY_ENABLED", "true")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_PORT", "8040")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_MAINTENANCE", str(maintenance).lower())
+        .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_REQUEST_BODY_BYTES",
+            str(_BROWSER_TRANSFER_BYTES),
+        )
         .with_env(
             "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES",
             str(maximum_active_exchanges),

@@ -408,11 +408,11 @@ Always-on required CI does not depend on external credentials.
   shared-cookie and separate-domain browser identity flows through a local TLS
   wildcard edge, approves the exact pending request through Main Web, and verifies
   stable secret-free URLs, current projection, replacement and close revision
-  fencing, 1 MiB browser and browser-neutral upload/download integrity, eight-asset
-  fan-out, HTTP POST, SSE, redirect non-following, and WebSocket text, binary,
-  ping/pong, close, and exact subprotocol behavior. A second Runtime Control replica
-  accepts the Gateway session after the Runner has registered with the first replica,
-  forcing the PostgreSQL Owner route and maximum-one-hop trusted relay path. The
+  fencing, browser upload digest and streamed download byte count, eight-asset
+  fan-out, HTTP POST and error propagation, SSE, redirect handling, and WebSocket
+  text, binary, ping/pong, and close behavior. A second Runtime Control replica accepts
+  the Gateway session after the Runner has registered with the first replica, forcing
+  the PostgreSQL Owner route and maximum-one-hop trusted relay path. The
   recurring file collects four tests: shared-cookie and separate-domain full
   journeys, pre-body hard-limit rejection, and maintenance preflight. The capacity
   backend is selectable between memory and Redis; Redis loss/recovery behavior stays
