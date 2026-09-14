@@ -121,6 +121,8 @@ class RunnerWebLoopbackPool:
         self.maximum_connections = maximum_connections
         self.http_pool: httpcore.AsyncConnectionPool | None = None
         self.websockets: set[RunnerWebSocket] = set()
+        self.generation = 0
+        self.active_generation: int | None = None
         self.lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -135,6 +137,8 @@ class RunnerWebLoopbackPool:
                 http2=False,
                 retries=0,
             )
+            self.generation += 1
+            self.active_generation = self.generation
 
     async def close(self) -> None:
         """Close every pooled loopback connection on generation invalidation."""
@@ -142,6 +146,7 @@ class RunnerWebLoopbackPool:
             http_pool = self.http_pool
             websockets = tuple(self.websockets)
             self.http_pool = None
+            self.active_generation = None
             self.websockets.clear()
         closes: list[Awaitable[None]] = []
         if http_pool is not None:
@@ -219,8 +224,10 @@ class RunnerWebLoopbackPool:
             raise ValueError("Runtime Web target must be ASCII") from error
         if not target.startswith(b"/") or target.startswith(b"//") or b"#" in target:
             raise ValueError("Runtime Web target must use origin form")
-        if self.http_pool is None:
-            raise RuntimeError("Runner Web loopback pool is not started")
+        async with self.lock:
+            generation = self.active_generation
+            if generation is None:
+                raise RuntimeError("Runner Web loopback pool is not started")
         normalized_headers = [
             (name, value)
             for name, value in headers
@@ -258,7 +265,15 @@ class RunnerWebLoopbackPool:
                                 writer=writer,
                                 on_close=self.websockets.discard,
                             )
-                            self.websockets.add(websocket)
+                            async with self.lock:
+                                if self.active_generation != generation:
+                                    await websocket.close()
+                                    writer = None
+                                    raise RuntimeError(
+                                        "Runner Web loopback generation changed "
+                                        "during WebSocket handshake"
+                                    )
+                                self.websockets.add(websocket)
                             return websocket
                         if isinstance(event, RejectConnection):
                             raise RuntimeError(
@@ -393,9 +408,11 @@ class RunnerWebSessionManager:
             self.offer = None
             self.consumed_offers.clear()
             self.consumed_offer_set.clear()
-        if client is not None:
-            await client.close()
-        await self.loopback.close()
+        try:
+            if client is not None:
+                await client.close()
+        finally:
+            await self.loopback.close()
 
     async def close(self) -> None:
         """Close the inactive manager without retaining application state."""
@@ -403,9 +420,11 @@ class RunnerWebSessionManager:
             client = self.client
             self.client = None
             self.offer = None
-        if client is not None:
-            await client.close()
-        await self.loopback.close()
+        try:
+            if client is not None:
+                await client.close()
+        finally:
+            await self.loopback.close()
 
     def _offer_is_current(self, offer: RunnerSessionOffer) -> bool:
         desired_generation = self.accepted_desired_generation()

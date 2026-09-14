@@ -392,6 +392,7 @@ class LogicalStreamState:
         self.rejected = False
         self.request_sequence = 0
         self.response_sequence = 0
+        self.request_body_bytes = 0
         self.request_ended = False
         self.response_head_received = False
         self.response_ended = False
@@ -436,7 +437,14 @@ class LogicalStreamState:
             raise ValueError("Runtime WebSocket streams require typed frames")
         if not 1 <= len(data) <= self.profile.data_frame_bytes:
             raise ValueError("Runtime Web data frame has an invalid size")
+        if (
+            direction is StreamDirection.REQUEST
+            and self.request_body_bytes + len(data) > MAX_REQUEST_BODY_BYTES
+        ):
+            raise ValueError("Runtime Web request body exceeds the maximum size")
         self._advance_sequence(direction, sequence)
+        if direction is StreamDirection.REQUEST:
+            self.request_body_bytes += len(data)
 
     def _advance_sequence(self, direction: StreamDirection, sequence: int) -> None:
         if direction is StreamDirection.REQUEST:

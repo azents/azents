@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import azents_runtime_control.runtime_web_session as runtime_web_session_module
 from azents_runtime_control.proto import runtime_web_session_pb2
 from azents_runtime_control.runtime_web_session import (
     APPROVED_SESSION_PROFILE,
@@ -201,6 +202,21 @@ def test_http_and_websocket_frame_kinds_and_effective_size_are_separate() -> Non
     websocket.receive_response_head(101, ())
     with pytest.raises(ValueError, match="typed frames"):
         websocket.receive_data(StreamDirection.REQUEST, 1, b"bypass")
+
+
+def test_http_request_body_limit_is_enforced_across_data_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime_web_session_module, "MAX_REQUEST_BODY_BYTES", 4)
+    stream = _stream()
+    stream.accept()
+
+    stream.receive_data(StreamDirection.REQUEST, 1, b"abc")
+    with pytest.raises(ValueError, match="request body exceeds"):
+        stream.receive_data(StreamDirection.REQUEST, 2, b"de")
+
+    assert stream.request_body_bytes == 3
+    assert stream.request_sequence == 1
 
 
 def test_websocket_control_interleaves_and_close_fences_each_direction() -> None:

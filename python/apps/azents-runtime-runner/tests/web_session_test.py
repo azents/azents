@@ -89,6 +89,63 @@ async def test_loopback_pool_reuses_one_generation_scoped_session() -> None:
     assert pool.http_pool is None
 
 
+async def test_loopback_websocket_rejects_registration_after_generation_close() -> None:
+    handshake_received = asyncio.Event()
+    permit_accept = asyncio.Event()
+
+    async def handle(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        request_head = await reader.readuntil(b"\r\n\r\n")
+        websocket_key = next(
+            line.split(b":", 1)[1].strip()
+            for line in request_head.split(b"\r\n")
+            if line.lower().startswith(b"sec-websocket-key:")
+        )
+        accept = base64.b64encode(
+            hashlib.sha1(
+                websocket_key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                usedforsecurity=False,
+            ).digest()
+        )
+        handshake_received.set()
+        await permit_accept.wait()
+        writer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\n"
+            b"Connection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: " + accept + b"\r\n\r\n"
+        )
+        await writer.drain()
+        await reader.read()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    pool = RunnerWebLoopbackPool(maximum_connections=8)
+    try:
+        await pool.start()
+        opening = asyncio.create_task(
+            pool.websocket(
+                target=b"/socket",
+                headers=(),
+                port=port,
+                timeout_seconds=1,
+            )
+        )
+        await handshake_received.wait()
+        await pool.close()
+        permit_accept.set()
+        with pytest.raises(RuntimeError, match="generation changed"):
+            await opening
+        assert not pool.websockets
+    finally:
+        permit_accept.set()
+        await pool.close()
+        server.close()
+        await server.wait_closed()
+
+
 async def test_loopback_http_preserves_raw_target_headers_and_connection() -> None:
     requests: list[bytes] = []
     connections = 0
@@ -273,6 +330,42 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
 
     assert calls == 0
     assert manager.client is None
+
+
+@pytest.mark.parametrize("invalidate", (True, False))
+async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
+    invalidate: bool,
+) -> None:
+    class FailingCloseClient(GrpcRunnerWebSessionClient):
+        def __init__(self) -> None:
+            pass
+
+        async def close(self) -> None:
+            raise RuntimeError("client shutdown failed")
+
+    loopback = RunnerWebLoopbackPool(maximum_connections=8)
+    await loopback.start()
+    manager = RunnerWebSessionManager(
+        runtime_id="runtime-a",
+        runner_boot_id="runner-boot-a",
+        accepted_desired_generation=lambda: 3,
+        accepted_generation=lambda: 4,
+        runner_auth_token="runner-token",
+        tls=None,
+        allow_insecure=True,
+        loopback=loopback,
+        client_factory=None,
+    )
+    manager.client = FailingCloseClient()
+
+    with pytest.raises(RuntimeError, match="client shutdown failed"):
+        if invalidate:
+            await manager.invalidate_generation()
+        else:
+            await manager.close()
+
+    assert loopback.http_pool is None
+    assert loopback.active_generation is None
 
 
 async def test_runner_manager_revalidates_generation_after_handshake() -> None:
