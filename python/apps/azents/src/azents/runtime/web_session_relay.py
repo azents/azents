@@ -518,6 +518,14 @@ class RuntimeWebRelayPool:
             tuple[RelaySessionKey, RelaySourceStreamKey], RelayStreamBinding
         ] = {}
         self.relay_bindings: dict[tuple[RelaySessionKey, int], RelayStreamBinding] = {}
+        self.source_response_session_consumed: dict[tuple[str, str], int] = {}
+        self.source_response_stream_consumed: dict[
+            tuple[RelaySessionKey, RelaySourceStreamKey], int
+        ] = {}
+        self.relay_response_session_consumed: dict[RelaySessionKey, int] = {}
+        self.owner_request_session_consumed: dict[RelaySessionKey, int] = {}
+        self.relay_request_stream_consumed: dict[tuple[RelaySessionKey, int], int] = {}
+        self.source_request_session_consumed: dict[tuple[str, str], int] = {}
         self.relay_tombstones: deque[tuple[RelaySessionKey, int]] = deque(
             maxlen=MAX_STREAM_TOMBSTONES
         )
@@ -593,6 +601,52 @@ class RuntimeWebRelayPool:
         forwarded.session_lease_id = key.owner.session_lease_id
         forwarded.lease_generation = key.owner.lease_generation
         forwarded.stream_id = binding.relay_stream_id
+        if (
+            forwarded.WhichOneof("payload") == "window_update"
+            and forwarded.window_update.direction
+            == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        ):
+            async with self.lock:
+                if (
+                    self.sessions.get(key) is not connection
+                    or self.source_bindings.get((key, binding.source)) is not binding
+                ):
+                    raise RuntimeError(
+                        "Runtime Web relay route changed before credit translation"
+                    )
+                source_session = (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                source_session_total = forwarded.window_update.session_consumed_total
+                previous_source_session_total = (
+                    self.source_response_session_consumed.get(source_session)
+                )
+                if (
+                    previous_source_session_total is not None
+                    and source_session_total < previous_source_session_total
+                ):
+                    raise ValueError(
+                        "Runtime Web relay source response consumed total decreased"
+                    )
+                stream_key = (key, binding.source)
+                previous_stream_total = self.source_response_stream_consumed.get(
+                    stream_key,
+                    0,
+                )
+                stream_total = forwarded.window_update.stream_consumed_total
+                if stream_total < previous_stream_total:
+                    raise ValueError(
+                        "Runtime Web relay source response stream total decreased"
+                    )
+                self.source_response_session_consumed[source_session] = (
+                    source_session_total
+                )
+                self.source_response_stream_consumed[stream_key] = stream_total
+                relay_session_total = self.relay_response_session_consumed.get(key, 0)
+                relay_session_total += stream_total - previous_stream_total
+                self.relay_response_session_consumed[key] = relay_session_total
+                forwarded.window_update.session_consumed_total = relay_session_total
         try:
             await connection.send(forwarded)
         except asyncio.CancelledError:
@@ -628,6 +682,47 @@ class RuntimeWebRelayPool:
             translated.session_id = binding.source.source_session_id
             translated.peer_boot_id = self.peer_boot_id
             translated.stream_id = binding.source.source_stream_id
+            if (
+                envelope.WhichOneof("payload") == "window_update"
+                and envelope.window_update.direction
+                == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            ):
+                owner_session_total = envelope.window_update.session_consumed_total
+                previous_owner_session_total = self.owner_request_session_consumed.get(
+                    key
+                )
+                if (
+                    previous_owner_session_total is not None
+                    and owner_session_total < previous_owner_session_total
+                ):
+                    raise ValueError(
+                        "Runtime Web relay Owner request consumed total decreased"
+                    )
+                stream_key = (key, binding.relay_stream_id)
+                previous_stream_total = self.relay_request_stream_consumed.get(
+                    stream_key,
+                    0,
+                )
+                stream_total = envelope.window_update.stream_consumed_total
+                if stream_total < previous_stream_total:
+                    raise ValueError(
+                        "Runtime Web relay Owner request stream total decreased"
+                    )
+                source_session = (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                source_session_total = self.source_request_session_consumed.get(
+                    source_session,
+                    0,
+                )
+                source_session_total += stream_total - previous_stream_total
+                self.owner_request_session_consumed[key] = owner_session_total
+                self.relay_request_stream_consumed[stream_key] = stream_total
+                self.source_request_session_consumed[source_session] = (
+                    source_session_total
+                )
+                translated.window_update.session_consumed_total = source_session_total
             if envelope.WhichOneof("payload") == "open_accepted":
                 if (
                     envelope.open_accepted.route_path
@@ -665,6 +760,12 @@ class RuntimeWebRelayPool:
             self.next_stream_ids.clear()
             self.source_bindings.clear()
             self.relay_bindings.clear()
+            self.source_response_session_consumed.clear()
+            self.source_response_stream_consumed.clear()
+            self.relay_response_session_consumed.clear()
+            self.owner_request_session_consumed.clear()
+            self.relay_request_stream_consumed.clear()
+            self.source_request_session_consumed.clear()
         for monitor in monitors:
             monitor.cancel()
         await asyncio.gather(*monitors, return_exceptions=True)
@@ -675,6 +776,29 @@ class RuntimeWebRelayPool:
         errors = [result for result in results if isinstance(result, Exception)]
         if errors:
             raise ExceptionGroup("Runtime Web relay close failed", errors)
+
+    async def release_source(
+        self,
+        *,
+        source_session_id: str,
+        source_peer_boot_id: str,
+    ) -> None:
+        """Release one disconnected source session and its hop-local credit."""
+        source_session = (source_session_id, source_peer_boot_id)
+        async with self.lock:
+            bindings = tuple(
+                (key, binding)
+                for (key, _), binding in self.source_bindings.items()
+                if (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                == source_session
+            )
+            for key, binding in bindings:
+                self._release_binding(key, binding)
+            self.source_response_session_consumed.pop(source_session, None)
+            self.source_request_session_consumed.pop(source_session, None)
 
     async def _route(
         self,
@@ -751,6 +875,8 @@ class RuntimeWebRelayPool:
             )
             for binding in bindings:
                 self._release_binding(key, binding)
+            self.relay_response_session_consumed.pop(key, None)
+            self.owner_request_session_consumed.pop(key, None)
             retirement_handler = self.retirement_handler if from_monitor else None
         if monitor is not None and not from_monitor:
             monitor.cancel()
@@ -767,6 +893,11 @@ class RuntimeWebRelayPool:
     ) -> None:
         self.source_bindings.pop((key, binding.source), None)
         self.relay_bindings.pop((key, binding.relay_stream_id), None)
+        self.source_response_stream_consumed.pop((key, binding.source), None)
+        self.relay_request_stream_consumed.pop(
+            (key, binding.relay_stream_id),
+            None,
+        )
         source_tombstone = (key, binding.source)
         if len(self.source_tombstones) == MAX_STREAM_TOMBSTONES:
             expired_source = self.source_tombstones.popleft()

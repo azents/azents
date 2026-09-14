@@ -16,7 +16,9 @@ from azents.runtime import web_session_relay as web_session_relay_module
 from azents.runtime.web_session_broker import BrokerTarget
 from azents.runtime.web_session_relay import (
     GrpcPersistentControlRelay,
+    PersistentRelayConnection,
     RelaySessionKey,
+    RelaySourceStreamKey,
     RelayStreamBinding,
     RuntimeWebRelayPool,
 )
@@ -114,6 +116,37 @@ class _Connector:
     async def __call__(self, key: RelaySessionKey) -> _Connection:
         self.keys.append(key)
         return self.connections[len(self.keys) - 1]
+
+
+class _RouteGateRelayPool(RuntimeWebRelayPool):
+    def __init__(self, connector: _Connector) -> None:
+        super().__init__(
+            connector=connector,
+            maximum_sessions=1,
+            peer_boot_id="accepting-control",
+        )
+        self.gate_credit_translation = False
+        self.route_returned = asyncio.Event()
+        self.release_route = asyncio.Event()
+
+    async def _route(
+        self,
+        key: RelaySessionKey,
+        source: RelaySourceStreamKey,
+        *,
+        create: bool,
+        payload: str | None,
+    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
+        routed = await super()._route(
+            key,
+            source,
+            create=create,
+            payload=payload,
+        )
+        if self.gate_credit_translation and payload == "window_update":
+            self.route_returned.set()
+            await self.release_route.wait()
+        return routed
 
 
 def _source_envelope(
@@ -224,6 +257,135 @@ async def test_relay_maps_same_source_stream_id_without_collision() -> None:
         runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
     )
     assert await pool.forward(target=target, envelope=late_credit) is None
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_translates_hop_local_session_credit_across_sources() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    first = await pool.forward(
+        target=target,
+        envelope=_source_envelope(1),
+    )
+    second = await pool.forward(
+        target=target,
+        envelope=_source_envelope(
+            1,
+            source_session_id="gateway-session-b",
+            source_peer_boot_id="gateway-boot-b",
+        ),
+    )
+    assert first is not None
+    assert second is not None
+
+    first_response_credit = _source_envelope(1)
+    first_response_credit.ClearField("open")
+    first_response_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    first_response_credit.window_update.stream_consumed_total = 5
+    first_response_credit.window_update.session_consumed_total = 5
+    await pool.forward(target=target, envelope=first_response_credit)
+    second_response_credit = _source_envelope(
+        1,
+        source_session_id="gateway-session-b",
+        source_peer_boot_id="gateway-boot-b",
+    )
+    second_response_credit.ClearField("open")
+    second_response_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    second_response_credit.window_update.stream_consumed_total = 3
+    second_response_credit.window_update.session_consumed_total = 3
+    await pool.forward(target=target, envelope=second_response_credit)
+
+    assert connection.sent[-2].window_update.session_consumed_total == 5
+    assert connection.sent[-1].window_update.session_consumed_total == 8
+
+    first_request_credit = _owner_envelope(
+        _owner(),
+        stream_id=first.relay_stream_id,
+    )
+    first_request_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    first_request_credit.window_update.stream_consumed_total = 5
+    first_request_credit.window_update.session_consumed_total = 5
+    translated_first = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=first_request_credit,
+    )
+    second_request_credit = _owner_envelope(
+        _owner(),
+        stream_id=second.relay_stream_id,
+    )
+    second_request_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    second_request_credit.window_update.stream_consumed_total = 3
+    second_request_credit.window_update.session_consumed_total = 8
+    translated_second = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=second_request_credit,
+    )
+
+    assert translated_first is not None
+    assert translated_first.window_update.session_consumed_total == 5
+    assert translated_second is not None
+    assert translated_second.window_update.session_consumed_total == 3
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_retirement_before_credit_translation_leaves_no_stale_state() -> (
+    None
+):
+    retired = _Connection()
+    replacement = _Connection()
+    pool = _RouteGateRelayPool(_Connector([retired, replacement]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    await pool.forward(target=target, envelope=_source_envelope(1))
+    key = RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    credit = _source_envelope(1)
+    credit.ClearField("open")
+    credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    credit.window_update.stream_consumed_total = 5
+    credit.window_update.session_consumed_total = 5
+    pool.gate_credit_translation = True
+
+    forwarding = asyncio.create_task(pool.forward(target=target, envelope=credit))
+    await pool.route_returned.wait()
+    assert await pool.retire(key, retired)
+    pool.release_route.set()
+
+    with pytest.raises(RuntimeError, match="route changed"):
+        await forwarding
+    assert pool.sessions == {}
+    assert pool.source_bindings == {}
+    assert pool.relay_bindings == {}
+    assert pool.source_response_session_consumed == {}
+    assert pool.source_response_stream_consumed == {}
+    assert pool.relay_response_session_consumed == {}
+    assert pool.owner_request_session_consumed == {}
+    assert pool.relay_request_stream_consumed == {}
+    assert pool.source_request_session_consumed == {}
+
+    await pool.forward(target=target, envelope=_source_envelope(2))
+    replacement_credit = _source_envelope(2)
+    replacement_credit.ClearField("open")
+    replacement_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    replacement_credit.window_update.stream_consumed_total = 4
+    replacement_credit.window_update.session_consumed_total = 9
+    pool.gate_credit_translation = False
+    await pool.forward(target=target, envelope=replacement_credit)
+
+    assert replacement.sent[-1].window_update.session_consumed_total == 4
     await pool.close()
 
 

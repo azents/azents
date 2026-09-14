@@ -1331,6 +1331,11 @@ class RuntimeWebControlDataPlane:
             )
         for key in keys:
             await self._release(key)
+        if source.owner is None:
+            await self.relay_pool.release_source(
+                source_session_id=source.session_id,
+                source_peer_boot_id=source.peer_boot_id,
+            )
         async with self.lock:
             runners = tuple(self.runners.values())
         await asyncio.gather(
