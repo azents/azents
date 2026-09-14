@@ -302,7 +302,7 @@ def test_fallback_badge_and_primary_next_reservation_are_reachable(
         f"{azents_main_web_url}/w/{handle}/agents/{agent_id}/sessions/{session_id}"
     )
     message_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.NAME, "message"))
+        ec.element_to_be_clickable((By.NAME, "chat-message"))
     )
     trigger = _wait(browser_driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))

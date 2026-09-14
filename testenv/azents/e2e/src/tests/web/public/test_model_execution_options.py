@@ -109,7 +109,7 @@ def test_existing_session_fast_toggle_saves_complete_displayed_profile(
         f"{azents_main_web_url}/w/{handle}/agents/{agent_id}/sessions/{session_id}"
     )
     browser_driver.get(session_url)
-    _wait(browser_driver).until(ec.element_to_be_clickable((By.NAME, "message")))
+    _wait(browser_driver).until(ec.element_to_be_clickable((By.NAME, "chat-message")))
 
     _select_reasoning_effort(browser_driver, "xhigh")
     model_trigger = _wait(browser_driver).until(
