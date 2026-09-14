@@ -39,6 +39,9 @@ def test_enabled_gateway_normalizes_exact_origins_and_domain() -> None:
     assert config.service_suffix == "services.example.net"
     assert config.cookie_domain == "services.example.net"
     assert len(settings.security_fingerprint()) == 64
+    assert settings.runtime_web_gateway_metrics_port == 8041
+    assert settings.runtime_web_gateway_control_session_pool_size == 4
+    assert settings.runtime_web_gateway_maximum_active_exchanges == 512
 
 
 def test_shared_cookie_mode_accepts_one_parent_domain_for_main_and_services() -> None:
@@ -66,6 +69,8 @@ def test_shared_cookie_mode_accepts_one_parent_domain_for_main_and_services() ->
         {"runtime_web_gateway_control_tls_private_key_file": None},
         {"runtime_web_gateway_identity_cookie_name": "__Secure-unsafe"},
         {"runtime_web_gateway_request_header_bytes": 1},
+        {"runtime_web_gateway_metrics_port": 8040},
+        {"runtime_web_gateway_maximum_active_exchanges": 0},
     ],
 )
 def test_enabled_gateway_rejects_incomplete_security_configuration(
