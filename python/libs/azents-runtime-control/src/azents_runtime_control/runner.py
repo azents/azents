@@ -796,6 +796,7 @@ class RunnerRunLoop:
                 cpu=collected.cpu,
                 memory=collected.memory,
                 disk=collected.disk,
+                runtime_web=collected.runtime_web,
             ),
             generation=accepted.generation,
         )

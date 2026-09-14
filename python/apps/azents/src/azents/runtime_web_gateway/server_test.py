@@ -427,6 +427,8 @@ def _operations() -> tuple[
         RuntimeWebGatewayHardLimits(
             maximum_active_exchanges=4,
             maximum_application_buffer_bytes=1024 * 1024,
+            maximum_control_buffer_bytes=1024 * 1024,
+            maximum_pending_tasks=16,
             maximum_scheduler_waiters=4,
             maximum_event_loop_lag_milliseconds=250,
             maximum_resident_memory_bytes=1024 * 1024 * 1024,
@@ -927,6 +929,8 @@ async def test_websocket_input_rejects_application_buffer_ceiling_without_leak()
         RuntimeWebGatewayHardLimits(
             maximum_active_exchanges=1,
             maximum_application_buffer_bytes=10,
+            maximum_control_buffer_bytes=1024,
+            maximum_pending_tasks=4,
             maximum_scheduler_waiters=1,
             maximum_event_loop_lag_milliseconds=250,
             maximum_resident_memory_bytes=1024 * 1024 * 1024,

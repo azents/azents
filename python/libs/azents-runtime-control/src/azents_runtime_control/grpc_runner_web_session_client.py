@@ -28,6 +28,10 @@ _MAX_PENDING_ENVELOPES = 8
 _LOGGER = logging.getLogger(__name__)
 
 
+class RunnerWebResourceExhausted(RuntimeError):
+    """One process-local Runner Web hard-limit rejection."""
+
+
 class _ClientState(enum.StrEnum):
     NEW = "new"
     ACTIVE = "active"
@@ -50,6 +54,20 @@ class RunnerWebSessionStream(Protocol):
     ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]: ...
 
 
+class RunnerWebEnvelopeResources(Protocol):
+    """Process-local resource accounting for the Runner outbound queue."""
+
+    def try_reserve_envelope(
+        self,
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> bool: ...
+
+    def release_envelope(
+        self,
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> None: ...
+
+
 class GrpcRunnerWebSessionClient:
     """Own one bounded persistent Runner-to-Owner gRPC session."""
 
@@ -59,11 +77,13 @@ class GrpcRunnerWebSessionClient:
         *,
         runner_auth_token: str,
         channel: grpc.aio.Channel | None,
+        outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> None:
         if not runner_auth_token:
             raise ValueError("Runner authentication token must not be empty")
         self.stream = stream
         self.channel = channel
+        self.outbound_resources = outbound_resources
         self.metadata = (("authorization", f"Bearer {runner_auth_token}"),)
         self.outbound: deque[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
             deque()
@@ -86,6 +106,7 @@ class GrpcRunnerWebSessionClient:
         runner_auth_token: str,
         tls: GrpcClientTlsConfig | None,
         allow_insecure: bool,
+        outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> "GrpcRunnerWebSessionClient":
         validate_runner_web_connect_address(endpoint)
         options: tuple[tuple[str, int | str], ...] = (
@@ -107,6 +128,7 @@ class GrpcRunnerWebSessionClient:
             _RuntimeRunnerWebSessionStub(channel).Connect,
             runner_auth_token=runner_auth_token,
             channel=channel,
+            outbound_resources=outbound_resources,
         )
 
     async def start(
@@ -181,6 +203,13 @@ class GrpcRunnerWebSessionClient:
                 or self.receiver_task.done()
             ):
                 raise RuntimeError("Runner Web session is not active")
+            if (
+                self.outbound_resources is not None
+                and not self.outbound_resources.try_reserve_envelope(envelope)
+            ):
+                raise RunnerWebResourceExhausted(
+                    "Runner Web outbound hard limit is exhausted"
+                )
             self.outbound.append(envelope)
             self.condition.notify_all()
 
@@ -201,6 +230,8 @@ class GrpcRunnerWebSessionClient:
                 if self.state is not _ClientState.ACTIVE:
                     return
                 message = self.outbound.popleft()
+                if self.outbound_resources is not None:
+                    self.outbound_resources.release_envelope(message)
                 self.condition.notify_all()
             yield message
 
@@ -255,7 +286,7 @@ class GrpcRunnerWebSessionClient:
                 if self.state is _ClientState.CLOSED:
                     return
                 self.state = _ClientState.CLOSING
-                self.outbound.clear()
+                self._release_outbound()
                 receiver_task = self.receiver_task
                 self.receiver_task = None
                 self.condition.notify_all()
@@ -276,13 +307,20 @@ class GrpcRunnerWebSessionClient:
                     await channel.close()
             finally:
                 async with self.condition:
-                    self.outbound.clear()
+                    self._release_outbound()
                     if self.accepted is not None and not self.accepted.done():
                         self.accepted.cancel()
                     self.state = _ClientState.CLOSED
                     self.condition.notify_all()
             if propagate_receiver_error and receiver_error is not None:
                 raise receiver_error
+
+    def _release_outbound(self) -> None:
+        """Release all exact queued process reservations before clearing."""
+        if self.outbound_resources is not None:
+            for envelope in self.outbound:
+                self.outbound_resources.release_envelope(envelope)
+        self.outbound.clear()
 
 
 class EnvelopeHandler(Protocol):

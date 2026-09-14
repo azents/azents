@@ -18,6 +18,7 @@ from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
+    runtime_web_session_pb2,
 )
 from azents_runtime_control.runner import (
     JsonValue,
@@ -61,11 +62,18 @@ from azents_runtime_control.runtime_configuration import (
     serialize_configuration_sequence,
 )
 from azents_runtime_control.runtime_web_session import (
+    CloseReason,
     OwnerSessionEpoch,
     RunnerSessionOffer,
     RunnerSessionOfferHandler,
+    StreamDirection,
+    StreamProtocol,
 )
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
+    RunnerRuntimeWebProtocolCount,
+    RunnerRuntimeWebReasonCount,
+    RunnerRuntimeWebTrafficCount,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsReport,
@@ -656,6 +664,7 @@ def runner_system_metrics_from_message(
         cpu=_system_metric_observation_from_message(message.cpu),
         memory=_system_metric_observation_from_message(message.memory),
         disk=_system_metric_observation_from_message(message.disk),
+        runtime_web=_runtime_web_metrics_from_message(message.runtime_web),
     )
 
 
@@ -670,6 +679,252 @@ def runner_system_metrics_to_message(
         cpu=_system_metric_observation_to_message(report.cpu),
         memory=_system_metric_observation_to_message(report.memory),
         disk=_system_metric_observation_to_message(report.disk),
+        runtime_web=_runtime_web_metrics_to_message(report.runtime_web),
+    )
+
+
+def _runtime_web_metrics_from_message(
+    message: runtime_runner_control_pb2.RunnerRuntimeWebMetrics,
+) -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics(
+        active_sessions=message.active_sessions,
+        active_streams=message.active_streams,
+        maximum_sessions=message.maximum_sessions,
+        maximum_active_streams=message.maximum_active_streams,
+        application_buffer_bytes=message.application_buffer_bytes,
+        application_buffer_limit_bytes=message.application_buffer_limit_bytes,
+        control_buffer_bytes=message.control_buffer_bytes,
+        control_buffer_limit_bytes=message.control_buffer_limit_bytes,
+        queued_envelopes=message.queued_envelopes,
+        queued_envelope_limit=message.queued_envelope_limit,
+        pending_tasks=message.pending_tasks,
+        pending_task_limit=message.pending_task_limit,
+        event_loop_lag_milliseconds=message.event_loop_lag_milliseconds,
+        event_loop_lag_limit_milliseconds=(message.event_loop_lag_limit_milliseconds),
+        resident_memory_bytes=message.resident_memory_bytes,
+        resident_memory_limit_bytes=message.resident_memory_limit_bytes,
+        credit_stalls_total=message.credit_stalls_total,
+        credit_stall_seconds=message.credit_stall_seconds,
+        request_consumed_bytes=message.request_consumed_bytes,
+        response_sent_bytes=message.response_sent_bytes,
+        response_consumed_bytes=message.response_consumed_bytes,
+        heartbeats_total=message.heartbeats_total,
+        go_aways_total=message.go_aways_total,
+        epoch_transitions_total=message.epoch_transitions_total,
+        setup_seconds_sum=message.setup_seconds_sum,
+        setup_count=message.setup_count,
+        ttfb_seconds_sum=message.ttfb_seconds_sum,
+        ttfb_count=message.ttfb_count,
+        duration_seconds_sum=message.duration_seconds_sum,
+        duration_count=message.duration_count,
+        goodput_bytes=message.goodput_bytes,
+        active_streams_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                value=item.value,
+            )
+            for item in message.active_streams_by_protocol
+        ),
+        opens_accepted_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                value=item.value,
+            )
+            for item in message.opens_accepted_by_protocol
+        ),
+        opens_rejected_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.opens_rejected_by_reason
+        ),
+        resets_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.resets_by_reason
+        ),
+        closes_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.closes_by_reason
+        ),
+        traffic=tuple(
+            RunnerRuntimeWebTrafficCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                direction=_runtime_web_direction_from_message(item.direction),
+                frames=item.frames,
+                bytes=item.bytes,
+            )
+            for item in message.traffic
+        ),
+    )
+
+
+def _runtime_web_metrics_to_message(
+    metrics: RunnerRuntimeWebMetrics,
+) -> runtime_runner_control_pb2.RunnerRuntimeWebMetrics:
+    return runtime_runner_control_pb2.RunnerRuntimeWebMetrics(
+        active_sessions=metrics.active_sessions,
+        active_streams=metrics.active_streams,
+        maximum_sessions=metrics.maximum_sessions,
+        maximum_active_streams=metrics.maximum_active_streams,
+        application_buffer_bytes=metrics.application_buffer_bytes,
+        application_buffer_limit_bytes=metrics.application_buffer_limit_bytes,
+        control_buffer_bytes=metrics.control_buffer_bytes,
+        control_buffer_limit_bytes=metrics.control_buffer_limit_bytes,
+        queued_envelopes=metrics.queued_envelopes,
+        queued_envelope_limit=metrics.queued_envelope_limit,
+        pending_tasks=metrics.pending_tasks,
+        pending_task_limit=metrics.pending_task_limit,
+        event_loop_lag_milliseconds=metrics.event_loop_lag_milliseconds,
+        event_loop_lag_limit_milliseconds=metrics.event_loop_lag_limit_milliseconds,
+        resident_memory_bytes=metrics.resident_memory_bytes,
+        resident_memory_limit_bytes=metrics.resident_memory_limit_bytes,
+        credit_stalls_total=metrics.credit_stalls_total,
+        credit_stall_seconds=metrics.credit_stall_seconds,
+        request_consumed_bytes=metrics.request_consumed_bytes,
+        response_sent_bytes=metrics.response_sent_bytes,
+        response_consumed_bytes=metrics.response_consumed_bytes,
+        heartbeats_total=metrics.heartbeats_total,
+        go_aways_total=metrics.go_aways_total,
+        epoch_transitions_total=metrics.epoch_transitions_total,
+        setup_seconds_sum=metrics.setup_seconds_sum,
+        setup_count=metrics.setup_count,
+        ttfb_seconds_sum=metrics.ttfb_seconds_sum,
+        ttfb_count=metrics.ttfb_count,
+        duration_seconds_sum=metrics.duration_seconds_sum,
+        duration_count=metrics.duration_count,
+        goodput_bytes=metrics.goodput_bytes,
+        active_streams_by_protocol=[
+            runtime_runner_control_pb2.RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                value=item.value,
+            )
+            for item in metrics.active_streams_by_protocol
+        ],
+        opens_accepted_by_protocol=[
+            runtime_runner_control_pb2.RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                value=item.value,
+            )
+            for item in metrics.opens_accepted_by_protocol
+        ],
+        opens_rejected_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.opens_rejected_by_reason
+        ],
+        resets_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.resets_by_reason
+        ],
+        closes_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.closes_by_reason
+        ],
+        traffic=[
+            runtime_runner_control_pb2.RunnerRuntimeWebTrafficCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                direction=_runtime_web_direction_to_message(item.direction),
+                frames=item.frames,
+                bytes=item.bytes,
+            )
+            for item in metrics.traffic
+        ],
+    )
+
+
+def _runtime_web_protocol_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType,
+) -> StreamProtocol:
+    mapping = {
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP: (
+            StreamProtocol.HTTP
+        ),
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET: (
+            StreamProtocol.WEBSOCKET
+        ),
+    }
+    try:
+        return mapping[value]
+    except KeyError as error:
+        raise ValueError("Runtime Web metrics protocol is invalid") from error
+
+
+def _runtime_web_protocol_to_message(
+    protocol: StreamProtocol,
+) -> runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType:
+    return {
+        StreamProtocol.HTTP: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP
+        ),
+        StreamProtocol.WEBSOCKET: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        ),
+    }[protocol]
+
+
+def _runtime_web_direction_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType,
+) -> StreamDirection:
+    mapping = {
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST: (
+            StreamDirection.REQUEST
+        ),
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: (
+            StreamDirection.RESPONSE
+        ),
+    }
+    try:
+        return mapping[value]
+    except KeyError as error:
+        raise ValueError("Runtime Web metrics direction is invalid") from error
+
+
+def _runtime_web_direction_to_message(
+    direction: StreamDirection,
+) -> runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType:
+    return {
+        StreamDirection.REQUEST: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        ),
+        StreamDirection.RESPONSE: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        ),
+    }[direction]
+
+
+def _runtime_web_reason_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
+) -> CloseReason:
+    try:
+        name = runtime_web_session_pb2.RuntimeWebSessionCloseReason.Name(value)
+    except ValueError as error:
+        raise ValueError("Runtime Web metrics reason is invalid") from error
+    prefix = "RUNTIME_WEB_SESSION_CLOSE_REASON_"
+    if not name.startswith(prefix) or name == f"{prefix}UNSPECIFIED":
+        raise ValueError("Runtime Web metrics reason is invalid")
+    return CloseReason(name.removeprefix(prefix).lower())
+
+
+def _runtime_web_reason_to_message(
+    reason: CloseReason,
+) -> runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType:
+    return runtime_web_session_pb2.RuntimeWebSessionCloseReason.Value(
+        f"RUNTIME_WEB_SESSION_CLOSE_REASON_{reason.value.upper()}"
     )
 
 

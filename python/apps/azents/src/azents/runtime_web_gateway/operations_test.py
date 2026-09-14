@@ -6,6 +6,7 @@ import pytest
 from azents_runtime_control.runtime_web_session import (
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
     CloseReason,
+    StreamProtocol,
 )
 
 from azents.runtime_web_gateway.operations import (
@@ -29,6 +30,8 @@ def _limits(*, active_exchanges: int = 2) -> RuntimeWebGatewayHardLimits:
     return RuntimeWebGatewayHardLimits(
         maximum_active_exchanges=active_exchanges,
         maximum_application_buffer_bytes=10,
+        maximum_control_buffer_bytes=10,
+        maximum_pending_tasks=16,
         maximum_scheduler_waiters=1,
         maximum_event_loop_lag_milliseconds=100,
         maximum_resident_memory_bytes=1000,
@@ -142,6 +145,8 @@ def test_hard_limits_require_positive_process_ceilings() -> None:
         RuntimeWebGatewayHardLimits(
             maximum_active_exchanges=0,
             maximum_application_buffer_bytes=1,
+            maximum_control_buffer_bytes=1,
+            maximum_pending_tasks=4,
             maximum_scheduler_waiters=1,
             maximum_event_loop_lag_milliseconds=1,
             maximum_resident_memory_bytes=1,
@@ -157,7 +162,8 @@ def test_resource_tracker_rejects_and_updates_live_pressure_before_oom() -> None
     assert not tracker.try_open_exchange()
     assert tracker.try_reserve_application_buffer(10)
     assert not tracker.try_reserve_application_buffer(1)
-    tracker.reserve_control_buffer(7)
+    assert tracker.try_reserve_control_buffer(7)
+    assert not tracker.try_reserve_control_buffer(4)
     assert tracker.snapshot().control_buffer_bytes == 7
     tracker.release_control_buffer(7)
     assert tracker.try_add_scheduler_waiter()
@@ -525,6 +531,26 @@ async def test_sse_reclassification_after_drain_start_uses_long_lived_grace() ->
 
 
 def test_openmetrics_uses_only_bounded_process_labels() -> None:
+    resources = RuntimeWebGatewayResourceTracker(_limits())
+    resources.record_transport_open(
+        protocol=StreamProtocol.HTTP,
+        path="local",
+        setup_seconds=0.1,
+    )
+    resources.record_transport_frame(
+        protocol=StreamProtocol.HTTP,
+        direction="response",
+        path="local",
+        size_bytes=64,
+    )
+    resources.record_transport_ttfb(0.2)
+    resources.record_transport_terminal(
+        protocol=StreamProtocol.HTTP,
+        path="local",
+        reason=None,
+        duration_seconds=0.5,
+        application_bytes=64,
+    )
     rendered = render_openmetrics(
         pressure=RuntimeWebGatewayPressure(0.1, 0.2, 0.3, 0.4, 0.5),
         health=_health(),
@@ -540,6 +566,7 @@ def test_openmetrics_uses_only_bounded_process_labels() -> None:
         scheduler_waiter_limit=32,
         resident_memory_bytes=2048,
         resident_memory_limit_bytes=8192,
+        transport=resources,
     )
 
     assert 'backend="memory"' in rendered
@@ -554,6 +581,12 @@ def test_openmetrics_uses_only_bounded_process_labels() -> None:
     assert "runtime_web_gateway_scheduler_waiter_limit 32" in rendered
     assert "runtime_web_gateway_resident_memory_bytes 2048" in rendered
     assert "runtime_web_gateway_resident_memory_limit_bytes 8192" in rendered
+    assert (
+        "runtime_web_gateway_transport_frames_total"
+        '{protocol="http",path="local",direction="response"} 1'
+    ) in rendered
+    assert "runtime_web_gateway_transport_ttfb_seconds_sum 0.2" in rendered
+    assert "runtime_web_gateway_transport_goodput_bytes_per_second 128.0" in rendered
     assert "runtime_web_gateway_ready 1" in rendered
-    for forbidden in ("runtime_id=", "user=", "session=", "path=", "query="):
+    for forbidden in ("runtime_id=", "user=", "session=", 'path="/', "query="):
         assert forbidden not in rendered

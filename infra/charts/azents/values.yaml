@@ -124,6 +124,15 @@ server:
       redisNamespace: azents:runtime:web:capacity
       redisTtlSeconds: 30
       maximumRelaySessions: 32
+    webHardLimits:
+      maximumSessions: 128
+      maximumActiveStreams: 1024
+      maximumApplicationBufferBytes: 536870912
+      maximumControlBufferBytes: 67108864
+      maximumQueuedEnvelopes: 4096
+      maximumPendingTasks: 2048
+      maximumEventLoopLagMilliseconds: 250
+      maximumResidentMemoryBytes: 1073741824
     runnerImage:
       repository: ""
       tag: ""
@@ -147,6 +156,8 @@ server:
     hardLimits:
       activeExchanges: 512
       applicationBufferBytes: 268435456
+      controlBufferBytes: 33554432
+      pendingTasks: 4096
       schedulerWaiters: 1024
       eventLoopLagMilliseconds: 250
       residentMemoryBytes: 1073741824
@@ -338,6 +349,14 @@ runtimeProviderKubernetes:
     maxPendingOperationsPerOwner: 100
     maxPendingOperations: 1000
     maxConcurrentControlOperations: 4
+    runtimeWebMaximumSessions: 1
+    runtimeWebMaximumActiveStreams: 128
+    runtimeWebMaximumApplicationBufferBytes: 268435456
+    runtimeWebMaximumControlBufferBytes: 16777216
+    runtimeWebMaximumQueuedEnvelopes: 1024
+    runtimeWebMaximumPendingTasks: 512
+    runtimeWebMaximumEventLoopLagMilliseconds: 250
+    runtimeWebMaximumResidentMemoryBytes: 1610612736
   runtimePod:
     annotations: {}
     imagePullSecrets: null

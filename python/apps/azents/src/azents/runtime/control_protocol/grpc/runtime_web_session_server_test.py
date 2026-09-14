@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+import dataclasses
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import AsyncContextManager
@@ -14,7 +15,19 @@ from azents_runtime_control.runtime_web_capacity import CapacityProfile
 from azents_runtime_control.runtime_web_session import (
     APPROVED_SESSION_PROFILE,
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    CloseReason,
     OwnerSessionEpoch,
+    StreamDirection,
+    StreamProtocol,
+)
+from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
+    RunnerRuntimeWebProtocolCount,
+    RunnerRuntimeWebReasonCount,
+    RunnerRuntimeWebTrafficCount,
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsScope,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,11 +36,16 @@ from azents.repos.runtime_web.data import RuntimeWebSessionRoute
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteRepository,
 )
+from azents.runtime.control_protocol.grpc import (
+    runtime_web_session_server as runtime_web_session_server_module,
+)
 from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
     RuntimeWebCapacityBackend,
     RuntimeWebCapacityConfig,
     RuntimeWebCapacityRegistry,
     RuntimeWebControlDataPlane,
+    RuntimeWebControlHardLimits,
+    RuntimeWebControlResourceTracker,
     RuntimeWebGatewaySessionGrpcServicer,
     RuntimeWebTrustedPeerAuthenticator,
     _BoundedEnvelopeQueue,
@@ -87,6 +105,16 @@ class _UnusedRelayConnector:
 
 
 class _RunnerMetrics:
+    def __init__(
+        self,
+        *,
+        samples: Mapping[
+            tuple[str, int],
+            list[RuntimeSystemMetricsSample],
+        ],
+    ) -> None:
+        self.samples = dict(samples)
+
     async def read_runner_system_metrics(
         self,
         *,
@@ -94,8 +122,8 @@ class _RunnerMetrics:
         generation: int,
         current_time: datetime,
     ) -> list[RuntimeSystemMetricsSample]:
-        del runtime_id, generation, current_time
-        return []
+        del current_time
+        return list(self.samples.get((runtime_id, generation), ()))
 
 
 class _OwnerLifecycle:
@@ -199,7 +227,137 @@ def _owner() -> OwnerSessionEpoch:
     )
 
 
-def _data_plane() -> RuntimeWebControlDataPlane:
+def _runner_runtime_web_metrics(scale: int) -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics(
+        active_sessions=scale,
+        active_streams=2 * scale,
+        maximum_sessions=30 * scale,
+        maximum_active_streams=31 * scale,
+        application_buffer_bytes=3 * scale,
+        application_buffer_limit_bytes=4 * scale,
+        control_buffer_bytes=5 * scale,
+        control_buffer_limit_bytes=6 * scale,
+        queued_envelopes=7 * scale,
+        queued_envelope_limit=8 * scale,
+        pending_tasks=9 * scale,
+        pending_task_limit=10 * scale,
+        event_loop_lag_milliseconds=11.0 * scale,
+        event_loop_lag_limit_milliseconds=12 * scale,
+        resident_memory_bytes=13 * scale,
+        resident_memory_limit_bytes=14 * scale,
+        credit_stalls_total=15 * scale,
+        credit_stall_seconds=16.0 * scale,
+        request_consumed_bytes=17 * scale,
+        response_sent_bytes=19 * scale,
+        response_consumed_bytes=18 * scale,
+        heartbeats_total=20 * scale,
+        go_aways_total=21 * scale,
+        epoch_transitions_total=22 * scale,
+        setup_seconds_sum=23.0 * scale,
+        setup_count=24 * scale,
+        ttfb_seconds_sum=25.0 * scale,
+        ttfb_count=26 * scale,
+        duration_seconds_sum=2.0 * scale,
+        duration_count=27 * scale,
+        goodput_bytes=10 * scale,
+        active_streams_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=protocol,
+                value=(index + 1) * scale,
+            )
+            for index, protocol in enumerate(StreamProtocol)
+        ),
+        opens_accepted_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=protocol,
+                value=(index + 3) * scale,
+            )
+            for index, protocol in enumerate(StreamProtocol)
+        ),
+        opens_rejected_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=reason,
+                value=(index + 1) * scale,
+            )
+            for index, reason in enumerate(CloseReason)
+        ),
+        resets_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=reason,
+                value=(index + 2) * scale,
+            )
+            for index, reason in enumerate(CloseReason)
+        ),
+        closes_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=reason,
+                value=(index + 3) * scale,
+            )
+            for index, reason in enumerate(CloseReason)
+        ),
+        traffic=tuple(
+            RunnerRuntimeWebTrafficCount(
+                protocol=protocol,
+                direction=direction,
+                frames=(protocol_index * 2 + direction_index + 1) * scale,
+                bytes=(protocol_index * 2 + direction_index + 1) * scale * 10,
+            )
+            for protocol_index, protocol in enumerate(StreamProtocol)
+            for direction_index, direction in enumerate(StreamDirection)
+        ),
+    )
+
+
+def _runner_metrics_sample(
+    *,
+    sequence: int,
+    runtime_web: RunnerRuntimeWebMetrics,
+) -> RuntimeSystemMetricsSample:
+    unavailable = RunnerSystemMetricObservation(
+        availability=RunnerSystemMetricAvailability.UNAVAILABLE,
+        used=None,
+        total=None,
+    )
+    return RuntimeSystemMetricsSample(
+        sequence=sequence,
+        measured_at=datetime(2026, 9, 14, tzinfo=UTC),
+        scope=RunnerSystemMetricsScope.CONTAINER,
+        cpu=unavailable,
+        memory=unavailable,
+        disk=unavailable,
+        runtime_web=runtime_web,
+    )
+
+
+def _hard_limits(
+    *,
+    maximum_sessions: int = 32,
+    maximum_active_streams: int = 128,
+    maximum_application_buffer_bytes: int = 128 * 1024 * 1024,
+    maximum_control_buffer_bytes: int = 16 * 1024 * 1024,
+    maximum_queued_envelopes: int = 1024,
+    maximum_pending_tasks: int = 256,
+    maximum_event_loop_lag_milliseconds: int = 250,
+    maximum_resident_memory_bytes: int = 1024 * 1024 * 1024,
+) -> RuntimeWebControlHardLimits:
+    return RuntimeWebControlHardLimits(
+        maximum_sessions=maximum_sessions,
+        maximum_active_streams=maximum_active_streams,
+        maximum_application_buffer_bytes=maximum_application_buffer_bytes,
+        maximum_control_buffer_bytes=maximum_control_buffer_bytes,
+        maximum_queued_envelopes=maximum_queued_envelopes,
+        maximum_pending_tasks=maximum_pending_tasks,
+        maximum_event_loop_lag_milliseconds=(maximum_event_loop_lag_milliseconds),
+        maximum_resident_memory_bytes=maximum_resident_memory_bytes,
+    )
+
+
+def _data_plane(
+    *,
+    hard_limits: RuntimeWebControlHardLimits | None = None,
+    resident_memory_bytes: Callable[[], int] = lambda: 1,
+    runner_metrics: _RunnerMetrics | None = None,
+) -> RuntimeWebControlDataPlane:
     capacity = RuntimeWebCapacityRegistry(
         config=_capacity_config(),
         redis=_Redis(),
@@ -218,12 +376,16 @@ def _data_plane() -> RuntimeWebControlDataPlane:
         control_boot_id="control-boot",
         capacity_registry=capacity,
         relay_pool=relay,
-        runner_metrics=_RunnerMetrics(),
+        runner_metrics=(
+            runner_metrics if runner_metrics is not None else _RunnerMetrics(samples={})
+        ),
         clock=lambda: datetime.now(UTC),
         metrics_recoverable_errors=(RedisConnectionError,),
         owner_lifecycle=_OwnerLifecycle(),
         long_lived_grace_seconds=0.01,
         finite_grace_seconds=0.02,
+        hard_limits=hard_limits or _hard_limits(),
+        resident_memory_bytes=resident_memory_bytes,
     )
 
 
@@ -231,6 +393,8 @@ def _local_data_plane(
     *,
     lifecycle: _OwnerLifecycle | None = None,
     capacity_config: RuntimeWebCapacityConfig | None = None,
+    hard_limits: RuntimeWebControlHardLimits | None = None,
+    resident_memory_bytes: Callable[[], int] = lambda: 1,
 ) -> tuple[RuntimeWebControlDataPlane, _OwnerLifecycle]:
     owner = _owner()
     route = RuntimeWebSessionRoute(
@@ -267,12 +431,14 @@ def _local_data_plane(
             control_boot_id="control-boot",
             capacity_registry=capacity,
             relay_pool=relay,
-            runner_metrics=_RunnerMetrics(),
+            runner_metrics=_RunnerMetrics(samples={}),
             clock=lambda: datetime.now(UTC),
             metrics_recoverable_errors=(RedisConnectionError,),
             owner_lifecycle=effective_lifecycle,
             long_lived_grace_seconds=0.01,
             finite_grace_seconds=0.02,
+            hard_limits=hard_limits or _hard_limits(),
+            resident_memory_bytes=resident_memory_bytes,
         ),
         effective_lifecycle,
     )
@@ -384,6 +550,60 @@ async def test_gateway_servicer_accepts_exact_replacement_handshake() -> None:
     await data_plane.unregister_source(source)
     with pytest.raises(StopAsyncIteration):
         await anext(responses)
+    assert data_plane.resources.snapshot().pending_tasks == 0
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_servicer_rejects_reader_task_budget_without_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_plane = _data_plane(hard_limits=_hard_limits(maximum_pending_tasks=1))
+    servicer = RuntimeWebGatewaySessionGrpcServicer(
+        data_plane=data_plane,
+        peers=RuntimeWebTrustedPeerAuthenticator(
+            allow_insecure=True,
+            gateway_identities=frozenset(),
+            control_identities=frozenset(),
+        ),
+        clock=lambda: datetime.now(UTC),
+    )
+    original_try_begin_task = data_plane.resources.try_begin_task
+    attempts = 0
+
+    def try_begin_task() -> bool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            return False
+        return original_try_begin_task()
+
+    monkeypatch.setattr(data_plane.resources, "try_begin_task", try_begin_task)
+
+    async def messages() -> AsyncIterator[
+        runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    ]:
+        yield _hello()
+        await asyncio.Event().wait()
+
+    responses = servicer.Connect(
+        messages(),
+        FakeGrpcContext[
+            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        ](),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="RESOURCE_EXHAUSTED: Runtime Web Control hard task limit is exhausted",
+    ):
+        await anext(responses)
+    snapshot = data_plane.resources.snapshot()
+    assert snapshot.active_sessions == 0
+    assert snapshot.queued_envelopes == 0
+    assert snapshot.pending_tasks == 0
+    assert data_plane.sources == {}
     await data_plane.close()
 
 
@@ -572,10 +792,441 @@ async def test_control_metrics_are_bounded_and_content_free() -> None:
     assert 'role="gateway"} 1' in rendered
     assert 'role="relay"} 1' in rendered
     assert "runtime_web_control_capacity_degraded 0" in rendered
+    assert "runtime_web_control_hard_sessions 2" in rendered
+    assert "runtime_web_control_event_loop_lag_milliseconds 0.0" in rendered
     for forbidden in ("runtime_id=", "session_id=", "path=", "query=", "user="):
         assert forbidden not in rendered
     await data_plane.unregister_source(first)
     await data_plane.unregister_source(second)
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_control_metrics_aggregate_latest_active_runner_snapshots() -> None:
+    first_owner = _owner()
+    second_owner = OwnerSessionEpoch(
+        owner_boot_id="owner-boot-b",
+        session_lease_id="owner-lease-b",
+        lease_generation=2,
+        runtime_id="runtime-b",
+        desired_generation=2,
+        runner_generation=3,
+    )
+    runner_metrics = _RunnerMetrics(
+        samples={
+            (first_owner.runtime_id, first_owner.runner_generation): [
+                _runner_metrics_sample(
+                    sequence=1,
+                    runtime_web=_runner_runtime_web_metrics(99),
+                ),
+                _runner_metrics_sample(
+                    sequence=2,
+                    runtime_web=dataclasses.replace(
+                        _runner_runtime_web_metrics(2),
+                        event_loop_lag_milliseconds=300.0,
+                        event_loop_lag_limit_milliseconds=250,
+                    ),
+                ),
+            ],
+            (second_owner.runtime_id, second_owner.runner_generation): [
+                _runner_metrics_sample(
+                    sequence=1,
+                    runtime_web=dataclasses.replace(
+                        _runner_runtime_web_metrics(3),
+                        event_loop_lag_milliseconds=0.0,
+                        event_loop_lag_limit_milliseconds=250,
+                    ),
+                )
+            ],
+        }
+    )
+    data_plane = _data_plane(runner_metrics=runner_metrics)
+    accepted = tuple(
+        RuntimeWebAcceptedRunnerSession(
+            owner=owner,
+            runner_boot_id=f"runner-{index}",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        )
+        for index, owner in enumerate((first_owner, second_owner), start=1)
+    )
+    for item in accepted:
+        await data_plane.register_runner(item)
+
+    rendered = await data_plane.metrics()
+
+    expected_lines = (
+        "runtime_web_runner_sessions 5",
+        "runtime_web_runner_session_limit 150",
+        "runtime_web_runner_active_streams 10",
+        "runtime_web_runner_active_stream_limit 155",
+        "runtime_web_runner_application_buffer_bytes 15",
+        "runtime_web_runner_application_buffer_limit_bytes 20",
+        "runtime_web_runner_control_buffer_bytes 25",
+        "runtime_web_runner_control_buffer_limit_bytes 30",
+        "runtime_web_runner_queued_envelopes 35",
+        "runtime_web_runner_queued_envelope_limit 40",
+        "runtime_web_runner_pending_tasks 45",
+        "runtime_web_runner_pending_task_limit 50",
+        "runtime_web_runner_event_loop_lag_milliseconds 300.0",
+        "runtime_web_runner_event_loop_lag_limit_milliseconds 250",
+        "runtime_web_runner_event_loop_lag_pressure 1.2",
+        "runtime_web_runner_resident_memory_bytes 65",
+        "runtime_web_runner_resident_memory_limit_bytes 70",
+        "runtime_web_runner_credit_stalls_total 75",
+        "runtime_web_runner_credit_stall_seconds_total 80.0",
+        "runtime_web_runner_request_consumed_bytes 85",
+        "runtime_web_runner_response_sent_bytes 95",
+        "runtime_web_runner_response_consumed_bytes 90",
+        "runtime_web_runner_response_credit_outstanding_bytes 5",
+        "runtime_web_runner_heartbeat_total 100",
+        "runtime_web_runner_go_away_total 105",
+        "runtime_web_runner_epoch_transition_total 110",
+        "runtime_web_runner_setup_seconds_sum 115.0",
+        "runtime_web_runner_setup_seconds_count 120",
+        "runtime_web_runner_ttfb_seconds_sum 125.0",
+        "runtime_web_runner_ttfb_seconds_count 130",
+        "runtime_web_runner_duration_seconds_sum 10.0",
+        "runtime_web_runner_duration_seconds_count 135",
+        "runtime_web_runner_goodput_bytes 50",
+        "runtime_web_runner_goodput_bytes_per_second 5.0",
+        ('runtime_web_runner_active_streams_by_protocol{protocol="http"} 5'),
+        ('runtime_web_runner_active_streams_by_protocol{protocol="websocket"} 10'),
+        ('runtime_web_runner_open_total{protocol="http",outcome="accepted"} 15'),
+        ('runtime_web_runner_open_rejected_total{reason="caller"} 5'),
+        'runtime_web_runner_reset_total{reason="caller"} 10',
+        'runtime_web_runner_close_total{reason="caller"} 15',
+        ('runtime_web_runner_open_rejected_total{reason="transport_unavailable"} 55'),
+        ('runtime_web_runner_frames_total{protocol="http",direction="request"} 5'),
+        (
+            "runtime_web_runner_bytes_total"
+            '{protocol="websocket",direction="response"} 200'
+        ),
+    )
+    for expected in expected_lines:
+        assert expected in rendered
+    for forbidden in (
+        "runtime_web_runner_memory_bytes",
+        "runtime_web_runner_memory_limit_bytes",
+        "runtime_id=",
+        "session_id=",
+        "path=",
+        "user=",
+    ):
+        assert forbidden not in rendered
+
+    for item in accepted:
+        await data_plane.unregister_runner(item)
+    await data_plane.close()
+
+
+def test_control_resource_tracker_rejects_and_releases_every_ceiling() -> None:
+    tracker = RuntimeWebControlResourceTracker(
+        limits=_hard_limits(
+            maximum_sessions=1,
+            maximum_active_streams=1,
+            maximum_application_buffer_bytes=4,
+            maximum_control_buffer_bytes=3,
+            maximum_queued_envelopes=1,
+            maximum_pending_tasks=1,
+            maximum_resident_memory_bytes=8,
+        ),
+        resident_memory_bytes=lambda: 1,
+    )
+
+    assert tracker.try_open_session()
+    assert not tracker.try_open_session()
+    assert tracker.try_open_stream()
+    assert not tracker.try_open_stream()
+    assert tracker.try_begin_task()
+    assert not tracker.try_begin_task()
+    assert tracker.try_reserve_envelope(application_bytes=4, control_bytes=3)
+    assert not tracker.try_reserve_envelope(application_bytes=1, control_bytes=0)
+    tracker.release_envelope(application_bytes=4, control_bytes=3)
+    tracker.end_task()
+    tracker.close_stream()
+    tracker.close_session()
+
+    snapshot = tracker.snapshot()
+    assert snapshot.active_sessions == 0
+    assert snapshot.active_streams == 0
+    assert snapshot.application_buffer_bytes == 0
+    assert snapshot.control_buffer_bytes == 0
+    assert snapshot.queued_envelopes == 0
+    assert snapshot.pending_tasks == 0
+
+
+def test_control_resource_tracker_rejects_lag_and_rss_pressure() -> None:
+    resident_memory_bytes = 1
+    tracker = RuntimeWebControlResourceTracker(
+        limits=_hard_limits(
+            maximum_event_loop_lag_milliseconds=10,
+            maximum_resident_memory_bytes=8,
+        ),
+        resident_memory_bytes=lambda: resident_memory_bytes,
+    )
+    tracker.update_process_pressure(lag_milliseconds=10, resident_memory_bytes=1)
+    assert not tracker.try_open_session()
+
+    tracker.update_process_pressure(lag_milliseconds=0, resident_memory_bytes=8)
+    assert not tracker.try_open_session()
+
+
+@pytest.mark.asyncio
+async def test_control_managed_task_releases_every_exit_path() -> None:
+    tracker = RuntimeWebControlResourceTracker(
+        limits=_hard_limits(maximum_pending_tasks=1),
+        resident_memory_bytes=lambda: 1,
+    )
+
+    async def complete() -> int:
+        return 7
+
+    completed = runtime_web_session_server_module._create_control_task(
+        tracker,
+        complete,
+    )
+    assert tracker.snapshot().pending_tasks == 1
+    assert await completed == 7
+    assert tracker.snapshot().pending_tasks == 0
+
+    async def fail() -> None:
+        raise RuntimeError("task failed")
+
+    failed = runtime_web_session_server_module._create_control_task(tracker, fail)
+    with pytest.raises(RuntimeError, match="task failed"):
+        await failed
+    assert tracker.snapshot().pending_tasks == 0
+
+    started = asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def wait_until_cancelled() -> None:
+        started.set()
+        await blocked.wait()
+
+    cancelled = runtime_web_session_server_module._create_control_task(
+        tracker,
+        wait_until_cancelled,
+    )
+    await started.wait()
+    cancelled.cancel()
+    await asyncio.gather(cancelled, return_exceptions=True)
+    assert tracker.snapshot().pending_tasks == 0
+
+    assert tracker.try_begin_task()
+    called = False
+
+    async def must_not_start() -> None:
+        nonlocal called
+        called = True
+
+    with pytest.raises(
+        runtime_web_session_server_module._RuntimeWebControlResourceExhausted
+    ):
+        runtime_web_session_server_module._create_control_task(
+            tracker,
+            must_not_start,
+        )
+    assert not called
+    assert tracker.snapshot().pending_tasks == 1
+    tracker.end_task()
+
+
+def test_control_managed_task_releases_when_create_task_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = RuntimeWebControlResourceTracker(
+        limits=_hard_limits(maximum_pending_tasks=1),
+        resident_memory_bytes=lambda: 1,
+    )
+
+    def fail_create_task(
+        coroutine: Awaitable[object],
+        *,
+        name: str | None = None,
+    ) -> asyncio.Task[object]:
+        del coroutine, name
+        raise RuntimeError("create failed")
+
+    monkeypatch.setattr(
+        runtime_web_session_server_module.asyncio,
+        "create_task",
+        fail_create_task,
+    )
+
+    async def task() -> None:
+        raise AssertionError("task must not start")
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        runtime_web_session_server_module._create_control_task(tracker, task)
+    assert tracker.snapshot().pending_tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_control_queue_releases_process_bytes_on_dequeue_and_close() -> None:
+    tracker = RuntimeWebControlResourceTracker(
+        limits=_hard_limits(),
+        resident_memory_bytes=lambda: 1,
+    )
+    queue = _BoundedEnvelopeQueue(tracker)
+    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    data.data.data = b"payload"
+    control = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    control.heartbeat.monotonic_sequence = 1
+
+    await queue.put(data)
+    await queue.put(control)
+    queued = tracker.snapshot()
+    assert queued.queued_envelopes == 2
+    assert queued.application_buffer_bytes == len(b"payload")
+    assert queued.control_buffer_bytes > 0
+
+    iterator = queue.__aiter__()
+    await anext(iterator)
+    dequeued = tracker.snapshot()
+    assert dequeued.queued_envelopes == 1
+    assert dequeued.application_buffer_bytes == 0
+    await queue.close()
+    released = tracker.snapshot()
+    assert released.queued_envelopes == 0
+    assert released.control_buffer_bytes == 0
+
+
+@pytest.mark.asyncio
+async def test_control_session_and_stream_hard_limits_reject_without_leak() -> None:
+    data_plane, _lifecycle = _local_data_plane(
+        hard_limits=_hard_limits(maximum_sessions=2, maximum_active_streams=1),
+    )
+    owner = _owner()
+    accepted = RuntimeWebAcceptedRunnerSession(
+        owner=owner,
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    await data_plane.register_runner(accepted)
+    source = await data_plane.register_source(
+        session_id="gateway-session",
+        peer_boot_id="gateway-boot",
+        owner=None,
+    )
+    with pytest.raises(RuntimeError):
+        await data_plane.register_source(
+            session_id="extra",
+            peer_boot_id="extra-boot",
+            owner=None,
+        )
+
+    await data_plane.handle(
+        source,
+        _open_envelope(
+            session_id=source.session_id,
+            peer_boot_id=source.peer_boot_id,
+            stream_id=1,
+        ),
+    )
+    await data_plane.handle(
+        source,
+        _open_envelope(
+            session_id=source.session_id,
+            peer_boot_id=source.peer_boot_id,
+            stream_id=2,
+        ),
+    )
+    rejected = await anext(source.queue.__aiter__())
+    assert rejected.open_rejected.reason == (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
+    )
+    assert data_plane.resources.snapshot().active_streams == 1
+
+    await data_plane.unregister_source(source)
+    await data_plane.unregister_runner(accepted)
+    assert data_plane.resources.snapshot().active_sessions == 0
+    assert data_plane.resources.snapshot().active_streams == 0
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_control_runner_heartbeat_ack_is_session_scoped_and_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_web_session_server_module,
+        "_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    data_plane, _lifecycle = _local_data_plane()
+    owner = _owner()
+    accepted = RuntimeWebAcceptedRunnerSession(
+        owner=owner,
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    connection = await data_plane.register_runner(accepted)
+    connection.start_heartbeats()
+    assert data_plane.resources.snapshot().pending_tasks == 1
+
+    heartbeat = await asyncio.wait_for(
+        anext(connection.queue.__aiter__()),
+        timeout=1,
+    )
+    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id=owner.session_lease_id,
+        peer_boot_id=accepted.runner_boot_id,
+        owner_boot_id=owner.owner_boot_id,
+        session_lease_id=owner.session_lease_id,
+        lease_generation=owner.lease_generation,
+    )
+    acknowledgement.heartbeat_ack.monotonic_sequence = (
+        heartbeat.heartbeat.monotonic_sequence
+    )
+    await data_plane.runner_response(acknowledgement)
+
+    await data_plane.unregister_runner(accepted)
+    assert data_plane.resources.snapshot().pending_tasks == 0
+    rendered = await data_plane.metrics()
+    assert "runtime_web_control_runner_heartbeats_sent_total 1" in rendered
+    assert "runtime_web_control_runner_heartbeat_acknowledgements_total 1" in rendered
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_control_runner_missed_heartbeat_closes_only_that_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_web_session_server_module,
+        "_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        runtime_web_session_server_module,
+        "_MAX_MISSED_HEARTBEATS",
+        1,
+    )
+    data_plane, _lifecycle = _local_data_plane()
+    owner = _owner()
+    accepted = RuntimeWebAcceptedRunnerSession(
+        owner=owner,
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    connection = await data_plane.register_runner(accepted)
+    connection.start_heartbeats()
+    messages = connection.queue.__aiter__()
+
+    heartbeat = await asyncio.wait_for(anext(messages), timeout=1)
+    assert heartbeat.WhichOneof("payload") == "heartbeat"
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(anext(messages), timeout=1)
+    assert connection.missed_heartbeats == 1
+
+    await data_plane.unregister_runner(accepted)
+    assert data_plane.resources.snapshot().pending_tasks == 0
     await data_plane.close()
 
 

@@ -38,8 +38,11 @@ from azents_runtime_runner.web_session import (
     RunnerWebSocket,
 )
 from azents_runtime_runner.web_session_dispatcher import (
+    RunnerWebHardLimits,
+    RunnerWebResourceTracker,
     RunnerWebSessionDispatcher,
     _head,
+    _RunnerInboundQueue,
     _Stream,
 )
 
@@ -171,6 +174,41 @@ def _manager(
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=2),
         client_factory=client_factory,
+        outbound_resources=None,
+    )
+
+
+def _resources(
+    *,
+    maximum_sessions: int = 1,
+    maximum_active_streams: int = 128,
+    maximum_application_buffer_bytes: int = 256 * 1024 * 1024,
+    maximum_control_buffer_bytes: int = 16 * 1024 * 1024,
+    maximum_queued_envelopes: int = 1024,
+    maximum_pending_tasks: int = 512,
+    maximum_event_loop_lag_milliseconds: int = 250,
+    maximum_resident_memory_bytes: int = 1536 * 1024 * 1024,
+) -> RunnerWebResourceTracker:
+    return RunnerWebResourceTracker(
+        limits=RunnerWebHardLimits(
+            maximum_sessions=maximum_sessions,
+            maximum_active_streams=maximum_active_streams,
+            maximum_application_buffer_bytes=maximum_application_buffer_bytes,
+            maximum_control_buffer_bytes=maximum_control_buffer_bytes,
+            maximum_queued_envelopes=maximum_queued_envelopes,
+            maximum_pending_tasks=maximum_pending_tasks,
+            maximum_event_loop_lag_milliseconds=(maximum_event_loop_lag_milliseconds),
+            maximum_resident_memory_bytes=maximum_resident_memory_bytes,
+        ),
+        resident_memory_bytes=lambda: 1,
+    )
+
+
+def _dispatcher(manager: RunnerWebSessionManager) -> RunnerWebSessionDispatcher:
+    return RunnerWebSessionDispatcher(
+        manager,
+        resources=_resources(),
+        monotonic_clock=lambda: 1.0,
     )
 
 
@@ -209,7 +247,7 @@ def _stream(
             target=b"/socket",
             headers=(),
         ),
-        inbound=asyncio.Queue(maxsize=8),
+        inbound=_RunnerInboundQueue(_resources()),
         response_credit=HierarchicalCredit(
             stream=AbsoluteCreditWindow(
                 initial_bytes=APPROVED_SESSION_PROFILE.response_stream_window_bytes,
@@ -246,7 +284,7 @@ async def test_shared_response_credit_wakes_another_stream() -> None:
     manager = _manager(client_factory=None)
     manager.offer = offer
     manager.client = client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
     stream_a = _stream(
         offer=offer,
@@ -294,7 +332,7 @@ async def test_late_terminal_control_for_completed_stream_preserves_session(
     manager = _manager(client_factory=None)
     manager.offer = offer
     manager.client = client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
     dispatcher._retire(7)
     envelope = _envelope(offer, stream_id=7)
@@ -329,7 +367,7 @@ async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
     manager = _manager(client_factory=None)
     manager.offer = offer
     manager.client = client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
     dispatcher.accepting_streams = True
     dispatcher._claim_stream_id(7)
@@ -353,7 +391,7 @@ async def test_sequential_completed_stream_late_credit_keeps_epoch_active() -> N
     manager = _manager(client_factory=None)
     manager.offer = offer
     manager.client = client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
     dispatcher.accepting_streams = True
     dispatcher._retire(1)
@@ -371,7 +409,7 @@ async def test_sequential_completed_stream_late_credit_keeps_epoch_active() -> N
 
 
 def test_runner_stream_tombstones_are_bounded() -> None:
-    dispatcher = RunnerWebSessionDispatcher(_manager(client_factory=None))
+    dispatcher = _dispatcher(_manager(client_factory=None))
 
     for stream_id in range(1, MAX_STREAM_TOMBSTONES + 2):
         dispatcher._claim_stream_id(stream_id)
@@ -389,7 +427,7 @@ def test_runner_stream_tombstones_are_bounded() -> None:
 async def test_websocket_request_returns_absolute_credit_past_one_window() -> None:
     offer = _offer()
     client = _RecordingClient()
-    dispatcher = RunnerWebSessionDispatcher(_manager(client_factory=None))
+    dispatcher = _dispatcher(_manager(client_factory=None))
     stream = _stream(
         offer=offer,
         client=client,
@@ -452,7 +490,7 @@ async def test_replacement_offer_closes_old_stream_before_new_client_starts() ->
         return client
 
     manager = _manager(client_factory=client_factory)
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     await dispatcher.handle_offer(first_offer)
     first_client = created["lease-a"]
     stream = _stream(
@@ -487,7 +525,7 @@ async def test_pinned_stream_reset_never_uses_replacement_client() -> None:
     manager = _manager(client_factory=None)
     manager.offer = second_offer
     manager.client = second_client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     stream = _stream(
         offer=first_offer,
         client=first_client,
@@ -508,7 +546,7 @@ async def test_go_away_refuses_new_streams_with_service_drain_reset() -> None:
     manager = _manager(client_factory=None)
     manager.offer = offer
     manager.client = client
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
     dispatcher.accepting_streams = True
     go_away = _envelope(offer)
@@ -556,12 +594,13 @@ async def test_receiver_eof_retires_manager_and_dispatcher_work() -> None:
             transport,
             runner_auth_token="token",
             channel=None,
+            outbound_resources=None,
         )
         created.append(client)
         return client
 
     manager = _manager(client_factory=client_factory)
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     await dispatcher.handle_offer(offer)
     client = created[0]
     stream = _stream(
@@ -592,7 +631,7 @@ async def test_receiver_eof_retires_manager_and_dispatcher_work() -> None:
 async def test_go_away_deadline_marks_pending_stream_service_drain() -> None:
     offer = _offer()
     client = _RecordingClient()
-    dispatcher = RunnerWebSessionDispatcher(_manager(client_factory=None))
+    dispatcher = _dispatcher(_manager(client_factory=None))
     stream = _stream(
         offer=offer,
         client=client,
@@ -647,7 +686,7 @@ async def test_websocket_protocol_failure_emits_stream_reset(
             maximum_bytes=APPROVED_SESSION_PROFILE.response_session_window_bytes,
         ),
     )
-    dispatcher = RunnerWebSessionDispatcher(manager)
+    dispatcher = _dispatcher(manager)
     dispatcher.streams[1] = stream
     caplog.set_level(
         logging.WARNING, logger="azents_runtime_runner.web_session_dispatcher"
@@ -664,6 +703,133 @@ async def test_websocket_protocol_failure_emits_stream_reset(
     )
     assert "Runtime Web Runner WebSocket protocol failed" in caplog.text
     assert "raw handshake detail" not in caplog.text
+
+
+def test_runner_resource_tracker_rejects_and_releases_process_ceilings() -> None:
+    resources = _resources(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        maximum_application_buffer_bytes=4,
+        maximum_control_buffer_bytes=64,
+        maximum_queued_envelopes=1,
+        maximum_pending_tasks=1,
+        maximum_resident_memory_bytes=8,
+    )
+    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    data.data.data = b"four"
+
+    assert resources.try_open_session()
+    assert not resources.try_open_session()
+    assert resources.try_open_stream(StreamProtocol.HTTP)
+    assert not resources.try_open_stream(StreamProtocol.WEBSOCKET)
+    assert resources.try_begin_tasks()
+    assert not resources.try_begin_tasks()
+    assert resources.try_reserve_envelope(data)
+    assert not resources.try_reserve_envelope(data)
+
+    resources.release_envelope(data)
+    resources.end_tasks()
+    resources.close_stream(StreamProtocol.HTTP)
+    resources.close_session()
+    snapshot = resources.snapshot()
+    assert snapshot.active_sessions == 0
+    assert snapshot.active_streams == 0
+    assert snapshot.application_buffer_bytes == 0
+    assert snapshot.queued_envelopes == 0
+    assert snapshot.pending_tasks == 0
+
+
+async def test_runner_inbound_queue_rejects_without_blocking_other_streams() -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    manager.offer = offer
+    manager.client = client
+    resources = _resources(maximum_queued_envelopes=1)
+    dispatcher = RunnerWebSessionDispatcher(
+        manager,
+        resources=resources,
+        monotonic_clock=lambda: 1.0,
+    )
+    dispatcher.accepting_envelopes = True
+    stream = _stream(
+        offer=offer,
+        client=client,
+        session_credit=dispatcher.response_session_credit,
+    )
+    stream.inbound = _RunnerInboundQueue(resources)
+    cancelled = asyncio.Event()
+    started = asyncio.Event()
+
+    async def active() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    stream.task = asyncio.create_task(active())
+    await started.wait()
+    dispatcher.streams[7] = stream
+    first = _envelope(offer, stream_id=7)
+    first.frame_sequence = 1
+    first.data.direction = runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    first.data.data = b"one"
+    second = _envelope(offer, stream_id=7)
+    second.frame_sequence = 2
+    second.data.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    second.data.data = b"two"
+
+    assert await stream.inbound.put(first)
+    await dispatcher(second)
+    await cancelled.wait()
+
+    assert stream.close_reason is CloseReason.RESOURCE_EXHAUSTED
+    assert resources.snapshot().queued_envelopes == 1
+    await stream.inbound.close()
+    assert resources.snapshot().queued_envelopes == 0
+
+
+def test_runner_openmetrics_are_bounded_content_free_aggregates() -> None:
+    resources = _resources()
+    resources.record_open_accepted(StreamProtocol.HTTP, 0.25)
+    resources.record_open_rejected(CloseReason.RESOURCE_EXHAUSTED)
+    resources.record_frame(StreamProtocol.HTTP, "request", 4)
+    resources.record_frame(StreamProtocol.HTTP, "response", 8)
+    resources.record_ttfb(0.5)
+    resources.record_close(
+        CloseReason.CALLER,
+        duration_seconds=2.0,
+        application_bytes=12,
+    )
+    resources.credit_stalls = 1
+    resources.credit_stall_seconds = 0.75
+    resources.heartbeats = 2
+    resources.go_aways = 1
+    resources.epoch_transitions = 1
+
+    snapshot = resources.system_metrics_snapshot()
+    rendered = resources.render_openmetrics()
+
+    assert snapshot.maximum_sessions == resources.limits.maximum_sessions
+    assert snapshot.maximum_active_streams == resources.limits.maximum_active_streams
+    assert 'protocol="http",outcome="accepted"} 1' in rendered
+    assert 'reason="resource_exhausted"} 1' in rendered
+    assert "runtime_web_runner_ttfb_seconds_sum 0.5" in rendered
+    assert "runtime_web_runner_goodput_bytes_per_second 6.0" in rendered
+    assert "runtime_web_runner_credit_stall_seconds_total 0.75" in rendered
+    assert "runtime_web_runner_heartbeat_total 2" in rendered
+    for forbidden in (
+        "runtime_id=",
+        "session_id=",
+        "endpoint=",
+        'path="/',
+        "query=",
+        "user=",
+    ):
+        assert forbidden not in rendered
 
 
 def _require_set(event: asyncio.Event) -> None:

@@ -812,7 +812,15 @@
             "maxConcurrentOperations",
             "maxPendingOperationsPerOwner",
             "maxPendingOperations",
-            "maxConcurrentControlOperations"
+            "maxConcurrentControlOperations",
+            "runtimeWebMaximumSessions",
+            "runtimeWebMaximumActiveStreams",
+            "runtimeWebMaximumApplicationBufferBytes",
+            "runtimeWebMaximumControlBufferBytes",
+            "runtimeWebMaximumQueuedEnvelopes",
+            "runtimeWebMaximumPendingTasks",
+            "runtimeWebMaximumEventLoopLagMilliseconds",
+            "runtimeWebMaximumResidentMemoryBytes"
           ],
           "properties": {
             "maxConcurrentOperationsPerSession": {
@@ -836,6 +844,38 @@
               "minimum": 1
             },
             "maxConcurrentControlOperations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumSessions": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumActiveStreams": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumApplicationBufferBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumControlBufferBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumQueuedEnvelopes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumPendingTasks": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumEventLoopLagMilliseconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumResidentMemoryBytes": {
               "type": "integer",
               "minimum": 1
             }
@@ -1048,7 +1088,8 @@
           "required": [
             "metricsPort",
             "terminationGracePeriodSeconds",
-            "webCapacity"
+            "webCapacity",
+            "webHardLimits"
           ],
           "properties": {
             "enabled": {
@@ -1267,6 +1308,54 @@
                 }
               }
             },
+            "webHardLimits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "maximumSessions",
+                "maximumActiveStreams",
+                "maximumApplicationBufferBytes",
+                "maximumControlBufferBytes",
+                "maximumQueuedEnvelopes",
+                "maximumPendingTasks",
+                "maximumEventLoopLagMilliseconds",
+                "maximumResidentMemoryBytes"
+              ],
+              "properties": {
+                "maximumSessions": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumActiveStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumApplicationBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumControlBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumQueuedEnvelopes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumPendingTasks": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumEventLoopLagMilliseconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumResidentMemoryBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
             "webTransport": {
               "type": "object",
               "additionalProperties": false,
@@ -1366,6 +1455,8 @@
               "required": [
                 "activeExchanges",
                 "applicationBufferBytes",
+                "controlBufferBytes",
+                "pendingTasks",
                 "schedulerWaiters",
                 "eventLoopLagMilliseconds",
                 "residentMemoryBytes"
@@ -1380,6 +1471,16 @@
                   "type": "integer",
                   "minimum": 1048576,
                   "maximum": 17179869184
+                },
+                "controlBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1048576,
+                  "maximum": 1073741824
+                },
+                "pendingTasks": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 65536
                 },
                 "schedulerWaiters": {
                   "type": "integer",

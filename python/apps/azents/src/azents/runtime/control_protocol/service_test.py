@@ -13,6 +13,7 @@ from azents_runtime_control.runtime_configuration import (
 )
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_CAPABILITY,
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsReport,
@@ -1030,6 +1031,7 @@ def _system_metrics_report(*, sequence: int) -> RunnerSystemMetricsReport:
             used=None,
             total=None,
         ),
+        runtime_web=_runtime_web_metrics(),
     )
 
 
@@ -1042,6 +1044,20 @@ def _stored_system_metrics_sample(*, sequence: int) -> RuntimeSystemMetricsSampl
         cpu=report.cpu,
         memory=report.memory,
         disk=report.disk,
+        runtime_web=report.runtime_web,
+    )
+
+
+def _runtime_web_metrics() -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics.zero(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        application_buffer_limit_bytes=1,
+        control_buffer_limit_bytes=1,
+        queued_envelope_limit=1,
+        pending_task_limit=1,
+        event_loop_lag_limit_milliseconds=1,
+        resident_memory_limit_bytes=1,
     )
 
 

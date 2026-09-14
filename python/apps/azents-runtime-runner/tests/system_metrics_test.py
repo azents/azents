@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricsScope,
 )
@@ -234,6 +235,20 @@ def _collector(
         cpu_count=cpu_count,
         monotonic=monotonic,
         platform_name=platform_name,
+        runtime_web_metrics=_runtime_web_metrics,
+    )
+
+
+def _runtime_web_metrics() -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics.zero(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        application_buffer_limit_bytes=1,
+        control_buffer_limit_bytes=1,
+        queued_envelope_limit=1,
+        pending_task_limit=1,
+        event_loop_lag_limit_milliseconds=1,
+        resident_memory_limit_bytes=1,
     )
 
 

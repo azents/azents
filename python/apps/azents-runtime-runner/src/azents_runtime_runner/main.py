@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import platform
+import sys
 import time
 import uuid
 from datetime import UTC, datetime
@@ -60,7 +61,11 @@ from azents_runtime_runner.web_session import (
     RunnerWebLoopbackPool,
     RunnerWebSessionManager,
 )
-from azents_runtime_runner.web_session_dispatcher import RunnerWebSessionDispatcher
+from azents_runtime_runner.web_session_dispatcher import (
+    RunnerWebHardLimits,
+    RunnerWebResourceTracker,
+    RunnerWebSessionDispatcher,
+)
 from azents_runtime_runner.workspace import Workspace
 
 _PROTOCOL_VERSION = RUNNER_TRANSFER_PROTOCOL_VERSION
@@ -95,6 +100,14 @@ _DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
 _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1_000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
+_DEFAULT_RUNTIME_WEB_MAXIMUM_SESSIONS = 1
+_DEFAULT_RUNTIME_WEB_MAXIMUM_ACTIVE_STREAMS = 128
+_DEFAULT_RUNTIME_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES = 256 * 1024 * 1024
+_DEFAULT_RUNTIME_WEB_MAXIMUM_CONTROL_BUFFER_BYTES = 16 * 1024 * 1024
+_DEFAULT_RUNTIME_WEB_MAXIMUM_QUEUED_ENVELOPES = 1024
+_DEFAULT_RUNTIME_WEB_MAXIMUM_PENDING_TASKS = 512
+_DEFAULT_RUNTIME_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS = 250
+_DEFAULT_RUNTIME_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES = 1536 * 1024 * 1024
 _TERMINAL_IDLE_TIMEOUT_SECONDS = 30 * 60.0
 _TERMINAL_MAXIMUM_LIFETIME_SECONDS = 8 * 60 * 60.0
 _TERMINAL_STREAM_GRACE_SECONDS = 2 * 60.0
@@ -141,6 +154,75 @@ class RunnerLimitConfig:
     max_pending_operations_per_owner: int
     max_pending_operations: int
     max_concurrent_control_operations: int
+    runtime_web_maximum_sessions: int
+    runtime_web_maximum_active_streams: int
+    runtime_web_maximum_application_buffer_bytes: int
+    runtime_web_maximum_control_buffer_bytes: int
+    runtime_web_maximum_queued_envelopes: int
+    runtime_web_maximum_pending_tasks: int
+    runtime_web_maximum_event_loop_lag_milliseconds: int
+    runtime_web_maximum_resident_memory_bytes: int
+
+
+class RunnerWebResidentMemorySampler:
+    """Read current Runner RSS without retaining process or application content."""
+
+    def __init__(self, *, statm_path: Path, page_size_bytes: int) -> None:
+        if page_size_bytes <= 0:
+            raise ValueError("Runner Web RSS page size must be positive")
+        self.statm_path = statm_path
+        self.page_size_bytes = page_size_bytes
+
+    def current_bytes(self) -> int:
+        """Return current RSS bytes from the Linux procfs resident-page field."""
+        try:
+            fields = self.statm_path.read_text(encoding="ascii").split()
+        except OSError as error:
+            raise RuntimeError(
+                "Runner Web current RSS sample is unavailable"
+            ) from error
+        if len(fields) < 2:
+            raise RuntimeError("Runner Web current RSS sample is invalid")
+        try:
+            resident_pages = int(fields[1])
+        except ValueError as error:
+            raise RuntimeError("Runner Web current RSS sample is invalid") from error
+        if resident_pages < 0:
+            raise RuntimeError("Runner Web current RSS sample is invalid")
+        return resident_pages * self.page_size_bytes
+
+
+def create_runner_web_resident_memory_sampler(
+    *,
+    platform: str,
+) -> RunnerWebResidentMemorySampler:
+    """Select one explicit current-RSS backend or fail safely."""
+    if platform.startswith("linux"):
+        return RunnerWebResidentMemorySampler(
+            statm_path=Path("/proc/self/statm"),
+            page_size_bytes=int(os.sysconf("SC_PAGE_SIZE")),
+        )
+    raise RuntimeError(
+        f"Runner Web current RSS sampling is unsupported on platform {platform!r}"
+    )
+
+
+async def _refresh_runner_web_process_pressure(
+    resources: RunnerWebResourceTracker,
+    *,
+    resident_memory_sampler: RunnerWebResidentMemorySampler,
+) -> None:
+    """Continuously measure event-loop progress for probes and metrics."""
+    loop = asyncio.get_running_loop()
+    expected = loop.time()
+    while True:
+        expected += 0.25
+        await asyncio.sleep(max(0.0, expected - loop.time()))
+        observed = loop.time()
+        resources.update_process_pressure(
+            lag_milliseconds=max(0.0, (observed - expected) * 1000),
+            resident_memory_bytes=resident_memory_sampler.current_bytes(),
+        )
 
 
 def main() -> None:
@@ -176,6 +258,32 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
+    resident_memory_sampler = create_runner_web_resident_memory_sampler(
+        platform=sys.platform,
+    )
+    web_resources = RunnerWebResourceTracker(
+        limits=RunnerWebHardLimits(
+            maximum_sessions=limit_config.runtime_web_maximum_sessions,
+            maximum_active_streams=(limit_config.runtime_web_maximum_active_streams),
+            maximum_application_buffer_bytes=(
+                limit_config.runtime_web_maximum_application_buffer_bytes
+            ),
+            maximum_control_buffer_bytes=(
+                limit_config.runtime_web_maximum_control_buffer_bytes
+            ),
+            maximum_queued_envelopes=(
+                limit_config.runtime_web_maximum_queued_envelopes
+            ),
+            maximum_pending_tasks=limit_config.runtime_web_maximum_pending_tasks,
+            maximum_event_loop_lag_milliseconds=(
+                limit_config.runtime_web_maximum_event_loop_lag_milliseconds
+            ),
+            maximum_resident_memory_bytes=(
+                limit_config.runtime_web_maximum_resident_memory_bytes
+            ),
+        ),
+        resident_memory_bytes=resident_memory_sampler.current_bytes,
+    )
     inherited_environment = {
         **prepare_runner_network_environment(),
         **prepare_runner_trust_environment(),
@@ -220,7 +328,36 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             "max_concurrent_control_operations": (
                 limit_config.max_concurrent_control_operations
             ),
+            "runtime_web_maximum_sessions": (limit_config.runtime_web_maximum_sessions),
+            "runtime_web_maximum_active_streams": (
+                limit_config.runtime_web_maximum_active_streams
+            ),
+            "runtime_web_maximum_application_buffer_bytes": (
+                limit_config.runtime_web_maximum_application_buffer_bytes
+            ),
+            "runtime_web_maximum_control_buffer_bytes": (
+                limit_config.runtime_web_maximum_control_buffer_bytes
+            ),
+            "runtime_web_maximum_queued_envelopes": (
+                limit_config.runtime_web_maximum_queued_envelopes
+            ),
+            "runtime_web_maximum_pending_tasks": (
+                limit_config.runtime_web_maximum_pending_tasks
+            ),
+            "runtime_web_maximum_event_loop_lag_milliseconds": (
+                limit_config.runtime_web_maximum_event_loop_lag_milliseconds
+            ),
+            "runtime_web_maximum_resident_memory_bytes": (
+                limit_config.runtime_web_maximum_resident_memory_bytes
+            ),
         },
+    )
+    web_process_sampler_task = asyncio.create_task(
+        _refresh_runner_web_process_pressure(
+            web_resources,
+            resident_memory_sampler=resident_memory_sampler,
+        ),
+        name="runtime-web-runner-process-pressure",
     )
     try:
         while True:
@@ -248,7 +385,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 registration=registration,
                 connection_id=connection_id,
                 consumer_id=runner_id,
-                system_metrics_collector=create_system_metrics_collector(),
+                system_metrics_collector=create_system_metrics_collector(
+                    runtime_web_metrics=web_resources.system_metrics_snapshot,
+                ),
                 max_concurrent_operations_per_session=(
                     limit_config.max_concurrent_operations_per_session
                 ),
@@ -311,8 +450,13 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 allow_insecure=allow_insecure_control,
                 loopback=RunnerWebLoopbackPool(maximum_connections=128),
                 client_factory=None,
+                outbound_resources=web_resources,
             )
-            web_dispatcher = RunnerWebSessionDispatcher(web_manager)
+            web_dispatcher = RunnerWebSessionDispatcher(
+                web_manager,
+                resources=web_resources,
+                monotonic_clock=time.monotonic,
+            )
             transfer_manager = RunnerTransferManager(
                 control=client,
                 transfer=transfer_client,
@@ -416,6 +560,11 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     )
             await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
     finally:
+        web_process_sampler_task.cancel()
+        try:
+            await web_process_sampler_task
+        except asyncio.CancelledError:
+            pass
         await execution_backend.close()
 
 
@@ -458,6 +607,38 @@ def runner_limit_config_from_env() -> RunnerLimitConfig:
             "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
             _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS,
         ),
+        runtime_web_maximum_sessions=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_SESSIONS",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_SESSIONS,
+        ),
+        runtime_web_maximum_active_streams=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_ACTIVE_STREAMS,
+        ),
+        runtime_web_maximum_application_buffer_bytes=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES,
+        ),
+        runtime_web_maximum_control_buffer_bytes=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_CONTROL_BUFFER_BYTES",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_CONTROL_BUFFER_BYTES,
+        ),
+        runtime_web_maximum_queued_envelopes=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_QUEUED_ENVELOPES",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_QUEUED_ENVELOPES,
+        ),
+        runtime_web_maximum_pending_tasks=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_PENDING_TASKS",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_PENDING_TASKS,
+        ),
+        runtime_web_maximum_event_loop_lag_milliseconds=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS,
+        ),
+        runtime_web_maximum_resident_memory_bytes=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES",
+            _DEFAULT_RUNTIME_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES,
+        ),
     )
     if config.max_concurrent_operations_per_session > config.max_concurrent_operations:
         raise SystemExit(
@@ -486,6 +667,20 @@ def runner_limit_config_from_env() -> RunnerLimitConfig:
         raise SystemExit(
             "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER must not exceed "
             "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS"
+        )
+    if config.runtime_web_maximum_pending_tasks < (
+        config.runtime_web_maximum_active_streams
+    ):
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_PENDING_TASKS must not be smaller "
+            "than AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS"
+        )
+    if config.runtime_web_maximum_queued_envelopes < (
+        config.runtime_web_maximum_active_streams
+    ):
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_QUEUED_ENVELOPES must not be smaller "
+            "than AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS"
         )
     return config
 

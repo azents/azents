@@ -40,6 +40,8 @@ class _Transport:
             RuntimeWebGatewayHardLimits(
                 maximum_active_exchanges=8,
                 maximum_application_buffer_bytes=8 * 1024 * 1024,
+                maximum_control_buffer_bytes=1024 * 1024,
+                maximum_pending_tasks=32,
                 maximum_scheduler_waiters=8,
                 maximum_event_loop_lag_milliseconds=250,
                 maximum_resident_memory_bytes=1024 * 1024 * 1024,

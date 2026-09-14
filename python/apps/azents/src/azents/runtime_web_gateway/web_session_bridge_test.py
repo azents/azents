@@ -27,6 +27,9 @@ from azents_runtime_control.runtime_web_session import (
     WebSocketOpcode,
 )
 
+from azents.runtime_web_gateway import (
+    web_session_bridge as web_session_bridge_module,
+)
 from azents.runtime_web_gateway.operations import (
     RuntimeWebDrainCoordinator,
     RuntimeWebDrainPolicy,
@@ -192,6 +195,8 @@ class _ObservedResources(RuntimeWebGatewayResourceTracker):
             RuntimeWebGatewayHardLimits(
                 maximum_active_exchanges=maximum_active_exchanges,
                 maximum_application_buffer_bytes=maximum_application_buffer_bytes,
+                maximum_control_buffer_bytes=16 * 1024 * 1024,
+                maximum_pending_tasks=128,
                 maximum_scheduler_waiters=maximum_scheduler_waiters,
                 maximum_event_loop_lag_milliseconds=250,
                 maximum_resident_memory_bytes=1024 * 1024 * 1024,
@@ -1315,6 +1320,7 @@ class _IndependentDuplexStream:
         self.responses: asyncio.Queue[
             runtime_web_session_pb2.RuntimeWebSessionEnvelope
         ] = asyncio.Queue()
+        self.response_yielded = asyncio.Event()
 
     def __call__(
         self,
@@ -1348,11 +1354,93 @@ class _IndependentDuplexStream:
                 )
                 while True:
                     yield await self.responses.get()
+                    self.response_yielded.set()
             finally:
                 consumer.cancel()
                 await asyncio.gather(consumer, return_exceptions=True)
 
         return exchange()
+
+
+@pytest.mark.asyncio
+async def test_gateway_session_heartbeat_ack_is_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        web_session_bridge_module,
+        "_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    stream = _IndependentDuplexStream()
+    resources = _ObservedResources()
+    transport = PersistentGatewaySessionTransport(stream, resources=resources)
+    identity = _identity()
+    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id=identity.session_id,
+        peer_boot_id=identity.peer_boot_id,
+        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        ),
+    )
+    await transport.start(hello, timeout_seconds=1)
+    await stream.sent.get()
+
+    heartbeat = await asyncio.wait_for(stream.sent.get(), timeout=1)
+    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id=identity.session_id,
+        peer_boot_id="control-boot",
+    )
+    acknowledgement.heartbeat_ack.monotonic_sequence = (
+        heartbeat.heartbeat.monotonic_sequence
+    )
+    await stream.responses.put(acknowledgement)
+    await asyncio.wait_for(stream.response_yielded.wait(), timeout=1)
+
+    assert resources.transport_heartbeats_sent == 1
+    assert resources.transport_heartbeat_acknowledgements == 1
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_session_two_missed_heartbeats_fail_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        web_session_bridge_module,
+        "_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        web_session_bridge_module,
+        "_MAX_MISSED_HEARTBEATS",
+        2,
+    )
+    stream = _IndependentDuplexStream()
+    resources = _ObservedResources()
+    transport = PersistentGatewaySessionTransport(stream, resources=resources)
+    identity = _identity()
+    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id=identity.session_id,
+        peer_boot_id=identity.peer_boot_id,
+        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        ),
+    )
+    await transport.start(hello, timeout_seconds=1)
+    await stream.sent.get()
+    await asyncio.wait_for(stream.sent.get(), timeout=1)
+    await asyncio.wait_for(stream.sent.get(), timeout=1)
+    assert transport.heartbeat_task is not None
+    await asyncio.wait_for(transport.heartbeat_task, timeout=1)
+    assert transport.receiver is not None
+    await asyncio.gather(transport.receiver, return_exceptions=True)
+
+    assert resources.transport_missed_heartbeats == 1
+    assert not transport.active
+    await transport.close()
 
 
 @pytest.mark.asyncio

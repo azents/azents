@@ -127,6 +127,8 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
     assert "port: operations" in deployment
     assert "AZ_RUNTIME_WEB_GATEWAY_CONTROL_SESSION_POOL_SIZE" in deployment
     assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_CONTROL_BUFFER_BYTES" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_PENDING_TASKS" in deployment
     assert "path: /__azents/ready" in deployment
     assert "requests:" in deployment
     assert "cpu: 250m" in deployment

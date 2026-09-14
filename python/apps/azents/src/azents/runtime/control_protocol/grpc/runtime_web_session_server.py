@@ -9,7 +9,7 @@ import enum
 import logging
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
-from typing import NoReturn, Protocol
+from typing import NoReturn, Protocol, TypeVar
 
 import grpc
 from aiohttp import web
@@ -38,8 +38,10 @@ from azents_runtime_control.runtime_web_session import (
     OwnerSessionEpoch,
     RequestHead,
     StreamAuthority,
+    StreamDirection,
     StreamProtocol,
 )
+from azents_runtime_control.system_metrics import RunnerRuntimeWebMetrics
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -71,7 +73,10 @@ from azents.runtime.web_session_relay import (
 
 _MAX_QUEUED_ENVELOPES = 32
 _MAX_QUEUED_BYTES = 16 * 1024 * 1024
+_HEARTBEAT_INTERVAL_SECONDS = 5.0
+_MAX_MISSED_HEARTBEATS = 2
 _LOGGER = logging.getLogger(__name__)
+_TaskResult = TypeVar("_TaskResult")
 
 
 class RuntimeWebCapacityBackend(enum.StrEnum):
@@ -93,6 +98,182 @@ class RuntimeWebCapacityConfig:
     def __post_init__(self) -> None:
         if not self.redis_namespace or self.redis_ttl_seconds <= 0:
             raise ValueError("Runtime Web capacity Redis settings are invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeWebControlHardLimits:
+    """Independent process ceilings for the Runtime Web Control data plane."""
+
+    maximum_sessions: int
+    maximum_active_streams: int
+    maximum_application_buffer_bytes: int
+    maximum_control_buffer_bytes: int
+    maximum_queued_envelopes: int
+    maximum_pending_tasks: int
+    maximum_event_loop_lag_milliseconds: int
+    maximum_resident_memory_bytes: int
+
+    def __post_init__(self) -> None:
+        for name, value in dataclasses.asdict(self).items():
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeWebControlResourceSnapshot:
+    """Current content-free Control hard-limit usage."""
+
+    active_sessions: int
+    active_streams: int
+    application_buffer_bytes: int
+    control_buffer_bytes: int
+    queued_envelopes: int
+    pending_tasks: int
+    event_loop_lag_milliseconds: float
+    resident_memory_bytes: int
+
+
+class RuntimeWebControlResourceTracker:
+    """Reserve exact process resources independently from Runtime soft capacity."""
+
+    def __init__(
+        self,
+        *,
+        limits: RuntimeWebControlHardLimits,
+        resident_memory_bytes: Callable[[], int],
+    ) -> None:
+        self.limits = limits
+        self.resident_memory_bytes = resident_memory_bytes()
+        self.active_sessions = 0
+        self.active_streams = 0
+        self.application_buffer_bytes = 0
+        self.control_buffer_bytes = 0
+        self.queued_envelopes = 0
+        self.pending_tasks = 0
+        self.event_loop_lag_milliseconds = 0.0
+
+    def pressure_acceptable(self) -> bool:
+        """Return whether sampled process pressure remains below hard ceilings."""
+        return (
+            self.event_loop_lag_milliseconds
+            < self.limits.maximum_event_loop_lag_milliseconds
+            and self.resident_memory_bytes < self.limits.maximum_resident_memory_bytes
+        )
+
+    def update_process_pressure(
+        self,
+        *,
+        lag_milliseconds: float,
+        resident_memory_bytes: int,
+    ) -> None:
+        """Replace cached event-loop and resident-memory pressure samples."""
+        if lag_milliseconds < 0 or resident_memory_bytes < 0:
+            raise ValueError("Runtime Web Control pressure must not be negative")
+        self.event_loop_lag_milliseconds = lag_milliseconds
+        self.resident_memory_bytes = resident_memory_bytes
+
+    def try_open_session(self) -> bool:
+        """Reserve one peer session under the process RSS and session ceilings."""
+        if (
+            self.active_sessions >= self.limits.maximum_sessions
+            or not self.pressure_acceptable()
+        ):
+            return False
+        self.active_sessions += 1
+        return True
+
+    def close_session(self) -> None:
+        """Release one exact peer-session reservation."""
+        if self.active_sessions <= 0:
+            raise ValueError("Runtime Web Control session reservation is absent")
+        self.active_sessions -= 1
+
+    def try_open_stream(self) -> bool:
+        """Reserve one logical stream under the process stream and RSS ceilings."""
+        if (
+            self.active_streams >= self.limits.maximum_active_streams
+            or not self.pressure_acceptable()
+        ):
+            return False
+        self.active_streams += 1
+        return True
+
+    def close_stream(self) -> None:
+        """Release one exact logical-stream reservation."""
+        if self.active_streams <= 0:
+            raise ValueError("Runtime Web Control stream reservation is absent")
+        self.active_streams -= 1
+
+    def try_begin_task(self) -> bool:
+        """Reserve one bounded queue or open task."""
+        if (
+            self.pending_tasks >= self.limits.maximum_pending_tasks
+            or not self.pressure_acceptable()
+        ):
+            return False
+        self.pending_tasks += 1
+        return True
+
+    def end_task(self) -> None:
+        """Release one exact pending-task reservation."""
+        if self.pending_tasks <= 0:
+            raise ValueError("Runtime Web Control task reservation is absent")
+        self.pending_tasks -= 1
+
+    def try_reserve_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> bool:
+        """Reserve one queued envelope and its application/control bytes."""
+        if application_bytes < 0 or control_bytes < 0:
+            raise ValueError("Runtime Web Control buffer sizes must not be negative")
+        if (
+            self.queued_envelopes >= self.limits.maximum_queued_envelopes
+            or self.application_buffer_bytes + application_bytes
+            > self.limits.maximum_application_buffer_bytes
+            or self.control_buffer_bytes + control_bytes
+            > self.limits.maximum_control_buffer_bytes
+            or not self.pressure_acceptable()
+        ):
+            return False
+        self.queued_envelopes += 1
+        self.application_buffer_bytes += application_bytes
+        self.control_buffer_bytes += control_bytes
+        return True
+
+    def release_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> None:
+        """Release one exact queued envelope reservation."""
+        if (
+            self.queued_envelopes <= 0
+            or application_bytes < 0
+            or control_bytes < 0
+            or application_bytes > self.application_buffer_bytes
+            or control_bytes > self.control_buffer_bytes
+        ):
+            raise ValueError("Runtime Web Control envelope release is invalid")
+        self.queued_envelopes -= 1
+        self.application_buffer_bytes -= application_bytes
+        self.control_buffer_bytes -= control_bytes
+
+    def snapshot(self) -> RuntimeWebControlResourceSnapshot:
+        """Return exact process usage for metrics and readiness."""
+        return RuntimeWebControlResourceSnapshot(
+            active_sessions=self.active_sessions,
+            active_streams=self.active_streams,
+            application_buffer_bytes=self.application_buffer_bytes,
+            control_buffer_bytes=self.control_buffer_bytes,
+            queued_envelopes=self.queued_envelopes,
+            pending_tasks=self.pending_tasks,
+            event_loop_lag_milliseconds=self.event_loop_lag_milliseconds,
+            resident_memory_bytes=self.resident_memory_bytes,
+        )
 
 
 class RuntimeWebCapacityRegistry:
@@ -194,6 +375,288 @@ class RuntimeWebRunnerMetricsReader(Protocol):
     ) -> list[RuntimeSystemMetricsSample]: ...
 
 
+def _runner_runtime_web_metrics_lines(
+    snapshots: tuple[RunnerRuntimeWebMetrics, ...],
+) -> list[str]:
+    """Render one identity-free aggregate across active Runner snapshots."""
+    active_streams_by_protocol = {protocol: 0 for protocol in StreamProtocol}
+    opens_accepted_by_protocol = {protocol: 0 for protocol in StreamProtocol}
+    opens_rejected_by_reason = {reason: 0 for reason in CloseReason}
+    resets_by_reason = {reason: 0 for reason in CloseReason}
+    closes_by_reason = {reason: 0 for reason in CloseReason}
+    traffic = {
+        (protocol, direction): [0, 0]
+        for protocol in StreamProtocol
+        for direction in StreamDirection
+    }
+    for snapshot in snapshots:
+        for item in snapshot.active_streams_by_protocol:
+            active_streams_by_protocol[item.protocol] += item.value
+        for item in snapshot.opens_accepted_by_protocol:
+            opens_accepted_by_protocol[item.protocol] += item.value
+        for item in snapshot.opens_rejected_by_reason:
+            opens_rejected_by_reason[item.reason] += item.value
+        for item in snapshot.resets_by_reason:
+            resets_by_reason[item.reason] += item.value
+        for item in snapshot.closes_by_reason:
+            closes_by_reason[item.reason] += item.value
+        for item in snapshot.traffic:
+            aggregate = traffic[(item.protocol, item.direction)]
+            aggregate[0] += item.frames
+            aggregate[1] += item.bytes
+
+    duration_seconds_sum = sum(snapshot.duration_seconds_sum for snapshot in snapshots)
+    goodput_bytes = sum(snapshot.goodput_bytes for snapshot in snapshots)
+    response_sent_bytes = sum(snapshot.response_sent_bytes for snapshot in snapshots)
+    response_consumed_bytes = sum(
+        snapshot.response_consumed_bytes for snapshot in snapshots
+    )
+    worst_lag_snapshot = max(
+        snapshots,
+        key=lambda snapshot: (
+            snapshot.event_loop_lag_milliseconds
+            / snapshot.event_loop_lag_limit_milliseconds
+        ),
+        default=None,
+    )
+    worst_lag_milliseconds = (
+        worst_lag_snapshot.event_loop_lag_milliseconds
+        if worst_lag_snapshot is not None
+        else 0.0
+    )
+    worst_lag_limit_milliseconds = (
+        worst_lag_snapshot.event_loop_lag_limit_milliseconds
+        if worst_lag_snapshot is not None
+        else 0
+    )
+    worst_lag_pressure = (
+        worst_lag_milliseconds / worst_lag_limit_milliseconds
+        if worst_lag_limit_milliseconds > 0
+        else 0.0
+    )
+    goodput_bytes_per_second = (
+        goodput_bytes / duration_seconds_sum if duration_seconds_sum > 0 else 0.0
+    )
+    lines = [
+        "# TYPE runtime_web_runner_sessions gauge",
+        (
+            "runtime_web_runner_sessions "
+            f"{sum(snapshot.active_sessions for snapshot in snapshots)}"
+        ),
+        "# TYPE runtime_web_runner_session_limit gauge",
+        (
+            "runtime_web_runner_session_limit "
+            f"{sum(snapshot.maximum_sessions for snapshot in snapshots)}"
+        ),
+        "# TYPE runtime_web_runner_active_streams gauge",
+        (
+            "runtime_web_runner_active_streams "
+            f"{sum(snapshot.active_streams for snapshot in snapshots)}"
+        ),
+        "# TYPE runtime_web_runner_active_stream_limit gauge",
+        (
+            "runtime_web_runner_active_stream_limit "
+            f"{sum(snapshot.maximum_active_streams for snapshot in snapshots)}"
+        ),
+        "# TYPE runtime_web_runner_active_streams_by_protocol gauge",
+        "# TYPE runtime_web_runner_open_total counter",
+    ]
+    for protocol in StreamProtocol:
+        label = f'protocol="{protocol.value}"'
+        lines.extend(
+            (
+                (
+                    "runtime_web_runner_active_streams_by_protocol"
+                    f"{{{label}}} {active_streams_by_protocol[protocol]}"
+                ),
+                (
+                    f'runtime_web_runner_open_total{{{label},outcome="accepted"}} '
+                    f"{opens_accepted_by_protocol[protocol]}"
+                ),
+            )
+        )
+    lines.extend(
+        (
+            "# TYPE runtime_web_runner_open_rejected_total counter",
+            "# TYPE runtime_web_runner_reset_total counter",
+            "# TYPE runtime_web_runner_close_total counter",
+        )
+    )
+    for reason in CloseReason:
+        label = f'reason="{reason.value}"'
+        lines.extend(
+            (
+                (
+                    f"runtime_web_runner_open_rejected_total{{{label}}} "
+                    f"{opens_rejected_by_reason[reason]}"
+                ),
+                (
+                    f"runtime_web_runner_reset_total{{{label}}} "
+                    f"{resets_by_reason[reason]}"
+                ),
+                (
+                    f"runtime_web_runner_close_total{{{label}}} "
+                    f"{closes_by_reason[reason]}"
+                ),
+            )
+        )
+    lines.extend(
+        (
+            "# TYPE runtime_web_runner_setup_seconds summary",
+            (
+                "runtime_web_runner_setup_seconds_sum "
+                f"{sum(snapshot.setup_seconds_sum for snapshot in snapshots)}"
+            ),
+            (
+                "runtime_web_runner_setup_seconds_count "
+                f"{sum(snapshot.setup_count for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_ttfb_seconds summary",
+            (
+                "runtime_web_runner_ttfb_seconds_sum "
+                f"{sum(snapshot.ttfb_seconds_sum for snapshot in snapshots)}"
+            ),
+            (
+                "runtime_web_runner_ttfb_seconds_count "
+                f"{sum(snapshot.ttfb_count for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_duration_seconds summary",
+            f"runtime_web_runner_duration_seconds_sum {duration_seconds_sum}",
+            (
+                "runtime_web_runner_duration_seconds_count "
+                f"{sum(snapshot.duration_count for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_goodput_bytes counter",
+            f"runtime_web_runner_goodput_bytes {goodput_bytes}",
+            "# TYPE runtime_web_runner_goodput_bytes_per_second gauge",
+            (f"runtime_web_runner_goodput_bytes_per_second {goodput_bytes_per_second}"),
+            "# TYPE runtime_web_runner_frames_total counter",
+            "# TYPE runtime_web_runner_bytes_total counter",
+        )
+    )
+    for protocol in StreamProtocol:
+        for direction in StreamDirection:
+            labels = f'protocol="{protocol.value}",direction="{direction.value}"'
+            frames, byte_count = traffic[(protocol, direction)]
+            lines.extend(
+                (
+                    f"runtime_web_runner_frames_total{{{labels}}} {frames}",
+                    f"runtime_web_runner_bytes_total{{{labels}}} {byte_count}",
+                )
+            )
+    lines.extend(
+        (
+            "# TYPE runtime_web_runner_credit_stalls_total counter",
+            (
+                "runtime_web_runner_credit_stalls_total "
+                f"{sum(snapshot.credit_stalls_total for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_credit_stall_seconds_total counter",
+            (
+                "runtime_web_runner_credit_stall_seconds_total "
+                f"{sum(snapshot.credit_stall_seconds for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_request_consumed_bytes counter",
+            (
+                "runtime_web_runner_request_consumed_bytes "
+                f"{sum(snapshot.request_consumed_bytes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_response_sent_bytes counter",
+            f"runtime_web_runner_response_sent_bytes {response_sent_bytes}",
+            "# TYPE runtime_web_runner_response_consumed_bytes counter",
+            f"runtime_web_runner_response_consumed_bytes {response_consumed_bytes}",
+            "# TYPE runtime_web_runner_response_credit_outstanding_bytes gauge",
+            (
+                "runtime_web_runner_response_credit_outstanding_bytes "
+                f"{response_sent_bytes - response_consumed_bytes}"
+            ),
+            "# TYPE runtime_web_runner_heartbeat_total counter",
+            (
+                "runtime_web_runner_heartbeat_total "
+                f"{sum(snapshot.heartbeats_total for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_go_away_total counter",
+            (
+                "runtime_web_runner_go_away_total "
+                f"{sum(snapshot.go_aways_total for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_epoch_transition_total counter",
+            (
+                "runtime_web_runner_epoch_transition_total "
+                f"{sum(snapshot.epoch_transitions_total for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_application_buffer_bytes gauge",
+            (
+                "runtime_web_runner_application_buffer_bytes "
+                f"{sum(snapshot.application_buffer_bytes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_application_buffer_limit_bytes gauge",
+            (
+                "runtime_web_runner_application_buffer_limit_bytes "
+                f"{
+                    sum(
+                        snapshot.application_buffer_limit_bytes
+                        for snapshot in snapshots
+                    )
+                }"
+            ),
+            "# TYPE runtime_web_runner_control_buffer_bytes gauge",
+            (
+                "runtime_web_runner_control_buffer_bytes "
+                f"{sum(snapshot.control_buffer_bytes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_control_buffer_limit_bytes gauge",
+            (
+                "runtime_web_runner_control_buffer_limit_bytes "
+                f"{sum(snapshot.control_buffer_limit_bytes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_queued_envelopes gauge",
+            (
+                "runtime_web_runner_queued_envelopes "
+                f"{sum(snapshot.queued_envelopes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_queued_envelope_limit gauge",
+            (
+                "runtime_web_runner_queued_envelope_limit "
+                f"{sum(snapshot.queued_envelope_limit for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_pending_tasks gauge",
+            (
+                "runtime_web_runner_pending_tasks "
+                f"{sum(snapshot.pending_tasks for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_pending_task_limit gauge",
+            (
+                "runtime_web_runner_pending_task_limit "
+                f"{sum(snapshot.pending_task_limit for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_event_loop_lag_milliseconds gauge",
+            (
+                "runtime_web_runner_event_loop_lag_milliseconds "
+                f"{worst_lag_milliseconds}"
+            ),
+            "# TYPE runtime_web_runner_event_loop_lag_limit_milliseconds gauge",
+            (
+                "runtime_web_runner_event_loop_lag_limit_milliseconds "
+                f"{worst_lag_limit_milliseconds}"
+            ),
+            "# TYPE runtime_web_runner_event_loop_lag_pressure gauge",
+            f"runtime_web_runner_event_loop_lag_pressure {worst_lag_pressure}",
+            "# TYPE runtime_web_runner_resident_memory_bytes gauge",
+            (
+                "runtime_web_runner_resident_memory_bytes "
+                f"{sum(snapshot.resident_memory_bytes for snapshot in snapshots)}"
+            ),
+            "# TYPE runtime_web_runner_resident_memory_limit_bytes gauge",
+            (
+                "runtime_web_runner_resident_memory_limit_bytes "
+                f"{sum(snapshot.resident_memory_limit_bytes for snapshot in snapshots)}"
+            ),
+        )
+    )
+    return lines
+
+
 class RuntimeWebTrustedPeerContext(Protocol):
     """Transport identity methods required from a trusted gRPC context."""
 
@@ -259,12 +722,16 @@ class RuntimeWebTrustedPeerAuthenticator:
 
 
 class _BoundedEnvelopeQueue:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        resources: RuntimeWebControlResourceTracker | None = None,
+    ) -> None:
         self.items: deque[_QueuedEnvelope] = deque()
         self.bytes = 0
         self.stalls = 0
         self.closed = False
         self.condition = asyncio.Condition()
+        self.resources = resources
 
     async def put(
         self,
@@ -275,28 +742,60 @@ class _BoundedEnvelopeQueue:
         size = envelope.ByteSize()
         if not 1 <= size <= MAX_ENVELOPE_BYTES:
             raise ValueError("Runtime Web session envelope size is invalid")
-        async with self.condition:
-            if (
-                len(self.items) >= _MAX_QUEUED_ENVELOPES
-                or self.bytes + size > _MAX_QUEUED_BYTES
-            ):
-                self.stalls += 1
-            await self.condition.wait_for(
-                lambda: (
-                    (
-                        len(self.items) < _MAX_QUEUED_ENVELOPES
-                        and self.bytes + size <= _MAX_QUEUED_BYTES
+        application_bytes = _application_payload_size(envelope)
+        control_bytes = size - application_bytes
+        resources = self.resources
+        if resources is not None:
+            if not resources.try_begin_task():
+                raise _RuntimeWebControlResourceExhausted
+        reserved = False
+        try:
+            async with self.condition:
+                if (
+                    len(self.items) >= _MAX_QUEUED_ENVELOPES
+                    or self.bytes + size > _MAX_QUEUED_BYTES
+                ):
+                    self.stalls += 1
+                await self.condition.wait_for(
+                    lambda: (
+                        (
+                            len(self.items) < _MAX_QUEUED_ENVELOPES
+                            and self.bytes + size <= _MAX_QUEUED_BYTES
+                        )
+                        or self.closed
                     )
-                    or self.closed
                 )
-            )
-            if self.closed:
-                raise RuntimeError("Runtime Web session response queue is closed")
-            copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
-            copied.CopyFrom(envelope)
-            self.items.append(_QueuedEnvelope(copied, on_dequeued))
-            self.bytes += size
-            self.condition.notify_all()
+                if self.closed:
+                    raise RuntimeError("Runtime Web session response queue is closed")
+                if resources is not None:
+                    if not resources.try_reserve_envelope(
+                        application_bytes=application_bytes,
+                        control_bytes=control_bytes,
+                    ):
+                        raise _RuntimeWebControlResourceExhausted
+                    reserved = True
+                copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+                copied.CopyFrom(envelope)
+                self.items.append(
+                    _QueuedEnvelope(
+                        copied,
+                        on_dequeued,
+                        application_bytes,
+                        control_bytes,
+                    )
+                )
+                self.bytes += size
+                self.condition.notify_all()
+        except BaseException:
+            if resources is not None and reserved:
+                resources.release_envelope(
+                    application_bytes=application_bytes,
+                    control_bytes=control_bytes,
+                )
+            raise
+        finally:
+            if resources is not None:
+                resources.end_task()
 
     async def __aiter__(
         self,
@@ -309,6 +808,11 @@ class _BoundedEnvelopeQueue:
                 queued = self.items.popleft()
                 self.bytes -= queued.envelope.ByteSize()
                 self.condition.notify_all()
+            if self.resources is not None:
+                self.resources.release_envelope(
+                    application_bytes=queued.application_bytes,
+                    control_bytes=queued.control_bytes,
+                )
             if queued.on_dequeued is not None:
                 await queued.on_dequeued()
             yield queued.envelope
@@ -324,6 +828,12 @@ class _BoundedEnvelopeQueue:
             *(item.on_dequeued() for item in queued if item.on_dequeued is not None),
             return_exceptions=True,
         )
+        if self.resources is not None:
+            for item in queued:
+                self.resources.release_envelope(
+                    application_bytes=item.application_bytes,
+                    control_bytes=item.control_bytes,
+                )
         errors = [result for result in results if isinstance(result, Exception)]
         if errors:
             raise ExceptionGroup(
@@ -345,6 +855,8 @@ class _SourceSession:
 class _QueuedEnvelope:
     envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
     on_dequeued: Callable[[], Awaitable[None]] | None
+    application_bytes: int
+    control_bytes: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -368,8 +880,46 @@ class _RuntimeWebCapacityRejected(RuntimeError):
     """One exact Owner-capacity rejection before queue admission."""
 
 
+class _RuntimeWebControlResourceExhausted(RuntimeError):
+    """One process-local Control hard-limit rejection."""
+
+
 class _RuntimeWebControlDraining(RuntimeError):
     """Reject one session registered after Control drain begins."""
+
+
+def _create_control_task(
+    resources: RuntimeWebControlResourceTracker | None,
+    task: Callable[[], Awaitable[_TaskResult]],
+    *,
+    name: str | None = None,
+) -> asyncio.Task[_TaskResult]:
+    """Create one task with an exactly paired process-budget reservation."""
+    if resources is not None and not resources.try_begin_task():
+        raise _RuntimeWebControlResourceExhausted
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if resources is not None and not released:
+            resources.end_task()
+            released = True
+
+    async def run() -> _TaskResult:
+        try:
+            return await task()
+        finally:
+            release()
+
+    managed = run()
+    try:
+        created = asyncio.create_task(managed, name=name)
+    except BaseException:
+        managed.close()
+        release()
+        raise
+    created.add_done_callback(lambda _completed: release())
+    return created
 
 
 class _FixedRouter:
@@ -396,10 +946,11 @@ class _RunnerConnection:
         *,
         accepted: RuntimeWebAcceptedRunnerSession,
         control_boot_id: str,
+        resources: RuntimeWebControlResourceTracker | None = None,
     ) -> None:
         self.accepted = accepted
         self.control_boot_id = control_boot_id
-        self.queue = _BoundedEnvelopeQueue()
+        self.queue = _BoundedEnvelopeQueue(resources)
         self.next_stream_id = 1
         self.sources: dict[int, _RunnerSourceBinding] = {}
         self.source_ids: dict[tuple[str, int], int] = {}
@@ -411,6 +962,69 @@ class _RunnerConnection:
         self.runner_request_session_consumed = 0
         self.source_request_session_consumed: dict[str, int] = {}
         self.lock = asyncio.Lock()
+        self.heartbeat_task: asyncio.Task[None] | None = None
+        self.heartbeat_sequence = 0
+        self.heartbeat_acknowledged_sequence = 0
+        self.heartbeats_sent = 0
+        self.heartbeat_acknowledgements = 0
+        self.missed_heartbeats = 0
+
+    def start_heartbeats(self) -> None:
+        """Start one application-independent Owner-session heartbeat loop."""
+        if self.heartbeat_task is not None:
+            raise RuntimeError("Runtime Web Runner heartbeat is already active")
+        self.heartbeat_task = _create_control_task(
+            self.queue.resources,
+            self._heartbeat_loop,
+            name=(
+                "runtime-web-control-runner-heartbeat:"
+                f"{self.accepted.owner.session_lease_id}"
+            ),
+        )
+
+    async def acknowledge_heartbeat(self, sequence: int) -> None:
+        """Apply one exact monotonic Runner heartbeat acknowledgement."""
+        async with self.lock:
+            if (
+                sequence <= self.heartbeat_acknowledged_sequence
+                or sequence > self.heartbeat_sequence
+            ):
+                raise ValueError(
+                    "Runtime Web Runner heartbeat acknowledgement is invalid"
+                )
+            self.heartbeat_acknowledged_sequence = sequence
+            self.heartbeat_acknowledgements += 1
+
+    async def _heartbeat_loop(self) -> None:
+        while True:
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+            async with self.lock:
+                missed = self.heartbeat_sequence - self.heartbeat_acknowledged_sequence
+                if missed >= _MAX_MISSED_HEARTBEATS:
+                    self.missed_heartbeats += 1
+                    exhausted = True
+                else:
+                    exhausted = False
+                    self.heartbeat_sequence += 1
+                    sequence = self.heartbeat_sequence
+                    self.heartbeats_sent += 1
+            if exhausted:
+                await self.queue.close()
+                return
+            owner = self.accepted.owner
+            heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+                session_id=owner.session_lease_id,
+                peer_boot_id=self.control_boot_id,
+                owner_boot_id=owner.owner_boot_id,
+                session_lease_id=owner.session_lease_id,
+                lease_generation=owner.lease_generation,
+            )
+            heartbeat.heartbeat.monotonic_sequence = sequence
+            try:
+                await self.queue.put(heartbeat)
+            except RuntimeError:
+                return
 
     async def send(
         self,
@@ -567,6 +1181,12 @@ class _RunnerConnection:
             self.source_request_session_consumed.pop(source_key, None)
 
     async def close(self) -> None:
+        heartbeat_task = self.heartbeat_task
+        self.heartbeat_task = None
+        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
+            if not heartbeat_task.done():
+                heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         async with self.lock:
             sources = tuple(self.sources.items())
             self.sources.clear()
@@ -607,6 +1227,8 @@ class RuntimeWebControlDataPlane:
         owner_lifecycle: RuntimeWebOwnedSessionProvider,
         long_lived_grace_seconds: float,
         finite_grace_seconds: float,
+        hard_limits: RuntimeWebControlHardLimits,
+        resident_memory_bytes: Callable[[], int],
     ) -> None:
         if (
             not metrics_recoverable_errors
@@ -626,6 +1248,11 @@ class RuntimeWebControlDataPlane:
         self.owner_lifecycle = owner_lifecycle
         self.long_lived_grace_seconds = long_lived_grace_seconds
         self.finite_grace_seconds = finite_grace_seconds
+        self.resources = RuntimeWebControlResourceTracker(
+            limits=hard_limits,
+            resident_memory_bytes=resident_memory_bytes,
+        )
+        self.relay_pool.bind_resources(self.resources)
         self.runners: dict[OwnerSessionEpoch, _RunnerConnection] = {}
         self.brokers: dict[OwnerSessionEpoch, RuntimeWebSessionBroker] = {}
         self.bindings: dict[BrokerStreamKey, _StreamBinding] = {}
@@ -639,9 +1266,26 @@ class RuntimeWebControlDataPlane:
         self.window_updates = 0
         self.resets = 0
         self.drains = 0
+        self.heartbeats_received = 0
+        self.runner_heartbeats_sent = 0
+        self.runner_heartbeat_acknowledgements = 0
+        self.runner_missed_heartbeats = 0
+        self.owner_epoch_transitions = 0
         self.draining = False
         self.binding_changed = asyncio.Condition()
         self.lock = asyncio.Lock()
+
+    def update_process_pressure(
+        self,
+        *,
+        lag_milliseconds: float,
+        resident_memory_bytes: int,
+    ) -> None:
+        """Update process progress evidence used by metrics and probes."""
+        self.resources.update_process_pressure(
+            lag_milliseconds=lag_milliseconds,
+            resident_memory_bytes=resident_memory_bytes,
+        )
 
     async def register_source(
         self,
@@ -657,12 +1301,15 @@ class RuntimeWebControlDataPlane:
             session_id=session_id,
             peer_boot_id=peer_boot_id,
             owner=owner,
-            queue=_BoundedEnvelopeQueue(),
+            queue=_BoundedEnvelopeQueue(self.resources),
         )
         async with self.lock:
             if self.draining:
                 raise _RuntimeWebControlDraining("Runtime Web Control is draining")
+            if not self.resources.try_open_session():
+                raise _RuntimeWebControlResourceExhausted
             if source.source_key in self.sources:
+                self.resources.close_session()
                 raise ValueError("Runtime Web source session ID is already active")
             self.sources[source.source_key] = source
         return source
@@ -671,6 +1318,7 @@ class RuntimeWebControlDataPlane:
         async with self.lock:
             if self.sources.get(source.source_key) is source:
                 self.sources.pop(source.source_key)
+                self.resources.close_session()
             self.draining_sources.discard(source.source_key)
             keys = tuple(
                 key
@@ -693,11 +1341,16 @@ class RuntimeWebControlDataPlane:
         connection = _RunnerConnection(
             accepted=accepted,
             control_boot_id=self.control_boot_id,
+            resources=self.resources,
         )
         async with self.lock:
+            if not self.resources.try_open_session():
+                raise _RuntimeWebControlResourceExhausted
             if accepted.owner in self.runners:
+                self.resources.close_session()
                 raise ValueError("Runtime Web Owner Runner session is already active")
             self.runners[accepted.owner] = connection
+            self.owner_epoch_transitions += 1
         return connection
 
     async def unregister_runner(
@@ -706,8 +1359,21 @@ class RuntimeWebControlDataPlane:
     ) -> None:
         async with self.lock:
             connection = self.runners.pop(accepted.owner, None)
+            keys = tuple(
+                key
+                for key, binding in self.bindings.items()
+                if binding.target.owner == accepted.owner
+            )
         if connection is not None:
+            self.runner_heartbeats_sent += connection.heartbeats_sent
+            self.runner_heartbeat_acknowledgements += (
+                connection.heartbeat_acknowledgements
+            )
+            self.runner_missed_heartbeats += connection.missed_heartbeats
+            self.resources.close_session()
             await connection.close()
+        for key in keys:
+            await self._release(key)
         await self.capacity_registry.release(accepted.owner)
 
     async def handle(
@@ -730,6 +1396,8 @@ class RuntimeWebControlDataPlane:
                 self.drains += 1
             return
         if payload == "heartbeat":
+            async with self.lock:
+                self.heartbeats_received += 1
             response = _base_response(source, self.control_boot_id)
             response.heartbeat_ack.monotonic_sequence = (
                 envelope.heartbeat.monotonic_sequence
@@ -750,7 +1418,20 @@ class RuntimeWebControlDataPlane:
                     )
                 )
                 return
-            await self._open(source, key, envelope)
+            if not self.resources.try_begin_task():
+                await source.queue.put(
+                    _rejection(
+                        source,
+                        self.control_boot_id,
+                        envelope.stream_id,
+                        CloseReason.RESOURCE_EXHAUSTED,
+                    )
+                )
+                return
+            try:
+                await self._open(source, key, envelope)
+            finally:
+                self.resources.end_task()
             return
         if payload == "window_update":
             async with self.lock:
@@ -784,6 +1465,16 @@ class RuntimeWebControlDataPlane:
             )
         if connection is None:
             raise ValueError("Runtime Web Runner Owner session is not active")
+        if envelope.WhichOneof("payload") == "heartbeat_ack":
+            if envelope.stream_id != 0:
+                raise ValueError(
+                    "Runtime Web Runner heartbeat acknowledgement must be "
+                    "session-scoped"
+                )
+            await connection.acknowledge_heartbeat(
+                envelope.heartbeat_ack.monotonic_sequence
+            )
+            return
         runner_source = await connection.source_binding(envelope.stream_id)
         if runner_source is None:
             if await connection.terminal(envelope.stream_id):
@@ -928,6 +1619,8 @@ class RuntimeWebControlDataPlane:
     async def metrics(self) -> str:
         """Render bounded content-free Control and capacity metrics."""
         snapshots = await self.capacity_registry.snapshots()
+        resources = self.resources.snapshot()
+        limits = self.resources.limits
         async with self.lock:
             gateway_sessions = sum(
                 source.owner is None for source in self.sources.values()
@@ -937,34 +1630,46 @@ class RuntimeWebControlDataPlane:
             )
             runner_sessions = len(self.runners)
             active_streams = len(self.bindings)
-            runner_items = tuple(self.runners.items())
+            runner_owners = tuple(self.runners)
             queues = tuple(source.queue for source in self.sources.values()) + tuple(
                 connection.queue for connection in self.runners.values()
-            )
-            runner_active_streams = sum(
-                binding.target.local for binding in self.bindings.values()
             )
             window_updates = self.window_updates
             resets = self.resets
             drains = self.drains
-        runner_memory_bytes = 0
-        runner_memory_limit_bytes = 0
-        for owner, _connection in runner_items:
+            heartbeats_received = self.heartbeats_received
+            owner_epoch_transitions = self.owner_epoch_transitions
+            heartbeats_sent = (
+                sum(connection.heartbeats_sent for connection in self.runners.values())
+                + self.runner_heartbeats_sent
+            )
+            heartbeat_acknowledgements = (
+                sum(
+                    connection.heartbeat_acknowledgements
+                    for connection in self.runners.values()
+                )
+                + self.runner_heartbeat_acknowledgements
+            )
+            missed_heartbeats = (
+                sum(
+                    connection.missed_heartbeats for connection in self.runners.values()
+                )
+                + self.runner_missed_heartbeats
+            )
+        current_time = self.clock()
+        runner_snapshots: list[RunnerRuntimeWebMetrics] = []
+        for owner in runner_owners:
             try:
                 samples = await self.runner_metrics.read_runner_system_metrics(
                     runtime_id=owner.runtime_id,
                     generation=owner.runner_generation,
-                    current_time=self.clock(),
+                    current_time=current_time,
                 )
             except self.metrics_recoverable_errors:
                 continue
             if not samples:
                 continue
-            memory = samples[-1].memory
-            if memory.used is not None:
-                runner_memory_bytes += memory.used
-            if memory.total is not None:
-                runner_memory_limit_bytes += memory.total
+            runner_snapshots.append(samples[-1].runtime_web)
         lines = [
             "# TYPE runtime_web_control_sessions gauge",
             (f'runtime_web_control_sessions{{role="gateway"}} {gateway_sessions}'),
@@ -972,6 +1677,63 @@ class RuntimeWebControlDataPlane:
             (f'runtime_web_control_sessions{{role="runner"}} {runner_sessions}'),
             "# TYPE runtime_web_control_active_streams gauge",
             f"runtime_web_control_active_streams {active_streams}",
+            "# TYPE runtime_web_control_hard_sessions gauge",
+            f"runtime_web_control_hard_sessions {resources.active_sessions}",
+            "# TYPE runtime_web_control_hard_session_limit gauge",
+            f"runtime_web_control_hard_session_limit {limits.maximum_sessions}",
+            "# TYPE runtime_web_control_hard_stream_limit gauge",
+            f"runtime_web_control_hard_stream_limit {limits.maximum_active_streams}",
+            "# TYPE runtime_web_control_application_buffer_bytes gauge",
+            (
+                "runtime_web_control_application_buffer_bytes "
+                f"{resources.application_buffer_bytes}"
+            ),
+            "# TYPE runtime_web_control_application_buffer_limit_bytes gauge",
+            (
+                "runtime_web_control_application_buffer_limit_bytes "
+                f"{limits.maximum_application_buffer_bytes}"
+            ),
+            "# TYPE runtime_web_control_control_buffer_bytes gauge",
+            (
+                "runtime_web_control_control_buffer_bytes "
+                f"{resources.control_buffer_bytes}"
+            ),
+            "# TYPE runtime_web_control_control_buffer_limit_bytes gauge",
+            (
+                "runtime_web_control_control_buffer_limit_bytes "
+                f"{limits.maximum_control_buffer_bytes}"
+            ),
+            "# TYPE runtime_web_control_queued_envelopes gauge",
+            f"runtime_web_control_queued_envelopes {resources.queued_envelopes}",
+            "# TYPE runtime_web_control_queued_envelope_limit gauge",
+            (
+                "runtime_web_control_queued_envelope_limit "
+                f"{limits.maximum_queued_envelopes}"
+            ),
+            "# TYPE runtime_web_control_pending_tasks gauge",
+            f"runtime_web_control_pending_tasks {resources.pending_tasks}",
+            "# TYPE runtime_web_control_pending_task_limit gauge",
+            f"runtime_web_control_pending_task_limit {limits.maximum_pending_tasks}",
+            "# TYPE runtime_web_control_event_loop_lag_milliseconds gauge",
+            (
+                "runtime_web_control_event_loop_lag_milliseconds "
+                f"{resources.event_loop_lag_milliseconds}"
+            ),
+            "# TYPE runtime_web_control_event_loop_lag_limit_milliseconds gauge",
+            (
+                "runtime_web_control_event_loop_lag_limit_milliseconds "
+                f"{limits.maximum_event_loop_lag_milliseconds}"
+            ),
+            "# TYPE runtime_web_control_resident_memory_bytes gauge",
+            (
+                "runtime_web_control_resident_memory_bytes "
+                f"{resources.resident_memory_bytes}"
+            ),
+            "# TYPE runtime_web_control_resident_memory_limit_bytes gauge",
+            (
+                "runtime_web_control_resident_memory_limit_bytes "
+                f"{limits.maximum_resident_memory_bytes}"
+            ),
             "# TYPE runtime_web_control_capacity_active_streams gauge",
             (
                 "runtime_web_control_capacity_active_streams "
@@ -1010,20 +1772,45 @@ class RuntimeWebControlDataPlane:
             f"runtime_web_control_resets_total {resets}",
             "# TYPE runtime_web_control_drains_total counter",
             f"runtime_web_control_drains_total {drains}",
-            "# TYPE runtime_web_runner_active_streams gauge",
-            f"runtime_web_runner_active_streams {runner_active_streams}",
-            "# TYPE runtime_web_runner_memory_bytes gauge",
-            f"runtime_web_runner_memory_bytes {runner_memory_bytes}",
-            "# TYPE runtime_web_runner_memory_limit_bytes gauge",
-            f"runtime_web_runner_memory_limit_bytes {runner_memory_limit_bytes}",
-            "# EOF",
+            "# TYPE runtime_web_control_heartbeats_received_total counter",
+            (f"runtime_web_control_heartbeats_received_total {heartbeats_received}"),
+            "# TYPE runtime_web_control_runner_heartbeats_sent_total counter",
+            (f"runtime_web_control_runner_heartbeats_sent_total {heartbeats_sent}"),
+            (
+                "# TYPE runtime_web_control_runner_heartbeat_acknowledgements_total "
+                "counter"
+            ),
+            (
+                "runtime_web_control_runner_heartbeat_acknowledgements_total "
+                f"{heartbeat_acknowledgements}"
+            ),
+            "# TYPE runtime_web_control_runner_missed_heartbeats_total counter",
+            (f"runtime_web_control_runner_missed_heartbeats_total {missed_heartbeats}"),
+            "# TYPE runtime_web_control_owner_epoch_transition_total counter",
+            (
+                "runtime_web_control_owner_epoch_transition_total "
+                f"{owner_epoch_transitions}"
+            ),
         ]
+        lines.extend(_runner_runtime_web_metrics_lines(tuple(runner_snapshots)))
+        lines.append("# EOF")
         return "\n".join(lines) + "\n"
 
     async def subready(self) -> bool:
         """Return replacement sub-readiness without coupling general liveness."""
         async with self.lock:
-            return bool(self.runners) and not self.draining
+            return (
+                bool(self.runners)
+                and not self.draining
+                and self.resources.pressure_acceptable()
+            )
+
+    def live(self) -> bool:
+        """Return process liveness based only on event-loop progress."""
+        return (
+            self.resources.event_loop_lag_milliseconds
+            < self.resources.limits.maximum_event_loop_lag_milliseconds
+        )
 
     async def begin_drain(self) -> None:
         """Withdraw readiness, fence Owner leases, and drain without replay."""
@@ -1086,6 +1873,8 @@ class RuntimeWebControlDataPlane:
         async with self.lock:
             runners = tuple(self.runners.values())
             sources = tuple(self.sources.values())
+            session_count = len(runners) + len(sources)
+            stream_count = len(self.bindings)
             self.runners.clear()
             self.sources.clear()
             self.draining_sources.clear()
@@ -1093,6 +1882,10 @@ class RuntimeWebControlDataPlane:
             self.brokers.clear()
             self.source_tombstones.clear()
             self.source_tombstone_set.clear()
+            for _ in range(session_count):
+                self.resources.close_session()
+            for _ in range(stream_count):
+                self.resources.close_stream()
         await asyncio.gather(
             *(runner.close() for runner in runners),
             return_exceptions=True,
@@ -1224,9 +2017,10 @@ class RuntimeWebControlDataPlane:
         )
         async with self.lock:
             draining = self.draining or source.source_key in self.draining_sources
-            if not draining:
+            admitted = False if draining else self.resources.try_open_stream()
+            if admitted:
                 self.bindings[key] = binding
-        if draining:
+        if not admitted:
             if broker is not None:
                 await broker.release(key)
             await source.queue.put(
@@ -1234,7 +2028,11 @@ class RuntimeWebControlDataPlane:
                     source,
                     self.control_boot_id,
                     envelope.stream_id,
-                    CloseReason.SERVICE_DRAIN,
+                    (
+                        CloseReason.SERVICE_DRAIN
+                        if draining
+                        else CloseReason.RESOURCE_EXHAUSTED
+                    ),
                 )
             )
             return
@@ -1371,6 +2169,7 @@ class RuntimeWebControlDataPlane:
             runner = None if binding is None else self.runners.get(binding.target.owner)
         if binding is None:
             return
+        self.resources.close_stream()
         async with self.lock:
             if key not in self.source_tombstone_set:
                 if len(self.source_tombstones) == MAX_STREAM_TOMBSTONES:
@@ -1452,12 +2251,39 @@ class RuntimeWebGatewaySessionGrpcServicer(
                 "Runtime Web Control is draining",
             )
             raise AssertionError("unreachable") from None
-        await source.queue.put(
-            _acceptance(first, self.data_plane.control_boot_id, self.clock)
-        )
-        reader = asyncio.create_task(
-            _read_source(self.data_plane, source, request_iterator)
-        )
+        except _RuntimeWebControlResourceExhausted:
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard session limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        try:
+            await source.queue.put(
+                _acceptance(first, self.data_plane.control_boot_id, self.clock)
+            )
+        except _RuntimeWebControlResourceExhausted:
+            await self.data_plane.unregister_source(source)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard queue limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        try:
+            reader = _create_control_task(
+                self.data_plane.resources,
+                lambda: _read_source(self.data_plane, source, request_iterator),
+                name=f"runtime-web-gateway-reader:{source.session_id}",
+            )
+        except _RuntimeWebControlResourceExhausted:
+            await self.data_plane.unregister_source(source)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard task limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        except Exception:
+            await self.data_plane.unregister_source(source)
+            raise
         try:
             async for response in source.queue:
                 yield response
@@ -1517,10 +2343,37 @@ class RuntimeWebControlSessionGrpcServicer(
                 "Runtime Web Control is draining",
             )
             raise AssertionError("unreachable") from None
-        await source.queue.put(_acceptance(first, owner.owner_boot_id, self.clock))
-        reader = asyncio.create_task(
-            _read_source(self.data_plane, source, request_iterator)
-        )
+        except _RuntimeWebControlResourceExhausted:
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard session limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        try:
+            await source.queue.put(_acceptance(first, owner.owner_boot_id, self.clock))
+        except _RuntimeWebControlResourceExhausted:
+            await self.data_plane.unregister_source(source)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard queue limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        try:
+            reader = _create_control_task(
+                self.data_plane.resources,
+                lambda: _read_source(self.data_plane, source, request_iterator),
+                name=f"runtime-web-relay-reader:{source.session_id}",
+            )
+        except _RuntimeWebControlResourceExhausted:
+            await self.data_plane.unregister_source(source)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard task limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        except Exception:
+            await self.data_plane.unregister_source(source)
+            raise
         try:
             async for response in source.queue:
                 yield response
@@ -1587,31 +2440,83 @@ class RuntimeRunnerWebSessionGrpcServicer(
                 runner_generation=owner.runner_generation,
             ),
         )
-        connection = await self.data_plane.register_runner(accepted)
-        await connection.queue.put(_acceptance(first, owner.owner_boot_id, self.clock))
-        renewal = asyncio.create_task(
-            _renew_owner_session(
-                provider=self.offer_provider,
-                owner=owner,
-                connection=connection,
-                interval_seconds=self.renew_interval_seconds,
-            ),
-            name=f"runtime-web-owner-renewal:{owner.session_lease_id}",
-        )
-        reader = asyncio.create_task(
-            _read_runner(self.data_plane, connection, request_iterator)
-        )
+        try:
+            connection = await self.data_plane.register_runner(accepted)
+        except _RuntimeWebControlResourceExhausted:
+            await self.registry.release(accepted)
+            await self.offer_provider.release_owner(owner)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard session limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        try:
+            await connection.queue.put(
+                _acceptance(first, owner.owner_boot_id, self.clock)
+            )
+        except _RuntimeWebControlResourceExhausted:
+            await self.data_plane.unregister_runner(accepted)
+            await self.registry.release(accepted)
+            await self.offer_provider.release_owner(owner)
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard queue limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        renewal: asyncio.Task[None] | None = None
+        reader: asyncio.Task[None] | None = None
+
+        async def cleanup() -> None:
+            for task in (renewal, reader):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (renewal, reader) if task is not None),
+                return_exceptions=True,
+            )
+            await self.data_plane.unregister_runner(accepted)
+            await self.registry.release(accepted)
+            await self.offer_provider.release_owner(owner)
+
+        try:
+            connection.start_heartbeats()
+            renewal = _create_control_task(
+                self.data_plane.resources,
+                lambda: _renew_owner_session(
+                    provider=self.offer_provider,
+                    owner=owner,
+                    connection=connection,
+                    interval_seconds=self.renew_interval_seconds,
+                ),
+                name=f"runtime-web-owner-renewal:{owner.session_lease_id}",
+            )
+            reader = _create_control_task(
+                self.data_plane.resources,
+                lambda: _read_runner(
+                    self.data_plane,
+                    connection,
+                    request_iterator,
+                ),
+                name=f"runtime-web-runner-reader:{owner.session_lease_id}",
+            )
+        except _RuntimeWebControlResourceExhausted:
+            await cleanup()
+            await context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Runtime Web Control hard task limit is exhausted",
+            )
+            raise AssertionError("unreachable") from None
+        except asyncio.CancelledError:
+            await cleanup()
+            raise
+        except Exception:
+            await cleanup()
+            raise
         try:
             async for response in connection.queue:
                 yield response
         finally:
-            renewal.cancel()
-            await asyncio.gather(renewal, return_exceptions=True)
-            reader.cancel()
-            await asyncio.gather(reader, return_exceptions=True)
-            await self.data_plane.unregister_runner(accepted)
-            await self.registry.release(accepted)
-            await self.offer_provider.release_owner(owner)
+            await cleanup()
 
 
 def add_runtime_web_session_servicers(
@@ -1684,8 +2589,11 @@ async def _operations_ready(request: web.Request) -> web.Response:
 
 
 async def _operations_live(request: web.Request) -> web.Response:
-    del request
-    return web.Response(text="live\n")
+    live = request.app[_OPERATIONS_DATA_PLANE].live()
+    return web.Response(
+        status=200 if live else 503,
+        text="live\n" if live else "not live\n",
+    )
 
 
 async def _operations_metrics(request: web.Request) -> web.Response:

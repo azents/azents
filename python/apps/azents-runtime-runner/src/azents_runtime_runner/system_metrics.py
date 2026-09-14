@@ -9,6 +9,7 @@ from pathlib import Path
 
 from azents_runtime_control.system_metrics import (
     CollectedRunnerSystemMetrics,
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsScope,
@@ -58,6 +59,7 @@ type PathExists = Callable[[Path], bool]
 type StatVfs = Callable[[str], os.statvfs_result]
 type CpuCount = Callable[[], int | None]
 type Monotonic = Callable[[], float]
+type RuntimeWebMetrics = Callable[[], RunnerRuntimeWebMetrics]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +101,7 @@ class LinuxSystemMetricsCollector:
         cpu_count: CpuCount,
         monotonic: Monotonic,
         platform_name: str,
+        runtime_web_metrics: RuntimeWebMetrics,
     ) -> None:
         """Initialize an injected collector."""
         self._read_text = read_text
@@ -107,6 +110,7 @@ class LinuxSystemMetricsCollector:
         self._cpu_count = cpu_count
         self._monotonic = monotonic
         self._platform_name = platform_name
+        self._runtime_web_metrics = runtime_web_metrics
         self._scope = self._detect_scope()
         self._cpu_baseline: _CpuBaseline | None = None
 
@@ -119,12 +123,14 @@ class LinuxSystemMetricsCollector:
                 cpu=unsupported,
                 memory=unsupported,
                 disk=unsupported,
+                runtime_web=self._runtime_web_metrics(),
             )
         return CollectedRunnerSystemMetrics(
             scope=self._scope,
             cpu=self._collect_cpu(),
             memory=self._collect_memory(),
             disk=self._collect_disk(),
+            runtime_web=self._runtime_web_metrics(),
         )
 
     def _detect_scope(self) -> RunnerSystemMetricsScope:
@@ -275,7 +281,10 @@ class LinuxSystemMetricsCollector:
             return None
 
 
-def create_system_metrics_collector() -> LinuxSystemMetricsCollector:
+def create_system_metrics_collector(
+    *,
+    runtime_web_metrics: RuntimeWebMetrics,
+) -> LinuxSystemMetricsCollector:
     """Create the production Linux collector."""
     return LinuxSystemMetricsCollector(
         read_text=lambda path: path.read_text(),
@@ -284,6 +293,7 @@ def create_system_metrics_collector() -> LinuxSystemMetricsCollector:
         cpu_count=os.cpu_count,
         monotonic=time.monotonic,
         platform_name=platform.system(),
+        runtime_web_metrics=runtime_web_metrics,
     )
 
 

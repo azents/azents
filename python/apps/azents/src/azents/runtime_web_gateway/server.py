@@ -374,6 +374,10 @@ async def runtime_web_gateway_lifespan(
             maximum_application_buffer_bytes=(
                 settings.runtime_web_gateway_maximum_application_buffer_bytes
             ),
+            maximum_control_buffer_bytes=(
+                settings.runtime_web_gateway_maximum_control_buffer_bytes
+            ),
+            maximum_pending_tasks=(settings.runtime_web_gateway_maximum_pending_tasks),
             maximum_scheduler_waiters=(
                 settings.runtime_web_gateway_maximum_scheduler_waiters
             ),
@@ -560,6 +564,7 @@ async def _metrics(request: web.Request) -> web.Response:
             scheduler_waiter_limit=limits.maximum_scheduler_waiters,
             resident_memory_bytes=operations.state.resident_memory_bytes,
             resident_memory_limit_bytes=limits.maximum_resident_memory_bytes,
+            transport=operations.state.resources,
         ),
         content_type="text/plain",
     )

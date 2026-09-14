@@ -11,7 +11,10 @@ from collections.abc import Awaitable, Callable, Collection
 from azents_runtime_control.runtime_web_session import (
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
     CloseReason,
+    StreamProtocol,
 )
+
+_TASK_SLOTS_PER_EXCHANGE = 4
 
 
 class RuntimeWebCapacityBackend(enum.StrEnum):
@@ -138,6 +141,8 @@ class RuntimeWebGatewayHardLimits:
 
     maximum_active_exchanges: int
     maximum_application_buffer_bytes: int
+    maximum_control_buffer_bytes: int
+    maximum_pending_tasks: int
     maximum_scheduler_waiters: int
     maximum_event_loop_lag_milliseconds: int
     maximum_resident_memory_bytes: int
@@ -149,6 +154,8 @@ class RuntimeWebGatewayHardLimits:
                 "maximum_application_buffer_bytes",
                 self.maximum_application_buffer_bytes,
             ),
+            ("maximum_control_buffer_bytes", self.maximum_control_buffer_bytes),
+            ("maximum_pending_tasks", self.maximum_pending_tasks),
             ("maximum_scheduler_waiters", self.maximum_scheduler_waiters),
             (
                 "maximum_event_loop_lag_milliseconds",
@@ -168,6 +175,7 @@ class RuntimeWebGatewayResourceSnapshot:
     active_exchanges: int
     application_buffer_bytes: int
     control_buffer_bytes: int
+    pending_tasks: int
     scheduler_waiters: int
 
 
@@ -179,8 +187,48 @@ class RuntimeWebGatewayResourceTracker:
         self.active_exchanges = 0
         self.application_buffer_bytes = 0
         self.control_buffer_bytes = 0
+        self.pending_tasks = 0
         self.scheduler_waiters = 0
         self.condition = asyncio.Condition()
+        self.transport_active = {
+            (protocol, path): 0
+            for protocol in StreamProtocol
+            for path in ("local", "relay")
+        }
+        self.transport_opens = {
+            (protocol, path): 0
+            for protocol in StreamProtocol
+            for path in ("local", "relay")
+        }
+        self.transport_rejections = {reason: 0 for reason in CloseReason}
+        self.transport_terminals = {reason: 0 for reason in CloseReason}
+        self.transport_completed = 0
+        self.transport_frames = {
+            (protocol, direction, path): 0
+            for protocol in StreamProtocol
+            for direction in ("request", "response")
+            for path in ("local", "relay")
+        }
+        self.transport_bytes = {
+            (protocol, direction, path): 0
+            for protocol in StreamProtocol
+            for direction in ("request", "response")
+            for path in ("local", "relay")
+        }
+        self.transport_setup_seconds_sum = 0.0
+        self.transport_setup_count = 0
+        self.transport_ttfb_seconds_sum = 0.0
+        self.transport_ttfb_count = 0
+        self.transport_duration_seconds_sum = 0.0
+        self.transport_duration_count = 0
+        self.transport_goodput_bytes = 0
+        self.transport_credit_stalls = 0
+        self.transport_credit_stall_seconds = 0.0
+        self.transport_heartbeats_sent = 0
+        self.transport_heartbeat_acknowledgements = 0
+        self.transport_missed_heartbeats = 0
+        self.transport_go_aways = 0
+        self.transport_epoch_transitions = 0
 
     def try_open_exchange(self) -> bool:
         """Reserve one local exchange without waiting for HPA."""
@@ -242,11 +290,17 @@ class RuntimeWebGatewayResourceTracker:
             self.application_buffer_bytes -= size_bytes
             self.condition.notify_all()
 
-    def reserve_control_buffer(self, size_bytes: int) -> None:
-        """Record one bounded transport-control buffer reservation."""
+    def try_reserve_control_buffer(self, size_bytes: int) -> bool:
+        """Reserve transport-control bytes without exceeding the process ceiling."""
         if size_bytes <= 0:
             raise ValueError("Runtime Web control buffer reservation must be positive")
+        if (
+            self.control_buffer_bytes + size_bytes
+            > self.limits.maximum_control_buffer_bytes
+        ):
+            return False
         self.control_buffer_bytes += size_bytes
+        return True
 
     def release_control_buffer(self, size_bytes: int) -> None:
         """Release one exact transport-control buffer reservation."""
@@ -260,6 +314,21 @@ class RuntimeWebGatewayResourceTracker:
             return False
         self.scheduler_waiters += 1
         return True
+
+    def try_begin_tasks(self, count: int = 1) -> bool:
+        """Reserve bounded process task slots before creating asynchronous work."""
+        if count <= 0:
+            raise ValueError("Runtime Web task reservation must be positive")
+        if self.pending_tasks + count > self.limits.maximum_pending_tasks:
+            return False
+        self.pending_tasks += count
+        return True
+
+    def end_tasks(self, count: int = 1) -> None:
+        """Release exact process task reservations."""
+        if count <= 0 or count > self.pending_tasks:
+            raise ValueError("Runtime Web task release is invalid")
+        self.pending_tasks -= count
 
     def remove_scheduler_waiter(self) -> None:
         """Release one scheduler waiter."""
@@ -307,8 +376,78 @@ class RuntimeWebGatewayResourceTracker:
             active_exchanges=self.active_exchanges,
             application_buffer_bytes=self.application_buffer_bytes,
             control_buffer_bytes=self.control_buffer_bytes,
+            pending_tasks=self.pending_tasks,
             scheduler_waiters=self.scheduler_waiters,
         )
+
+    def record_transport_open(
+        self,
+        *,
+        protocol: StreamProtocol,
+        path: str,
+        setup_seconds: float,
+    ) -> None:
+        """Record one accepted transport open using bounded dimensions."""
+        _validate_transport_path(path)
+        self.transport_active[(protocol, path)] += 1
+        self.transport_opens[(protocol, path)] += 1
+        self.transport_setup_seconds_sum += _finite_non_negative(setup_seconds)
+        self.transport_setup_count += 1
+
+    def record_transport_rejection(self, reason: CloseReason) -> None:
+        """Record one bounded transport rejection reason."""
+        self.transport_rejections[reason] += 1
+
+    def record_transport_frame(
+        self,
+        *,
+        protocol: StreamProtocol,
+        direction: str,
+        path: str,
+        size_bytes: int,
+    ) -> None:
+        """Record one byte-preserving frame without application content."""
+        _validate_transport_path(path)
+        if direction not in {"request", "response"} or size_bytes < 0:
+            raise ValueError("Runtime Web transport frame metric is invalid")
+        key = (protocol, direction, path)
+        self.transport_frames[key] += 1
+        self.transport_bytes[key] += size_bytes
+
+    def record_transport_ttfb(self, seconds: float) -> None:
+        """Record one browser-visible first-byte observation."""
+        self.transport_ttfb_seconds_sum += _finite_non_negative(seconds)
+        self.transport_ttfb_count += 1
+
+    def record_transport_credit_stall(self, seconds: float) -> None:
+        """Record one bounded request-credit wait observation."""
+        self.transport_credit_stalls += 1
+        self.transport_credit_stall_seconds += _finite_non_negative(seconds)
+
+    def record_transport_terminal(
+        self,
+        *,
+        protocol: StreamProtocol,
+        path: str | None,
+        reason: CloseReason | None,
+        duration_seconds: float,
+        application_bytes: int,
+    ) -> None:
+        """Record one terminal outcome and release its accepted-path gauge."""
+        if application_bytes < 0:
+            raise ValueError("Runtime Web transport bytes must not be negative")
+        if path is not None:
+            _validate_transport_path(path)
+            if self.transport_active[(protocol, path)] <= 0:
+                raise ValueError("Runtime Web active transport metric is absent")
+            self.transport_active[(protocol, path)] -= 1
+        if reason is None:
+            self.transport_completed += 1
+        else:
+            self.transport_terminals[reason] += 1
+        self.transport_duration_seconds_sum += _finite_non_negative(duration_seconds)
+        self.transport_duration_count += 1
+        self.transport_goodput_bytes += application_bytes
 
 
 class RuntimeWebDrainStreamKind(enum.StrEnum):
@@ -391,6 +530,9 @@ class RuntimeWebDrainCoordinator:
         async with self.condition:
             if self.draining or not self.resources.try_open_exchange():
                 return None
+            if not self.resources.try_begin_tasks(_TASK_SLOTS_PER_EXCHANGE):
+                self.resources.close_exchange()
+                return None
             registration = RuntimeWebDrainRegistration(
                 registration_id=self.next_registration_id,
                 kind=kind,
@@ -410,6 +552,7 @@ class RuntimeWebDrainCoordinator:
             if active is None or active.registration != registration:
                 return False
             self.active.pop(registration.registration_id)
+            self.resources.end_tasks(_TASK_SLOTS_PER_EXCHANGE)
             self.resources.close_exchange()
             self.condition.notify_all()
             return True
@@ -606,6 +749,7 @@ class RuntimeWebDrainCoordinator:
             async with self.condition:
                 for registration_id in forced_ids:
                     if self.active.pop(registration_id, None) is not None:
+                        self.resources.end_tasks(_TASK_SLOTS_PER_EXCHANGE)
                         self.resources.close_exchange()
                 self.condition.notify_all()
         return forced_ids, failures
@@ -779,6 +923,17 @@ class RuntimeWebGatewayOperationsCoordinator:
         return await self.drain_coordinator.drain()
 
 
+def _validate_transport_path(path: str) -> None:
+    if path not in {"local", "relay"}:
+        raise ValueError("Runtime Web transport path metric is invalid")
+
+
+def _finite_non_negative(value: float) -> float:
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("Runtime Web duration metric must be finite and non-negative")
+    return value
+
+
 def render_openmetrics(
     *,
     pressure: RuntimeWebGatewayPressure,
@@ -795,6 +950,7 @@ def render_openmetrics(
     scheduler_waiter_limit: int,
     resident_memory_bytes: int,
     resident_memory_limit_bytes: int,
+    transport: RuntimeWebGatewayResourceTracker,
 ) -> str:
     """Render the bounded process-level OpenMetrics contract."""
     backend_label = f'backend="{backend.value}"'
@@ -815,6 +971,18 @@ def render_openmetrics(
         ),
         "# TYPE runtime_web_gateway_control_buffer_bytes gauge",
         f"runtime_web_gateway_control_buffer_bytes {control_buffer_bytes}",
+        "# TYPE runtime_web_gateway_control_buffer_limit_bytes gauge",
+        (
+            "runtime_web_gateway_control_buffer_limit_bytes "
+            f"{transport.limits.maximum_control_buffer_bytes}"
+        ),
+        "# TYPE runtime_web_gateway_pending_tasks gauge",
+        f"runtime_web_gateway_pending_tasks {transport.pending_tasks}",
+        "# TYPE runtime_web_gateway_pending_task_limit gauge",
+        (
+            "runtime_web_gateway_pending_task_limit "
+            f"{transport.limits.maximum_pending_tasks}"
+        ),
         "# TYPE runtime_web_gateway_scheduler_waiters gauge",
         f"runtime_web_gateway_scheduler_waiters {scheduler_waiters}",
         "# TYPE runtime_web_gateway_scheduler_waiter_limit gauge",
@@ -834,6 +1002,133 @@ def render_openmetrics(
         f"runtime_web_capacity_backend_info{{{backend_label}}} 1",
         "# TYPE runtime_web_capacity_degraded gauge",
         f"runtime_web_capacity_degraded{{{backend_label}}} {int(capacity_degraded)}",
-        "# EOF",
     ]
+    for protocol in StreamProtocol:
+        for path in ("local", "relay"):
+            labels = f'protocol="{protocol.value}",path="{path}"'
+            lines.extend(
+                (
+                    (
+                        f"runtime_web_gateway_transport_active{{{labels}}} "
+                        f"{transport.transport_active[(protocol, path)]}"
+                    ),
+                    (
+                        f"runtime_web_gateway_transport_open_total{{{labels}}} "
+                        f"{transport.transport_opens[(protocol, path)]}"
+                    ),
+                )
+            )
+            for direction in ("request", "response"):
+                frame_labels = f'{labels},direction="{direction}"'
+                lines.extend(
+                    (
+                        (
+                            "runtime_web_gateway_transport_frames_total"
+                            f"{{{frame_labels}}} "
+                            f"{transport.transport_frames[(protocol, direction, path)]}"
+                        ),
+                        (
+                            "runtime_web_gateway_transport_bytes_total"
+                            f"{{{frame_labels}}} "
+                            f"{transport.transport_bytes[(protocol, direction, path)]}"
+                        ),
+                    )
+                )
+    for reason in CloseReason:
+        reason_label = f'reason="{reason.value}"'
+        lines.extend(
+            (
+                (
+                    "runtime_web_gateway_transport_rejected_total"
+                    f"{{{reason_label}}} {transport.transport_rejections[reason]}"
+                ),
+                (
+                    "runtime_web_gateway_transport_terminal_total"
+                    f"{{{reason_label}}} {transport.transport_terminals[reason]}"
+                ),
+            )
+        )
+    goodput = (
+        transport.transport_goodput_bytes / transport.transport_duration_seconds_sum
+        if transport.transport_duration_seconds_sum > 0
+        else 0.0
+    )
+    lines.extend(
+        (
+            "# TYPE runtime_web_gateway_transport_completed_total counter",
+            (
+                "runtime_web_gateway_transport_completed_total "
+                f"{transport.transport_completed}"
+            ),
+            "# TYPE runtime_web_gateway_transport_setup_seconds summary",
+            (
+                "runtime_web_gateway_transport_setup_seconds_sum "
+                f"{transport.transport_setup_seconds_sum}"
+            ),
+            (
+                "runtime_web_gateway_transport_setup_seconds_count "
+                f"{transport.transport_setup_count}"
+            ),
+            "# TYPE runtime_web_gateway_transport_ttfb_seconds summary",
+            (
+                "runtime_web_gateway_transport_ttfb_seconds_sum "
+                f"{transport.transport_ttfb_seconds_sum}"
+            ),
+            (
+                "runtime_web_gateway_transport_ttfb_seconds_count "
+                f"{transport.transport_ttfb_count}"
+            ),
+            "# TYPE runtime_web_gateway_transport_duration_seconds summary",
+            (
+                "runtime_web_gateway_transport_duration_seconds_sum "
+                f"{transport.transport_duration_seconds_sum}"
+            ),
+            (
+                "runtime_web_gateway_transport_duration_seconds_count "
+                f"{transport.transport_duration_count}"
+            ),
+            "# TYPE runtime_web_gateway_transport_goodput_bytes_per_second gauge",
+            (f"runtime_web_gateway_transport_goodput_bytes_per_second {goodput}"),
+            "# TYPE runtime_web_gateway_transport_credit_stalls_total counter",
+            (
+                "runtime_web_gateway_transport_credit_stalls_total "
+                f"{transport.transport_credit_stalls}"
+            ),
+            "# TYPE runtime_web_gateway_transport_credit_stall_seconds_total counter",
+            (
+                "runtime_web_gateway_transport_credit_stall_seconds_total "
+                f"{transport.transport_credit_stall_seconds}"
+            ),
+            "# TYPE runtime_web_gateway_transport_heartbeats_sent_total counter",
+            (
+                "runtime_web_gateway_transport_heartbeats_sent_total "
+                f"{transport.transport_heartbeats_sent}"
+            ),
+            (
+                "# TYPE "
+                "runtime_web_gateway_transport_heartbeat_acknowledgements_total "
+                "counter"
+            ),
+            (
+                "runtime_web_gateway_transport_heartbeat_acknowledgements_total "
+                f"{transport.transport_heartbeat_acknowledgements}"
+            ),
+            "# TYPE runtime_web_gateway_transport_missed_heartbeats_total counter",
+            (
+                "runtime_web_gateway_transport_missed_heartbeats_total "
+                f"{transport.transport_missed_heartbeats}"
+            ),
+            "# TYPE runtime_web_gateway_transport_go_away_total counter",
+            (
+                "runtime_web_gateway_transport_go_away_total "
+                f"{transport.transport_go_aways}"
+            ),
+            "# TYPE runtime_web_gateway_transport_epoch_transition_total counter",
+            (
+                "runtime_web_gateway_transport_epoch_transition_total "
+                f"{transport.transport_epoch_transitions}"
+            ),
+            "# EOF",
+        )
+    )
     return "\n".join(lines) + "\n"

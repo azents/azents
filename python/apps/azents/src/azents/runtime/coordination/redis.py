@@ -7,7 +7,16 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 
+from azents_runtime_control.runtime_web_session import (
+    CloseReason,
+    StreamDirection,
+    StreamProtocol,
+)
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
+    RunnerRuntimeWebProtocolCount,
+    RunnerRuntimeWebReasonCount,
+    RunnerRuntimeWebTrafficCount,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsScope,
@@ -1634,12 +1643,16 @@ def _system_metrics_sample_to_json(sample: RuntimeSystemMetricsSample) -> str:
             "cpu": _system_metric_observation_to_json(sample.cpu),
             "memory": _system_metric_observation_to_json(sample.memory),
             "disk": _system_metric_observation_to_json(sample.disk),
+            "runtime_web": dataclasses.asdict(sample.runtime_web),
         }
     )
 
 
 def _system_metrics_sample_from_json(raw: str) -> RuntimeSystemMetricsSample:
     payload = _json_loads(raw)
+    runtime_web = payload.get("runtime_web")
+    if runtime_web is None:
+        raise RuntimeError("Runtime Web metrics snapshot is required")
     return RuntimeSystemMetricsSample(
         sequence=_required_int(payload["sequence"]),
         measured_at=_required_datetime(payload["measured_at"]),
@@ -1647,6 +1660,94 @@ def _system_metrics_sample_from_json(raw: str) -> RuntimeSystemMetricsSample:
         cpu=_system_metric_observation_from_json(payload["cpu"]),
         memory=_system_metric_observation_from_json(payload["memory"]),
         disk=_system_metric_observation_from_json(payload["disk"]),
+        runtime_web=_runtime_web_metrics_from_json(runtime_web),
+    )
+
+
+def _runtime_web_metrics_from_json(value: object) -> RunnerRuntimeWebMetrics:
+    payload = _json_object(value)
+    return RunnerRuntimeWebMetrics(
+        active_sessions=_required_int(payload["active_sessions"]),
+        active_streams=_required_int(payload["active_streams"]),
+        maximum_sessions=_required_int(payload["maximum_sessions"]),
+        maximum_active_streams=_required_int(payload["maximum_active_streams"]),
+        application_buffer_bytes=_required_int(payload["application_buffer_bytes"]),
+        application_buffer_limit_bytes=_required_int(
+            payload["application_buffer_limit_bytes"]
+        ),
+        control_buffer_bytes=_required_int(payload["control_buffer_bytes"]),
+        control_buffer_limit_bytes=_required_int(payload["control_buffer_limit_bytes"]),
+        queued_envelopes=_required_int(payload["queued_envelopes"]),
+        queued_envelope_limit=_required_int(payload["queued_envelope_limit"]),
+        pending_tasks=_required_int(payload["pending_tasks"]),
+        pending_task_limit=_required_int(payload["pending_task_limit"]),
+        event_loop_lag_milliseconds=_required_float(
+            payload["event_loop_lag_milliseconds"]
+        ),
+        event_loop_lag_limit_milliseconds=_required_int(
+            payload["event_loop_lag_limit_milliseconds"]
+        ),
+        resident_memory_bytes=_required_int(payload["resident_memory_bytes"]),
+        resident_memory_limit_bytes=_required_int(
+            payload["resident_memory_limit_bytes"]
+        ),
+        credit_stalls_total=_required_int(payload["credit_stalls_total"]),
+        credit_stall_seconds=_required_float(payload["credit_stall_seconds"]),
+        request_consumed_bytes=_required_int(payload["request_consumed_bytes"]),
+        response_sent_bytes=_required_int(payload["response_sent_bytes"]),
+        response_consumed_bytes=_required_int(payload["response_consumed_bytes"]),
+        heartbeats_total=_required_int(payload["heartbeats_total"]),
+        go_aways_total=_required_int(payload["go_aways_total"]),
+        epoch_transitions_total=_required_int(payload["epoch_transitions_total"]),
+        setup_seconds_sum=_required_float(payload["setup_seconds_sum"]),
+        setup_count=_required_int(payload["setup_count"]),
+        ttfb_seconds_sum=_required_float(payload["ttfb_seconds_sum"]),
+        ttfb_count=_required_int(payload["ttfb_count"]),
+        duration_seconds_sum=_required_float(payload["duration_seconds_sum"]),
+        duration_count=_required_int(payload["duration_count"]),
+        goodput_bytes=_required_int(payload["goodput_bytes"]),
+        active_streams_by_protocol=_protocol_counts(
+            payload["active_streams_by_protocol"]
+        ),
+        opens_accepted_by_protocol=_protocol_counts(
+            payload["opens_accepted_by_protocol"]
+        ),
+        opens_rejected_by_reason=_reason_counts(payload["opens_rejected_by_reason"]),
+        resets_by_reason=_reason_counts(payload["resets_by_reason"]),
+        closes_by_reason=_reason_counts(payload["closes_by_reason"]),
+        traffic=_traffic_counts(payload["traffic"]),
+    )
+
+
+def _protocol_counts(value: object) -> tuple[RunnerRuntimeWebProtocolCount, ...]:
+    return tuple(
+        RunnerRuntimeWebProtocolCount(
+            protocol=StreamProtocol(str(item["protocol"])),
+            value=_required_int(item["value"]),
+        )
+        for item in _json_object_list(value)
+    )
+
+
+def _reason_counts(value: object) -> tuple[RunnerRuntimeWebReasonCount, ...]:
+    return tuple(
+        RunnerRuntimeWebReasonCount(
+            reason=CloseReason(str(item["reason"])),
+            value=_required_int(item["value"]),
+        )
+        for item in _json_object_list(value)
+    )
+
+
+def _traffic_counts(value: object) -> tuple[RunnerRuntimeWebTrafficCount, ...]:
+    return tuple(
+        RunnerRuntimeWebTrafficCount(
+            protocol=StreamProtocol(str(item["protocol"])),
+            direction=StreamDirection(str(item["direction"])),
+            frames=_required_int(item["frames"]),
+            bytes=_required_int(item["bytes"]),
+        )
+        for item in _json_object_list(value)
     )
 
 
@@ -1691,6 +1792,18 @@ def _required_int(value: object) -> int:
     if result is None:
         raise RuntimeError("Runtime coordination integer is required")
     return result
+
+
+def _required_float(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise RuntimeError("Runtime coordination number is required")
+    return float(value)
+
+
+def _json_object_list(value: object) -> tuple[dict[str, JsonValue], ...]:
+    if not isinstance(value, list):
+        raise RuntimeError("Runtime coordination JSON value must be an array")
+    return tuple(_json_object(item) for item in value)
 
 
 def _required_connection_generation(value: object) -> int:

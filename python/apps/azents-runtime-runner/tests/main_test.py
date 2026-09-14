@@ -154,10 +154,20 @@ _LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
 )
+_WEB_LIMIT_ENV_NAMES = (
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_SESSIONS",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_CONTROL_BUFFER_BYTES",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_QUEUED_ENVELOPES",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_PENDING_TASKS",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+    "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES",
+)
 
 
 def _clear_limit_env(monkeypatch: MonkeyPatch) -> None:
-    for name in _LIMIT_ENV_NAMES:
+    for name in (*_LIMIT_ENV_NAMES, *_WEB_LIMIT_ENV_NAMES):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -198,6 +208,14 @@ def test_runner_limit_config_from_env_defaults(monkeypatch: MonkeyPatch) -> None
         max_pending_operations_per_owner=100,
         max_pending_operations=1_000,
         max_concurrent_control_operations=4,
+        runtime_web_maximum_sessions=1,
+        runtime_web_maximum_active_streams=128,
+        runtime_web_maximum_application_buffer_bytes=256 * 1024 * 1024,
+        runtime_web_maximum_control_buffer_bytes=16 * 1024 * 1024,
+        runtime_web_maximum_queued_envelopes=1024,
+        runtime_web_maximum_pending_tasks=512,
+        runtime_web_maximum_event_loop_lag_milliseconds=250,
+        runtime_web_maximum_resident_memory_bytes=1536 * 1024 * 1024,
     )
 
 
@@ -214,6 +232,14 @@ def test_runner_limit_config_from_env_reads_overrides(monkeypatch: MonkeyPatch) 
         max_pending_operations_per_owner=20,
         max_pending_operations=80,
         max_concurrent_control_operations=2,
+        runtime_web_maximum_sessions=1,
+        runtime_web_maximum_active_streams=128,
+        runtime_web_maximum_application_buffer_bytes=256 * 1024 * 1024,
+        runtime_web_maximum_control_buffer_bytes=16 * 1024 * 1024,
+        runtime_web_maximum_queued_envelopes=1024,
+        runtime_web_maximum_pending_tasks=512,
+        runtime_web_maximum_event_loop_lag_milliseconds=250,
+        runtime_web_maximum_resident_memory_bytes=1536 * 1024 * 1024,
     )
 
 

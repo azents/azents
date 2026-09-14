@@ -18,6 +18,8 @@ from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
     runner_event_from_message,
     runner_runtime_configuration_evidence_from_message,
+    runner_system_metrics_from_message,
+    runner_system_metrics_to_message,
 )
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
@@ -32,6 +34,21 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from azents_runtime_control.runtime_web_session import (
+    CloseReason,
+    StreamDirection,
+    StreamProtocol,
+)
+from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
+    RunnerRuntimeWebProtocolCount,
+    RunnerRuntimeWebReasonCount,
+    RunnerRuntimeWebTrafficCount,
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsReport,
+    RunnerSystemMetricsScope,
+)
 
 
 class _ObservedRunnerMessages(
@@ -94,6 +111,179 @@ def test_additive_metrics_payload_is_ignored_by_previous_runner_schema() -> None
             recognized_payloads.append(payload)
 
     assert recognized_payloads == ["heartbeat"]
+
+
+def _complete_system_metrics_report() -> RunnerSystemMetricsReport:
+    observation = RunnerSystemMetricObservation(
+        availability=RunnerSystemMetricAvailability.AVAILABLE,
+        used=1,
+        total=2,
+    )
+    runtime_web = RunnerRuntimeWebMetrics(
+        active_sessions=1,
+        active_streams=2,
+        maximum_sessions=41,
+        maximum_active_streams=42,
+        application_buffer_bytes=3,
+        application_buffer_limit_bytes=4,
+        control_buffer_bytes=5,
+        control_buffer_limit_bytes=6,
+        queued_envelopes=7,
+        queued_envelope_limit=8,
+        pending_tasks=9,
+        pending_task_limit=10,
+        event_loop_lag_milliseconds=11.5,
+        event_loop_lag_limit_milliseconds=12,
+        resident_memory_bytes=13,
+        resident_memory_limit_bytes=14,
+        credit_stalls_total=15,
+        credit_stall_seconds=16.5,
+        request_consumed_bytes=17,
+        response_sent_bytes=19,
+        response_consumed_bytes=18,
+        heartbeats_total=20,
+        go_aways_total=21,
+        epoch_transitions_total=22,
+        setup_seconds_sum=23.5,
+        setup_count=24,
+        ttfb_seconds_sum=25.5,
+        ttfb_count=26,
+        duration_seconds_sum=27.5,
+        duration_count=28,
+        goodput_bytes=29,
+        active_streams_by_protocol=(
+            RunnerRuntimeWebProtocolCount(
+                protocol=StreamProtocol.HTTP,
+                value=30,
+            ),
+            RunnerRuntimeWebProtocolCount(
+                protocol=StreamProtocol.WEBSOCKET,
+                value=31,
+            ),
+        ),
+        opens_accepted_by_protocol=(
+            RunnerRuntimeWebProtocolCount(
+                protocol=StreamProtocol.HTTP,
+                value=32,
+            ),
+            RunnerRuntimeWebProtocolCount(
+                protocol=StreamProtocol.WEBSOCKET,
+                value=33,
+            ),
+        ),
+        opens_rejected_by_reason=(
+            tuple(
+                RunnerRuntimeWebReasonCount(
+                    reason=reason,
+                    value=34 + index,
+                )
+                for index, reason in enumerate(CloseReason)
+            )
+        ),
+        resets_by_reason=(
+            tuple(
+                RunnerRuntimeWebReasonCount(
+                    reason=reason,
+                    value=45 + index,
+                )
+                for index, reason in enumerate(CloseReason)
+            )
+        ),
+        closes_by_reason=(
+            tuple(
+                RunnerRuntimeWebReasonCount(
+                    reason=reason,
+                    value=56 + index,
+                )
+                for index, reason in enumerate(CloseReason)
+            )
+        ),
+        traffic=(
+            tuple(
+                RunnerRuntimeWebTrafficCount(
+                    protocol=protocol,
+                    direction=direction,
+                    frames=67 + protocol_index * 2 + direction_index,
+                    bytes=71 + protocol_index * 2 + direction_index,
+                )
+                for protocol_index, protocol in enumerate(StreamProtocol)
+                for direction_index, direction in enumerate(StreamDirection)
+            )
+        ),
+    )
+    report = RunnerSystemMetricsReport(
+        runtime_id="runtime-1",
+        sequence=1,
+        scope=RunnerSystemMetricsScope.CONTAINER,
+        cpu=observation,
+        memory=observation,
+        disk=observation,
+        runtime_web=runtime_web,
+    )
+
+    return report
+
+
+def test_runner_system_metrics_runtime_web_round_trip_is_strict() -> None:
+    report = _complete_system_metrics_report()
+    message = runner_system_metrics_to_message(report)
+    assert runner_system_metrics_from_message(message) == report
+
+    message.ClearField("runtime_web")
+    with pytest.raises(
+        ValueError,
+        match="Runtime Web metric limits must be positive",
+    ):
+        runner_system_metrics_from_message(message)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("sparse_protocol", "active stream protocol"),
+        ("missing_open_protocols", "accepted open protocol"),
+        ("missing_rejected_reasons", "rejected open reason"),
+        ("missing_reset_reasons", "reset reason"),
+        ("missing_close_reasons", "close reason"),
+        ("sparse_traffic", "traffic"),
+        ("duplicate_protocol", "active stream protocol"),
+        ("duplicate_reason", "close reason"),
+        ("duplicate_traffic", "traffic"),
+    ),
+)
+def test_runner_system_metrics_rejects_incomplete_or_duplicate_dimensions(
+    mutation: str,
+    message: str,
+) -> None:
+    report = _complete_system_metrics_report()
+    encoded = runner_system_metrics_to_message(report)
+    if mutation == "sparse_protocol":
+        del encoded.runtime_web.active_streams_by_protocol[-1]
+    elif mutation == "missing_open_protocols":
+        encoded.runtime_web.ClearField("opens_accepted_by_protocol")
+    elif mutation == "missing_rejected_reasons":
+        encoded.runtime_web.ClearField("opens_rejected_by_reason")
+    elif mutation == "missing_reset_reasons":
+        encoded.runtime_web.ClearField("resets_by_reason")
+    elif mutation == "missing_close_reasons":
+        encoded.runtime_web.ClearField("closes_by_reason")
+    elif mutation == "sparse_traffic":
+        del encoded.runtime_web.traffic[-1]
+    elif mutation == "duplicate_protocol":
+        encoded.runtime_web.active_streams_by_protocol.add().CopyFrom(
+            encoded.runtime_web.active_streams_by_protocol[0]
+        )
+    elif mutation == "duplicate_reason":
+        encoded.runtime_web.closes_by_reason.add().CopyFrom(
+            encoded.runtime_web.closes_by_reason[0]
+        )
+    elif mutation == "duplicate_traffic":
+        encoded.runtime_web.traffic.add().CopyFrom(encoded.runtime_web.traffic[0])
+    else:
+        raise AssertionError("unknown test mutation")
+
+    with pytest.raises(ValueError, match=message):
+        runner_system_metrics_from_message(encoded)
 
 
 @pytest.mark.asyncio

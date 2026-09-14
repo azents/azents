@@ -14,6 +14,7 @@ import builtins as _builtins
 from . import runtime_configuration_pb2 as _runtime_configuration_pb2
 from . import runtime_runner_terminal_pb2 as _runtime_runner_terminal_pb2
 from . import runtime_runner_transfer_pb2 as _runtime_runner_transfer_pb2
+from . import runtime_web_session_pb2 as _runtime_web_session_pb2
 import sys
 import typing as _typing
 
@@ -1317,6 +1318,332 @@ class RunnerSystemMetricObservation(_message.Message):
 Global___RunnerSystemMetricObservation: _TypeAlias = RunnerSystemMetricObservation
 
 @_typing.final
+class RunnerRuntimeWebProtocolCount(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PROTOCOL_FIELD_NUMBER: _builtins.int
+    VALUE_FIELD_NUMBER: _builtins.int
+    protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType
+    value: _builtins.int
+    def __init__(
+        self,
+        *,
+        protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType = ...,
+        value: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "protocol", b"protocol", "value", b"value"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerRuntimeWebProtocolCount: _TypeAlias = RunnerRuntimeWebProtocolCount
+
+@_typing.final
+class RunnerRuntimeWebReasonCount(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    REASON_FIELD_NUMBER: _builtins.int
+    VALUE_FIELD_NUMBER: _builtins.int
+    reason: _runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType
+    value: _builtins.int
+    def __init__(
+        self,
+        *,
+        reason: _runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType = ...,
+        value: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "reason", b"reason", "value", b"value"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerRuntimeWebReasonCount: _TypeAlias = RunnerRuntimeWebReasonCount
+
+@_typing.final
+class RunnerRuntimeWebTrafficCount(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PROTOCOL_FIELD_NUMBER: _builtins.int
+    DIRECTION_FIELD_NUMBER: _builtins.int
+    FRAMES_FIELD_NUMBER: _builtins.int
+    BYTES_FIELD_NUMBER: _builtins.int
+    protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType
+    direction: _runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType
+    frames: _builtins.int
+    bytes: _builtins.int
+    def __init__(
+        self,
+        *,
+        protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType = ...,
+        direction: _runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType = ...,
+        frames: _builtins.int = ...,
+        bytes: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "bytes",
+        b"bytes",
+        "direction",
+        b"direction",
+        "frames",
+        b"frames",
+        "protocol",
+        b"protocol",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerRuntimeWebTrafficCount: _TypeAlias = RunnerRuntimeWebTrafficCount
+
+@_typing.final
+class RunnerRuntimeWebMetrics(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ACTIVE_SESSIONS_FIELD_NUMBER: _builtins.int
+    ACTIVE_STREAMS_FIELD_NUMBER: _builtins.int
+    APPLICATION_BUFFER_BYTES_FIELD_NUMBER: _builtins.int
+    APPLICATION_BUFFER_LIMIT_BYTES_FIELD_NUMBER: _builtins.int
+    CONTROL_BUFFER_BYTES_FIELD_NUMBER: _builtins.int
+    CONTROL_BUFFER_LIMIT_BYTES_FIELD_NUMBER: _builtins.int
+    QUEUED_ENVELOPES_FIELD_NUMBER: _builtins.int
+    QUEUED_ENVELOPE_LIMIT_FIELD_NUMBER: _builtins.int
+    PENDING_TASKS_FIELD_NUMBER: _builtins.int
+    PENDING_TASK_LIMIT_FIELD_NUMBER: _builtins.int
+    EVENT_LOOP_LAG_MILLISECONDS_FIELD_NUMBER: _builtins.int
+    EVENT_LOOP_LAG_LIMIT_MILLISECONDS_FIELD_NUMBER: _builtins.int
+    RESIDENT_MEMORY_BYTES_FIELD_NUMBER: _builtins.int
+    RESIDENT_MEMORY_LIMIT_BYTES_FIELD_NUMBER: _builtins.int
+    CREDIT_STALLS_TOTAL_FIELD_NUMBER: _builtins.int
+    CREDIT_STALL_SECONDS_FIELD_NUMBER: _builtins.int
+    REQUEST_CONSUMED_BYTES_FIELD_NUMBER: _builtins.int
+    RESPONSE_SENT_BYTES_FIELD_NUMBER: _builtins.int
+    RESPONSE_CONSUMED_BYTES_FIELD_NUMBER: _builtins.int
+    HEARTBEATS_TOTAL_FIELD_NUMBER: _builtins.int
+    GO_AWAYS_TOTAL_FIELD_NUMBER: _builtins.int
+    EPOCH_TRANSITIONS_TOTAL_FIELD_NUMBER: _builtins.int
+    SETUP_SECONDS_SUM_FIELD_NUMBER: _builtins.int
+    SETUP_COUNT_FIELD_NUMBER: _builtins.int
+    TTFB_SECONDS_SUM_FIELD_NUMBER: _builtins.int
+    TTFB_COUNT_FIELD_NUMBER: _builtins.int
+    DURATION_SECONDS_SUM_FIELD_NUMBER: _builtins.int
+    DURATION_COUNT_FIELD_NUMBER: _builtins.int
+    GOODPUT_BYTES_FIELD_NUMBER: _builtins.int
+    ACTIVE_STREAMS_BY_PROTOCOL_FIELD_NUMBER: _builtins.int
+    OPENS_ACCEPTED_BY_PROTOCOL_FIELD_NUMBER: _builtins.int
+    OPENS_REJECTED_BY_REASON_FIELD_NUMBER: _builtins.int
+    RESETS_BY_REASON_FIELD_NUMBER: _builtins.int
+    CLOSES_BY_REASON_FIELD_NUMBER: _builtins.int
+    TRAFFIC_FIELD_NUMBER: _builtins.int
+    MAXIMUM_SESSIONS_FIELD_NUMBER: _builtins.int
+    MAXIMUM_ACTIVE_STREAMS_FIELD_NUMBER: _builtins.int
+    active_sessions: _builtins.int
+    active_streams: _builtins.int
+    application_buffer_bytes: _builtins.int
+    application_buffer_limit_bytes: _builtins.int
+    control_buffer_bytes: _builtins.int
+    control_buffer_limit_bytes: _builtins.int
+    queued_envelopes: _builtins.int
+    queued_envelope_limit: _builtins.int
+    pending_tasks: _builtins.int
+    pending_task_limit: _builtins.int
+    event_loop_lag_milliseconds: _builtins.float
+    event_loop_lag_limit_milliseconds: _builtins.int
+    resident_memory_bytes: _builtins.int
+    resident_memory_limit_bytes: _builtins.int
+    credit_stalls_total: _builtins.int
+    credit_stall_seconds: _builtins.float
+    request_consumed_bytes: _builtins.int
+    response_sent_bytes: _builtins.int
+    response_consumed_bytes: _builtins.int
+    heartbeats_total: _builtins.int
+    go_aways_total: _builtins.int
+    epoch_transitions_total: _builtins.int
+    setup_seconds_sum: _builtins.float
+    setup_count: _builtins.int
+    ttfb_seconds_sum: _builtins.float
+    ttfb_count: _builtins.int
+    duration_seconds_sum: _builtins.float
+    duration_count: _builtins.int
+    goodput_bytes: _builtins.int
+    maximum_sessions: _builtins.int
+    maximum_active_streams: _builtins.int
+    @_builtins.property
+    def active_streams_by_protocol(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebProtocolCount
+    ]: ...
+    @_builtins.property
+    def opens_accepted_by_protocol(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebProtocolCount
+    ]: ...
+    @_builtins.property
+    def opens_rejected_by_reason(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebReasonCount
+    ]: ...
+    @_builtins.property
+    def resets_by_reason(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebReasonCount
+    ]: ...
+    @_builtins.property
+    def closes_by_reason(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebReasonCount
+    ]: ...
+    @_builtins.property
+    def traffic(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RunnerRuntimeWebTrafficCount
+    ]: ...
+    def __init__(
+        self,
+        *,
+        active_sessions: _builtins.int = ...,
+        active_streams: _builtins.int = ...,
+        application_buffer_bytes: _builtins.int = ...,
+        application_buffer_limit_bytes: _builtins.int = ...,
+        control_buffer_bytes: _builtins.int = ...,
+        control_buffer_limit_bytes: _builtins.int = ...,
+        queued_envelopes: _builtins.int = ...,
+        queued_envelope_limit: _builtins.int = ...,
+        pending_tasks: _builtins.int = ...,
+        pending_task_limit: _builtins.int = ...,
+        event_loop_lag_milliseconds: _builtins.float = ...,
+        event_loop_lag_limit_milliseconds: _builtins.int = ...,
+        resident_memory_bytes: _builtins.int = ...,
+        resident_memory_limit_bytes: _builtins.int = ...,
+        credit_stalls_total: _builtins.int = ...,
+        credit_stall_seconds: _builtins.float = ...,
+        request_consumed_bytes: _builtins.int = ...,
+        response_sent_bytes: _builtins.int = ...,
+        response_consumed_bytes: _builtins.int = ...,
+        heartbeats_total: _builtins.int = ...,
+        go_aways_total: _builtins.int = ...,
+        epoch_transitions_total: _builtins.int = ...,
+        setup_seconds_sum: _builtins.float = ...,
+        setup_count: _builtins.int = ...,
+        ttfb_seconds_sum: _builtins.float = ...,
+        ttfb_count: _builtins.int = ...,
+        duration_seconds_sum: _builtins.float = ...,
+        duration_count: _builtins.int = ...,
+        goodput_bytes: _builtins.int = ...,
+        active_streams_by_protocol: _abc.Iterable[
+            Global___RunnerRuntimeWebProtocolCount
+        ]
+        | None = ...,
+        opens_accepted_by_protocol: _abc.Iterable[
+            Global___RunnerRuntimeWebProtocolCount
+        ]
+        | None = ...,
+        opens_rejected_by_reason: _abc.Iterable[Global___RunnerRuntimeWebReasonCount]
+        | None = ...,
+        resets_by_reason: _abc.Iterable[Global___RunnerRuntimeWebReasonCount]
+        | None = ...,
+        closes_by_reason: _abc.Iterable[Global___RunnerRuntimeWebReasonCount]
+        | None = ...,
+        traffic: _abc.Iterable[Global___RunnerRuntimeWebTrafficCount] | None = ...,
+        maximum_sessions: _builtins.int = ...,
+        maximum_active_streams: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "active_sessions",
+        b"active_sessions",
+        "active_streams",
+        b"active_streams",
+        "active_streams_by_protocol",
+        b"active_streams_by_protocol",
+        "application_buffer_bytes",
+        b"application_buffer_bytes",
+        "application_buffer_limit_bytes",
+        b"application_buffer_limit_bytes",
+        "closes_by_reason",
+        b"closes_by_reason",
+        "control_buffer_bytes",
+        b"control_buffer_bytes",
+        "control_buffer_limit_bytes",
+        b"control_buffer_limit_bytes",
+        "credit_stall_seconds",
+        b"credit_stall_seconds",
+        "credit_stalls_total",
+        b"credit_stalls_total",
+        "duration_count",
+        b"duration_count",
+        "duration_seconds_sum",
+        b"duration_seconds_sum",
+        "epoch_transitions_total",
+        b"epoch_transitions_total",
+        "event_loop_lag_limit_milliseconds",
+        b"event_loop_lag_limit_milliseconds",
+        "event_loop_lag_milliseconds",
+        b"event_loop_lag_milliseconds",
+        "go_aways_total",
+        b"go_aways_total",
+        "goodput_bytes",
+        b"goodput_bytes",
+        "heartbeats_total",
+        b"heartbeats_total",
+        "maximum_active_streams",
+        b"maximum_active_streams",
+        "maximum_sessions",
+        b"maximum_sessions",
+        "opens_accepted_by_protocol",
+        b"opens_accepted_by_protocol",
+        "opens_rejected_by_reason",
+        b"opens_rejected_by_reason",
+        "pending_task_limit",
+        b"pending_task_limit",
+        "pending_tasks",
+        b"pending_tasks",
+        "queued_envelope_limit",
+        b"queued_envelope_limit",
+        "queued_envelopes",
+        b"queued_envelopes",
+        "request_consumed_bytes",
+        b"request_consumed_bytes",
+        "resets_by_reason",
+        b"resets_by_reason",
+        "resident_memory_bytes",
+        b"resident_memory_bytes",
+        "resident_memory_limit_bytes",
+        b"resident_memory_limit_bytes",
+        "response_consumed_bytes",
+        b"response_consumed_bytes",
+        "response_sent_bytes",
+        b"response_sent_bytes",
+        "setup_count",
+        b"setup_count",
+        "setup_seconds_sum",
+        b"setup_seconds_sum",
+        "traffic",
+        b"traffic",
+        "ttfb_count",
+        b"ttfb_count",
+        "ttfb_seconds_sum",
+        b"ttfb_seconds_sum",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerRuntimeWebMetrics: _TypeAlias = RunnerRuntimeWebMetrics
+
+@_typing.final
 class RunnerSystemMetrics(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
@@ -1326,6 +1653,7 @@ class RunnerSystemMetrics(_message.Message):
     CPU_FIELD_NUMBER: _builtins.int
     MEMORY_FIELD_NUMBER: _builtins.int
     DISK_FIELD_NUMBER: _builtins.int
+    RUNTIME_WEB_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     sequence: _builtins.int
     scope: Global___RunnerSystemMetricsScope.ValueType
@@ -1335,6 +1663,8 @@ class RunnerSystemMetrics(_message.Message):
     def memory(self) -> Global___RunnerSystemMetricObservation: ...
     @_builtins.property
     def disk(self) -> Global___RunnerSystemMetricObservation: ...
+    @_builtins.property
+    def runtime_web(self) -> Global___RunnerRuntimeWebMetrics: ...
     def __init__(
         self,
         *,
@@ -1344,9 +1674,17 @@ class RunnerSystemMetrics(_message.Message):
         cpu: Global___RunnerSystemMetricObservation | None = ...,
         memory: Global___RunnerSystemMetricObservation | None = ...,
         disk: Global___RunnerSystemMetricObservation | None = ...,
+        runtime_web: Global___RunnerRuntimeWebMetrics | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
-        "cpu", b"cpu", "disk", b"disk", "memory", b"memory"
+        "cpu",
+        b"cpu",
+        "disk",
+        b"disk",
+        "memory",
+        b"memory",
+        "runtime_web",
+        b"runtime_web",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -1358,6 +1696,8 @@ class RunnerSystemMetrics(_message.Message):
         b"memory",
         "runtime_id",
         b"runtime_id",
+        "runtime_web",
+        b"runtime_web",
         "scope",
         b"scope",
         "sequence",

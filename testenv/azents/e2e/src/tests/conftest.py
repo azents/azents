@@ -1884,6 +1884,26 @@ def azents_runtime_control_container(
             "azents:e2e:runtime-web:capacity",
         )
         .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_TTL_SECONDS", "30")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_SESSIONS", "128")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_ACTIVE_STREAMS", "1024")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_APPLICATION_BUFFER_BYTES",
+            "536870912",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_CONTROL_BUFFER_BYTES",
+            "67108864",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_QUEUED_ENVELOPES", "4096")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_PENDING_TASKS", "2048")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+            "250",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_RESIDENT_MEMORY_BYTES",
+            "1073741824",
+        )
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")
         .with_env("AZ_TESTENV_RUNTIME_CONTROL_HEARTBEAT_INTERVAL_SECONDS", "2")

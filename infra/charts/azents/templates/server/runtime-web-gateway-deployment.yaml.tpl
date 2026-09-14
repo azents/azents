@@ -64,6 +64,10 @@ spec:
               value: {{ printf "%d" (int64 $gateway.hardLimits.activeExchanges) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_APPLICATION_BUFFER_BYTES
               value: {{ printf "%d" (int64 $gateway.hardLimits.applicationBufferBytes) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_CONTROL_BUFFER_BYTES
+              value: {{ printf "%d" (int64 $gateway.hardLimits.controlBufferBytes) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_PENDING_TASKS
+              value: {{ printf "%d" (int64 $gateway.hardLimits.pendingTasks) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_SCHEDULER_WAITERS
               value: {{ printf "%d" (int64 $gateway.hardLimits.schedulerWaiters) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS

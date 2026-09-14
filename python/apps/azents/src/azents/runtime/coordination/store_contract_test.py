@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsScope,
@@ -41,6 +42,8 @@ from azents.runtime.coordination.memory import (
 )
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
+    _system_metrics_sample_from_json,
+    _system_metrics_sample_to_json,
 )
 from azents.runtime.coordination.store import (
     RuntimeCoordinationStore,
@@ -988,7 +991,59 @@ async def test_system_metrics_series_rejects_non_increasing_sequences(
         current_time=second.measured_at,
     )
 
-    assert [sample.sequence for sample in series] == [1, 2]
+    assert series == [first, second]
+
+
+def test_redis_system_metrics_json_requires_valid_runtime_web_snapshot() -> None:
+    sample = _metrics_sample(sequence=1, measured_at=_now())
+    raw = _system_metrics_sample_to_json(sample)
+
+    assert _system_metrics_sample_from_json(raw) == sample
+
+    missing_payload = _json_object(raw)
+    missing_payload.pop("runtime_web")
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime Web metrics snapshot is required",
+    ):
+        _system_metrics_sample_from_json(json.dumps(missing_payload))
+
+    invalid_payload = _json_object(raw)
+    runtime_web = invalid_payload["runtime_web"]
+    assert isinstance(runtime_web, dict)
+    runtime_web["pending_task_limit"] = 0
+    with pytest.raises(
+        ValueError,
+        match="Runtime Web metric limits must be positive",
+    ):
+        _system_metrics_sample_from_json(json.dumps(invalid_payload))
+
+    sparse_payload = _json_object(raw)
+    sparse_runtime_web = sparse_payload["runtime_web"]
+    assert isinstance(sparse_runtime_web, dict)
+    active_streams = sparse_runtime_web["active_streams_by_protocol"]
+    assert isinstance(active_streams, list)
+    active_streams.pop()
+    with pytest.raises(ValueError, match="active stream protocol"):
+        _system_metrics_sample_from_json(json.dumps(sparse_payload))
+
+    missing_payload = _json_object(raw)
+    missing_runtime_web = missing_payload["runtime_web"]
+    assert isinstance(missing_runtime_web, dict)
+    missing_runtime_web.pop("closes_by_reason")
+    with pytest.raises(KeyError, match="closes_by_reason"):
+        _system_metrics_sample_from_json(json.dumps(missing_payload))
+
+    duplicate_payload = _json_object(raw)
+    duplicate_runtime_web = duplicate_payload["runtime_web"]
+    assert isinstance(duplicate_runtime_web, dict)
+    traffic = duplicate_runtime_web["traffic"]
+    assert isinstance(traffic, list)
+    first_traffic = traffic[0]
+    assert isinstance(first_traffic, dict)
+    traffic.append(dict(first_traffic))
+    with pytest.raises(ValueError, match="traffic"):
+        _system_metrics_sample_from_json(json.dumps(duplicate_payload))
 
 
 @pytest.mark.asyncio
@@ -1639,6 +1694,20 @@ def _metrics_sample(
         cpu=unavailable if sequence == 1 else available,
         memory=available,
         disk=available,
+        runtime_web=_runtime_web_metrics(),
+    )
+
+
+def _runtime_web_metrics() -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics.zero(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        application_buffer_limit_bytes=1,
+        control_buffer_limit_bytes=1,
+        queued_envelope_limit=1,
+        pending_task_limit=1,
+        event_loop_lag_limit_milliseconds=1,
+        resident_memory_limit_bytes=1,
     )
 
 

@@ -3,7 +3,9 @@
 import asyncio
 import dataclasses
 import logging
+import os
 import signal
+import sys
 import time
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
@@ -102,6 +104,7 @@ from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
     RuntimeWebCapacityConfig,
     RuntimeWebCapacityRegistry,
     RuntimeWebControlDataPlane,
+    RuntimeWebControlHardLimits,
     RuntimeWebTrustedPeerAuthenticator,
     add_runtime_web_session_servicers,
     create_runtime_web_control_operations_application,
@@ -521,6 +524,14 @@ class RuntimeControlSettings(BaseSettings):
         ge=1,
         le=256,
     )
+    runtime_control_web_hard_maximum_sessions: int | None = None
+    runtime_control_web_hard_maximum_active_streams: int | None = None
+    runtime_control_web_hard_maximum_application_buffer_bytes: int | None = None
+    runtime_control_web_hard_maximum_control_buffer_bytes: int | None = None
+    runtime_control_web_hard_maximum_queued_envelopes: int | None = None
+    runtime_control_web_hard_maximum_pending_tasks: int | None = None
+    runtime_control_web_hard_maximum_event_loop_lag_milliseconds: int | None = None
+    runtime_control_web_hard_maximum_resident_memory_bytes: int | None = None
     runtime_control_instance_id: str = "azents-runtime-control-local"
     runtime_control_reconcile_interval_seconds: float = (
         _DEFAULT_RECONCILE_INTERVAL_SECONDS
@@ -867,6 +878,7 @@ async def runtime_control_server_lifespan(
                         envelope,
                     ),
                     timeout_seconds=10,
+                    resources=data_plane.resources,
                 )
             except BaseException:
                 await channel.close()
@@ -877,6 +889,9 @@ async def runtime_control_server_lifespan(
             connector=connect_relay,
             maximum_sessions=settings.runtime_control_web_maximum_relay_sessions,
             peer_boot_id=control_boot_id,
+        )
+        resident_memory_sampler = create_runtime_web_control_resident_memory_sampler(
+            platform=sys.platform,
         )
         web_data_plane = RuntimeWebControlDataPlane(
             session_manager=session_manager,
@@ -891,6 +906,8 @@ async def runtime_control_server_lifespan(
             owner_lifecycle=owner_offer_provider,
             long_lived_grace_seconds=5,
             finite_grace_seconds=120,
+            hard_limits=_runtime_web_control_hard_limits(settings),
+            resident_memory_bytes=resident_memory_sampler.current_bytes,
         )
     reconciler = RuntimeLifecycleReconciler(
         agent_repository=agent_repository,
@@ -1086,6 +1103,7 @@ async def runtime_control_server_lifespan(
     if trusted_server is not None:
         await trusted_server.start()
     web_operations_runner: web.AppRunner | None = None
+    web_process_sampler_task: asyncio.Task[None] | None = None
     if web_data_plane is not None:
         web_operations_runner = web.AppRunner(
             create_runtime_web_control_operations_application(web_data_plane)
@@ -1096,6 +1114,13 @@ async def runtime_control_server_lifespan(
             host="0.0.0.0",
             port=settings.runtime_control_web_metrics_port,
         ).start()
+        web_process_sampler_task = asyncio.create_task(
+            _refresh_runtime_web_control_process_pressure(
+                web_data_plane,
+                resident_memory_sampler=resident_memory_sampler,
+            ),
+            name="runtime-web-control-process-pressure",
+        )
     _LOGGER.info(
         "Runtime Control gRPC server started",
         extra={
@@ -1149,6 +1174,12 @@ async def runtime_control_server_lifespan(
             pass
         if web_data_plane is not None:
             await web_data_plane.begin_drain()
+        if web_process_sampler_task is not None:
+            web_process_sampler_task.cancel()
+            try:
+                await web_process_sampler_task
+            except asyncio.CancelledError:
+                pass
         if trusted_server is not None:
             await trusted_server.stop(grace=0)
         await server.stop(grace=0)
@@ -1464,6 +1495,7 @@ def validate_runtime_control_web_settings(
     }:
         raise ValueError("Runtime Web metrics port must be separate")
     _runtime_web_capacity_config(settings)
+    _runtime_web_control_hard_limits(settings)
     if not settings.runtime_control_allow_insecure:
         _peer_identities(settings.runtime_control_trusted_gateway_peer_identities)
         _peer_identities(settings.runtime_control_trusted_control_peer_identities)
@@ -1521,6 +1553,132 @@ def _runtime_web_capacity_config(
         redis_namespace=settings.runtime_control_web_capacity_redis_namespace,
         redis_ttl_seconds=settings.runtime_control_web_capacity_redis_ttl_seconds,
     )
+
+
+def _runtime_web_control_hard_limits(
+    settings: RuntimeControlSettings,
+) -> RuntimeWebControlHardLimits:
+    values = {
+        "maximum sessions": settings.runtime_control_web_hard_maximum_sessions,
+        "maximum active streams": (
+            settings.runtime_control_web_hard_maximum_active_streams
+        ),
+        "maximum application buffer bytes": (
+            settings.runtime_control_web_hard_maximum_application_buffer_bytes
+        ),
+        "maximum control buffer bytes": (
+            settings.runtime_control_web_hard_maximum_control_buffer_bytes
+        ),
+        "maximum queued envelopes": (
+            settings.runtime_control_web_hard_maximum_queued_envelopes
+        ),
+        "maximum pending tasks": (
+            settings.runtime_control_web_hard_maximum_pending_tasks
+        ),
+        "maximum event-loop lag milliseconds": (
+            settings.runtime_control_web_hard_maximum_event_loop_lag_milliseconds
+        ),
+        "maximum resident memory bytes": (
+            settings.runtime_control_web_hard_maximum_resident_memory_bytes
+        ),
+    }
+    missing = tuple(name for name, value in values.items() if value is None)
+    if missing:
+        raise ValueError(
+            "Runtime Web Control hard-limit settings are required: "
+            + ", ".join(sorted(missing))
+        )
+    positive = {name: value for name, value in values.items() if value is not None}
+    if any(value <= 0 for value in positive.values()):
+        raise ValueError("Runtime Web Control hard-limit settings must be positive")
+    limits = RuntimeWebControlHardLimits(
+        maximum_sessions=positive["maximum sessions"],
+        maximum_active_streams=positive["maximum active streams"],
+        maximum_application_buffer_bytes=positive["maximum application buffer bytes"],
+        maximum_control_buffer_bytes=positive["maximum control buffer bytes"],
+        maximum_queued_envelopes=positive["maximum queued envelopes"],
+        maximum_pending_tasks=positive["maximum pending tasks"],
+        maximum_event_loop_lag_milliseconds=positive[
+            "maximum event-loop lag milliseconds"
+        ],
+        maximum_resident_memory_bytes=positive["maximum resident memory bytes"],
+    )
+    capacity = _runtime_web_capacity_config(settings)
+    if limits.maximum_active_streams < capacity.profile.maximum_active_streams:
+        raise ValueError(
+            "Runtime Web Control hard stream limit must not be smaller than "
+            "one Runtime capacity limit"
+        )
+    if limits.maximum_application_buffer_bytes < capacity.profile.maximum_buffer_bytes:
+        raise ValueError(
+            "Runtime Web Control hard application-buffer limit must not be "
+            "smaller than one Runtime capacity limit"
+        )
+    return limits
+
+
+class RuntimeWebControlResidentMemorySampler:
+    """Read current Control RSS without retaining process or application content."""
+
+    def __init__(self, *, statm_path: Path, page_size_bytes: int) -> None:
+        if page_size_bytes <= 0:
+            raise ValueError("Runtime Web Control RSS page size must be positive")
+        self.statm_path = statm_path
+        self.page_size_bytes = page_size_bytes
+
+    def current_bytes(self) -> int:
+        """Return current RSS bytes from the Linux procfs resident-page field."""
+        try:
+            fields = self.statm_path.read_text(encoding="ascii").split()
+        except OSError as error:
+            raise RuntimeError(
+                "Runtime Web Control current RSS sample is unavailable"
+            ) from error
+        if len(fields) < 2:
+            raise RuntimeError("Runtime Web Control current RSS sample is invalid")
+        try:
+            resident_pages = int(fields[1])
+        except ValueError as error:
+            raise RuntimeError(
+                "Runtime Web Control current RSS sample is invalid"
+            ) from error
+        if resident_pages < 0:
+            raise RuntimeError("Runtime Web Control current RSS sample is invalid")
+        return resident_pages * self.page_size_bytes
+
+
+def create_runtime_web_control_resident_memory_sampler(
+    *,
+    platform: str,
+) -> RuntimeWebControlResidentMemorySampler:
+    """Select one explicit current-RSS backend or fail safely."""
+    if platform.startswith("linux"):
+        return RuntimeWebControlResidentMemorySampler(
+            statm_path=Path("/proc/self/statm"),
+            page_size_bytes=int(os.sysconf("SC_PAGE_SIZE")),
+        )
+    raise RuntimeError(
+        "Runtime Web Control current RSS sampling is unsupported on platform "
+        f"{platform!r}"
+    )
+
+
+async def _refresh_runtime_web_control_process_pressure(
+    data_plane: RuntimeWebControlDataPlane,
+    *,
+    resident_memory_sampler: RuntimeWebControlResidentMemorySampler,
+) -> None:
+    """Continuously measure event-loop progress for probes and metrics."""
+    loop = asyncio.get_running_loop()
+    expected = loop.time()
+    while True:
+        expected += 0.25
+        await asyncio.sleep(max(0.0, expected - loop.time()))
+        observed = loop.time()
+        data_plane.update_process_pressure(
+            lag_milliseconds=max(0.0, (observed - expected) * 1000),
+            resident_memory_bytes=resident_memory_sampler.current_bytes(),
+        )
 
 
 def _utc_now() -> datetime:

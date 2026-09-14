@@ -46,6 +46,16 @@ class RuntimeWebGatewaySettings(BaseSettings):
         ge=1024 * 1024,
         le=16 * 1024 * 1024 * 1024,
     )
+    runtime_web_gateway_maximum_control_buffer_bytes: int = Field(
+        default=32 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=1024 * 1024 * 1024,
+    )
+    runtime_web_gateway_maximum_pending_tasks: int = Field(
+        default=4096,
+        ge=4,
+        le=65_536,
+    )
     runtime_web_gateway_maximum_scheduler_waiters: int = Field(
         default=1024,
         ge=1,
@@ -126,6 +136,15 @@ class RuntimeWebGatewaySettings(BaseSettings):
             )
         if self.runtime_web_gateway_identity_cookie_name != _IDENTITY_COOKIE_NAME:
             raise ValueError("Runtime Web identity cookie name is reserved")
+        minimum_pending_tasks = (
+            self.runtime_web_gateway_maximum_active_exchanges * 4
+            + self.runtime_web_gateway_control_session_pool_size * 2
+        )
+        if self.runtime_web_gateway_maximum_pending_tasks < minimum_pending_tasks:
+            raise ValueError(
+                "Runtime Web Gateway pending-task limit must cover exchange and "
+                "Control-session reservations"
+            )
         main = _exact_origin(self.runtime_web_gateway_main_web_origin)
         broker = _exact_origin(self.runtime_web_gateway_broker_origin)
         main_hostname = main.hostname

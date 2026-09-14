@@ -28,6 +28,7 @@ from azents_runtime_control.runtime_web_session import RunnerSessionOffer
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_CAPABILITY,
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsReport,
@@ -2318,6 +2319,20 @@ def _system_metrics_report(*, sequence: int) -> RunnerSystemMetricsReport:
             used=None,
             total=None,
         ),
+        runtime_web=_runtime_web_metrics(),
+    )
+
+
+def _runtime_web_metrics() -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics.zero(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        application_buffer_limit_bytes=1,
+        control_buffer_limit_bytes=1,
+        queued_envelope_limit=1,
+        pending_task_limit=1,
+        event_loop_lag_limit_milliseconds=1,
+        resident_memory_limit_bytes=1,
     )
 
 

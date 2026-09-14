@@ -12,12 +12,64 @@ from azents_runtime_control.runtime_web_session import (
     OwnerSessionEpoch,
 )
 
+from azents.runtime import web_session_relay as web_session_relay_module
 from azents.runtime.web_session_broker import BrokerTarget
 from azents.runtime.web_session_relay import (
     GrpcPersistentControlRelay,
     RelaySessionKey,
     RuntimeWebRelayPool,
 )
+
+
+class _Resources:
+    def __init__(self, *, maximum_tasks: int) -> None:
+        self.maximum_tasks = maximum_tasks
+        self.sessions = 0
+        self.tasks = 0
+        self.envelopes = 0
+
+    def try_open_session(self) -> bool:
+        if self.sessions >= 1:
+            return False
+        self.sessions += 1
+        return True
+
+    def close_session(self) -> None:
+        if self.sessions <= 0:
+            raise ValueError("session reservation is absent")
+        self.sessions -= 1
+
+    def try_begin_task(self) -> bool:
+        if self.tasks >= self.maximum_tasks:
+            return False
+        self.tasks += 1
+        return True
+
+    def end_task(self) -> None:
+        if self.tasks <= 0:
+            raise ValueError("task reservation is absent")
+        self.tasks -= 1
+
+    def try_reserve_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> bool:
+        del application_bytes, control_bytes
+        self.envelopes += 1
+        return True
+
+    def release_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> None:
+        del application_bytes, control_bytes
+        if self.envelopes <= 0:
+            raise ValueError("envelope reservation is absent")
+        self.envelopes -= 1
 
 
 def _owner(owner_boot_id: str = "owner") -> OwnerSessionEpoch:
@@ -234,6 +286,39 @@ async def test_relay_rejects_fingerprint_and_owner_response_mismatch() -> None:
     await pool.close()
 
 
+@pytest.mark.asyncio
+async def test_relay_pool_monitor_releases_task_budget_on_close() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    resources = _Resources(maximum_tasks=1)
+    pool.bind_resources(resources)
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+
+    await pool.forward(target=target, envelope=_source_envelope(1))
+
+    assert resources.tasks == 1
+    await pool.close()
+    assert resources.tasks == 0
+    assert connection.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_relay_pool_monitor_budget_exhaustion_closes_new_connection() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    resources = _Resources(maximum_tasks=0)
+    pool.bind_resources(resources)
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+
+    with pytest.raises(RuntimeError, match="hard task limit"):
+        await pool.forward(target=target, envelope=_source_envelope(1))
+
+    assert resources.tasks == 0
+    assert pool.sessions == {}
+    assert pool.monitors == {}
+    assert connection.closed.is_set()
+
+
 class _RelayDuplexStream:
     def __init__(self, key: RelaySessionKey) -> None:
         self.key = key
@@ -301,6 +386,7 @@ async def test_concrete_grpc_relay_persists_and_pins_owner_peer() -> None:
         hello=hello,
         handler=handler,
         timeout_seconds=1,
+        resources=None,
     )
     assert (await stream.sent.get()).WhichOneof("payload") == "hello"
     outbound = _owner_envelope(owner, stream_id=7)
@@ -321,6 +407,140 @@ async def test_concrete_grpc_relay_persists_and_pins_owner_peer() -> None:
     await stream.responses.put(response)
     await asyncio.wait_for(delivered.wait(), timeout=1)
     await relay.close()
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_releases_receiver_and_heartbeat_tasks_on_close() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=2)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+
+    relay = await GrpcPersistentControlRelay.connect(
+        key=key,
+        stream=stream,
+        hello=hello,
+        handler=lambda envelope: asyncio.sleep(0),
+        timeout_seconds=1,
+        resources=resources,
+    )
+
+    assert resources.sessions == 1
+    assert resources.tasks == 2
+    await relay.close()
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_heartbeat_budget_exhaustion_releases_receiver() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=1)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="hard task limit"):
+        await GrpcPersistentControlRelay.connect(
+            key=key,
+            stream=stream,
+            hello=hello,
+            handler=lambda envelope: asyncio.sleep(0),
+            timeout_seconds=1,
+            resources=resources,
+        )
+
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_receiver_failure_releases_its_task_budget() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=2)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+    relay = await GrpcPersistentControlRelay.connect(
+        key=key,
+        stream=stream,
+        hello=hello,
+        handler=lambda envelope: asyncio.sleep(0),
+        timeout_seconds=1,
+        resources=resources,
+    )
+    assert (await stream.sent.get()).WhichOneof("payload") == "hello"
+    outbound = _owner_envelope(owner, stream_id=1)
+    outbound.peer_boot_id = "accepting-control"
+    outbound.cancel.CopyFrom(runtime_web_session_pb2.RuntimeWebSessionCancel())
+    await relay.send(outbound)
+    assert (await stream.sent.get()).stream_id == 1
+    invalid = _owner_envelope(owner, stream_id=1)
+    invalid.peer_boot_id = "stale-owner"
+    await stream.responses.put(invalid)
+
+    await asyncio.wait_for(relay.wait_closed(), timeout=1)
+
+    assert resources.tasks == 1
+    await relay.close()
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+    assert resources.envelopes == 0
+
+
+def test_relay_managed_task_releases_when_create_task_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resources = _Resources(maximum_tasks=1)
+
+    def fail_create_task(
+        coroutine: object,
+        *,
+        name: str | None = None,
+    ) -> asyncio.Task[object]:
+        del coroutine, name
+        raise RuntimeError("create failed")
+
+    monkeypatch.setattr(
+        web_session_relay_module.asyncio,
+        "create_task",
+        fail_create_task,
+    )
+
+    async def task() -> None:
+        raise AssertionError("task must not start")
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        web_session_relay_module._create_relay_task(resources, task)
+    assert resources.tasks == 0
 
 
 @pytest.mark.asyncio

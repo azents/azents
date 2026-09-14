@@ -11,6 +11,7 @@ import h11
 import httpcore
 from azents_runtime_control.grpc_runner_web_session_client import (
     GrpcRunnerWebSessionClient,
+    RunnerWebEnvelopeResources,
 )
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.proto import runtime_web_session_pb2
@@ -373,6 +374,7 @@ class RunnerWebSessionManager:
         loopback: RunnerWebLoopbackPool,
         client_factory: Callable[[RunnerSessionOffer], GrpcRunnerWebSessionClient]
         | None,
+        outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> None:
         if not runtime_id or not runner_boot_id or not runner_auth_token:
             raise ValueError("Runtime and Runner authentication identity are required")
@@ -385,6 +387,7 @@ class RunnerWebSessionManager:
         self.allow_insecure = allow_insecure
         self.loopback = loopback
         self.client_factory = client_factory
+        self.outbound_resources = outbound_resources
         self.client: GrpcRunnerWebSessionClient | None = None
         self.offer: RunnerSessionOffer | None = None
         self.consumed_offers: deque[tuple[OwnerSessionEpoch, str]] = deque(maxlen=64)
@@ -425,6 +428,7 @@ class RunnerWebSessionManager:
                     runner_auth_token=self.runner_auth_token,
                     tls=self.tls,
                     allow_insecure=self.allow_insecure,
+                    outbound_resources=self.outbound_resources,
                 )
             )
             if previous is not None:

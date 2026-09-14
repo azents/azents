@@ -391,6 +391,7 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
+        outbound_resources=None,
     )
 
     async def handler(envelope: object) -> None:
@@ -468,6 +469,7 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
             stream,
             runner_auth_token="runner-token",
             channel=None,
+            outbound_resources=None,
         )
 
     manager = RunnerWebSessionManager(
@@ -480,6 +482,7 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
+        outbound_resources=None,
     )
 
     async def handler(
@@ -549,6 +552,7 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
+        outbound_resources=None,
     )
 
     async def handler(
@@ -590,6 +594,7 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
             stream,
             runner_auth_token="runner-token",
             channel=None,
+            outbound_resources=None,
         )
 
     manager = RunnerWebSessionManager(
@@ -602,6 +607,7 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
+        outbound_resources=None,
     )
 
     async def handler(
@@ -660,6 +666,7 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
             stream,
             runner_auth_token="runner-token",
             channel=None,
+            outbound_resources=None,
         )
 
     manager = RunnerWebSessionManager(
@@ -672,6 +679,7 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
         allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
+        outbound_resources=None,
     )
 
     async def handler(

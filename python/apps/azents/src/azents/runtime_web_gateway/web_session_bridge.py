@@ -42,6 +42,8 @@ _MAX_PENDING_ENVELOPES = 32
 _MAX_PENDING_BROWSER_EVENTS = 8
 _BROWSER_EVENT_QUEUE_SIZE = _MAX_PENDING_BROWSER_EVENTS + 1
 _CANCEL_DELIVERY_TIMEOUT_SECONDS = 0.1
+_HEARTBEAT_INTERVAL_SECONDS = 5.0
+_MAX_MISSED_HEARTBEATS = 2
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -96,6 +98,13 @@ class PersistentGatewaySessionTransport:
         self.condition = asyncio.Condition()
         self.credit_condition = asyncio.Condition()
         self.receiver: asyncio.Task[None] | None = None
+        self.heartbeat_task: asyncio.Task[None] | None = None
+        self.heartbeat_identity: (
+            runtime_web_session_pb2.RuntimeWebSessionEnvelope | None
+        ) = None
+        self.heartbeat_sequence = 0
+        self.heartbeat_acknowledged_sequence = 0
+        self.task_slots_reserved = 0
         self.go_away_task: asyncio.Task[None] | None = None
         self.go_away_handler: (
             Callable[
@@ -140,23 +149,47 @@ class PersistentGatewaySessionTransport:
         async with self.condition:
             if self.receiver is not None:
                 raise RuntimeError("Runtime Web Gateway session is already started")
+            if not self.resources.try_begin_tasks(2):
+                raise RuntimeWebGatewayResourceExhausted(
+                    "Runtime Web Gateway session task limit is exhausted"
+                )
+            self.task_slots_reserved = 2
             accepted = asyncio.get_running_loop().create_future()
             self.active = True
             try:
                 responses = self.stream(self._outbound_messages(hello))
             except Exception:
                 self.active = False
+                self.resources.end_tasks(self.task_slots_reserved)
+                self.task_slots_reserved = 0
                 raise
-            self.receiver = asyncio.create_task(
-                self._receive(
-                    responses,
-                    accepted,
-                    expected_fingerprint=hello.protocol_fingerprint,
-                    expected_session_id=hello.session_id,
+            try:
+                self.receiver = asyncio.create_task(
+                    self._receive(
+                        responses,
+                        accepted,
+                        expected_fingerprint=hello.protocol_fingerprint,
+                        expected_session_id=hello.session_id,
+                    )
                 )
-            )
+            except BaseException:
+                self.active = False
+                self.resources.end_tasks(self.task_slots_reserved)
+                self.task_slots_reserved = 0
+                raise
         try:
-            return await asyncio.wait_for(accepted, timeout_seconds)
+            accepted_envelope = await asyncio.wait_for(accepted, timeout_seconds)
+            self.heartbeat_identity = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                protocol_fingerprint=hello.protocol_fingerprint,
+                session_id=hello.session_id,
+                peer_boot_id=hello.peer_boot_id,
+            )
+            self.resources.transport_epoch_transitions += 1
+            self.heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(),
+                name=f"runtime-web-gateway-heartbeat:{hello.session_id}",
+            )
+            return accepted_envelope
         except asyncio.CancelledError:
             await self.close()
             raise
@@ -243,7 +276,10 @@ class PersistentGatewaySessionTransport:
                     ) from self.failure
                 queued = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
                 queued.CopyFrom(envelope)
-                self.resources.reserve_control_buffer(control_bytes)
+                if not self.resources.try_reserve_control_buffer(control_bytes):
+                    raise RuntimeWebGatewayResourceExhausted(
+                        "Runtime Web control buffer is exhausted"
+                    )
                 control_reserved = True
                 self.outbound.append(
                     _BufferedEnvelope(
@@ -265,7 +301,13 @@ class PersistentGatewaySessionTransport:
     async def close(self) -> tuple[int, ...]:
         """Close once, discard queued work, and return active stream IDs."""
         async with self.condition:
-            if not self.active and self.receiver is None and self.go_away_task is None:
+            if (
+                not self.active
+                and self.receiver is None
+                and self.go_away_task is None
+                and self.heartbeat_task is None
+                and self.task_slots_reserved == 0
+            ):
                 return ()
             self.active = False
             buffered = tuple(self.outbound)
@@ -276,6 +318,8 @@ class PersistentGatewaySessionTransport:
             self.receiver = None
             go_away_task = self.go_away_task
             self.go_away_task = None
+            heartbeat_task = self.heartbeat_task
+            self.heartbeat_task = None
             self.condition.notify_all()
         await self._release_buffered(buffered)
         if receiver is not None:
@@ -286,6 +330,13 @@ class PersistentGatewaySessionTransport:
             if not go_away_task.done():
                 go_away_task.cancel()
             await asyncio.gather(go_away_task, return_exceptions=True)
+        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
+            if not heartbeat_task.done():
+                heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        if self.task_slots_reserved:
+            self.resources.end_tasks(self.task_slots_reserved)
+            self.task_slots_reserved = 0
         return failed
 
     async def wait_closed(self) -> None:
@@ -351,7 +402,24 @@ class PersistentGatewaySessionTransport:
                 if envelope.peer_boot_id != peer_boot_id:
                     raise RuntimeError("Runtime Web Gateway peer identity changed")
                 payload = envelope.WhichOneof("payload")
+                if payload == "heartbeat_ack":
+                    if (
+                        envelope.stream_id != 0
+                        or envelope.heartbeat_ack.monotonic_sequence
+                        <= self.heartbeat_acknowledged_sequence
+                        or envelope.heartbeat_ack.monotonic_sequence
+                        > self.heartbeat_sequence
+                    ):
+                        raise RuntimeError(
+                            "Runtime Web Gateway heartbeat acknowledgement is invalid"
+                        )
+                    self.heartbeat_acknowledged_sequence = (
+                        envelope.heartbeat_ack.monotonic_sequence
+                    )
+                    self.resources.transport_heartbeat_acknowledgements += 1
+                    continue
                 if payload == "go_away":
+                    self.resources.transport_go_aways += 1
                     await self._receive_go_away(envelope)
                     continue
                 if envelope.stream_id == 0:
@@ -389,6 +457,37 @@ class PersistentGatewaySessionTransport:
             await self._release_buffered(buffered)
             for _, handler in handlers:
                 await handler.fail_transport()
+
+    async def _heartbeat_loop(self) -> None:
+        """Send one session heartbeat every five seconds and fail after two misses."""
+        while True:
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+            async with self.condition:
+                if not self.active:
+                    return
+                missed = self.heartbeat_sequence - self.heartbeat_acknowledged_sequence
+                if missed >= _MAX_MISSED_HEARTBEATS:
+                    self.resources.transport_missed_heartbeats += 1
+                    self.failure = TimeoutError(
+                        "Runtime Web Gateway heartbeat acknowledgement timed out"
+                    )
+                    receiver = self.receiver
+                else:
+                    receiver = None
+                    identity = self.heartbeat_identity
+                    if identity is None:
+                        raise RuntimeError(
+                            "Runtime Web Gateway heartbeat identity is absent"
+                        )
+                    self.heartbeat_sequence += 1
+                    heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+                    heartbeat.CopyFrom(identity)
+                    heartbeat.heartbeat.monotonic_sequence = self.heartbeat_sequence
+                    self.resources.transport_heartbeats_sent += 1
+            if receiver is not None:
+                receiver.cancel()
+                return
+            await self.send(heartbeat)
 
     async def _receive_go_away(
         self,
@@ -503,6 +602,12 @@ class RuntimeWebBrowserStreamBridge:
         self.request_sequence = 0
         self.released = False
         self.terminal_published = False
+        self.terminal_metric_recorded = False
+        self.transport_open_recorded = False
+        self.started_at = asyncio.get_running_loop().time()
+        self.ttfb_seconds: float | None = None
+        self.request_bytes = 0
+        self.response_bytes = 0
         self.buffered_event_ids: set[int] = set()
         profile = binding.state.profile
         self.request_credit = HierarchicalCredit(
@@ -599,6 +704,7 @@ class RuntimeWebBrowserStreamBridge:
                 data=data,
             )
         )
+        self._record_frame("request", size_bytes)
 
     async def finish_request(self) -> None:
         """Half-close the request direction at the exact sequence."""
@@ -648,6 +754,7 @@ class RuntimeWebBrowserStreamBridge:
                 data=data,
             )
         )
+        self._record_frame("request", len(data))
 
     async def cancel(self, reason: CloseReason = CloseReason.CALLER) -> None:
         """Best-effort one bounded CANCEL while always releasing local ownership."""
@@ -767,10 +874,17 @@ class RuntimeWebBrowserStreamBridge:
             else:
                 raise ValueError("Runtime Web Gateway open route is invalid")
             self.binding.state.accept()
+            self.resources.record_transport_open(
+                protocol=self.binding.state.request_head.protocol,
+                path=self.route,
+                setup_seconds=asyncio.get_running_loop().time() - self.started_at,
+            )
+            self.transport_open_recorded = True
             self.accepted.set()
             return
         if payload == "open_rejected":
             reason = _close_reason(envelope.open_rejected.reason)
+            self.resources.record_transport_rejection(reason)
             self.acceptance_error = reason
             self.accepted.set()
             self.binding.state.reject(reason)
@@ -785,6 +899,9 @@ class RuntimeWebBrowserStreamBridge:
             self.binding.state.receive_response_head(
                 envelope.response_head.status, headers
             )
+            if self.ttfb_seconds is None:
+                self.ttfb_seconds = asyncio.get_running_loop().time() - self.started_at
+                self.resources.record_transport_ttfb(self.ttfb_seconds)
             await self._queue_event(
                 BrowserStreamEvent(
                     payload=payload,
@@ -837,6 +954,7 @@ class RuntimeWebBrowserStreamBridge:
                 )
             ):
                 return
+            self._record_frame("response", len(envelope.data.data))
             return
         if payload == "direction_end":
             direction = _direction(envelope.direction_end.direction)
@@ -899,6 +1017,7 @@ class RuntimeWebBrowserStreamBridge:
                 )
             ):
                 return
+            self._record_frame("response", len(envelope.websocket.data))
             return
         if payload == "reset":
             reason = _close_reason(envelope.reset.reason)
@@ -947,7 +1066,9 @@ class RuntimeWebBrowserStreamBridge:
                 )
 
             waiter_reserved = False
+            stalled_at: float | None = None
             if not ready():
+                stalled_at = asyncio.get_running_loop().time()
                 waiter_reserved = self.resources.try_add_scheduler_waiter()
                 if not waiter_reserved:
                     raise RuntimeWebGatewayResourceExhausted(
@@ -961,6 +1082,10 @@ class RuntimeWebBrowserStreamBridge:
             if self.released:
                 raise RuntimeError("Runtime Web request stream is closed")
             self.request_credit.reserve(size_bytes)
+        if stalled_at is not None:
+            self.resources.record_transport_credit_stall(
+                asyncio.get_running_loop().time() - stalled_at
+            )
 
     async def next_event(self) -> BrowserStreamEvent:
         """Consume one browser event without acknowledging unwritten bytes."""
@@ -1068,9 +1193,52 @@ class RuntimeWebBrowserStreamBridge:
         async with self.event_condition:
             if self.terminal_published:
                 return
+            self._record_terminal_metric(reason)
             self.events.put_nowait(terminal)
             self.terminal_published = True
             self.event_condition.notify_all()
+
+    def _record_frame(self, direction: str, size_bytes: int) -> None:
+        path = self.route
+        if path is None:
+            raise RuntimeError("Runtime Web transport path is absent")
+        self.resources.record_transport_frame(
+            protocol=self.binding.state.request_head.protocol,
+            direction=direction,
+            path=path,
+            size_bytes=size_bytes,
+        )
+        if direction == "request":
+            self.request_bytes += size_bytes
+        elif direction == "response":
+            self.response_bytes += size_bytes
+        else:
+            raise ValueError("Runtime Web transport direction is invalid")
+
+    def _record_terminal_metric(self, reason: CloseReason | None) -> None:
+        if self.terminal_metric_recorded:
+            return
+        self.terminal_metric_recorded = True
+        duration_seconds = asyncio.get_running_loop().time() - self.started_at
+        self.resources.record_transport_terminal(
+            protocol=self.binding.state.request_head.protocol,
+            path=self.route if self.transport_open_recorded else None,
+            reason=reason,
+            duration_seconds=duration_seconds,
+            application_bytes=self.request_bytes + self.response_bytes,
+        )
+        _LOGGER.info(
+            "Runtime Web transport completed",
+            extra={
+                "protocol": self.binding.state.request_head.protocol.value,
+                "route": self.route or "unresolved",
+                "terminal_reason": ("completed" if reason is None else reason.value),
+                "request_bytes": self.request_bytes,
+                "response_bytes": self.response_bytes,
+                "ttfb_seconds": self.ttfb_seconds,
+                "duration_seconds": duration_seconds,
+            },
+        )
 
     async def _queue_event(self, event: BrowserStreamEvent) -> bool:
         application_bytes = len(event.data)
@@ -1080,8 +1248,14 @@ class RuntimeWebBrowserStreamBridge:
         ):
             await self.cancel(CloseReason.RESOURCE_EXHAUSTED)
             return False
+        control_reserved = False
         if control_bytes:
-            self.resources.reserve_control_buffer(control_bytes)
+            control_reserved = self.resources.try_reserve_control_buffer(control_bytes)
+            if not control_reserved:
+                if application_bytes:
+                    await self.resources.release_application_buffer(application_bytes)
+                await self.cancel(CloseReason.RESOURCE_EXHAUSTED)
+                return False
         waiter_reserved = False
         application_reserved = bool(application_bytes)
         queued_successfully = False
@@ -1108,7 +1282,7 @@ class RuntimeWebBrowserStreamBridge:
             if waiter_reserved:
                 self.resources.remove_scheduler_waiter()
             if not queued_successfully:
-                if control_bytes:
+                if control_reserved:
                     self.resources.release_control_buffer(control_bytes)
                 if application_reserved:
                     await self.resources.release_application_buffer(application_bytes)

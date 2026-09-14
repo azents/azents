@@ -2,6 +2,7 @@
 {{- $transfer := .Values.server.runtimeControl.transfer }}
 {{- $webTransport := .Values.server.runtimeControl.webTransport }}
 {{- $webCapacity := .Values.server.runtimeControl.webCapacity }}
+{{- $webHardLimits := .Values.server.runtimeControl.webHardLimits }}
 {{- $objectStorageEndpoint := include "azents.objectStorageEndpoint" . }}
 {{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
@@ -116,6 +117,22 @@ spec:
               value: {{ printf "%d" (int64 $webCapacity.redisTtlSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_WEB_MAXIMUM_RELAY_SESSIONS
               value: {{ printf "%d" (int64 $webCapacity.maximumRelaySessions) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_SESSIONS
+              value: {{ printf "%d" (int64 $webHardLimits.maximumSessions) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_ACTIVE_STREAMS
+              value: {{ printf "%d" (int64 $webHardLimits.maximumActiveStreams) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_APPLICATION_BUFFER_BYTES
+              value: {{ printf "%d" (int64 $webHardLimits.maximumApplicationBufferBytes) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_CONTROL_BUFFER_BYTES
+              value: {{ printf "%d" (int64 $webHardLimits.maximumControlBufferBytes) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_QUEUED_ENVELOPES
+              value: {{ printf "%d" (int64 $webHardLimits.maximumQueuedEnvelopes) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_PENDING_TASKS
+              value: {{ printf "%d" (int64 $webHardLimits.maximumPendingTasks) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS
+              value: {{ printf "%d" (int64 $webHardLimits.maximumEventLoopLagMilliseconds) | quote }}
+            - name: AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_RESIDENT_MEMORY_BYTES
+              value: {{ printf "%d" (int64 $webHardLimits.maximumResidentMemoryBytes) | quote }}
             {{- end }}
             - name: AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS
               value: {{ printf "%d" (int64 .Values.server.runtimeControl.reconcileIntervalSeconds) | quote }}

@@ -341,6 +341,26 @@ def _runtime_control_relay_container(
             "azents:e2e:runtime-web:capacity",
         )
         .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_TTL_SECONDS", "30")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_SESSIONS", "128")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_ACTIVE_STREAMS", "1024")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_APPLICATION_BUFFER_BYTES",
+            "536870912",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_CONTROL_BUFFER_BYTES",
+            "67108864",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_QUEUED_ENVELOPES", "4096")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_PENDING_TASKS", "2048")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+            "250",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_RESIDENT_MEMORY_BYTES",
+            "1073741824",
+        )
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control-relay")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "60")
         .with_env("AZ_RUNTIME_CONTROL_WEB_ROUTE_LEASE_SECONDS", "10")
@@ -1339,7 +1359,7 @@ def _assert_content_free_metrics(
     *,
     sensitive_values: tuple[str, ...],
 ) -> str:
-    """Reject concrete authority, secret, path, body, and error canaries."""
+    """Reject concrete authority, secret, URL path, body, and error canaries."""
     metrics = _gateway_metrics(stack)
     for line in metrics.splitlines():
         if line.startswith("#") or "{" not in line:
@@ -1350,12 +1370,19 @@ def _assert_content_free_metrics(
             for item in label_set.split(",")
             if item
         }
-        assert label_names <= {"backend", "route"}
+        assert label_names <= {
+            "backend",
+            "direction",
+            "path",
+            "protocol",
+            "reason",
+            "route",
+        }
     for forbidden_label in (
         "user=",
         "session_id=",
         "endpoint_id=",
-        "path=",
+        'path="/',
         "query=",
         "cookie=",
         "authorization=",
@@ -1775,6 +1802,33 @@ def _metric_value(metrics: str, prefix: str) -> float:
             _, value = line.rsplit(" ", maxsplit=1)
             return float(value)
     raise AssertionError(f"Runtime Web metric was not observed: {prefix!r}")
+
+
+def _wait_for_runtime_web_stream_release(stack: _RuntimeWebStack) -> None:
+    """Wait for authoritative Gateway and Control stream gauges to reach zero."""
+    deadline = time.monotonic() + 10
+    while True:
+        gateway_active = _metric_value(
+            _gateway_metrics(stack),
+            "runtime_web_gateway_active_exchanges ",
+        )
+        owner_active = _metric_value(
+            _control_metrics(stack.owner_control_operations_url),
+            "runtime_web_control_active_streams ",
+        )
+        accepting_active = _metric_value(
+            _control_metrics(stack.accepting_control_operations_url),
+            "runtime_web_control_active_streams ",
+        )
+        if gateway_active == owner_active == accepting_active == 0:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                "Runtime Web streams were not released before drain verification: "
+                f"gateway={gateway_active}, owner={owner_active}, "
+                f"accepting={accepting_active}"
+            )
+        time.sleep(0.1)
 
 
 def _request_rejection_without_body(
@@ -2381,6 +2435,7 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
             ),
         )
         assert _route_open_count(metrics_after_recovery, "local") > local_opens_before
+        _wait_for_runtime_web_stream_release(stack)
 
         websocket_started = threading.Event()
         websocket_drained = threading.Event()
