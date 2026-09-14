@@ -63,7 +63,7 @@ Before writing the plan:
 1. identify approved mechanism IDs, workstreams, dependencies, interfaces, paths,
    validation, and removal obligations;
 2. assign one exact independent reviewer for the complete feature; this reviewer is
-   mandatory and no area-specific or specialist reviewer is added; and
+   mandatory and reviews every integrated phase diff for the feature; and
 3. limit implementation discovery to assigned paths, approved mechanisms,
    interfaces, tests, dependencies, risks, validation, and blockers; and
 4. classify new findings:
@@ -108,12 +108,11 @@ remains `None`.
   progression, and final integration.
 - Implementation subagents are optional. When used, they stay within assigned paths
   and interfaces, run focused checks, and hand their completed work and evidence to
-  the primary agent. They do not request review or re-review.
+  the primary agent.
 - The single reviewer is read-only and reviews the complete root-integrated stable
   phase diff from confirmed Requirements, accepted ADR, approved Design and Design
   Authority, and the phase contract.
-- Do not create a separate validation-owner role. The primary agent owns integrated
-  validation, its execution, and its result.
+- The primary agent owns integrated validation, its execution, and its result.
 - Requirements, ADR, approved Design, and current Specs are product and design
   authority. Plans are authoritative only for approved execution scope, ownership,
   paths, ordering, and validation.
@@ -146,11 +145,8 @@ For each phase:
    prerequisites are fresh, and the environment is equivalent;
 8. freeze the integrated diff and have the primary agent request one read-only
    review from the single assigned reviewer;
-9. have the primary agent apply review findings and run affected integrated checks.
-   Do not delegate incremental review corrections. Only when one subagent's
-   self-contained implementation must be discarded and rewritten in full may the
-   primary agent remove that implementation and reassign the complete rewrite to
-   that subagent;
+9. have the primary agent apply every review finding directly and run affected
+   integrated checks;
 10. when re-review is required, have the primary agent request it from the same
     reviewer only after corrections and integrated validation are complete; and
 11. record the checkpoint, commit, and open the phase PR before the next phase.
@@ -182,9 +178,7 @@ phase and owns every integrated validation rerun. Rerun only evidence invalidate
 the correction; rerun the full matrix when it crosses interfaces or shared behavior.
 Apply `/code-review` re-review criteria and rebase dependent branches when an earlier
 phase changes. When re-review is required, the primary agent requests the existing
-single reviewer after the corrected diff and integrated validation are stable. The
-full-rewrite exception for a discarded subagent-owned implementation remains the
-only case where correction work returns to an implementation subagent.
+single reviewer after the corrected diff and integrated validation are stable.
 
 ## Phase 4: Promote Specs
 
@@ -233,8 +227,7 @@ validation, checkpoint, and next branch.
   agent-owned.
 - Keep implementation and independent review separate, use exactly one reviewer,
   and allow only the primary agent to request review or re-review.
-- Keep integrated validation owned and executed by the primary agent; do not create
-  a validation-owner role.
+- Keep integrated validation owned and executed by the primary agent.
 - Do not start the next phase before opening the current phase PR.
 - Keep snapshot basenames aligned and generated clients source-generated.
 - Remove temporary plans only after validated spec promotion.
