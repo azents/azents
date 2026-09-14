@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import socket
 import ssl
 import subprocess
@@ -102,8 +103,42 @@ _SHARED_COOKIE_DOMAIN = "runtime-e2e.test"
 _SEPARATE_COOKIE_DOMAIN = _SERVICE_SUFFIX
 _TERMINAL_ORIGIN = "https://azents-web-gateway:8443"
 _SIGNUP_PASSWORD = "TestPass123!"
-_BROWSER_TRANSFER_BYTES = 1024 * 1024
-_BROWSER_ASSET_COUNT = 8
+
+
+def _bounded_workload_value(
+    name: str,
+    *,
+    default: int,
+    maximum: int,
+) -> int:
+    """Read one bounded positive E2E workload override."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        raise RuntimeError(f"{name} must be an integer") from None
+    if not 1 <= value <= maximum:
+        raise RuntimeError(f"{name} must be between 1 and {maximum}")
+    return value
+
+
+_BROWSER_TRANSFER_BYTES = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES",
+    default=1024 * 1024,
+    maximum=1024 * 1024 * 1024,
+)
+_BROWSER_ASSET_COUNT = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_ASSET_COUNT",
+    default=8,
+    maximum=2_000,
+)
+_BROWSER_SCRIPT_TIMEOUT_SECONDS = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_SCRIPT_TIMEOUT_SECONDS",
+    default=120,
+    maximum=7_200,
+)
 _REJECTED_REQUEST_CONTENT_LENGTH = 64 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
@@ -1010,15 +1045,16 @@ def _create_workspace(
 
 def _runtime_application_script() -> str:
     """Return the bounded loopback application executed by the real Runner."""
-    return """
+    script = """
 import asyncio
 import hashlib
 
 from aiohttp import web
 
-TRANSFER_BYTES = 1024 * 1024
+TRANSFER_BYTES = __TRANSFER_BYTES__
 TRANSFER_CHUNK_BYTES = 256 * 1024
 ASSET_BYTES = 32 * 1024
+ASSET_COUNT = __ASSET_COUNT__
 upload_invocations = 0
 active_sse = 0
 sse_connections = 0
@@ -1056,17 +1092,23 @@ async def upload(request):
 
 async def download(request):
     digest = hashlib.sha256()
-    chunk = b'd' * TRANSFER_CHUNK_BYTES
-    for _ in range(TRANSFER_BYTES // len(chunk)):
-        digest.update(chunk)
+    chunk = b'd' * min(TRANSFER_CHUNK_BYTES, TRANSFER_BYTES)
+    remaining = TRANSFER_BYTES
+    while remaining:
+        data = chunk[:remaining]
+        digest.update(data)
+        remaining -= len(data)
     response = web.StreamResponse(headers={
         'Content-Length': str(TRANSFER_BYTES),
         'Content-Type': 'application/octet-stream',
         'X-Content-Sha256': digest.hexdigest(),
     })
     await response.prepare(request)
-    for _ in range(TRANSFER_BYTES // len(chunk)):
-        await response.write(chunk)
+    remaining = TRANSFER_BYTES
+    while remaining:
+        data = chunk[:remaining]
+        await response.write(data)
+        remaining -= len(data)
     await response.write_eof()
     return response
 
@@ -1082,10 +1124,10 @@ async def hold(request):
 
 async def asset(request):
     asset_id = int(request.match_info['asset_id'])
-    if not 0 <= asset_id < 8:
+    if not 0 <= asset_id < ASSET_COUNT:
         raise web.HTTPNotFound()
     return web.Response(
-        body=bytes([asset_id]) * ASSET_BYTES,
+        body=bytes([asset_id % 256]) * ASSET_BYTES,
         content_type='application/octet-stream',
     )
 
@@ -1159,7 +1201,12 @@ application.router.add_get('/redirect', redirect)
 application.router.add_get('/failure/{canary}', failure)
 application.router.add_get('/ws', websocket)
 web.run_app(application, host='127.0.0.1', port=8765, handle_signals=False)
-""".strip()
+"""
+    return (
+        script.replace("__TRANSFER_BYTES__", str(_BROWSER_TRANSFER_BYTES))
+        .replace("__ASSET_COUNT__", str(_BROWSER_ASSET_COUNT))
+        .strip()
+    )
 
 
 @contextmanager
@@ -1236,7 +1283,7 @@ def _browser(
         command_executor=selenium_url,
         options=options,
     )
-    driver.set_script_timeout(120)
+    driver.set_script_timeout(_BROWSER_SCRIPT_TIMEOUT_SECONDS)
     return driver
 
 
@@ -1641,6 +1688,8 @@ def _browser_transport_evidence(
     """Exercise bounded browser transfer, fan-out, SSE, and WebSocket behavior."""
     result = driver.execute_async_script(
         """
+const transferBytes = arguments[0];
+const assetCount = arguments[1];
 const done = arguments[arguments.length - 1];
 (async () => {
   const checkedFetch = async (url, init = undefined) => {
@@ -1656,7 +1705,7 @@ const done = arguments[arguments.length - 1];
     {method: 'POST', body: 'runtime-web-body'},
   );
   const echoBody = await echo.json();
-  const uploadBody = new Uint8Array(1024 * 1024);
+  const uploadBody = new Uint8Array(transferBytes);
   uploadBody.fill(0x75);
   const expectedUploadDigest = Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', uploadBody)),
@@ -1680,10 +1729,10 @@ const done = arguments[arguments.length - 1];
     bytes += part.value.byteLength;
   }
   const assets = await Promise.all(
-    Array.from({length: 8}, async (_, assetId) => {
+    Array.from({length: assetCount}, async (_, assetId) => {
       const response = await checkedFetch(`/asset/${assetId}`);
       const body = new Uint8Array(await response.arrayBuffer());
-      return body.length === 32 * 1024 && body[0] === assetId;
+      return body.length === 32 * 1024 && body[0] === assetId % 256;
     }),
   );
   const websocket = await new Promise((resolve, reject) => {
@@ -1748,7 +1797,9 @@ const done = arguments[arguments.length - 1];
     websocket,
   });
 })().catch(error => done({error: String(error)}));
-"""
+""",
+        _BROWSER_TRANSFER_BYTES,
+        _BROWSER_ASSET_COUNT,
     )
     if not isinstance(result, dict):
         raise AssertionError(f"Browser transport evidence was invalid: {result!r}")

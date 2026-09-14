@@ -33,8 +33,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 180 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 82 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-13 | 37 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-14 | 83 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-14 | 38 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 51 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
@@ -49,7 +49,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-13 | 20 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-13 | 60 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-14 | 61 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
 
@@ -364,7 +364,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Isolated Runtime Operation Reply Streams Requirements](requirements/runtime-260912-isolated-operation-reply-streams.md) | runtime-260912 | 2026-09-12 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Runtime Web Browser and Services Correction Requirements](requirements/runtimeweb-260913-browser-services-correction.md) | runtimeweb-260913 | 2026-09-13 | - |
-| [Heavy-Workload Runtime Web Services Requirements](requirements/runtimeweb-260914-heavy-workload-services.md) | runtimeweb-260914 | 2026-09-14 | - |
+| [Heavy-Workload Runtime Web Services Requirements](requirements/runtimeweb-260914-heavy-workload-services.md) | runtimeweb-260914 | 2026-09-14 | 2026-09-14 |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
 | [Sandbox Runtime Profile Abstraction Discussion Historical Requirements Reconstruction](requirements/sandbox-260419-sandbox-profile.md) | sandbox-260419 | 2026-04-19 | - |

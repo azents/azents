@@ -60,6 +60,29 @@ uv run pytest \
 
 The temporary harness selected the heavy workload values listed above for the `shared_cookie` parameter. To reproduce the load result, apply those values to a disposable local copy of the lightweight Runtime Web E2E journey, run the command, and discard the workload-only changes after recording the new report.
 
+The maintained journey now exposes bounded low-default workload overrides for future
+one-time runs:
+
+```console
+cd testenv/azents/e2e
+AZENTS_E2E_SERVER_IMAGE=<tested-server-image> \
+AZENTS_E2E_RUNTIME_RUNNER_IMAGE=<tested-runner-image> \
+AZENTS_E2E_RUNTIME_WEB_CAPACITY_BACKEND=memory \
+AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES=67108864 \
+AZENTS_E2E_RUNTIME_WEB_ASSET_COUNT=64 \
+AZENTS_E2E_RUNTIME_WEB_SCRIPT_TIMEOUT_SECONDS=600 \
+uv run pytest \
+  'src/tests/web/public/test_runtime_web_gateway.py::test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay[shared_cookie]' \
+  -q -s --tb=short
+```
+
+These overrides reproduce the maintained browser transfer and asset magnitude
+without adding another test node. The recorded 2026-09-14 run also used disposable
+browser-neutral and slow-peer extensions described in the workload section; those
+extensions remain historical evidence rather than recurring test code. A future run
+that needs those profiles must record its exact temporary extension and results in a
+new dated report.
+
 ## Result
 
 Final result: **passed**.

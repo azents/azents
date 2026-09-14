@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/776db49c8368_drop_runtime_web_browser_profile.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/eebc06bf6bf0_add_runtime_web_session_routes.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_drop_legacy_runtime_web_transport.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -47,8 +49,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-13
-spec_version: 37
+last_verified_at: 2026-09-14
+spec_version: 38
 ---
 
 # Agent Runtime Persistence
@@ -89,16 +91,35 @@ exists. Coordination loss ends the Terminal path without changing durable Runtim
 Session, Project, or Agent Workspace state.
 
 Runtime Web persists stable Session-and-port endpoints, exposure requests, approved
-cycles, current authentication configuration, browser-identity hashes, broker/ticket
-hashes, route leases, and shared admission leases only where those records own
-authority or bounded recovery. Security configuration changes revoke existing browser
-identities and discard pending broker bindings and tickets. Plaintext browser secrets
-are returned once and never stored. Application
-HTTP, SSE, and WebSocket bytes, full paths and queries, headers, cookies, and upstream
-errors are never written to PostgreSQL, Redis, object storage, events, Chat history,
-or Runtime configuration history. A transport or coordination loss therefore ends
-only the active exchange; it does not replay application requests or change the
-stable endpoint and finite approval records.
+cycles, current authentication configuration, browser-identity hashes,
+broker/ticket hashes, and one current `runtime_web_session_routes` Owner lease per
+Runtime. The route row contains only the exact Runtime and Runner generations, Owner
+replica and boot identities, trusted Owner address, session lease identity and
+generation, join-nonce hash, protocol fingerprint, lease timestamps, and bounded
+drain marker needed to fence the persistent Runner Web session. Exact acquisition,
+renewal, and release compare the complete epoch. The row is deleted when the Owner
+session ends; no route history is retained.
+
+Runtime Web stream counts, pending opens, buffer and bandwidth grants, fair-scheduler
+state, logical-stream registries, tombstones, and live session state are ephemeral.
+The Owner keeps authoritative process-local live state. The optional Redis capacity
+backend stores only bounded aggregate operational state with a TTL and backend
+epoch. Redis loss reconstructs equivalent capacity from the live registry and credit
+accounting; recovery replaces stale keys instead of adopting them as active work.
+
+Security configuration changes revoke existing browser identities and discard
+pending broker bindings and tickets. Plaintext browser secrets are returned once and
+never stored. Application HTTP, SSE, and WebSocket bytes, full paths and queries,
+headers, cookies, upstream errors, WebSocket payloads, flow-control frames, and
+application outcomes are never written to PostgreSQL, Redis, object storage, events,
+Chat history, or Runtime configuration history. A transport or coordination loss
+therefore ends only active work; it does not replay application requests or change
+the stable endpoint and finite approval records.
+
+The legacy `runtime_web_tunnel_routes`, `runtime_web_admission_leases`, and
+`runtime_web_gateway_admission_leases` tables do not exist. Their request-scoped
+route and endpoint/user/Agent admission semantics have no reader, compatibility
+view, alias, or fallback after the forward-only clean-cutover migration.
 Gateway identities contain no browser-vendor or browser-profile state. An endpoint's
 current-cycle pointer retains the latest active or ended cycle so projections can
 distinguish active, expired, and explicitly closed authority. Closing advances the
@@ -434,6 +455,10 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-14 (spec_version=38)** — Added one exact current
+  `runtime_web_session_routes` Owner lease, made logical streams and Runtime capacity
+  Redis-optional ephemeral state, and removed the legacy tunnel and
+  endpoint/user/Agent admission tables without a compatibility reader.
 - **2026-09-13 (spec_version=37)** — Removed persisted Runtime Web browser-profile
   state and retained the latest ended cycle pointer so refreshed projections preserve
   explicit closed authority.

@@ -30,8 +30,8 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 180 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-13 | 82 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-13 | 37 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-14 | 83 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-14 | 38 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 51 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
@@ -46,6 +46,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-13 | 20 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-13 | 60 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-14 | 61 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |

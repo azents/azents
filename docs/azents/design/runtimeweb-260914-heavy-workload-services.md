@@ -2,6 +2,7 @@
 title: "Heavy-Workload Runtime Web Services Design"
 created: 2026-09-14
 updated: 2026-09-14
+implemented: 2026-09-14
 tags: [runtime-web, transport, performance, reliability, security, infra, testing]
 document_role: primary
 document_type: design
