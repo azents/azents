@@ -167,6 +167,7 @@ class RuntimeWebGatewayResourceSnapshot:
 
     active_exchanges: int
     application_buffer_bytes: int
+    control_buffer_bytes: int
     scheduler_waiters: int
 
 
@@ -177,7 +178,9 @@ class RuntimeWebGatewayResourceTracker:
         self.limits = limits
         self.active_exchanges = 0
         self.application_buffer_bytes = 0
+        self.control_buffer_bytes = 0
         self.scheduler_waiters = 0
+        self.condition = asyncio.Condition()
 
     def try_open_exchange(self) -> bool:
         """Reserve one local exchange without waiting for HPA."""
@@ -206,11 +209,50 @@ class RuntimeWebGatewayResourceTracker:
         self.application_buffer_bytes += size_bytes
         return True
 
-    def release_application_buffer(self, size_bytes: int) -> None:
+    async def reserve_application_buffer(self, size_bytes: int) -> bool:
+        """Wait for bounded application-buffer capacity without excess waiters."""
+        if size_bytes <= 0:
+            raise ValueError(
+                "Runtime Web application buffer reservation must be positive"
+            )
+        if size_bytes > self.limits.maximum_application_buffer_bytes:
+            return False
+        async with self.condition:
+            if self.try_reserve_application_buffer(size_bytes):
+                return True
+            if not self.try_add_scheduler_waiter():
+                return False
+            try:
+                await self.condition.wait_for(
+                    lambda: (
+                        self.application_buffer_bytes + size_bytes
+                        <= self.limits.maximum_application_buffer_bytes
+                    )
+                )
+                self.application_buffer_bytes += size_bytes
+                return True
+            finally:
+                self.remove_scheduler_waiter()
+
+    async def release_application_buffer(self, size_bytes: int) -> None:
         """Release previously reserved application bytes."""
-        if size_bytes <= 0 or size_bytes > self.application_buffer_bytes:
-            raise ValueError("Runtime Web application buffer release is invalid")
-        self.application_buffer_bytes -= size_bytes
+        async with self.condition:
+            if size_bytes <= 0 or size_bytes > self.application_buffer_bytes:
+                raise ValueError("Runtime Web application buffer release is invalid")
+            self.application_buffer_bytes -= size_bytes
+            self.condition.notify_all()
+
+    def reserve_control_buffer(self, size_bytes: int) -> None:
+        """Record one bounded transport-control buffer reservation."""
+        if size_bytes <= 0:
+            raise ValueError("Runtime Web control buffer reservation must be positive")
+        self.control_buffer_bytes += size_bytes
+
+    def release_control_buffer(self, size_bytes: int) -> None:
+        """Release one exact transport-control buffer reservation."""
+        if size_bytes <= 0 or size_bytes > self.control_buffer_bytes:
+            raise ValueError("Runtime Web control buffer release is invalid")
+        self.control_buffer_bytes -= size_bytes
 
     def try_add_scheduler_waiter(self) -> bool:
         """Reserve one bounded scheduler waiter."""
@@ -264,6 +306,7 @@ class RuntimeWebGatewayResourceTracker:
         return RuntimeWebGatewayResourceSnapshot(
             active_exchanges=self.active_exchanges,
             application_buffer_bytes=self.application_buffer_bytes,
+            control_buffer_bytes=self.control_buffer_bytes,
             scheduler_waiters=self.scheduler_waiters,
         )
 
@@ -280,7 +323,7 @@ class RuntimeWebDrainRegistration:
     """Exact process-local drain registration token."""
 
     registration_id: int
-    kind: RuntimeWebDrainStreamKind
+    kind: RuntimeWebDrainStreamKind = dataclasses.field(compare=False)
 
 
 class RuntimeWebDrainCallbackPhase(enum.StrEnum):
@@ -333,6 +376,9 @@ class RuntimeWebDrainCoordinator:
         self.next_registration_id = 1
         self.active: dict[int, _ActiveDrainStream] = {}
         self.condition = asyncio.Condition()
+        self.drain_started_at: float | None = None
+        self.dynamic_force_closed: set[int] = set()
+        self.dynamic_callback_failures: list[RuntimeWebDrainCallbackFailure] = []
 
     async def register(
         self,
@@ -368,6 +414,33 @@ class RuntimeWebDrainCoordinator:
             self.condition.notify_all()
             return True
 
+    async def reclassify(
+        self,
+        registration: RuntimeWebDrainRegistration,
+        *,
+        kind: RuntimeWebDrainStreamKind,
+    ) -> bool:
+        """Reclassify an accepted response and preserve its drain-start deadline."""
+        async with self.condition:
+            active = self.active.get(registration.registration_id)
+            if active is None or active.registration != registration:
+                return False
+            updated = dataclasses.replace(
+                active,
+                registration=dataclasses.replace(
+                    active.registration,
+                    kind=kind,
+                ),
+            )
+            self.active[registration.registration_id] = updated
+            drain_started_at = self.drain_started_at
+        if (
+            drain_started_at is not None
+            and kind is RuntimeWebDrainStreamKind.LONG_LIVED
+        ):
+            await self._close_reclassified_long_lived(updated, drain_started_at)
+        return True
+
     async def drain(self) -> RuntimeWebDrainResult:
         """Complete cleanup even when the caller is cancelled during drain."""
         cleanup = asyncio.create_task(
@@ -386,6 +459,7 @@ class RuntimeWebDrainCoordinator:
         started_at = loop.time()
         async with self.condition:
             self.draining = True
+            self.drain_started_at = started_at
             active_at_start = tuple(self.active.values())
             long_lived = tuple(
                 active
@@ -438,7 +512,10 @@ class RuntimeWebDrainCoordinator:
         )
         forced_http, force_http_failures = await self._force_remaining(finite_http_ids)
         callback_failures.extend(force_http_failures)
-        forced = tuple(sorted((*forced_long_lived, *forced_http)))
+        async with self.condition:
+            dynamic_forced = tuple(self.dynamic_force_closed)
+            dynamic_failures = tuple(self.dynamic_callback_failures)
+        forced = tuple(sorted({*forced_long_lived, *forced_http, *dynamic_forced}))
         async with self.condition:
             graceful = tuple(
                 sorted(
@@ -453,8 +530,35 @@ class RuntimeWebDrainCoordinator:
         return RuntimeWebDrainResult(
             gracefully_closed=graceful,
             force_closed=forced,
-            callback_failures=tuple(callback_failures),
+            callback_failures=tuple((*callback_failures, *dynamic_failures)),
         )
+
+    async def _close_reclassified_long_lived(
+        self,
+        active: _ActiveDrainStream,
+        drain_started_at: float,
+    ) -> None:
+        registration_id = active.registration.registration_id
+        remaining = max(
+            0.0,
+            self.policy.long_lived_grace_seconds
+            - (asyncio.get_running_loop().time() - drain_started_at),
+        )
+        failures = await _close_streams(
+            (active,),
+            graceful=True,
+            timeout_seconds=remaining,
+        )
+        remaining = max(
+            0.0,
+            self.policy.long_lived_grace_seconds
+            - (asyncio.get_running_loop().time() - drain_started_at),
+        )
+        await self._wait_for_release((registration_id,), timeout_seconds=remaining)
+        forced, force_failures = await self._force_remaining((registration_id,))
+        async with self.condition:
+            self.dynamic_force_closed.update(forced)
+            self.dynamic_callback_failures.extend((*failures, *force_failures))
 
     async def _wait_for_release(
         self,
@@ -592,6 +696,10 @@ class RuntimeWebGatewayOperationalState:
     backend: RuntimeWebCapacityBackend
     capacity_degraded: bool
     resources: RuntimeWebGatewayResourceTracker
+    local_open_count: int
+    relay_open_count: int
+    event_loop_lag_milliseconds: float
+    resident_memory_bytes: int
 
     def update_dependencies(
         self,
@@ -614,19 +722,41 @@ class RuntimeWebGatewayOperationalState:
         resident_memory_bytes: int,
     ) -> None:
         """Refresh live pressure and process-only health from hard-limit usage."""
-        self.pressure = self.resources.pressure(
-            event_loop_lag_milliseconds=event_loop_lag_milliseconds,
-            resident_memory_bytes=resident_memory_bytes,
-        )
+        self.event_loop_lag_milliseconds = event_loop_lag_milliseconds
+        self.resident_memory_bytes = resident_memory_bytes
+        self.pressure = self.current_pressure()
         self.health = dataclasses.replace(
             self.health,
             local_pressure_acceptable=self.pressure.value < 1.0,
             event_loop_responsive=self.pressure.event_loop_lag_ratio < 1.0,
         )
 
+    def refresh_resource_pressure(self) -> None:
+        """Refresh mutable resource ratios using cached loop and RSS evidence."""
+        self.update_process_pressure(
+            event_loop_lag_milliseconds=self.event_loop_lag_milliseconds,
+            resident_memory_bytes=self.resident_memory_bytes,
+        )
+
+    def current_pressure(self) -> RuntimeWebGatewayPressure:
+        """Return current resource usage with the latest sampled process evidence."""
+        return self.resources.pressure(
+            event_loop_lag_milliseconds=self.event_loop_lag_milliseconds,
+            resident_memory_bytes=self.resident_memory_bytes,
+        )
+
     def begin_drain(self) -> None:
         """Make readiness false before new work is refused."""
         self.health = dataclasses.replace(self.health, draining=True)
+
+    def record_route(self, route: str) -> None:
+        """Record one bounded local or relay admission outcome."""
+        if route == "local":
+            self.local_open_count += 1
+        elif route == "relay":
+            self.relay_open_count += 1
+        else:
+            raise ValueError("Runtime Web route metric is invalid")
 
 
 class RuntimeWebGatewayOperationsCoordinator:
@@ -655,12 +785,47 @@ def render_openmetrics(
     health: RuntimeWebGatewayHealth,
     backend: RuntimeWebCapacityBackend,
     capacity_degraded: bool,
+    active_exchanges: int,
+    local_open_count: int,
+    relay_open_count: int,
+    application_buffer_bytes: int,
+    application_buffer_limit_bytes: int,
+    control_buffer_bytes: int,
+    scheduler_waiters: int,
+    scheduler_waiter_limit: int,
+    resident_memory_bytes: int,
+    resident_memory_limit_bytes: int,
 ) -> str:
     """Render the bounded process-level OpenMetrics contract."""
     backend_label = f'backend="{backend.value}"'
     lines = [
         "# TYPE runtime_web_gateway_pressure gauge",
         f"runtime_web_gateway_pressure {pressure.value}",
+        "# TYPE runtime_web_gateway_active_exchanges gauge",
+        f"runtime_web_gateway_active_exchanges {active_exchanges}",
+        "# TYPE runtime_web_gateway_open_total counter",
+        f'runtime_web_gateway_open_total{{route="local"}} {local_open_count}',
+        f'runtime_web_gateway_open_total{{route="relay"}} {relay_open_count}',
+        "# TYPE runtime_web_gateway_application_buffer_bytes gauge",
+        f"runtime_web_gateway_application_buffer_bytes {application_buffer_bytes}",
+        "# TYPE runtime_web_gateway_application_buffer_limit_bytes gauge",
+        (
+            "runtime_web_gateway_application_buffer_limit_bytes "
+            f"{application_buffer_limit_bytes}"
+        ),
+        "# TYPE runtime_web_gateway_control_buffer_bytes gauge",
+        f"runtime_web_gateway_control_buffer_bytes {control_buffer_bytes}",
+        "# TYPE runtime_web_gateway_scheduler_waiters gauge",
+        f"runtime_web_gateway_scheduler_waiters {scheduler_waiters}",
+        "# TYPE runtime_web_gateway_scheduler_waiter_limit gauge",
+        f"runtime_web_gateway_scheduler_waiter_limit {scheduler_waiter_limit}",
+        "# TYPE runtime_web_gateway_resident_memory_bytes gauge",
+        f"runtime_web_gateway_resident_memory_bytes {resident_memory_bytes}",
+        "# TYPE runtime_web_gateway_resident_memory_limit_bytes gauge",
+        (
+            "runtime_web_gateway_resident_memory_limit_bytes "
+            f"{resident_memory_limit_bytes}"
+        ),
         "# TYPE runtime_web_gateway_ready gauge",
         f"runtime_web_gateway_ready {int(health.ready)}",
         "# TYPE runtime_web_gateway_live gauge",

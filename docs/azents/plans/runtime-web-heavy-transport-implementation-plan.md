@@ -41,16 +41,18 @@ unavailable from production readiness. Approved mechanisms: `M1`, `M2`, `M3`, `M
 Add the maintenance preflight and replacement activation, apply the destructive
 migration, remove every old RPC/message/intent/table/setting/channel/compatibility
 surface/test/fixture/generated surface, and add deterministic Redis/in-memory parity,
-asset, transfer, slow-peer, SSE, WebSocket, local/relay, fault, cutover, and load
-harness coverage. Approved mechanisms: `M4`, `M8`, `M12`, `M13`, `M14`.
+asset, transfer, slow-peer, SSE, WebSocket, local/relay, fault, cutover, and one-time
+heavy-load evidence. Remove the heavy workload harness from recurring collection
+after recording the dated report. Approved mechanisms: `M4`, `M8`, `M12`, `M13`,
+`M14`.
 
 ### 4/4 Final validation, Specs, and cleanup
 
-Run the complete real-Runtime E2E and bounded performance matrix, correct
-implementation defects, audit M1 through M15 in both directions, update Living Specs,
-record validation evidence, set matching implemented dates only after success, and
-remove all implementation and phase plans. Approved mechanisms: `M10`, `M12`, `M13`,
-`M14`, `M15`.
+Run the complete lightweight real-Runtime E2E matrix, consume the recorded Phase 3
+one-time heavy-load evidence, correct implementation defects, audit M1 through M15
+in both directions, update Living Specs, record validation evidence, set matching
+implemented dates only after success, and remove all implementation and phase
+plans. Approved mechanisms: `M10`, `M12`, `M13`, `M14`, `M15`.
 
 ## Dependencies and Interfaces
 
@@ -77,8 +79,10 @@ remove all implementation and phase plans. Approved mechanisms: `M10`, `M12`, `M
 
 Every phase runs focused Python format, lint, type, and tests for changed subprojects
 plus generated-surface validation. Phase 3 and 4 run repository absence searches.
-Phase 4 runs approved real-Runtime E2E and scheduled/release performance evidence
-where the dedicated prerequisite is available.
+Phase 3 records one disposable heavy-load run and removes its workload-only harness
+from recurring test collection. Phase 4 runs the approved lightweight real-Runtime
+E2E matrix and reuses the dated heavy-load report unless a later feature, release, or
+incident explicitly requires fresh load evidence.
 
 ## Removal Obligations
 

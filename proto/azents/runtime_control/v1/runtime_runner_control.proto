@@ -6,7 +6,6 @@ import "google/protobuf/timestamp.proto";
 import "runtime_configuration.proto";
 import "runtime_runner_terminal.proto";
 import "runtime_runner_transfer.proto";
-import "runtime_web_transport.proto";
 
 // Runtime-internal Runners open this outbound stream to Runtime Control.
 service RuntimeRunnerControl {
@@ -32,6 +31,8 @@ message RunnerMessage {
 
 message RunnerControlMessage {
   string request_id = 1;
+  reserved 27, 28;
+  reserved "web_open_intent", "web_cancel_intent";
 
   oneof payload {
     RunnerRegisterAccepted register_accepted = 10;
@@ -43,8 +44,7 @@ message RunnerControlMessage {
     RunnerTransferCancel transfer_cancel = 24;
     RunnerTerminalOpenIntent terminal_open_intent = 25;
     RunnerTerminalTerminateIntent terminal_terminate_intent = 26;
-    RunnerWebOpenIntent web_open_intent = 27;
-    RunnerWebCancelIntent web_cancel_intent = 28;
+    RunnerSessionOffer web_session_offer = 29;
     RunnerError error = 40;
   }
 }
@@ -158,6 +158,21 @@ message RunnerTerminalOpenIntent {
 message RunnerTerminalTerminateIntent {
   TerminalIdentity identity = 1;
   TerminalTerminationReason reason = 2;
+}
+
+message RunnerSessionOffer {
+  string runtime_id = 1;
+  uint64 desired_generation = 2;
+  uint64 runner_generation = 3;
+  string owner_replica_id = 4;
+  string owner_boot_id = 5;
+  string session_lease_id = 6;
+  uint64 lease_generation = 7;
+  string connect_address = 8;
+  string tls_server_name = 9;
+  string join_nonce = 10;
+  string protocol_fingerprint = 11;
+  google.protobuf.Timestamp registration_deadline_at = 12;
 }
 
 message RunnerTransferResult {

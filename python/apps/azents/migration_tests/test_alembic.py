@@ -3,10 +3,13 @@
 import datetime
 import hashlib
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.exc as sa_exc
+from alembic import command as alembic_command
 from pytest_alembic import tests
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
@@ -14,7 +17,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "5f007c6234c4c8ebfb3ba1613fc77c31dbb528823ec9c7b74053cef90bb5683d"
+    "8be003f836a50d4b70e60dc8e79e285c95f7579ba9ad530bfd995371287fe52a"
 )
 
 
@@ -183,6 +186,159 @@ def test_single_head_revision(alembic_runner: MigrationContext) -> None:
 def test_upgrade(alembic_runner: MigrationContext) -> None:
     """Require a complete base-to-head upgrade."""
     tests.test_upgrade(alembic_runner)
+
+
+@pytest.mark.parametrize(
+    "legacy_table",
+    (
+        "runtime_web_tunnel_routes",
+        "runtime_web_admission_leases",
+        "runtime_web_gateway_admission_leases",
+    ),
+)
+def test_runtime_web_cutover_requires_drained_legacy_rows(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+    legacy_table: str,
+) -> None:
+    """Reject destructive cutover while a legacy transport lease is active."""
+    alembic_runner.migrate_up_to("eebc06bf6bf0")
+    with alembic_engine.begin() as connection:
+        _insert_active_legacy_runtime_web_row(connection, legacy_table)
+
+    with pytest.raises(
+        sa_exc.DBAPIError,
+        match="Runtime Web maintenance preflight found active legacy work",
+    ):
+        alembic_runner.migrate_up_to("097a97177350")
+
+    with alembic_engine.begin() as connection:
+        connection.execute(sa.text(f"DELETE FROM {legacy_table}"))
+    alembic_runner.migrate_up_to("097a97177350")
+
+    inspector = sa.inspect(alembic_engine)
+    assert {
+        "runtime_web_tunnel_routes",
+        "runtime_web_admission_leases",
+        "runtime_web_gateway_admission_leases",
+    }.isdisjoint(inspector.get_table_names())
+
+
+def test_runtime_web_cutover_serializes_against_legacy_writers(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Observe a concurrent legacy write before the locked preflight check."""
+    alembic_runner.migrate_up_to("eebc06bf6bf0")
+    config = alembic_runner.command_executor.alembic_config
+    with alembic_engine.connect() as writer:
+        transaction = writer.begin()
+        writer.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        writer.execute(
+            sa.text(
+                "LOCK TABLE runtime_web_gateway_admission_leases IN ROW EXCLUSIVE MODE"
+            )
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            migration = executor.submit(
+                alembic_command.upgrade,
+                config,
+                "097a97177350",
+            )
+            _wait_for_runtime_web_cutover_lock(alembic_engine)
+            _insert_active_legacy_runtime_web_row(
+                writer,
+                "runtime_web_gateway_admission_leases",
+                set_replication_role=False,
+            )
+            transaction.commit()
+            with pytest.raises(
+                sa_exc.DBAPIError,
+                match="Runtime Web maintenance preflight found active legacy work",
+            ):
+                migration.result(timeout=5)
+
+    with alembic_engine.begin() as connection:
+        connection.execute(sa.text("DELETE FROM runtime_web_gateway_admission_leases"))
+    alembic_runner.migrate_up_to("097a97177350")
+
+
+def _wait_for_runtime_web_cutover_lock(engine: Engine) -> None:
+    """Wait for the migration's authoritative PostgreSQL lock request."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with engine.connect() as connection:
+            waiting = connection.scalar(
+                sa.text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks
+                        WHERE relation = (
+                            'runtime_web_gateway_admission_leases'::regclass
+                        )
+                          AND mode = 'AccessExclusiveLock'
+                          AND NOT granted
+                    )
+                    """
+                )
+            )
+        if waiting:
+            return
+        time.sleep(0.01)
+    raise AssertionError("Runtime Web cutover did not request its table lock")
+
+
+def _insert_active_legacy_runtime_web_row(
+    connection: sa.Connection,
+    table: str,
+    *,
+    set_replication_role: bool = True,
+) -> None:
+    """Insert one active row into an exact legacy transport table."""
+    if set_replication_role:
+        connection.execute(sa.text("SET LOCAL session_replication_role = replica"))
+    statements = {
+        "runtime_web_tunnel_routes": """
+            INSERT INTO runtime_web_tunnel_routes (
+                tunnel_id, endpoint_id, cycle_id, endpoint_authority_revision,
+                close_barrier, runtime_id, desired_generation, runner_generation,
+                port, join_nonce, owner_replica_id, owner_boot_id, owner_address,
+                route_lease_id, lease_generation, registration_deadline_at,
+                approval_deadline_at, transport_deadline_at, lease_expires_at
+            )
+            VALUES (
+                'active-legacy-tunnel', 'missing-endpoint', 'missing-cycle', 1,
+                1, 'missing-runtime', 1, 1, 8080, 'active-legacy-nonce',
+                'control-1', 'owner-boot-1', 'control-1:8032',
+                'active-route-lease', 1, now() + interval '10 seconds',
+                now() + interval '1 hour', now() + interval '1 hour',
+                now() + interval '1 minute'
+            )
+        """,
+        "runtime_web_admission_leases": """
+            INSERT INTO runtime_web_admission_leases (
+                id, tunnel_id, owner_boot_id, lease_generation,
+                lease_expires_at, reserved_bytes
+            )
+            VALUES (
+                'active-legacy-admission', 'active-legacy-tunnel',
+                'owner-boot-1', 1, now() + interval '1 minute', 0
+            )
+        """,
+        "runtime_web_gateway_admission_leases": """
+            INSERT INTO runtime_web_gateway_admission_leases (
+                id, tunnel_id, endpoint_id, user_id, agent_id, websocket,
+                lease_expires_at
+            )
+            VALUES (
+                'active-legacy-gateway', 'active-legacy-tunnel',
+                'missing-endpoint', 'missing-user', 'missing-agent', FALSE,
+                now() + interval '1 minute'
+            )
+        """,
+    }
+    connection.execute(sa.text(statements[table]))
 
 
 def test_runtime_web_epoch_removal_discards_stale_auth_authority(
@@ -650,7 +806,7 @@ def test_session_model_settings_candidate_data_migration(
             },
         )
 
-    alembic_runner.migrate_up_to("head")
+    alembic_runner.migrate_up_to("9fa04ea90acb")
     with alembic_engine.connect() as connection:
         migrated = connection.execute(
             sa.text(
@@ -934,6 +1090,13 @@ def test_global_link_migration_consolidates_and_rejects_ambiguous_owners(
     ]
 
 
-def test_up_down_consistency(alembic_runner: MigrationContext) -> None:
-    """Require the baseline to downgrade and upgrade consistently."""
-    tests.test_up_down_consistency(alembic_runner)
+def test_runtime_web_cutover_is_forward_only(
+    alembic_runner: MigrationContext,
+) -> None:
+    """Reject schema restoration after the destructive Runtime Web cutover."""
+    alembic_runner.migrate_up_to("097a97177350")
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime Web clean cutover is irreversible and forward-only",
+    ):
+        alembic_runner.migrate_down_to("eebc06bf6bf0")

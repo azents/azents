@@ -92,11 +92,3 @@ class RuntimeWebGatewayAuthority(BaseModel):
     runner_generation: int | None
     active: bool
     runtime_ready: bool
-
-
-class RuntimeWebAdmissionLimits(BaseModel):
-    """Shared connection limits for one transport kind."""
-
-    endpoint: int = Field(ge=1)
-    user: int = Field(ge=1)
-    agent: int = Field(ge=1)

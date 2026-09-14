@@ -330,6 +330,16 @@ class _ObjectStore:
         self.uploads.pop(key, None)
 
 
+class _NoWebSessionOfferProvider:
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> None:
+        del runtime_id, runner_generation
+
+
 class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
     def __init__(
         self,
@@ -351,6 +361,7 @@ class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
             transfer_result_sink=_TransferResultSink(),
+            web_session_offer_provider=_NoWebSessionOfferProvider(),
             operation_block_ms=operation_block_ms,
         )
         self.peers: list[str] = []

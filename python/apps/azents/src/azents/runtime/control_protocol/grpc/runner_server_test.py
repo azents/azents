@@ -24,6 +24,7 @@ from azents_runtime_control.runner_transfer import RunnerTransferResult
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
+from azents_runtime_control.runtime_web_session import RunnerSessionOffer
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_CAPABILITY,
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
@@ -150,6 +151,17 @@ class FakeStateSink:
         return self.heartbeat_configuration
 
 
+class _NoWebOfferProvider:
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RunnerSessionOffer | None:
+        del runtime_id, runner_generation
+        return None
+
+
 @dataclasses.dataclass
 class RecordingTransferResultSink(RuntimeRunnerTransferResultSink):
     """Record structurally valid transfer results delegated by the bridge."""
@@ -270,6 +282,7 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=sink,
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
 
     await servicer._append_transfer_result(  # Test the bounded bridge path directly.
@@ -319,6 +332,7 @@ async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() 
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=sink,
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
     message = _transfer_result_message(committed=True)
     message.transfer_result.operation_id = "o" * 129
@@ -693,6 +707,7 @@ async def test_runner_grpc_isolates_metrics_store_failure_from_heartbeat() -> No
         consumer_id="runner-consumer-a",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
         operation_block_ms=1,
     )
     inbound = QueueIterator()
@@ -1204,6 +1219,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         operation_block_ms=1,
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
     outbound: asyncio.Queue[
         runtime_runner_control_pb2.RunnerControlMessage | _RunnerOutboundItem
@@ -1248,6 +1264,7 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
 
     await servicer._relay_runner_operations(  # Verify auth precedes durable claim.
@@ -1287,6 +1304,7 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
     task = asyncio.create_task(
         servicer._relay_runner_operations(
@@ -1324,6 +1342,7 @@ async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> 
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
 
     with pytest.raises(RuntimeError, match="Conflicting duplicate"):
@@ -1396,6 +1415,7 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=sink,
+        web_session_offer_provider=_NoWebOfferProvider(),
     )
     envelope = _transfer_envelope()
     intent = _runner_transfer_intent(envelope)
@@ -2248,6 +2268,7 @@ def _servicer(
         consumer_id="runner-consumer-a",
         runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
+        web_session_offer_provider=_NoWebOfferProvider(),
         operation_block_ms=1,
     )
 

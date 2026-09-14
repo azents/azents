@@ -26,7 +26,6 @@ _CONFIG = RuntimeWebGatewayConfig(
     identity_lifetime_seconds=1_800,
     request_header_bytes=32 * 1024,
     request_body_bytes=64 * 1024 * 1024,
-    frame_bytes=64 * 1024,
     permissions_policy="camera=()",
 )
 

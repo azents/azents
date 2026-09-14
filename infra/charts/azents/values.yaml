@@ -76,6 +76,8 @@ server:
     enabled: false
     endpoint: ""
     replicas: 2
+    metricsPort: 8033
+    terminationGracePeriodSeconds: 150
     reconcileIntervalSeconds: 15
     lifecycleRetryDelaySeconds: 15
     startTimeoutSeconds: 300
@@ -106,9 +108,22 @@ server:
       enabled: false
       trustedPort: 8032
       routeLeaseSeconds: 10
-      maxActiveConnections: 128
+      runnerTlsServerName: runtime-control
       gatewayPeerIdentities: ""
       controlPeerIdentities: ""
+    webCapacity:
+      backend: memory
+      maximumActiveStreams: 64
+      maximumSseStreams: 8
+      maximumWebsocketStreams: 8
+      maximumPendingOpens: 64
+      maximumBufferBytes: 67108864
+      inboundBytesPerSecond: 1073741824
+      outboundBytesPerSecond: 1073741824
+      burstBytes: 67108864
+      redisNamespace: azents:runtime:web:capacity
+      redisTtlSeconds: 30
+      maximumRelaySessions: 32
     runnerImage:
       repository: ""
       tag: ""
@@ -145,17 +160,7 @@ server:
     activeDurationSeconds: 3600
     request:
       headerBytes: 32768
-      bodyBytes: 67108864
-      frameBytes: 65536
-    connectionLimits:
-      http:
-        endpoint: 32
-        user: 64
-        agent: 128
-      websocket:
-        endpoint: 4
-        user: 8
-        agent: 16
+      bodyBytes: 1073741824
     permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     controlTls:
       existingSecret: ""

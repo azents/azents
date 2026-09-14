@@ -88,3 +88,16 @@ def test_insecure_control_is_local_only() -> None:
             runtime_web_gateway_control_tls_certificate_file=None,
             runtime_web_gateway_control_tls_private_key_file=None,
         )
+
+
+def test_legacy_transport_limits_are_not_configurable() -> None:
+    """Keep fixed frame sizing and Runtime-scoped capacity authoritative."""
+    assert {
+        "runtime_web_gateway_frame_bytes",
+        "runtime_web_gateway_http_endpoint_connections",
+        "runtime_web_gateway_http_user_connections",
+        "runtime_web_gateway_http_agent_connections",
+        "runtime_web_gateway_websocket_endpoint_connections",
+        "runtime_web_gateway_websocket_user_connections",
+        "runtime_web_gateway_websocket_agent_connections",
+    }.isdisjoint(RuntimeWebGatewaySettings.model_fields)

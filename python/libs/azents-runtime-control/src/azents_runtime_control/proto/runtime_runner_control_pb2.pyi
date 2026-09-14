@@ -14,7 +14,6 @@ import builtins as _builtins
 from . import runtime_configuration_pb2 as _runtime_configuration_pb2
 from . import runtime_runner_terminal_pb2 as _runtime_runner_terminal_pb2
 from . import runtime_runner_transfer_pb2 as _runtime_runner_transfer_pb2
-from . import runtime_web_transport_pb2 as _runtime_web_transport_pb2
 import sys
 import typing as _typing
 
@@ -306,8 +305,7 @@ class RunnerControlMessage(_message.Message):
     TRANSFER_CANCEL_FIELD_NUMBER: _builtins.int
     TERMINAL_OPEN_INTENT_FIELD_NUMBER: _builtins.int
     TERMINAL_TERMINATE_INTENT_FIELD_NUMBER: _builtins.int
-    WEB_OPEN_INTENT_FIELD_NUMBER: _builtins.int
-    WEB_CANCEL_INTENT_FIELD_NUMBER: _builtins.int
+    WEB_SESSION_OFFER_FIELD_NUMBER: _builtins.int
     ERROR_FIELD_NUMBER: _builtins.int
     request_id: _builtins.str
     @_builtins.property
@@ -329,9 +327,7 @@ class RunnerControlMessage(_message.Message):
     @_builtins.property
     def terminal_terminate_intent(self) -> Global___RunnerTerminalTerminateIntent: ...
     @_builtins.property
-    def web_open_intent(self) -> _runtime_web_transport_pb2.RunnerWebOpenIntent: ...
-    @_builtins.property
-    def web_cancel_intent(self) -> _runtime_web_transport_pb2.RunnerWebCancelIntent: ...
+    def web_session_offer(self) -> Global___RunnerSessionOffer: ...
     @_builtins.property
     def error(self) -> Global___RunnerError: ...
     def __init__(
@@ -347,9 +343,7 @@ class RunnerControlMessage(_message.Message):
         transfer_cancel: Global___RunnerTransferCancel | None = ...,
         terminal_open_intent: Global___RunnerTerminalOpenIntent | None = ...,
         terminal_terminate_intent: Global___RunnerTerminalTerminateIntent | None = ...,
-        web_open_intent: _runtime_web_transport_pb2.RunnerWebOpenIntent | None = ...,
-        web_cancel_intent: _runtime_web_transport_pb2.RunnerWebCancelIntent
-        | None = ...,
+        web_session_offer: Global___RunnerSessionOffer | None = ...,
         error: Global___RunnerError | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -375,10 +369,8 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
-        "web_cancel_intent",
-        b"web_cancel_intent",
-        "web_open_intent",
-        b"web_open_intent",
+        "web_session_offer",
+        b"web_session_offer",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -406,10 +398,8 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
-        "web_cancel_intent",
-        b"web_cancel_intent",
-        "web_open_intent",
-        b"web_open_intent",
+        "web_session_offer",
+        b"web_session_offer",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_payload: _TypeAlias = _typing.Literal[
@@ -422,8 +412,7 @@ class RunnerControlMessage(_message.Message):
         "transfer_cancel",
         "terminal_open_intent",
         "terminal_terminate_intent",
-        "web_open_intent",
-        "web_cancel_intent",
+        "web_session_offer",
         "error",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
@@ -975,6 +964,86 @@ class RunnerTerminalTerminateIntent(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RunnerTerminalTerminateIntent: _TypeAlias = RunnerTerminalTerminateIntent
+
+@_typing.final
+class RunnerSessionOffer(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    RUNTIME_ID_FIELD_NUMBER: _builtins.int
+    DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
+    RUNNER_GENERATION_FIELD_NUMBER: _builtins.int
+    OWNER_REPLICA_ID_FIELD_NUMBER: _builtins.int
+    OWNER_BOOT_ID_FIELD_NUMBER: _builtins.int
+    SESSION_LEASE_ID_FIELD_NUMBER: _builtins.int
+    LEASE_GENERATION_FIELD_NUMBER: _builtins.int
+    CONNECT_ADDRESS_FIELD_NUMBER: _builtins.int
+    TLS_SERVER_NAME_FIELD_NUMBER: _builtins.int
+    JOIN_NONCE_FIELD_NUMBER: _builtins.int
+    PROTOCOL_FINGERPRINT_FIELD_NUMBER: _builtins.int
+    REGISTRATION_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    runtime_id: _builtins.str
+    desired_generation: _builtins.int
+    runner_generation: _builtins.int
+    owner_replica_id: _builtins.str
+    owner_boot_id: _builtins.str
+    session_lease_id: _builtins.str
+    lease_generation: _builtins.int
+    connect_address: _builtins.str
+    tls_server_name: _builtins.str
+    join_nonce: _builtins.str
+    protocol_fingerprint: _builtins.str
+    @_builtins.property
+    def registration_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        runtime_id: _builtins.str = ...,
+        desired_generation: _builtins.int = ...,
+        runner_generation: _builtins.int = ...,
+        owner_replica_id: _builtins.str = ...,
+        owner_boot_id: _builtins.str = ...,
+        session_lease_id: _builtins.str = ...,
+        lease_generation: _builtins.int = ...,
+        connect_address: _builtins.str = ...,
+        tls_server_name: _builtins.str = ...,
+        join_nonce: _builtins.str = ...,
+        protocol_fingerprint: _builtins.str = ...,
+        registration_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "registration_deadline_at", b"registration_deadline_at"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "connect_address",
+        b"connect_address",
+        "desired_generation",
+        b"desired_generation",
+        "join_nonce",
+        b"join_nonce",
+        "lease_generation",
+        b"lease_generation",
+        "owner_boot_id",
+        b"owner_boot_id",
+        "owner_replica_id",
+        b"owner_replica_id",
+        "protocol_fingerprint",
+        b"protocol_fingerprint",
+        "registration_deadline_at",
+        b"registration_deadline_at",
+        "runner_generation",
+        b"runner_generation",
+        "runtime_id",
+        b"runtime_id",
+        "session_lease_id",
+        b"session_lease_id",
+        "tls_server_name",
+        b"tls_server_name",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerSessionOffer: _TypeAlias = RunnerSessionOffer
 
 @_typing.final
 class RunnerTransferResult(_message.Message):

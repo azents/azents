@@ -91,6 +91,30 @@ RUNTIME_WEB_SESSION_DIRECTION_REQUEST: RuntimeWebSessionDirection.ValueType  # 1
 RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: RuntimeWebSessionDirection.ValueType  # 2
 Global___RuntimeWebSessionDirection: _TypeAlias = RuntimeWebSessionDirection
 
+class _RuntimeWebSessionRoutePath:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RuntimeWebSessionRoutePathEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionRoutePath.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED: (
+        _RuntimeWebSessionRoutePath.ValueType
+    )  # 0
+    RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL: _RuntimeWebSessionRoutePath.ValueType  # 1
+    RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY: _RuntimeWebSessionRoutePath.ValueType  # 2
+
+class RuntimeWebSessionRoutePath(
+    _RuntimeWebSessionRoutePath, metaclass=_RuntimeWebSessionRoutePathEnumTypeWrapper
+): ...
+
+RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED: RuntimeWebSessionRoutePath.ValueType  # 0
+RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL: RuntimeWebSessionRoutePath.ValueType  # 1
+RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY: RuntimeWebSessionRoutePath.ValueType  # 2
+Global___RuntimeWebSessionRoutePath: _TypeAlias = RuntimeWebSessionRoutePath
+
 class _RuntimeWebSessionWebSocketOpcode:
     ValueType = _typing.NewType("ValueType", _builtins.int)
     V: _TypeAlias = ValueType
@@ -973,15 +997,18 @@ class RuntimeWebSessionOpenAccepted(_message.Message):
     DATA_FRAME_BYTES_FIELD_NUMBER: _builtins.int
     REQUEST_CREDIT_BYTES_FIELD_NUMBER: _builtins.int
     RESPONSE_CREDIT_BYTES_FIELD_NUMBER: _builtins.int
+    ROUTE_PATH_FIELD_NUMBER: _builtins.int
     data_frame_bytes: _builtins.int
     request_credit_bytes: _builtins.int
     response_credit_bytes: _builtins.int
+    route_path: Global___RuntimeWebSessionRoutePath.ValueType
     def __init__(
         self,
         *,
         data_frame_bytes: _builtins.int = ...,
         request_credit_bytes: _builtins.int = ...,
         response_credit_bytes: _builtins.int = ...,
+        route_path: Global___RuntimeWebSessionRoutePath.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -992,6 +1019,8 @@ class RuntimeWebSessionOpenAccepted(_message.Message):
         b"request_credit_bytes",
         "response_credit_bytes",
         b"response_credit_bytes",
+        "route_path",
+        b"route_path",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...

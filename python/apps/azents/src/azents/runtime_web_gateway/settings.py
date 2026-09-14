@@ -92,41 +92,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
         ge=64 * 1024,
         le=1024 * 1024 * 1024,
     )
-    runtime_web_gateway_frame_bytes: int = Field(
-        default=64 * 1024,
-        ge=4 * 1024,
-        le=64 * 1024,
-    )
-    runtime_web_gateway_http_endpoint_connections: int = Field(
-        default=32,
-        ge=1,
-        le=128,
-    )
-    runtime_web_gateway_http_user_connections: int = Field(
-        default=64,
-        ge=1,
-        le=256,
-    )
-    runtime_web_gateway_http_agent_connections: int = Field(
-        default=128,
-        ge=1,
-        le=512,
-    )
-    runtime_web_gateway_websocket_endpoint_connections: int = Field(
-        default=4,
-        ge=1,
-        le=16,
-    )
-    runtime_web_gateway_websocket_user_connections: int = Field(
-        default=8,
-        ge=1,
-        le=32,
-    )
-    runtime_web_gateway_websocket_agent_connections: int = Field(
-        default=16,
-        ge=1,
-        le=64,
-    )
     runtime_web_gateway_security_permissions_policy: str = (
         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     )
@@ -259,7 +224,6 @@ class RuntimeWebGatewayConfig(BaseModel):
     identity_lifetime_seconds: int
     request_header_bytes: int
     request_body_bytes: int
-    frame_bytes: int
     permissions_policy: str
 
     @classmethod
@@ -291,7 +255,6 @@ class RuntimeWebGatewayConfig(BaseModel):
             ),
             request_header_bytes=settings.runtime_web_gateway_request_header_bytes,
             request_body_bytes=settings.runtime_web_gateway_request_body_bytes,
-            frame_bytes=settings.runtime_web_gateway_frame_bytes,
             permissions_policy=(
                 settings.runtime_web_gateway_security_permissions_policy
             ),

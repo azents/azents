@@ -1,7 +1,8 @@
-"""Inactive authenticated Runner client for one persistent Runtime Web session."""
+"""Authenticated Runner client for one persistent Runtime Web session."""
 
 import asyncio
 import enum
+import logging
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
 from typing import TYPE_CHECKING, Protocol
@@ -24,6 +25,7 @@ else:
     )
 
 _MAX_PENDING_ENVELOPES = 8
+_LOGGER = logging.getLogger(__name__)
 
 
 class _ClientState(enum.StrEnum):
@@ -111,6 +113,7 @@ class GrpcRunnerWebSessionClient:
         self,
         hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
         handler: "EnvelopeHandler",
+        failure_handler: "FailureHandler",
         *,
         timeout_seconds: float,
     ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
@@ -134,7 +137,7 @@ class GrpcRunnerWebSessionClient:
                 stream_error = error
             else:
                 self.receiver_task = asyncio.create_task(
-                    self._receive(responses, handler)
+                    self._receive(responses, handler, failure_handler)
                 )
         if stream_error is not None:
             await self._shutdown(propagate_receiver_error=False)
@@ -205,15 +208,19 @@ class GrpcRunnerWebSessionClient:
         self,
         responses: AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
         handler: "EnvelopeHandler",
+        failure_handler: "FailureHandler",
     ) -> None:
         first = True
         try:
             async for response in responses:
                 if first:
                     first = False
-                    if response.WhichOneof("payload") != "session_accepted":
+                    if (
+                        response.WhichOneof("payload") != "session_accepted"
+                        or response.stream_id != 0
+                    ):
                         raise RuntimeError(
-                            "Runner Web session accepted frame must be first"
+                            "Runner Web session acceptance must be session-scoped"
                         )
                     if self.accepted is not None and not self.accepted.done():
                         self.accepted.set_result(response)
@@ -224,17 +231,23 @@ class GrpcRunnerWebSessionClient:
                 self.accepted.set_exception(
                     RuntimeError("Runner Web session closed before acceptance")
                 )
+            _LOGGER.warning("Runtime Web Runner session closed by Control")
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            _LOGGER.exception("Runtime Web Runner session receive failed")
             if self.accepted is not None and not self.accepted.done():
                 self.accepted.set_exception(error)
             raise
         finally:
+            failed = False
             async with self.condition:
                 if self.state is _ClientState.ACTIVE:
                     self.state = _ClientState.FAILED
+                    failed = True
                 self.condition.notify_all()
+            if failed:
+                await failure_handler()
 
     async def _shutdown(self, *, propagate_receiver_error: bool) -> None:
         async with self.shutdown_lock:
@@ -280,3 +293,9 @@ class EnvelopeHandler(Protocol):
         envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
         /,
     ) -> Awaitable[None]: ...
+
+
+class FailureHandler(Protocol):
+    """Handle independent persistent-session receiver failure."""
+
+    def __call__(self) -> Awaitable[None]: ...

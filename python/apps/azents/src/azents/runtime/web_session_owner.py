@@ -249,6 +249,7 @@ class RuntimeWebSessionOwnerManager:
             route=route,
             offer=RunnerSessionOffer(
                 owner=owner,
+                owner_replica_id=route.owner_replica_id,
                 connect_address=self.runner_connect_address,
                 tls_server_name=self.runner_tls_server_name,
                 session_nonce=nonce,

@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 from azents_runtime_control.grpc_runner_web_session_client import (
+    EnvelopeHandler,
+    FailureHandler,
     GrpcRunnerWebSessionClient,
 )
 from azents_runtime_control.proto import runtime_web_session_pb2
@@ -19,6 +21,7 @@ from azents_runtime_control.runtime_web_session import (
 
 from azents_runtime_runner.web_session import (
     RunnerWebLoopbackPool,
+    RunnerWebLoopbackProtocolError,
     RunnerWebSessionManager,
     _hello,
 )
@@ -34,6 +37,7 @@ def _offer(*, runner_generation: int = 4) -> RunnerSessionOffer:
             desired_generation=3,
             runner_generation=runner_generation,
         ),
+        owner_replica_id="control-a",
         connect_address="control-a.internal:8030",
         tls_server_name="runtime-control.internal",
         session_nonce="nonce-a",
@@ -60,6 +64,10 @@ def _accepted(
     envelope.session_accepted.request_session_window_bytes = 8 * 1024 * 1024
     envelope.session_accepted.response_session_window_bytes = 8 * 1024 * 1024
     return envelope
+
+
+async def _failure_handler() -> None:
+    pass
 
 
 def test_runner_hello_binds_exact_owner_generation_and_profile() -> None:
@@ -269,7 +277,9 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
             b"HTTP/1.1 101 Switching Protocols\r\n"
             b"Upgrade: websocket\r\n"
             b"Connection: Upgrade\r\n"
-            b"Sec-WebSocket-Accept: " + accept + b"\r\n\r\n"
+            b"Sec-WebSocket-Accept: "
+            + accept
+            + b"\r\nSec-WebSocket-Protocol: Chat.V2\r\n\r\n"
         )
         await writer.drain()
         await reader.read()
@@ -281,10 +291,18 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
         await pool.start()
         websocket = await pool.websocket(
             target=b"/%7euser?x=a%2fb",
-            headers=((b"X-Raw", b"\xff"),),
+            headers=(
+                (b"host", f"localhost:{port}".encode()),
+                (b"sec-websocket-protocol", b"chat.v1, Chat.V2"),
+                (b"X-Raw", b"\xff"),
+            ),
             port=port,
             timeout_seconds=1,
         )
+        assert (
+            b"sec-websocket-protocol",
+            b"Chat.V2",
+        ) in websocket.response_headers
         await websocket.close()
         with pytest.raises(ValueError, match="origin form"):
             await pool.websocket(
@@ -299,7 +317,59 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
         await server.wait_closed()
 
     assert request_head.startswith(b"GET /%7euser?x=a%2fb HTTP/1.1\r\n")
+    assert request_head.lower().count(b"\r\nhost:") == 1
+    assert f"\r\nHost: 127.0.0.1:{port}\r\n".encode() in request_head
+    assert request_head.lower().count(b"\r\nsec-websocket-protocol:") == 1
+    assert b"\r\nSec-WebSocket-Protocol: chat.v1, Chat.V2\r\n" in request_head
     assert b"\r\nX-Raw: \xff\r\n" in request_head
+
+
+async def test_loopback_websocket_rejects_unoffered_selected_subprotocol() -> None:
+    async def handle(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        request_head = await reader.readuntil(b"\r\n\r\n")
+        websocket_key = next(
+            line.split(b":", 1)[1].strip()
+            for line in request_head.split(b"\r\n")
+            if line.lower().startswith(b"sec-websocket-key:")
+        )
+        accept = base64.b64encode(
+            hashlib.sha1(
+                websocket_key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                usedforsecurity=False,
+            ).digest()
+        )
+        writer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\n"
+            b"Connection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: "
+            + accept
+            + b"\r\nSec-WebSocket-Protocol: other\r\n\r\n"
+        )
+        await writer.drain()
+        await reader.read()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    pool = RunnerWebLoopbackPool(maximum_connections=1)
+    try:
+        await pool.start()
+        with pytest.raises(RunnerWebLoopbackProtocolError, match="handshake"):
+            await pool.websocket(
+                target=b"/socket",
+                headers=((b"sec-websocket-protocol", b"chat.v1"),),
+                port=port,
+                timeout_seconds=1,
+            )
+    finally:
+        await pool.close()
+        server.close()
+        await server.wait_closed()
 
 
 async def test_runner_manager_rejects_obsolete_generation_without_connecting() -> None:
@@ -326,7 +396,11 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
     async def handler(envelope: object) -> None:
         del envelope
 
-    await manager.accept_offer(_offer(runner_generation=4), handler)
+    await manager.accept_offer(
+        _offer(runner_generation=4),
+        handler,
+        _failure_handler,
+    )
 
     assert calls == 0
     assert manager.client is None
@@ -414,7 +488,9 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         del envelope
         handled.set()
 
-    accepting = asyncio.create_task(manager.accept_offer(offer, handler))
+    accepting = asyncio.create_task(
+        manager.accept_offer(offer, handler, _failure_handler)
+    )
     await hello_seen.wait()
     generation = 5
     permit_accept.set()
@@ -423,6 +499,70 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         await accepting
     assert manager.client is None
     assert not handled.is_set()
+    await manager.close()
+
+
+async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None:
+    offer = _offer()
+
+    class _StreamScopedClient(GrpcRunnerWebSessionClient):
+        def __init__(self) -> None:
+            self.activated_flag = False
+            self.closed = False
+
+        async def start(
+            self,
+            hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            handler: EnvelopeHandler,
+            failure_handler: FailureHandler,
+            *,
+            timeout_seconds: float,
+        ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+            del hello, handler, failure_handler, timeout_seconds
+            accepted = _accepted(offer)
+            accepted.stream_id = 7
+            return accepted
+
+        def activate(self) -> None:
+            self.activated_flag = True
+
+        async def close(self) -> None:
+            self.closed = True
+
+    client: _StreamScopedClient | None = None
+
+    def client_factory(
+        candidate: RunnerSessionOffer,
+    ) -> GrpcRunnerWebSessionClient:
+        nonlocal client
+        assert candidate == offer
+        client = _StreamScopedClient()
+        return client
+
+    manager = RunnerWebSessionManager(
+        runtime_id="runtime-a",
+        runner_boot_id="runner-boot-a",
+        accepted_desired_generation=lambda: 3,
+        accepted_generation=lambda: 4,
+        runner_auth_token="runner-token",
+        tls=None,
+        allow_insecure=True,
+        loopback=RunnerWebLoopbackPool(maximum_connections=8),
+        client_factory=client_factory,
+    )
+
+    async def handler(
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> None:
+        del envelope
+
+    with pytest.raises(ValueError, match="authority changed"):
+        await manager.accept_offer(offer, handler, _failure_handler)
+    assert manager.client is None
+    assert manager.offer is None
+    assert client is not None
+    assert not client.activated_flag
+    assert client.closed
     await manager.close()
 
 
@@ -469,9 +609,9 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
     ) -> None:
         del envelope
 
-    await manager.accept_offer(offer, handler)
+    await manager.accept_offer(offer, handler, _failure_handler)
     accepted_client = manager.client
-    await manager.accept_offer(offer, handler)
+    await manager.accept_offer(offer, handler, _failure_handler)
 
     assert clients == 1
     assert manager.client is accepted_client
@@ -540,6 +680,6 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
         del envelope
 
     with pytest.raises(ValueError):
-        await manager.accept_offer(offer, handler)
+        await manager.accept_offer(offer, handler, _failure_handler)
     assert manager.client is None
     await manager.close()

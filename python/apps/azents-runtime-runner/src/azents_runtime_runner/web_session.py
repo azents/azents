@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 
+import h11
 import httpcore
 from azents_runtime_control.grpc_runner_web_session_client import (
     GrpcRunnerWebSessionClient,
@@ -30,16 +31,24 @@ from wsproto.events import (
     Request,
     TextMessage,
 )
+from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
+from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
 _WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
     {
         b"connection",
+        b"host",
         b"upgrade",
         b"sec-websocket-accept",
         b"sec-websocket-extensions",
         b"sec-websocket-key",
+        b"sec-websocket-protocol",
         b"sec-websocket-version",
     }
+)
+_WEBSOCKET_SUBPROTOCOL_HEADER = b"sec-websocket-protocol"
+_TOKEN_BYTES = frozenset(
+    b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
 
@@ -52,6 +61,10 @@ class LoopbackHttpResponse:
     body: AsyncIterator[bytes]
 
 
+class RunnerWebLoopbackProtocolError(ValueError):
+    """Bound a local WebSocket protocol failure without exposing wire details."""
+
+
 class RunnerWebSocket:
     """One raw-byte-handshaken loopback WebSocket connection."""
 
@@ -61,11 +74,13 @@ class RunnerWebSocket:
         connection: WSConnection,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
+        response_headers: tuple[tuple[bytes, bytes], ...],
         on_close: Callable[["RunnerWebSocket"], None],
     ) -> None:
         self.connection = connection
         self.reader = reader
         self.writer = writer
+        self.response_headers = response_headers
         self.on_close = on_close
         self.closed = False
         self.message_bytes = 0
@@ -233,6 +248,7 @@ class RunnerWebLoopbackPool:
             for name, value in headers
             if name.lower() not in _WEBSOCKET_HANDSHAKE_HEADERS
         ]
+        subprotocols = _websocket_subprotocols(headers)
         writer: asyncio.StreamWriter | None = None
         try:
             async with asyncio.timeout(timeout_seconds):
@@ -244,7 +260,7 @@ class RunnerWebLoopbackPool:
                             host=f"127.0.0.1:{port}",
                             target=target_text,
                             extensions=[],
-                            subprotocols=[],
+                            subprotocols=subprotocols,
                             extra_headers=normalized_headers,
                         )
                     )
@@ -259,10 +275,24 @@ class RunnerWebLoopbackPool:
                     connection.receive_data(data)
                     for event in connection.events():
                         if isinstance(event, AcceptConnection):
+                            response_headers = tuple(event.extra_headers)
+                            if event.subprotocol is not None:
+                                if event.subprotocol not in subprotocols:
+                                    raise RunnerWebLoopbackProtocolError(
+                                        "Runner WebSocket selected protocol is invalid"
+                                    )
+                                response_headers = (
+                                    *response_headers,
+                                    (
+                                        _WEBSOCKET_SUBPROTOCOL_HEADER,
+                                        event.subprotocol.encode("ascii"),
+                                    ),
+                                )
                             websocket = RunnerWebSocket(
                                 connection=connection,
                                 reader=reader,
                                 writer=writer,
+                                response_headers=response_headers,
                                 on_close=self.websockets.discard,
                             )
                             async with self.lock:
@@ -284,11 +314,47 @@ class RunnerWebLoopbackPool:
                 writer.close()
                 await writer.wait_closed()
             raise
+        except (
+            h11.LocalProtocolError,
+            WsprotoLocalProtocolError,
+            WsprotoRemoteProtocolError,
+        ):
+            if writer is not None:
+                writer.close()
+                await writer.wait_closed()
+            raise RunnerWebLoopbackProtocolError(
+                "Runner WebSocket handshake is invalid"
+            ) from None
         except Exception:
             if writer is not None:
                 writer.close()
                 await writer.wait_closed()
             raise
+
+
+def _websocket_subprotocols(
+    headers: tuple[tuple[bytes, bytes], ...],
+) -> list[str]:
+    """Parse ordered WebSocket subprotocol tokens from normalized headers."""
+    protocols: list[str] = []
+    seen: set[str] = set()
+    for name, value in headers:
+        if name.lower() != _WEBSOCKET_SUBPROTOCOL_HEADER:
+            continue
+        for raw_token in value.split(b","):
+            token = raw_token.strip(b" \t")
+            if not token or any(byte not in _TOKEN_BYTES for byte in token):
+                raise RunnerWebLoopbackProtocolError(
+                    "Runner WebSocket subprotocol token is invalid"
+                )
+            protocol = token.decode("ascii")
+            if protocol in seen:
+                raise RunnerWebLoopbackProtocolError(
+                    "Runner WebSocket subprotocol is duplicated"
+                )
+            seen.add(protocol)
+            protocols.append(protocol)
+    return protocols
 
 
 class RunnerWebSessionManager:
@@ -331,20 +397,21 @@ class RunnerWebSessionManager:
         handler: Callable[
             [runtime_web_session_pb2.RuntimeWebSessionEnvelope], Awaitable[None]
         ],
-    ) -> None:
+        failure_handler: Callable[[], Awaitable[None]],
+    ) -> bool:
         """Replace only with an exact current-generation non-expired offer."""
-        if not self._offer_is_current(offer):
-            return
+        if not self.offer_is_current(offer):
+            return False
         async with self.lock:
-            if not self._offer_is_current(offer):
-                return
+            if not self.offer_is_current(offer):
+                return False
             offer_key = (offer.owner, offer.session_nonce)
             if (
                 offer_key in self.consumed_offer_set
                 or self.offer is not None
                 and self.offer.owner == offer.owner
             ):
-                return
+                return False
             self._remember_consumed(offer_key)
             previous = self.client
             self.client = None
@@ -368,13 +435,20 @@ class RunnerWebSessionManager:
                 if remaining <= 0:
                     raise ValueError("Runner Web session offer expired before connect")
                 hello = _hello(offer, self.runner_boot_id)
+
+                async def client_failed() -> None:
+                    await failure_handler()
+                    await self._detach_failed_client(client)
+
                 accepted = await client.start(
                     hello,
                     handler,
+                    client_failed,
                     timeout_seconds=remaining,
                 )
                 if (
-                    accepted.protocol_fingerprint != offer.protocol_fingerprint
+                    accepted.stream_id != 0
+                    or accepted.protocol_fingerprint != offer.protocol_fingerprint
                     or accepted.session_id != offer.owner.session_lease_id
                     or accepted.peer_boot_id != offer.owner.owner_boot_id
                     or accepted.owner_boot_id != offer.owner.owner_boot_id
@@ -386,19 +460,36 @@ class RunnerWebSessionManager:
                     accepted,
                     maximum_data_frame_bytes=hello.hello.maximum_data_frame_bytes,
                 )
-                if not self._offer_is_current(offer):
+                if not self.offer_is_current(offer):
                     raise ValueError(
                         "Runner Web session generation changed during acceptance"
                     )
+                self.client = client
+                self.offer = offer
                 client.activate()
             except asyncio.CancelledError:
+                self.client = None
+                self.offer = None
                 await client.close()
                 raise
             except Exception:
+                self.client = None
+                self.offer = None
                 await client.close()
                 raise
-            self.client = client
-            self.offer = offer
+            return True
+
+    async def _detach_failed_client(
+        self,
+        client: GrpcRunnerWebSessionClient,
+    ) -> None:
+        """Drop only the exact failed session and its loopback generation."""
+        async with self.lock:
+            if self.client is not client:
+                return
+            self.client = None
+            self.offer = None
+        await self.loopback.close()
 
     async def invalidate_generation(self) -> None:
         """Close session and pooled loopback state before accepting replacement."""
@@ -426,7 +517,8 @@ class RunnerWebSessionManager:
         finally:
             await self.loopback.close()
 
-    def _offer_is_current(self, offer: RunnerSessionOffer) -> bool:
+    def offer_is_current(self, offer: RunnerSessionOffer) -> bool:
+        """Return whether an offer matches current Runtime generation authority."""
         desired_generation = self.accepted_desired_generation()
         generation = self.accepted_generation()
         return (

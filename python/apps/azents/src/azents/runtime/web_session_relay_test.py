@@ -122,6 +122,8 @@ async def test_relay_maps_same_source_stream_id_without_collision() -> None:
     )
 
     assert len(connector.keys) == 1
+    assert first is not None
+    assert second is not None
     assert first.relay_stream_id != second.relay_stream_id
     assert [message.stream_id for message in connection.sent] == [1, 2]
     for message in connection.sent:
@@ -159,6 +161,16 @@ async def test_relay_maps_same_source_stream_id_without_collision() -> None:
                 source_peer_boot_id="gateway-boot-b",
             ),
         )
+    late_credit = _source_envelope(
+        1,
+        source_session_id="gateway-session-b",
+        source_peer_boot_id="gateway-boot-b",
+    )
+    late_credit.ClearField("open")
+    late_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    assert await pool.forward(target=target, envelope=late_credit) is None
     await pool.close()
 
 
@@ -211,6 +223,7 @@ async def test_relay_rejects_fingerprint_and_owner_response_mismatch() -> None:
     with pytest.raises(ValueError, match="fingerprint"):
         await pool.forward(target=target, envelope=incompatible)
     binding = await pool.forward(target=target, envelope=_source_envelope(2))
+    assert binding is not None
     stale = _owner_envelope(_owner(), stream_id=binding.relay_stream_id)
     stale.peer_boot_id = "stale-owner"
     with pytest.raises(ValueError, match="identity"):
@@ -308,3 +321,27 @@ async def test_concrete_grpc_relay_persists_and_pins_owner_peer() -> None:
     await stream.responses.put(response)
     await asyncio.wait_for(delivered.wait(), timeout=1)
     await relay.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_rewrites_owner_local_acceptance_to_relay() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    binding = await pool.forward(target=target, envelope=_source_envelope(1))
+    assert binding is not None
+    response = _owner_envelope(_owner(), stream_id=binding.relay_stream_id)
+    response.open_accepted.route_path = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+    )
+
+    translated = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=response,
+    )
+
+    assert translated is not None
+    assert translated.open_accepted.route_path == (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+    )
+    await pool.close()

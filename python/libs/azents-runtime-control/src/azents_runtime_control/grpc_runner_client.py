@@ -18,7 +18,6 @@ from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
-    runtime_web_transport_pb2,
 )
 from azents_runtime_control.runner import (
     JsonValue,
@@ -56,18 +55,15 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
 )
-from azents_runtime_control.runner_web import (
-    RunnerWebCancelIntent,
-    RunnerWebCancelIntentHandler,
-    RunnerWebCancelReason,
-    RunnerWebIdentity,
-    RunnerWebOpenIntent,
-    RunnerWebOpenIntentHandler,
-)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
     serialize_configuration_sequence,
+)
+from azents_runtime_control.runtime_web_session import (
+    OwnerSessionEpoch,
+    RunnerSessionOffer,
+    RunnerSessionOfferHandler,
 )
 from azents_runtime_control.system_metrics import (
     RunnerSystemMetricAvailability,
@@ -136,8 +132,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._terminal_terminate_intent_handler: (
             RunnerTerminalTerminateIntentHandler | None
         ) = None
-        self._web_open_intent_handler: RunnerWebOpenIntentHandler | None = None
-        self._web_cancel_intent_handler: RunnerWebCancelIntentHandler | None = None
+        self._web_session_offer_handler: RunnerSessionOfferHandler | None = None
         self._pending_heartbeat_acks: dict[
             str, asyncio.Future[RunnerHeartbeatAcknowledgement]
         ] = {}
@@ -211,19 +206,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         """Set the direct metadata-only Terminal termination handler."""
         self._terminal_terminate_intent_handler = handler
 
-    def set_web_open_intent_handler(
+    def set_web_session_offer_handler(
         self,
-        handler: RunnerWebOpenIntentHandler,
+        handler: RunnerSessionOfferHandler,
     ) -> None:
-        """Set the direct metadata-only Runtime Web admission handler."""
-        self._web_open_intent_handler = handler
-
-    def set_web_cancel_intent_handler(
-        self,
-        handler: RunnerWebCancelIntentHandler,
-    ) -> None:
-        """Set the direct metadata-only Runtime Web cancellation handler."""
-        self._web_cancel_intent_handler = handler
+        """Set the exact replacement Runtime Web session offer handler."""
+        self._web_session_offer_handler = handler
 
     async def register_runner(
         self,
@@ -498,22 +486,13 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 )
             )
             return
-        if payload == "web_open_intent":
-            if self._web_open_intent_handler is None:
+        if payload == "web_session_offer":
+            if self._web_session_offer_handler is None:
                 raise RuntimeRunnerControlStreamClosed(
-                    "Runner Web admission handler is not registered"
+                    "Runner Web session offer handler is not registered"
                 )
-            await self._web_open_intent_handler(
-                runner_web_open_intent_from_message(message.web_open_intent)
-            )
-            return
-        if payload == "web_cancel_intent":
-            if self._web_cancel_intent_handler is None:
-                raise RuntimeRunnerControlStreamClosed(
-                    "Runner Web cancellation handler is not registered"
-                )
-            await self._web_cancel_intent_handler(
-                runner_web_cancel_intent_from_message(message.web_cancel_intent)
+            await self._web_session_offer_handler(
+                runner_session_offer_from_message(message.web_session_offer)
             )
             return
         if payload == "error":
@@ -1878,41 +1857,47 @@ def runner_terminal_terminate_intent_to_message(
     )
 
 
-def runner_web_open_intent_from_message(
-    message: runtime_web_transport_pb2.RunnerWebOpenIntent,
-) -> RunnerWebOpenIntent:
-    """Deserialize one bounded Runner Web open intent."""
-    return RunnerWebOpenIntent(
-        identity=runner_web_identity_from_message(message.identity)
+def runner_session_offer_from_message(
+    message: runtime_runner_control_pb2.RunnerSessionOffer,
+) -> RunnerSessionOffer:
+    """Deserialize one exact replacement Runtime Web session offer."""
+    if not message.HasField("registration_deadline_at"):
+        raise ValueError("Runner Web session registration deadline is required")
+    return RunnerSessionOffer(
+        owner=OwnerSessionEpoch(
+            owner_boot_id=message.owner_boot_id,
+            session_lease_id=message.session_lease_id,
+            lease_generation=message.lease_generation,
+            runtime_id=message.runtime_id,
+            desired_generation=message.desired_generation,
+            runner_generation=message.runner_generation,
+        ),
+        owner_replica_id=message.owner_replica_id,
+        connect_address=message.connect_address,
+        tls_server_name=message.tls_server_name,
+        session_nonce=message.join_nonce,
+        protocol_fingerprint=message.protocol_fingerprint,
+        deadline_at=_datetime(message.registration_deadline_at),
     )
 
 
-def runner_web_open_intent_to_message(
-    intent: RunnerWebOpenIntent,
-) -> runtime_web_transport_pb2.RunnerWebOpenIntent:
-    """Serialize one bounded Runner Web open intent."""
-    return runtime_web_transport_pb2.RunnerWebOpenIntent(
-        identity=runner_web_identity_to_message(intent.identity)
-    )
-
-
-def runner_web_cancel_intent_from_message(
-    message: runtime_web_transport_pb2.RunnerWebCancelIntent,
-) -> RunnerWebCancelIntent:
-    """Deserialize one bounded Runner Web cancellation intent."""
-    return RunnerWebCancelIntent(
-        identity=runner_web_identity_from_message(message.identity),
-        reason=_runner_web_cancel_reason_from_message(message.reason),
-    )
-
-
-def runner_web_cancel_intent_to_message(
-    intent: RunnerWebCancelIntent,
-) -> runtime_web_transport_pb2.RunnerWebCancelIntent:
-    """Serialize one bounded Runner Web cancellation intent."""
-    return runtime_web_transport_pb2.RunnerWebCancelIntent(
-        identity=runner_web_identity_to_message(intent.identity),
-        reason=_runner_web_cancel_reason_to_message(intent.reason),
+def runner_session_offer_to_message(
+    offer: RunnerSessionOffer,
+) -> runtime_runner_control_pb2.RunnerSessionOffer:
+    """Serialize one exact replacement Runtime Web session offer."""
+    return runtime_runner_control_pb2.RunnerSessionOffer(
+        runtime_id=offer.owner.runtime_id,
+        desired_generation=offer.owner.desired_generation,
+        runner_generation=offer.owner.runner_generation,
+        owner_replica_id=offer.owner_replica_id,
+        owner_boot_id=offer.owner.owner_boot_id,
+        session_lease_id=offer.owner.session_lease_id,
+        lease_generation=offer.owner.lease_generation,
+        connect_address=offer.connect_address,
+        tls_server_name=offer.tls_server_name,
+        join_nonce=offer.session_nonce,
+        protocol_fingerprint=offer.protocol_fingerprint,
+        registration_deadline_at=_timestamp(offer.deadline_at),
     )
 
 
@@ -2049,108 +2034,6 @@ def _terminal_identity_to_message(
         runtime_id=identity.runtime_id,
         runner_generation=identity.runner_generation,
     )
-
-
-def runner_web_identity_from_message(
-    message: runtime_web_transport_pb2.RuntimeWebTunnelIdentity,
-) -> RunnerWebIdentity:
-    if (
-        not message.HasField("registration_deadline_at")
-        or not message.HasField("approval_deadline_at")
-        or not message.HasField("transport_deadline_at")
-    ):
-        raise ValueError("Runner Web identity deadlines are required")
-    return RunnerWebIdentity(
-        tunnel_id=message.tunnel_id,
-        endpoint_id=message.endpoint_id,
-        cycle_id=message.cycle_id,
-        endpoint_authority_revision=message.endpoint_authority_revision,
-        close_barrier=message.close_barrier,
-        runtime_id=message.runtime_id,
-        desired_generation=message.desired_generation,
-        runner_generation=message.runner_generation,
-        port=message.port,
-        join_nonce=message.join_nonce,
-        registration_deadline_at=_datetime(message.registration_deadline_at),
-        approval_deadline_at=_datetime(message.approval_deadline_at),
-        transport_deadline_at=_datetime(message.transport_deadline_at),
-    )
-
-
-def runner_web_identity_to_message(
-    identity: RunnerWebIdentity,
-) -> runtime_web_transport_pb2.RuntimeWebTunnelIdentity:
-    return runtime_web_transport_pb2.RuntimeWebTunnelIdentity(
-        tunnel_id=identity.tunnel_id,
-        endpoint_id=identity.endpoint_id,
-        cycle_id=identity.cycle_id,
-        endpoint_authority_revision=identity.endpoint_authority_revision,
-        close_barrier=identity.close_barrier,
-        runtime_id=identity.runtime_id,
-        desired_generation=identity.desired_generation,
-        runner_generation=identity.runner_generation,
-        port=identity.port,
-        join_nonce=identity.join_nonce,
-        registration_deadline_at=_timestamp(identity.registration_deadline_at),
-        approval_deadline_at=_timestamp(identity.approval_deadline_at),
-        transport_deadline_at=_timestamp(identity.transport_deadline_at),
-    )
-
-
-def _runner_web_cancel_reason_from_message(
-    value: runtime_web_transport_pb2.RuntimeWebCancelReason.ValueType,
-) -> RunnerWebCancelReason:
-    return {
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_CALLER: (
-            RunnerWebCancelReason.CALLER
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_APPROVAL_EXPIRED: (
-            RunnerWebCancelReason.APPROVAL_EXPIRED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_AUTHORITY_REVOKED: (
-            RunnerWebCancelReason.AUTHORITY_REVOKED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_RUNTIME_REPLACED: (
-            RunnerWebCancelReason.RUNTIME_REPLACED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_DEADLINE: (
-            RunnerWebCancelReason.DEADLINE
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_SHUTDOWN: (
-            RunnerWebCancelReason.SHUTDOWN
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_PROTOCOL_VIOLATION: (
-            RunnerWebCancelReason.PROTOCOL_VIOLATION
-        ),
-    }[value]
-
-
-def _runner_web_cancel_reason_to_message(
-    reason: RunnerWebCancelReason,
-) -> runtime_web_transport_pb2.RuntimeWebCancelReason.ValueType:
-    return {
-        RunnerWebCancelReason.CALLER: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_CALLER
-        ),
-        RunnerWebCancelReason.APPROVAL_EXPIRED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_APPROVAL_EXPIRED
-        ),
-        RunnerWebCancelReason.AUTHORITY_REVOKED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_AUTHORITY_REVOKED
-        ),
-        RunnerWebCancelReason.RUNTIME_REPLACED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_RUNTIME_REPLACED
-        ),
-        RunnerWebCancelReason.DEADLINE: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_DEADLINE
-        ),
-        RunnerWebCancelReason.SHUTDOWN: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_SHUTDOWN
-        ),
-        RunnerWebCancelReason.PROTOCOL_VIOLATION: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_PROTOCOL_VIOLATION
-        ),
-    }[reason]
 
 
 def _terminal_termination_reason_from_message(
@@ -2295,12 +2178,8 @@ __all__ = [
     "runner_terminal_open_intent_to_message",
     "runner_terminal_terminate_intent_from_message",
     "runner_terminal_terminate_intent_to_message",
-    "runner_web_identity_from_message",
-    "runner_web_identity_to_message",
-    "runner_web_cancel_intent_from_message",
-    "runner_web_cancel_intent_to_message",
-    "runner_web_open_intent_from_message",
-    "runner_web_open_intent_to_message",
+    "runner_session_offer_from_message",
+    "runner_session_offer_to_message",
     "runner_transfer_cancel_from_message",
     "runner_transfer_intent_from_message",
     "runner_transfer_result_from_message",

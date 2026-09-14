@@ -25,6 +25,10 @@ def _envelope(payload: str) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope
     return envelope
 
 
+async def _failure_handler() -> None:
+    pass
+
+
 def test_activation_gate_is_synchronous() -> None:
     assert not inspect.iscoroutinefunction(GrpcRunnerWebSessionClient.activate)
 
@@ -33,6 +37,7 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
     observed_requests: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
     observed_metadata: object = None
     handled: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+    failed = asyncio.Event()
 
     async def stream(
         requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
@@ -50,6 +55,9 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
     ) -> None:
         handled.append(envelope)
 
+    async def failure_handler() -> None:
+        failed.set()
+
     client = GrpcRunnerWebSessionClient(
         stream,
         runner_auth_token="token-a",
@@ -57,7 +65,7 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
     )
     hello = _envelope("heartbeat")
 
-    accepted = await client.start(hello, handler, timeout_seconds=1)
+    accepted = await client.start(hello, handler, failure_handler, timeout_seconds=1)
     assert accepted.WhichOneof("payload") == "session_accepted"
     assert client.receiver_task is not None
     client.activate()
@@ -65,6 +73,7 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
     assert observed_requests == [hello]
     assert observed_metadata == (("authorization", "Bearer token-a"),)
     assert [item.WhichOneof("payload") for item in handled] == ["heartbeat"]
+    assert failed.is_set()
 
 
 async def test_client_rejects_non_acceptance_first_frame() -> None:
@@ -88,8 +97,43 @@ async def test_client_rejects_non_acceptance_first_frame() -> None:
         channel=None,
     )
 
-    with pytest.raises(RuntimeError, match="accepted frame must be first"):
-        await client.start(_envelope("heartbeat"), handler, timeout_seconds=1)
+    with pytest.raises(RuntimeError, match="session-scoped"):
+        await client.start(
+            _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=1
+        )
+
+
+async def test_client_rejects_stream_scoped_session_acceptance() -> None:
+    accepted = _envelope("accepted")
+    accepted.stream_id = 7
+
+    async def stream(
+        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        *,
+        metadata: object = None,
+    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+        del metadata
+        await anext(requests)
+        yield accepted
+
+    async def handler(
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> None:
+        del envelope
+
+    client = GrpcRunnerWebSessionClient(
+        stream,
+        runner_auth_token="token-a",
+        channel=None,
+    )
+
+    with pytest.raises(RuntimeError, match="session-scoped"):
+        await client.start(
+            _envelope("heartbeat"),
+            handler,
+            _failure_handler,
+            timeout_seconds=1,
+        )
 
 
 async def test_close_fails_sender_blocked_on_full_queue() -> None:
@@ -115,7 +159,9 @@ async def test_close_fails_sender_blocked_on_full_queue() -> None:
         runner_auth_token="token-a",
         channel=None,
     )
-    await client.start(_envelope("heartbeat"), handler, timeout_seconds=1)
+    await client.start(
+        _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=1
+    )
     client.activate()
     for _ in range(8):
         await client.send(_envelope("heartbeat"))
@@ -157,7 +203,9 @@ async def test_close_cleans_up_before_propagating_handler_failure() -> None:
         runner_auth_token="token-a",
         channel=None,
     )
-    await client.start(_envelope("heartbeat"), handler, timeout_seconds=1)
+    await client.start(
+        _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=1
+    )
     client.activate()
     await handled.wait()
 
@@ -189,7 +237,9 @@ async def test_start_failure_cleans_up_without_receiver_task() -> None:
     )
 
     with pytest.raises(RuntimeError, match="stream failed"):
-        await client.start(_envelope("heartbeat"), handler, timeout_seconds=1)
+        await client.start(
+            _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=1
+        )
     assert client.receiver_task is None
     assert not client.outbound
 
@@ -218,6 +268,8 @@ async def test_start_timeout_cancels_and_retrieves_receiver_task() -> None:
     )
 
     with pytest.raises(TimeoutError):
-        await client.start(_envelope("heartbeat"), handler, timeout_seconds=0.01)
+        await client.start(
+            _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=0.01
+        )
     assert client.receiver_task is None
     assert not client.outbound

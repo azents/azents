@@ -27,7 +27,7 @@ def _settings() -> RuntimeControlSettings:
 def test_runtime_control_heartbeat_interval_defaults_to_production_value() -> None:
     assert _settings().testenv_runtime_control_heartbeat_interval_seconds == 20
     assert not _settings().runtime_control_web_transport_enabled
-    assert _settings().runtime_control_web_max_active_connections == 128
+    assert _settings().runtime_control_runner_web_connect_address == ""
 
 
 def test_runtime_control_heartbeat_interval_accepts_positive_testenv_override() -> None:

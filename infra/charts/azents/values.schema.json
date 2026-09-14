@@ -1045,6 +1045,11 @@
         "runtimeControl": {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "metricsPort",
+            "terminationGracePeriodSeconds",
+            "webCapacity"
+          ],
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -1054,6 +1059,15 @@
             },
             "replicas": {
               "type": "integer"
+            },
+            "metricsPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "terminationGracePeriodSeconds": {
+              "type": "integer",
+              "const": 150
             },
             "reconcileIntervalSeconds": {
               "type": "number"
@@ -1180,6 +1194,79 @@
             "pdb": {
               "type": "object"
             },
+            "webCapacity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "backend",
+                "maximumActiveStreams",
+                "maximumSseStreams",
+                "maximumWebsocketStreams",
+                "maximumPendingOpens",
+                "maximumBufferBytes",
+                "inboundBytesPerSecond",
+                "outboundBytesPerSecond",
+                "burstBytes",
+                "redisNamespace",
+                "redisTtlSeconds",
+                "maximumRelaySessions"
+              ],
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "enum": [
+                    "memory",
+                    "redis"
+                  ]
+                },
+                "maximumActiveStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumSseStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumWebsocketStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumPendingOpens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "inboundBytesPerSecond": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "outboundBytesPerSecond": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "burstBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "redisNamespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "redisTtlSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
+                },
+                "maximumRelaySessions": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 256
+                }
+              }
+            },
             "webTransport": {
               "type": "object",
               "additionalProperties": false,
@@ -1187,7 +1274,7 @@
                 "enabled",
                 "trustedPort",
                 "routeLeaseSeconds",
-                "maxActiveConnections",
+                "runnerTlsServerName",
                 "gatewayPeerIdentities",
                 "controlPeerIdentities"
               ],
@@ -1205,10 +1292,9 @@
                   "minimum": 1,
                   "maximum": 60
                 },
-                "maxActiveConnections": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 512
+                "runnerTlsServerName": {
+                  "type": "string",
+                  "minLength": 1
                 },
                 "gatewayPeerIdentities": {
                   "type": "string"
@@ -1240,7 +1326,6 @@
             "identityLifetimeSeconds",
             "activeDurationSeconds",
             "request",
-            "connectionLimits",
             "permissionsPolicy",
             "controlTls",
             "ingress",
@@ -1351,8 +1436,7 @@
               "additionalProperties": false,
               "required": [
                 "headerBytes",
-                "bodyBytes",
-                "frameBytes"
+                "bodyBytes"
               ],
               "properties": {
                 "headerBytes": {
@@ -1364,73 +1448,6 @@
                   "type": "integer",
                   "minimum": 65536,
                   "maximum": 1073741824
-                },
-                "frameBytes": {
-                  "type": "integer",
-                  "minimum": 4096,
-                  "maximum": 65536
-                }
-              }
-            },
-            "connectionLimits": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "http",
-                "websocket"
-              ],
-              "properties": {
-                "http": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "endpoint",
-                    "user",
-                    "agent"
-                  ],
-                  "properties": {
-                    "endpoint": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 128
-                    },
-                    "user": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 256
-                    },
-                    "agent": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 512
-                    }
-                  }
-                },
-                "websocket": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "endpoint",
-                    "user",
-                    "agent"
-                  ],
-                  "properties": {
-                    "endpoint": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 16
-                    },
-                    "user": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 32
-                    },
-                    "agent": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 64
-                    }
-                  }
                 }
               }
             },

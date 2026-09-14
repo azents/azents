@@ -21,6 +21,15 @@ from azents_runtime_control.runtime_web_session import (
 from azents.runtime.web_session_broker import BrokerTarget
 
 _MAX_PENDING_RELAY_ENVELOPES = 32
+_IGNORED_TOMBSTONE_PAYLOADS = frozenset(
+    {
+        "window_update",
+        "direction_end",
+        "cancel",
+        "reset",
+        "stream_end",
+    }
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -318,7 +327,7 @@ class RuntimeWebRelayPool:
         *,
         target: BrokerTarget,
         envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-    ) -> RelayStreamBinding:
+    ) -> RelayStreamBinding | None:
         """Map and send one source envelope over exactly one persistent relay."""
         if target.local or target.relay_count != 1:
             raise ValueError("Runtime Web relay requires one remote Owner hop")
@@ -347,11 +356,15 @@ class RuntimeWebRelayPool:
             source_stream_id=envelope.stream_id,
         )
         key = RelaySessionKey(target.owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
-        connection, binding = await self._route(
+        routed = await self._route(
             key,
             source,
             create=envelope.WhichOneof("payload") == "open",
+            payload=envelope.WhichOneof("payload"),
         )
+        if routed is None:
+            return None
+        connection, binding = routed
         forwarded = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
         forwarded.CopyFrom(envelope)
         forwarded.session_id = key.owner.session_lease_id
@@ -395,6 +408,17 @@ class RuntimeWebRelayPool:
             translated.session_id = binding.source.source_session_id
             translated.peer_boot_id = self.peer_boot_id
             translated.stream_id = binding.source.source_stream_id
+            if envelope.WhichOneof("payload") == "open_accepted":
+                if (
+                    envelope.open_accepted.route_path
+                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+                ):
+                    raise ValueError(
+                        "Runtime Web Owner-local route acceptance is invalid"
+                    )
+                translated.open_accepted.route_path = (
+                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+                )
             if envelope.WhichOneof("payload") in {
                 "open_rejected",
                 "reset",
@@ -438,11 +462,14 @@ class RuntimeWebRelayPool:
         source: RelaySourceStreamKey,
         *,
         create: bool,
-    ) -> tuple[PersistentRelayConnection, RelayStreamBinding]:
+        payload: str | None,
+    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
         async with self.lock:
             mapping_key = (key, source)
             binding = self.source_bindings.get(mapping_key)
             if binding is None and mapping_key in self.source_tombstone_set:
+                if not create and payload in _IGNORED_TOMBSTONE_PAYLOADS:
+                    return None
                 raise ValueError("Runtime Web relay source stream is not reusable")
             if binding is None and not create:
                 raise ValueError("Runtime Web relay source stream is unknown")

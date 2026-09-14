@@ -15,14 +15,33 @@ from typing import Any, Literal, Protocol
 import aioboto3
 import boto3
 import grpc
+from aiohttp import web
 from azcommon.infra.s3.service import S3Service
 from azcommon.logging import RuntimeEnvironment, configure_logging_for_runtime
+from azents_runtime_control.proto import (
+    runtime_web_session_pb2,
+    runtime_web_session_pb2_grpc,
+)
+from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+)
+from azents_runtime_control.runtime_web_capacity import CapacityProfile
+from azents_runtime_control.runtime_web_session import (
+    APPROVED_SESSION_PROFILE,
+    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    OwnerSessionEpoch,
+    RunnerSessionOffer,
+    validate_runner_web_connect_address,
+)
 from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1Api
 from kubernetes_asyncio.client.api_client import ApiClient
 from kubernetes_asyncio.config import load_incluster_config
 from mypy_boto3_rds import RDSClient
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -54,9 +73,11 @@ from azents.repos.runtime_provider_control.repository import (
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
-from azents.repos.runtime_web.transport_repository import (
-    RuntimeWebTransportRepository,
+from azents.repos.runtime_web.session_route_repository import (
+    RuntimeWebSessionRouteConflict,
+    RuntimeWebSessionRouteRepository,
 )
+from azents.runtime.control_protocol.data import RuntimeRunnerRegistration
 from azents.runtime.control_protocol.grpc.auth import (
     RuntimeTransferCoordinatorCredentialGrpcAuth,
 )
@@ -64,6 +85,7 @@ from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
+    RuntimeWebSessionOfferProvider,
     add_runtime_runner_control_servicer,
 )
 from azents.runtime.control_protocol.grpc.runner_terminal_broker import (
@@ -75,20 +97,14 @@ from azents.runtime.control_protocol.grpc.runner_terminal_server import (
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     add_runtime_runner_transfer_servicer,
 )
-from azents.runtime.control_protocol.grpc.runner_web_registry import (
-    RuntimeWebOwnerRegistry,
-)
-from azents.runtime.control_protocol.grpc.runner_web_server import (
-    AllowInsecureRuntimeWebTrustedPeerAuthenticator,
-    GrpcRuntimeWebRelayConnector,
-    MtlsRuntimeWebTrustedPeerAuthenticator,
-    RuntimeRunnerWebBroker,
+from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
+    RuntimeWebCapacityBackend,
+    RuntimeWebCapacityConfig,
+    RuntimeWebCapacityRegistry,
+    RuntimeWebControlDataPlane,
     RuntimeWebTrustedPeerAuthenticator,
-    add_runtime_runner_web_servicer,
-    add_runtime_web_relay_servicer,
-)
-from azents.runtime.control_protocol.grpc.runtime_web_proxy_server import (
-    add_runtime_web_proxy_servicer,
+    add_runtime_web_session_servicers,
+    create_runtime_web_control_operations_application,
 )
 from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
@@ -139,8 +155,17 @@ from azents.runtime.transfer.object_store import (
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
 )
-from azents.runtime.web_transport_coordinator import RuntimeWebTransportCoordinator
-from azents.runtime.web_transport_dispatcher import RuntimeWebTransportDispatcher
+from azents.runtime.web_session_owner import (
+    RuntimeWebOwnedSession,
+    RuntimeWebOwnerSessionRegistry,
+    RuntimeWebSessionOwnerManager,
+)
+from azents.runtime.web_session_relay import (
+    GrpcPersistentControlRelay,
+    PersistentRelayConnection,
+    RelaySessionKey,
+    RuntimeWebRelayPool,
+)
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrationService,
     RuntimeRunnerConnectionRegistrationService,
@@ -175,6 +200,7 @@ _TERMINAL_REPAIR_LIMIT = 100
 _DEFAULT_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
 _MAX_TRANSFER_TTL_SECONDS = 3_600
 _MAX_TRANSFER_PROCESS_BUFFER_BYTES = 64 * 1024 * 1024
+_RUNTIME_WEB_SESSION_OFFER_WAIT_SECONDS = 10.0
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -217,6 +243,241 @@ class RuntimeTransferRepairCoordinator(Protocol):
         ...
 
 
+class _DisabledRuntimeWebSessionOfferProvider:
+    """Return no session offer when Runtime Web is disabled."""
+
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RunnerSessionOffer | None:
+        del runtime_id, runner_generation
+        return None
+
+    async def owned_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RuntimeWebOwnedSession | None:
+        del runtime_id, runner_generation
+        return None
+
+    async def renew_owner(self, owner: OwnerSessionEpoch) -> bool:
+        del owner
+        return False
+
+    async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool:
+        del owner
+        return False
+
+    async def release_owner(self, owner: OwnerSessionEpoch) -> bool:
+        del owner
+        return False
+
+
+class _OwnerRuntimeWebSessionOfferProvider:
+    """Acquire one exact Owner epoch for each registered Runner generation."""
+
+    def __init__(
+        self,
+        *,
+        session_manager: SessionManager[AsyncSession],
+        runtime_repository: AgentRuntimeRepository,
+        owner_manager: RuntimeWebSessionOwnerManager,
+        generation_gate: _RuntimeWebRunnerGenerationGate,
+    ) -> None:
+        self.session_manager = session_manager
+        self.runtime_repository = runtime_repository
+        self.owner_manager = owner_manager
+        self.generation_gate = generation_gate
+        self.owned: dict[str, RuntimeWebOwnedSession] = {}
+        self.lock = asyncio.Lock()
+
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RunnerSessionOffer | None:
+        ready = await self.generation_gate.wait(
+            runtime_id=runtime_id,
+            runner_generation=runner_generation,
+            timeout_seconds=_RUNTIME_WEB_SESSION_OFFER_WAIT_SECONDS,
+        )
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_id(session, runtime_id)
+        if (
+            not ready
+            or runtime is None
+            or runtime.desired_generation <= 0
+            or runtime.runner_generation != runner_generation
+        ):
+            _LOGGER.warning(
+                "Runtime Web session offer unavailable",
+                extra={
+                    "runner_generation": runner_generation,
+                    "reason": "runner_generation_not_current",
+                },
+            )
+            return None
+        async with self.lock:
+            previous = self.owned.pop(runtime_id, None)
+            if previous is not None:
+                await self.owner_manager.release(previous)
+            try:
+                owned = await self.owner_manager.acquire(
+                    runtime_id=runtime_id,
+                    desired_generation=runtime.desired_generation,
+                    runner_generation=runner_generation,
+                )
+            except RuntimeWebSessionRouteConflict:
+                _LOGGER.warning(
+                    "Runtime Web session offer unavailable",
+                    extra={
+                        "runner_generation": runner_generation,
+                        "reason": "owner_route_conflict",
+                    },
+                )
+                return None
+            self.owned[runtime_id] = owned
+            _LOGGER.info(
+                "Runtime Web session offer issued",
+                extra={
+                    "runner_generation": runner_generation,
+                    "owner_replica_id": owned.route.owner_replica_id,
+                    "lease_generation": owned.route.lease_generation,
+                },
+            )
+            return owned.offer
+
+    async def owned_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RuntimeWebOwnedSession | None:
+        """Return the exact offer already issued to one Runner generation."""
+        async with self.lock:
+            owned = self.owned.get(runtime_id)
+            if (
+                owned is None
+                or owned.offer.owner.runner_generation != runner_generation
+            ):
+                return None
+            return owned
+
+    async def renew_owner(self, owner: OwnerSessionEpoch) -> bool:
+        async with self.lock:
+            current = self.owned.get(owner.runtime_id)
+        if current is None or current.offer.owner != owner:
+            return False
+        renewed = await self.owner_manager.renew(current)
+        async with self.lock:
+            if self.owned.get(owner.runtime_id) != current:
+                return False
+            self.owned[owner.runtime_id] = renewed
+        return True
+
+    async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool:
+        async with self.lock:
+            current = self.owned.get(owner.runtime_id)
+        if current is None or current.offer.owner != owner:
+            return False
+        draining = await self.owner_manager.mark_draining(current)
+        async with self.lock:
+            if self.owned.get(owner.runtime_id) != current:
+                return False
+            self.owned[owner.runtime_id] = draining
+        return True
+
+    async def release_owner(self, owner: OwnerSessionEpoch) -> bool:
+        async with self.lock:
+            current = self.owned.get(owner.runtime_id)
+            if current is None or current.offer.owner != owner:
+                return False
+            self.owned.pop(owner.runtime_id)
+        return await self.owner_manager.release(current)
+
+
+class _RuntimeWebRunnerGenerationGate:
+    """Signal exact Runner-generation persistence without polling."""
+
+    def __init__(self) -> None:
+        self.ready: set[tuple[str, int]] = set()
+        self.events: dict[tuple[str, int], asyncio.Event] = {}
+        self.lock = asyncio.Lock()
+
+    async def mark(self, *, runtime_id: str, runner_generation: int) -> None:
+        key = (runtime_id, runner_generation)
+        async with self.lock:
+            self.ready.add(key)
+            event = self.events.get(key)
+            if event is not None:
+                event.set()
+
+    async def wait(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        timeout_seconds: float,
+    ) -> bool:
+        key = (runtime_id, runner_generation)
+        async with self.lock:
+            if key in self.ready:
+                return True
+            event = self.events.setdefault(key, asyncio.Event())
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
+        except TimeoutError:
+            async with self.lock:
+                if self.events.get(key) is event:
+                    self.events.pop(key)
+            return False
+        async with self.lock:
+            self.ready.discard(key)
+            if self.events.get(key) is event:
+                self.events.pop(key)
+        return True
+
+
+class _RuntimeWebRunnerStateSink:
+    """Signal after the ordinary Runner report is durably persisted."""
+
+    def __init__(
+        self,
+        *,
+        delegate: RuntimeRunnerStateRepositorySink,
+        generation_gate: _RuntimeWebRunnerGenerationGate,
+    ) -> None:
+        self.delegate = delegate
+        self.generation_gate = generation_gate
+
+    async def validate_runner_registration(
+        self,
+        registration: RuntimeRunnerRegistration,
+    ) -> bool:
+        return await self.delegate.validate_runner_registration(registration)
+
+    async def configuration_evidence_for_runner_heartbeat(
+        self,
+        *,
+        runtime_id: str,
+    ) -> RuntimeConfigurationEvidence | None:
+        return await self.delegate.configuration_evidence_for_runner_heartbeat(
+            runtime_id=runtime_id
+        )
+
+    async def record_runner_state(self, report: SharedRunnerStateReport) -> None:
+        await self.delegate.record_runner_state(report)
+        await self.generation_gate.mark(
+            runtime_id=report.runtime_id,
+            runner_generation=report.runner_generation,
+        )
+
+
 class RuntimeControlSettings(BaseSettings):
     """runtime-control server settings."""
 
@@ -237,7 +498,29 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_trusted_gateway_peer_identities: str = ""
     runtime_control_trusted_control_peer_identities: str = ""
     runtime_control_web_route_lease_seconds: float = 10.0
-    runtime_control_web_max_active_connections: int = 128
+    runtime_control_runner_web_connect_address: str = ""
+    runtime_control_runner_web_tls_server_name: str = ""
+    runtime_control_web_metrics_port: int = Field(default=8033, ge=1, le=65_535)
+    runtime_control_web_capacity_backend: Literal["memory", "redis"] = "memory"
+    runtime_control_web_capacity_maximum_active_streams: int | None = None
+    runtime_control_web_capacity_maximum_sse_streams: int | None = None
+    runtime_control_web_capacity_maximum_websocket_streams: int | None = None
+    runtime_control_web_capacity_maximum_pending_opens: int | None = None
+    runtime_control_web_capacity_maximum_buffer_bytes: int | None = None
+    runtime_control_web_capacity_inbound_bytes_per_second: int | None = None
+    runtime_control_web_capacity_outbound_bytes_per_second: int | None = None
+    runtime_control_web_capacity_burst_bytes: int | None = None
+    runtime_control_web_capacity_redis_namespace: str = "azents:runtime:web:capacity"
+    runtime_control_web_capacity_redis_ttl_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+    )
+    runtime_control_web_maximum_relay_sessions: int = Field(
+        default=32,
+        ge=1,
+        le=256,
+    )
     runtime_control_instance_id: str = "azents-runtime-control-local"
     runtime_control_reconcile_interval_seconds: float = (
         _DEFAULT_RECONCILE_INTERVAL_SECONDS
@@ -312,6 +595,47 @@ class _RuntimeWebTrustedTransport:
     server_credentials: grpc.ServerCredentials | None
     channel_credentials: grpc.ChannelCredentials | None
     allow_insecure: bool
+
+
+class _ChannelRelay:
+    """Close one persistent relay and its owned gRPC channel together."""
+
+    def __init__(
+        self,
+        *,
+        relay: GrpcPersistentControlRelay,
+        channel: grpc.aio.Channel,
+    ) -> None:
+        self.relay = relay
+        self.channel = channel
+
+    async def send(
+        self,
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> None:
+        await self.relay.send(envelope)
+
+    async def close(self) -> None:
+        try:
+            await self.relay.close()
+        finally:
+            await self.channel.close()
+
+    async def wait_closed(self) -> None:
+        await self.relay.wait_closed()
+
+
+class _RuntimeWebCapacityRedisAdapter:
+    """Expose the exact coroutine-based capacity Redis contract."""
+
+    def __init__(self, client: Redis) -> None:
+        self.client = client
+
+    async def get(self, name: str) -> bytes | str | None:
+        return await self.client.get(name)
+
+    async def set(self, name: str, value: str, *, ex: int) -> object:
+        return await self.client.set(name, value, ex=ex)
 
 
 @asynccontextmanager
@@ -431,10 +755,14 @@ async def runtime_control_server_lifespan(
         profile_repository=profile_repository,
         session_manager=session_manager,
     )
-    runner_sink = RuntimeRunnerStateRepositorySink(
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=session_manager,
+    web_runner_generation_gate = _RuntimeWebRunnerGenerationGate()
+    runner_sink = _RuntimeWebRunnerStateSink(
+        delegate=RuntimeRunnerStateRepositorySink(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=session_manager,
+        ),
+        generation_gate=web_runner_generation_gate,
     )
     runner_credential_verifier = RuntimeRunnerCredentialVerifier(
         settings.credential_encryption_key
@@ -464,54 +792,105 @@ async def runtime_control_server_lifespan(
             settings.testenv_runtime_control_heartbeat_interval_seconds
         ),
     )
-    web_registry: RuntimeWebOwnerRegistry | None = None
-    web_coordinator: RuntimeWebTransportCoordinator | None = None
-    web_broker: RuntimeRunnerWebBroker | None = None
-    trusted_authenticator: RuntimeWebTrustedPeerAuthenticator | None = None
+    web_session_offer_provider: RuntimeWebSessionOfferProvider = (
+        _DisabledRuntimeWebSessionOfferProvider()
+    )
+    owner_offer_provider: _OwnerRuntimeWebSessionOfferProvider | None = None
+    owner_registry: RuntimeWebOwnerSessionRegistry | None = None
+    web_data_plane: RuntimeWebControlDataPlane | None = None
     trusted_transport: _RuntimeWebTrustedTransport | None = None
     if settings.runtime_control_web_transport_enabled:
-        web_registry = RuntimeWebOwnerRegistry(clock=clock)
-        web_dispatcher = RuntimeWebTransportDispatcher(
-            control_protocol=control_protocol,
-            coordination_store=coordination_store,
-        )
-        web_coordinator = RuntimeWebTransportCoordinator(
+        trusted_transport = runtime_web_trusted_transport(settings)
+        control_boot_id = uuid.uuid4().hex
+        route_repository = RuntimeWebSessionRouteRepository()
+        owner_manager = RuntimeWebSessionOwnerManager(
             session_manager=session_manager,
-            repository=RuntimeWebTransportRepository(),
-            registry=web_registry,
-            dispatcher=web_dispatcher,
+            repository=route_repository,
             owner_replica_id=settings.runtime_control_instance_id,
-            owner_boot_id=uuid.uuid4().hex,
-            owner_address=settings.runtime_control_trusted_advertise_address,
-            lease_seconds=settings.runtime_control_web_route_lease_seconds,
-            maximum_active_connections=(
-                settings.runtime_control_web_max_active_connections
+            owner_boot_id=control_boot_id,
+            trusted_owner_address=(settings.runtime_control_trusted_advertise_address),
+            runner_connect_address=(
+                settings.runtime_control_runner_web_connect_address
             ),
+            runner_tls_server_name=(
+                settings.runtime_control_runner_web_tls_server_name
+            ),
+            lease_seconds=settings.runtime_control_web_route_lease_seconds,
             clock=clock,
         )
-        trusted_transport = runtime_web_trusted_transport(settings)
-        relay_connector = GrpcRuntimeWebRelayConnector(
-            channel_factory=lambda endpoint: _runtime_web_relay_channel(
-                endpoint,
-                transport=trusted_transport,
-            )
+        owner_offer_provider = _OwnerRuntimeWebSessionOfferProvider(
+            session_manager=session_manager,
+            runtime_repository=runtime_repository,
+            owner_manager=owner_manager,
+            generation_gate=web_runner_generation_gate,
         )
-        web_broker = RuntimeRunnerWebBroker(
-            coordinator=web_coordinator,
-            registry=web_registry,
-            relay_connector=relay_connector,
+        web_session_offer_provider = owner_offer_provider
+        owner_registry = RuntimeWebOwnerSessionRegistry(
+            session_manager=session_manager,
+            repository=route_repository,
+            clock=clock,
         )
-        trusted_authenticator = (
-            AllowInsecureRuntimeWebTrustedPeerAuthenticator()
-            if trusted_transport.allow_insecure
-            else MtlsRuntimeWebTrustedPeerAuthenticator(
-                gateway_identities=_peer_identities(
-                    settings.runtime_control_trusted_gateway_peer_identities
-                ),
-                control_identities=_peer_identities(
-                    settings.runtime_control_trusted_control_peer_identities
-                ),
+        capacity_registry = RuntimeWebCapacityRegistry(
+            config=_runtime_web_capacity_config(settings),
+            redis=_RuntimeWebCapacityRedisAdapter(redis),
+            monotonic_clock_milliseconds=lambda: int(time.monotonic() * 1000),
+            recoverable_errors=(RedisError, OSError, TimeoutError),
+        )
+
+        async def connect_relay(
+            key: RelaySessionKey,
+        ) -> PersistentRelayConnection:
+            data_plane = web_data_plane
+            relay_transport = trusted_transport
+            if data_plane is None or relay_transport is None:
+                raise RuntimeError("Runtime Web relay composition is unavailable")
+            channel = _runtime_web_relay_channel(
+                await data_plane.owner_address(key.owner),
+                transport=relay_transport,
             )
+            hello = _runtime_web_relay_hello(
+                key=key,
+                control_boot_id=control_boot_id,
+                clock=clock,
+            )
+            try:
+                relay = await GrpcPersistentControlRelay.connect(
+                    key=key,
+                    stream=(
+                        runtime_web_session_pb2_grpc.RuntimeWebControlSessionStub(
+                            channel
+                        ).Relay
+                    ),
+                    hello=hello,
+                    handler=lambda envelope: data_plane.relay_response(
+                        key,
+                        envelope,
+                    ),
+                    timeout_seconds=10,
+                )
+            except BaseException:
+                await channel.close()
+                raise
+            return _ChannelRelay(relay=relay, channel=channel)
+
+        relay_pool = RuntimeWebRelayPool(
+            connector=connect_relay,
+            maximum_sessions=settings.runtime_control_web_maximum_relay_sessions,
+            peer_boot_id=control_boot_id,
+        )
+        web_data_plane = RuntimeWebControlDataPlane(
+            session_manager=session_manager,
+            route_repository=route_repository,
+            owner_replica_id=settings.runtime_control_instance_id,
+            control_boot_id=control_boot_id,
+            capacity_registry=capacity_registry,
+            relay_pool=relay_pool,
+            runner_metrics=coordination_store,
+            clock=clock,
+            metrics_recoverable_errors=(RedisError, OSError, TimeoutError),
+            owner_lifecycle=owner_offer_provider,
+            long_lived_grace_seconds=5,
+            finite_grace_seconds=120,
         )
     reconciler = RuntimeLifecycleReconciler(
         agent_repository=agent_repository,
@@ -593,6 +972,43 @@ async def runtime_control_server_lifespan(
     trusted_server: grpc.aio.Server | None = None
     if settings.runtime_control_web_transport_enabled:
         trusted_server = grpc.aio.server()
+        if (
+            web_data_plane is None
+            or owner_offer_provider is None
+            or owner_registry is None
+        ):
+            raise RuntimeError("Runtime Web Control composition is incomplete")
+        peer_authenticator = RuntimeWebTrustedPeerAuthenticator(
+            allow_insecure=settings.runtime_control_allow_insecure,
+            gateway_identities=(
+                frozenset()
+                if settings.runtime_control_allow_insecure
+                else _peer_identities(
+                    settings.runtime_control_trusted_gateway_peer_identities
+                )
+            ),
+            control_identities=(
+                frozenset()
+                if settings.runtime_control_allow_insecure
+                else _peer_identities(
+                    settings.runtime_control_trusted_control_peer_identities
+                )
+            ),
+        )
+        add_runtime_web_session_servicers(
+            trusted_server=trusted_server,
+            runner_server=server,
+            data_plane=web_data_plane,
+            offer_provider=owner_offer_provider,
+            owner_registry=owner_registry,
+            runner_authenticator=runner_authenticator,
+            peer_authenticator=peer_authenticator,
+            clock=clock,
+            owner_renew_interval_seconds=max(
+                0.1,
+                settings.runtime_control_web_route_lease_seconds / 3,
+            ),
+        )
     add_runtime_provider_control_servicer(
         server,
         control_protocol=control_protocol,
@@ -616,13 +1032,8 @@ async def runtime_control_server_lifespan(
         runner_authenticator=runner_authenticator,
         connection_registrar=runner_connection_registrar,
         transfer_result_sink=transfer_result_coordinator,
+        web_session_offer_provider=web_session_offer_provider,
     )
-    if web_broker is not None:
-        add_runtime_runner_web_servicer(
-            server,
-            broker=web_broker,
-            runner_authenticator=runner_authenticator,
-        )
     add_runtime_runner_terminal_servicer(
         server,
         broker=CoordinatedRuntimeRunnerTerminalBroker(
@@ -657,23 +1068,6 @@ async def runtime_control_server_lifespan(
             coordinator_credential_verifier
         ),
     )
-    if (
-        trusted_server is not None
-        and web_coordinator is not None
-        and web_registry is not None
-        and trusted_authenticator is not None
-    ):
-        add_runtime_web_proxy_servicer(
-            trusted_server,
-            coordinator=web_coordinator,
-            trusted_authenticator=trusted_authenticator,
-        )
-        add_runtime_web_relay_servicer(
-            trusted_server,
-            coordinator=web_coordinator,
-            registry=web_registry,
-            trusted_authenticator=trusted_authenticator,
-        )
     listen_address = f"0.0.0.0:{settings.runtime_control_port}"
     if transport.server_credentials is None:
         server.add_insecure_port(listen_address)
@@ -691,6 +1085,17 @@ async def runtime_control_server_lifespan(
     await server.start()
     if trusted_server is not None:
         await trusted_server.start()
+    web_operations_runner: web.AppRunner | None = None
+    if web_data_plane is not None:
+        web_operations_runner = web.AppRunner(
+            create_runtime_web_control_operations_application(web_data_plane)
+        )
+        await web_operations_runner.setup()
+        await web.TCPSite(
+            web_operations_runner,
+            host="0.0.0.0",
+            port=settings.runtime_control_web_metrics_port,
+        ).start()
     _LOGGER.info(
         "Runtime Control gRPC server started",
         extra={
@@ -710,6 +1115,11 @@ async def runtime_control_server_lifespan(
             "runner_authentication": "runtime_bound_credential",
             "tls_enabled": transport.server_credentials is not None,
             "web_transport_enabled": settings.runtime_control_web_transport_enabled,
+            "web_metrics_port": (
+                settings.runtime_control_web_metrics_port
+                if settings.runtime_control_web_transport_enabled
+                else None
+            ),
             "trusted_tls_enabled": (
                 trusted_transport is not None
                 and trusted_transport.server_credentials is not None
@@ -737,9 +1147,15 @@ async def runtime_control_server_lifespan(
             await terminal_repair_task
         except asyncio.CancelledError:
             pass
+        if web_data_plane is not None:
+            await web_data_plane.begin_drain()
         if trusted_server is not None:
-            await trusted_server.stop(grace=5)
-        await server.stop(grace=5)
+            await trusted_server.stop(grace=0)
+        await server.stop(grace=0)
+        if web_operations_runner is not None:
+            await web_operations_runner.cleanup()
+        if web_data_plane is not None:
+            await web_data_plane.close()
         if kubernetes_api_client is not None:
             await kubernetes_api_client.close()
         await resources.aclose()
@@ -1032,16 +1448,79 @@ def validate_runtime_control_web_settings(
         return
     if not 1 <= settings.runtime_control_web_route_lease_seconds <= 60:
         raise ValueError("Runtime Web route lease must be within 1 to 60 seconds")
-    if not 1 <= settings.runtime_control_web_max_active_connections <= 512:
-        raise ValueError("Runtime Web active connection limit must be within 1 to 512")
     address = settings.runtime_control_trusted_advertise_address.strip()
     if not address or "://" in address or ":" not in address:
         raise ValueError("Runtime Web trusted advertise address must be host:port")
+    validate_runner_web_connect_address(
+        settings.runtime_control_runner_web_connect_address
+    )
+    if not settings.runtime_control_runner_web_tls_server_name.strip():
+        raise ValueError("Runtime Web Runner TLS server name is required")
     if settings.runtime_control_trusted_port < 0:
         raise ValueError("Runtime Web trusted port must not be negative")
+    if settings.runtime_control_web_metrics_port in {
+        settings.runtime_control_port,
+        settings.runtime_control_trusted_port,
+    }:
+        raise ValueError("Runtime Web metrics port must be separate")
+    _runtime_web_capacity_config(settings)
     if not settings.runtime_control_allow_insecure:
         _peer_identities(settings.runtime_control_trusted_gateway_peer_identities)
         _peer_identities(settings.runtime_control_trusted_control_peer_identities)
+
+
+def _runtime_web_capacity_config(
+    settings: RuntimeControlSettings,
+) -> RuntimeWebCapacityConfig:
+    values = {
+        "maximum active streams": (
+            settings.runtime_control_web_capacity_maximum_active_streams
+        ),
+        "maximum SSE streams": (
+            settings.runtime_control_web_capacity_maximum_sse_streams
+        ),
+        "maximum WebSocket streams": (
+            settings.runtime_control_web_capacity_maximum_websocket_streams
+        ),
+        "maximum pending opens": (
+            settings.runtime_control_web_capacity_maximum_pending_opens
+        ),
+        "maximum buffer bytes": (
+            settings.runtime_control_web_capacity_maximum_buffer_bytes
+        ),
+        "inbound bytes per second": (
+            settings.runtime_control_web_capacity_inbound_bytes_per_second
+        ),
+        "outbound bytes per second": (
+            settings.runtime_control_web_capacity_outbound_bytes_per_second
+        ),
+        "burst bytes": settings.runtime_control_web_capacity_burst_bytes,
+    }
+    missing = tuple(name for name, value in values.items() if value is None)
+    if missing:
+        raise ValueError(
+            "Runtime Web capacity settings are required: " + ", ".join(sorted(missing))
+        )
+    positive = {name: value for name, value in values.items() if value is not None}
+    if any(value <= 0 for value in positive.values()):
+        raise ValueError("Runtime Web capacity settings must be positive")
+    return RuntimeWebCapacityConfig(
+        backend=RuntimeWebCapacityBackend(
+            settings.runtime_control_web_capacity_backend
+        ),
+        profile=CapacityProfile(
+            maximum_active_streams=positive["maximum active streams"],
+            maximum_sse_streams=positive["maximum SSE streams"],
+            maximum_websocket_streams=positive["maximum WebSocket streams"],
+            maximum_pending_opens=positive["maximum pending opens"],
+            maximum_buffer_bytes=positive["maximum buffer bytes"],
+            inbound_bytes_per_second=positive["inbound bytes per second"],
+            outbound_bytes_per_second=positive["outbound bytes per second"],
+            burst_bytes=positive["burst bytes"],
+        ),
+        redis_namespace=settings.runtime_control_web_capacity_redis_namespace,
+        redis_ttl_seconds=settings.runtime_control_web_capacity_redis_ttl_seconds,
+    )
 
 
 def _utc_now() -> datetime:
@@ -1137,6 +1616,46 @@ def _runtime_web_relay_channel(
     if transport.allow_insecure:
         return grpc.aio.insecure_channel(endpoint)
     raise RuntimeError("Runtime Web relay transport is not configured")
+
+
+def _runtime_web_relay_hello(
+    *,
+    key: RelaySessionKey,
+    control_boot_id: str,
+    clock: Callable[[], datetime],
+) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    """Create one exact Control-to-Owner persistent relay handshake."""
+    deadline = clock() + timedelta(seconds=10)
+    hello = runtime_web_session_pb2.RuntimeWebSessionHello(
+        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+        runtime_id=key.owner.runtime_id,
+        desired_generation=key.owner.desired_generation,
+        runner_generation=key.owner.runner_generation,
+        session_nonce=key.owner.session_lease_id,
+        maximum_data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
+        request_stream_window_bytes=(
+            APPROVED_SESSION_PROFILE.request_stream_window_bytes
+        ),
+        response_stream_window_bytes=(
+            APPROVED_SESSION_PROFILE.response_stream_window_bytes
+        ),
+        request_session_window_bytes=(
+            APPROVED_SESSION_PROFILE.request_session_window_bytes
+        ),
+        response_session_window_bytes=(
+            APPROVED_SESSION_PROFILE.response_session_window_bytes
+        ),
+    )
+    hello.deadline_at.FromDatetime(deadline)
+    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        session_id=key.owner.session_lease_id,
+        peer_boot_id=control_boot_id,
+        owner_boot_id=key.owner.owner_boot_id,
+        session_lease_id=key.owner.session_lease_id,
+        lease_generation=key.owner.lease_generation,
+        hello=hello,
+    )
 
 
 def _peer_identities(value: str) -> frozenset[str]:

@@ -10,14 +10,12 @@ from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthConfiguration,
     RDBRuntimeWebAuthTicket,
     RDBRuntimeWebEndpoint,
-    RDBRuntimeWebGatewayAdmissionLease,
     RDBRuntimeWebGatewayIdentity,
     RuntimeWebAuthMode,
 )
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
 from azents.repos.runtime_web.gateway_data import (
-    RuntimeWebAdmissionLimits,
     RuntimeWebAuthBinding,
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
@@ -27,14 +25,6 @@ from azents.repos.runtime_web.gateway_data import (
     RuntimeWebRedeemedIdentity,
 )
 from azents.repos.runtime_web.repository import RuntimeWebRepositoryConflict
-
-
-class RuntimeWebGatewayCapacityExceeded(ValueError):
-    """A shared endpoint, user, or Agent admission quota is exhausted."""
-
-    def __init__(self, scope: str) -> None:
-        super().__init__(scope)
-        self.scope = scope
 
 
 class RuntimeWebGatewayRepository:
@@ -461,92 +451,6 @@ class RuntimeWebGatewayRepository:
     ) -> RDBRuntimeWebEndpoint | None:
         """Resolve one stable endpoint by its opaque identifier."""
         return await session.get(RDBRuntimeWebEndpoint, endpoint_id)
-
-    async def acquire_admission(
-        self,
-        session: AsyncSession,
-        *,
-        tunnel_id: str,
-        endpoint_id: str,
-        user_id: str,
-        agent_id: str,
-        websocket: bool,
-        lease_expires_at: datetime.datetime,
-        now: datetime.datetime,
-        limits: RuntimeWebAdmissionLimits,
-    ) -> str:
-        """Acquire shared scope counts under deterministic transaction locks."""
-        scope_keys = sorted(
-            (
-                f"runtime-web-admission:agent:{agent_id}:{websocket}",
-                f"runtime-web-admission:endpoint:{endpoint_id}:{websocket}",
-                f"runtime-web-admission:user:{user_id}:{websocket}",
-            )
-        )
-        for scope_key in scope_keys:
-            await session.execute(
-                sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-                {"key": scope_key},
-            )
-        await session.execute(
-            sa.delete(RDBRuntimeWebGatewayAdmissionLease).where(
-                RDBRuntimeWebGatewayAdmissionLease.lease_expires_at <= now
-            )
-        )
-        scopes = (
-            (
-                "endpoint",
-                RDBRuntimeWebGatewayAdmissionLease.endpoint_id,
-                endpoint_id,
-                limits.endpoint,
-            ),
-            (
-                "user",
-                RDBRuntimeWebGatewayAdmissionLease.user_id,
-                user_id,
-                limits.user,
-            ),
-            (
-                "agent",
-                RDBRuntimeWebGatewayAdmissionLease.agent_id,
-                agent_id,
-                limits.agent,
-            ),
-        )
-        for scope, column, subject_id, limit in scopes:
-            count = await session.scalar(
-                sa.select(sa.func.count(RDBRuntimeWebGatewayAdmissionLease.id)).where(
-                    column == subject_id,
-                    RDBRuntimeWebGatewayAdmissionLease.websocket == websocket,
-                    RDBRuntimeWebGatewayAdmissionLease.lease_expires_at > now,
-                )
-            )
-            if (count or 0) >= limit:
-                raise RuntimeWebGatewayCapacityExceeded(scope)
-        admission = RDBRuntimeWebGatewayAdmissionLease(
-            tunnel_id=tunnel_id,
-            endpoint_id=endpoint_id,
-            user_id=user_id,
-            agent_id=agent_id,
-            websocket=websocket,
-            lease_expires_at=lease_expires_at,
-        )
-        session.add(admission)
-        await session.flush()
-        return admission.id
-
-    async def release_admission(
-        self,
-        session: AsyncSession,
-        *,
-        tunnel_id: str,
-    ) -> None:
-        """Release one exact Gateway-owned shared admission."""
-        await session.execute(
-            sa.delete(RDBRuntimeWebGatewayAdmissionLease).where(
-                RDBRuntimeWebGatewayAdmissionLease.tunnel_id == tunnel_id
-            )
-        )
 
     async def _locked_enabled_configuration(
         self,
