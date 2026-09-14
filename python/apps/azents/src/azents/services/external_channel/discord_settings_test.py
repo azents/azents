@@ -78,6 +78,7 @@ class _DiscordSettingsServiceFixture(NamedTuple):
     service: DiscordSettingsResponseService
     repository: AsyncMock
     account_link_service: AsyncMock
+    account_oauth_settings: AsyncMock
     model_settings_service: AsyncMock
 
 
@@ -249,6 +250,7 @@ def _service(
         service=service,
         repository=repository,
         account_link_service=account_link_service,
+        account_oauth_settings=account_oauth_settings,
         model_settings_service=model_settings_service,
     )
 
@@ -314,6 +316,38 @@ async def test_denied_conversation_renders_only_generic_link_surface() -> None:
         "label": "Connect Azents account",
         "url": "https://azents.example/account/external-accounts/connect/discord",
     }
+
+
+@pytest.mark.asyncio
+async def test_unavailable_account_link_is_omitted_from_private_settings() -> None:
+    """Do not advertise an unavailable provider in the private settings response."""
+    current = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Agent One",
+        session_navigation=None,
+        setting=_setting(),
+        claim=None,
+        resource=None,
+        binding=None,
+    )
+    participation = SimpleNamespace(
+        resolve_settings=AsyncMock(return_value=current),
+    )
+    fixture = _service(origin=_origin(), participation=participation)
+    fixture.account_oauth_settings.get_detail.return_value = SimpleNamespace(
+        effective_status=ExternalAccountOAuthEffectiveStatus.INCOMPLETE,
+    )
+
+    response = await fixture.service.initial_response(
+        origin_interaction_id="interaction-1",
+        context=_CONTEXT,
+        now=_NOW,
+    )
+
+    data = _object_dict(response.response["data"])
+    assert "currently unavailable" not in str(data).lower()
+    assert "Connect Azents account" not in str(data)
+    assert len(_object_dict_list(data["components"])) == 2
 
 
 @pytest.mark.asyncio

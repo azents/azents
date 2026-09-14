@@ -569,7 +569,7 @@ async def test_unavailable_provider_keeps_guest_form_without_dead_controls(
     assert view.submit_title == guest.submit_title
     assert view.callback_id == guest.callback_id
     assert view.private_metadata == guest.private_metadata
-    assert "currently unavailable" in repr(view.blocks)
+    assert view.blocks == guest.blocks
     assert "Connect Azents account" not in repr(view.blocks)
     assert "actions" not in repr(view.blocks)
     assert "optional" not in repr(view.blocks)

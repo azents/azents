@@ -242,6 +242,10 @@ export function ExternalAccountLinks({
   onRetry,
 }: ExternalAccountLinksContainerProps): React.ReactElement {
   const t = useTranslations("externalAccountLinks");
+  const actionableProviders =
+    state.type === "READY"
+      ? state.providers.filter((availability) => availability.available)
+      : [];
 
   switch (state.type) {
     case "LOADING":
@@ -324,24 +328,26 @@ export function ExternalAccountLinks({
               <Text c="dimmed">{t("description")}</Text>
             </Stack>
 
-            <Stack gap="md">
-              <Stack gap={rem(4)}>
-                <Title order={2} size="h3">
-                  {t("providerCard.title")}
-                </Title>
-                <Text c="dimmed" size="sm">
-                  {t("providerCard.description")}
-                </Text>
+            {actionableProviders.length > 0 ? (
+              <Stack gap="md">
+                <Stack gap={rem(4)}>
+                  <Title order={2} size="h3">
+                    {t("providerCard.title")}
+                  </Title>
+                  <Text c="dimmed" size="sm">
+                    {t("providerCard.description")}
+                  </Text>
+                </Stack>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                  {actionableProviders.map((availability) => (
+                    <ProviderConnectCard
+                      key={availability.provider}
+                      availability={availability}
+                    />
+                  ))}
+                </SimpleGrid>
               </Stack>
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                {state.providers.map((availability) => (
-                  <ProviderConnectCard
-                    key={availability.provider}
-                    availability={availability}
-                  />
-                ))}
-              </SimpleGrid>
-            </Stack>
+            ) : null}
 
             <Stack gap="md">
               <Title order={2} size="h3">
@@ -354,9 +360,11 @@ export function ExternalAccountLinks({
                       <IconPlugConnected size={22} />
                     </ThemeIcon>
                     <Text fw={600}>{t("emptyTitle")}</Text>
-                    <Text c="dimmed" size="sm">
-                      {t("emptyDescription")}
-                    </Text>
+                    {actionableProviders.length > 0 ? (
+                      <Text c="dimmed" size="sm">
+                        {t("emptyDescription")}
+                      </Text>
+                    ) : null}
                   </Stack>
                 </Paper>
               ) : (

@@ -17,7 +17,7 @@ _DISCORD_CONNECT_PATH = "/account/external-accounts/connect/discord"
 class DiscordAccountLinkPresentation:
     """Private account state summary and provider-native controls."""
 
-    summary: str
+    summary: str | None
     rows: list[dict[str, object]]
 
 
@@ -72,9 +72,9 @@ def discord_account_link_presentation(
 
 
 def discord_account_link_state_unavailable() -> DiscordAccountLinkPresentation:
-    """Render one quiet provider-specific unavailable line without a dead link."""
+    """Render no provider-specific surface when connection is unavailable."""
     return DiscordAccountLinkPresentation(
-        summary="Discord account connection is currently unavailable.",
+        summary=None,
         rows=[],
     )
 

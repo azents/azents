@@ -73,7 +73,7 @@ def test_ready_unlinked_presentation_is_one_direct_web_url() -> None:
 
 
 def test_unavailable_provider_omits_dead_connect_control() -> None:
-    """Show one quiet unavailable line while preserving the surrounding settings."""
+    """Omit the account-link surface while preserving surrounding settings."""
     presentation = discord_account_link_presentation(
         state=ExternalAccountNativeLinkState(
             link=None,
@@ -83,9 +83,7 @@ def test_unavailable_provider_omits_dead_connect_control() -> None:
         web_url="https://azents.example",
     )
 
-    assert presentation.summary == (
-        "Discord account connection is currently unavailable."
-    )
+    assert presentation.summary is None
     assert presentation.rows == []
 
 
