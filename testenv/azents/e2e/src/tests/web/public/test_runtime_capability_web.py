@@ -621,7 +621,7 @@ def test_runtime_free_add_and_remove_progress(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/sessions/new"
     )
     message_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.NAME, "message"))
+        ec.element_to_be_clickable((By.NAME, "chat-message"))
     )
     message_input.send_keys("Verify Runtime metrics", Keys.ENTER)
     _wait(browser_driver).until(

@@ -16,6 +16,7 @@ import docker as docker_py
 import psycopg
 import pytest
 import requests
+from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
@@ -4347,6 +4348,9 @@ def test_discord_single_activation_and_interaction_journey(
         user_id="600000000000000001",
     )
 
+    discord_oauth = SystemSettingsV1Api(
+        admin_api_client
+    ).system_settings_v1_get_external_account_oauth_setting("discord")
     state = _discord_provider_state(discord_provider_fake_url)
     assert state["interactions"] == [
         {
@@ -4361,7 +4365,7 @@ def test_discord_single_activation_and_interaction_journey(
             "response_status": 200,
             "response_type": 4,
             "ephemeral": True,
-            "component_count": 0,
+            "component_count": int(discord_oauth.effective_status == "ready"),
             "has_content": True,
         },
     ]
