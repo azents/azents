@@ -664,15 +664,10 @@ class TestModelStreamWatchdog:
                 session_id=session_id,
                 message=_ABSOLUTE_RECOVERY_PROMPT,
             )
-            live_payload = _wait_for_live_content(
-                public_url=azents_public_server_url,
-                token=workspace.token,
+            failed_event_ids = _wait_for_ws_live_content(
+                websocket,
                 session_id=result.session_id,
                 content=_ABSOLUTE_FAILED_PREFIX,
-            )
-            failed_event_ids = _live_event_ids_containing(
-                live_payload,
-                _ABSOLUTE_FAILED_PREFIX,
             )
             assert failed_event_ids
             _wait_for_retry_without_content(
