@@ -1540,13 +1540,13 @@ async def test_redis_cutover_ignores_legacy_generation_counter(
         subject_id="provider-1",
         connection_id="provider-a",
         owner_replica_id="control-a",
-        generation=281474976710656,
+        generation=987_654_321,
         connected_at=connected_at,
         ttl_seconds=60,
         metadata={},
     )
 
-    assert connection.generation == 281474976710656
+    assert connection.generation == 987_654_321
     assert await redis.get(legacy_key) == b"41"
     assert await redis.ttl(legacy_key) > 0
     active_keys = {
@@ -1561,13 +1561,14 @@ async def test_redis_cutover_ignores_legacy_generation_counter(
 async def test_redis_connection_generation_strings_round_trip_high_boundaries(
     redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
 ) -> None:
-    """Redis preserves consecutive migration and signed-BIGINT boundary values."""
+    """Redis preserves consecutive high and signed-BIGINT boundary values."""
     store, _ = redis_store
     connected_at = _now()
+    representative_high_generation = MAX_RUNTIME_CONNECTION_GENERATION // 2
     generations = (
-        2**48 - 1,
-        2**48,
-        2**48 + 1,
+        representative_high_generation - 1,
+        representative_high_generation,
+        representative_high_generation + 1,
         MAX_RUNTIME_CONNECTION_GENERATION - 1,
         MAX_RUNTIME_CONNECTION_GENERATION,
     )
