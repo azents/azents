@@ -488,6 +488,12 @@ class RelayConnector(Protocol):
     async def __call__(self, key: RelaySessionKey) -> PersistentRelayConnection: ...
 
 
+type RelayRetirementHandler = Callable[
+    [RelaySessionKey, tuple[RelayStreamBinding, ...]],
+    Awaitable[None],
+]
+
+
 class RuntimeWebRelayPool:
     """Reuse one bounded relay per Owner epoch without retry or replay."""
 
@@ -504,6 +510,7 @@ class RuntimeWebRelayPool:
         self.maximum_sessions = maximum_sessions
         self.peer_boot_id = peer_boot_id
         self.resources: ControlRelayResources | None = None
+        self.retirement_handler: RelayRetirementHandler | None = None
         self.sessions: dict[RelaySessionKey, PersistentRelayConnection] = {}
         self.monitors: dict[RelaySessionKey, asyncio.Task[None]] = {}
         self.next_stream_ids: dict[RelaySessionKey, int] = {}
@@ -522,6 +529,12 @@ class RuntimeWebRelayPool:
             set()
         )
         self.lock = asyncio.Lock()
+
+    def bind_retirement_handler(self, handler: RelayRetirementHandler) -> None:
+        """Bind the exact data-plane callback for asynchronous relay loss."""
+        if self.retirement_handler is not None:
+            raise RuntimeError("Runtime Web relay retirement handler is already bound")
+        self.retirement_handler = handler
 
     def bind_resources(self, resources: ControlRelayResources) -> None:
         """Bind the process-wide Control task budget before relay use."""
@@ -738,10 +751,15 @@ class RuntimeWebRelayPool:
             )
             for binding in bindings:
                 self._release_binding(key, binding)
+            retirement_handler = self.retirement_handler if from_monitor else None
         if monitor is not None and not from_monitor:
             monitor.cancel()
             await asyncio.gather(monitor, return_exceptions=True)
-        await connection.close()
+        try:
+            if retirement_handler is not None and bindings:
+                await retirement_handler(key, bindings)
+        finally:
+            await connection.close()
         return True
 
     def _release_binding(

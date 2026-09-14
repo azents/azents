@@ -1321,6 +1321,16 @@ class RunnerWebSessionDispatcher:
         self.tombstone_set.add(stream_id)
 
     async def _stream_end(self, stream_id: int, stream: _Stream) -> None:
+        async with stream.credit_changed:
+            await stream.credit_changed.wait_for(
+                lambda: (
+                    stream.response_credit.closed
+                    or stream.response_credit.stream.sent_total
+                    == stream.response_credit.stream.consumed_total
+                )
+            )
+            if stream.response_credit.closed:
+                return
         envelope = self._envelope(stream_id=stream_id, offer=stream.offer)
         envelope.stream_end.SetInParent()
         await self._send(envelope, client=stream.client)

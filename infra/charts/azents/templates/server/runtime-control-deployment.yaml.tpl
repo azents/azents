@@ -209,9 +209,8 @@ spec:
               readOnly: true
           {{- if $webTransport.enabled }}
           readinessProbe:
-            httpGet:
-              path: /__azents/runtime-web/ready
-              port: operations
+            tcpSocket:
+              port: grpc
             initialDelaySeconds: 5
             timeoutSeconds: 2
             periodSeconds: 10

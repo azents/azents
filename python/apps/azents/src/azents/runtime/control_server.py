@@ -271,6 +271,10 @@ class _DisabledRuntimeWebSessionOfferProvider:
         del owner
         return False
 
+    async def mark_owner_joined(self, owner: OwnerSessionEpoch) -> bool:
+        del owner
+        return False
+
     async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool:
         del owner
         return False
@@ -296,6 +300,7 @@ class _OwnerRuntimeWebSessionOfferProvider:
         self.owner_manager = owner_manager
         self.generation_gate = generation_gate
         self.owned: dict[str, RuntimeWebOwnedSession] = {}
+        self.joined: set[OwnerSessionEpoch] = set()
         self.lock = asyncio.Lock()
 
     async def offer_for_runner(
@@ -304,6 +309,15 @@ class _OwnerRuntimeWebSessionOfferProvider:
         runtime_id: str,
         runner_generation: int,
     ) -> RunnerSessionOffer | None:
+        async with self.lock:
+            current = self.owned.get(runtime_id)
+            if current is not None and _owner_offer_blocks_reissue(
+                current.offer,
+                joined=self.joined,
+                runner_generation=runner_generation,
+                now=datetime.now(UTC),
+            ):
+                return None
         ready = await self.generation_gate.wait(
             runtime_id=runtime_id,
             runner_generation=runner_generation,
@@ -328,6 +342,7 @@ class _OwnerRuntimeWebSessionOfferProvider:
         async with self.lock:
             previous = self.owned.pop(runtime_id, None)
             if previous is not None:
+                self.joined.discard(previous.offer.owner)
                 await self.owner_manager.release(previous)
             try:
                 owned = await self.owner_manager.acquire(
@@ -383,6 +398,15 @@ class _OwnerRuntimeWebSessionOfferProvider:
             self.owned[owner.runtime_id] = renewed
         return True
 
+    async def mark_owner_joined(self, owner: OwnerSessionEpoch) -> bool:
+        """Fence retries once the exact one-time offer has joined."""
+        async with self.lock:
+            current = self.owned.get(owner.runtime_id)
+            if current is None or current.offer.owner != owner:
+                return False
+            self.joined.add(owner)
+            return True
+
     async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool:
         async with self.lock:
             current = self.owned.get(owner.runtime_id)
@@ -401,7 +425,21 @@ class _OwnerRuntimeWebSessionOfferProvider:
             if current is None or current.offer.owner != owner:
                 return False
             self.owned.pop(owner.runtime_id)
+            self.joined.discard(owner)
         return await self.owner_manager.release(current)
+
+
+def _owner_offer_blocks_reissue(
+    offer: RunnerSessionOffer,
+    *,
+    joined: set[OwnerSessionEpoch],
+    runner_generation: int,
+    now: datetime,
+) -> bool:
+    """Keep current-generation pending or joined Owner offers stable."""
+    return offer.owner.runner_generation == runner_generation and (
+        offer.owner in joined or offer.deadline_at > now
+    )
 
 
 class _RuntimeWebRunnerGenerationGate:

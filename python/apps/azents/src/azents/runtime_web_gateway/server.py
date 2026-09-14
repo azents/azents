@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime
 import html
 import itertools
@@ -1240,6 +1241,7 @@ async def _proxy_websocket(
     websocket: web.WebSocketResponse | None = None
     client_task: asyncio.Task[None] | None = None
     guard_task: asyncio.Task[None] | None = None
+    response_assembler = _WebSocketResponseAssembler()
     try:
         try:
             offered_subprotocols = _websocket_subprotocol_tokens(request.raw_headers)
@@ -1308,15 +1310,32 @@ async def _proxy_websocket(
             if event.payload == "websocket":
                 if websocket is None:
                     raise RuntimeError("Runtime WebSocket frame preceded upgrade")
+                partial_close = (
+                    event.websocket_opcode is WebSocketOpcode.CLOSE
+                    and response_assembler.partial_message
+                )
+                batch = await _assemble_websocket_response_event(
+                    response_assembler,
+                    bridge,
+                    event,
+                )
+                if batch is None:
+                    continue
                 written = False
                 try:
-                    await _write_websocket_event(websocket, event)
+                    await _write_websocket_event(websocket, batch.event)
                     written = True
                 finally:
-                    if written:
-                        await bridge.release_event(event)
-                    else:
-                        await bridge.discard_event(event)
+                    for original in batch.release_events:
+                        if written:
+                            await bridge.release_event(original)
+                        else:
+                            await bridge.discard_event(original)
+                if partial_close:
+                    for pending in response_assembler.discard_pending():
+                        await bridge.discard_event(pending)
+                    await bridge.cancel(CloseReason.CALLER)
+                    break
                 continue
             if event.payload == "terminal":
                 await bridge.release_event(event)
@@ -1345,6 +1364,8 @@ async def _proxy_websocket(
             guard_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await guard_task
+        for event in response_assembler.discard_pending():
+            await bridge.discard_event(event)
         await bridge.discard_buffered_events()
 
 
@@ -1408,6 +1429,89 @@ async def _send_websocket_frames(
         if opcode is WebSocketOpcode.CLOSE:
             break
     await bridge.finish_request()
+
+
+@dataclasses.dataclass(frozen=True)
+class _WebSocketWriteBatch:
+    event: BrowserStreamEvent
+    release_events: tuple[BrowserStreamEvent, ...]
+
+
+class _WebSocketResponseAssembler:
+    """Reassemble data fragments while allowing interleaved control frames."""
+
+    def __init__(self) -> None:
+        self.opcode: WebSocketOpcode | None = None
+        self.data = bytearray()
+        self.events: list[BrowserStreamEvent] = []
+
+    @property
+    def partial_message(self) -> bool:
+        """Return whether one incomplete data message is buffered."""
+        return self.opcode is not None
+
+    def feed(self, event: BrowserStreamEvent) -> _WebSocketWriteBatch | None:
+        opcode = event.websocket_opcode
+        final = event.websocket_final
+        if opcode is None or final is None:
+            raise RuntimeError("Runtime WebSocket event metadata is absent")
+        if opcode in {
+            WebSocketOpcode.PING,
+            WebSocketOpcode.PONG,
+            WebSocketOpcode.CLOSE,
+        }:
+            return _WebSocketWriteBatch(event=event, release_events=(event,))
+        if opcode in {WebSocketOpcode.TEXT, WebSocketOpcode.BINARY}:
+            if self.opcode is not None:
+                raise RuntimeError(
+                    "Runtime WebSocket message opcode changed mid-message"
+                )
+            if final:
+                return _WebSocketWriteBatch(event=event, release_events=(event,))
+            self.opcode = opcode
+            self.data.extend(event.data)
+            self.events.append(event)
+            return None
+        if opcode is not WebSocketOpcode.CONTINUATION or self.opcode is None:
+            raise RuntimeError("Runtime WebSocket continuation is invalid")
+        self.data.extend(event.data)
+        self.events.append(event)
+        if not final:
+            return None
+        assembled = dataclasses.replace(
+            event,
+            data=bytes(self.data),
+            websocket_opcode=self.opcode,
+            websocket_final=True,
+        )
+        release_events = tuple(self.events)
+        self.opcode = None
+        self.data.clear()
+        self.events.clear()
+        return _WebSocketWriteBatch(
+            event=assembled,
+            release_events=release_events,
+        )
+
+    def discard_pending(self) -> tuple[BrowserStreamEvent, ...]:
+        pending = tuple(self.events)
+        self.opcode = None
+        self.data.clear()
+        self.events.clear()
+        return pending
+
+
+async def _assemble_websocket_response_event(
+    assembler: _WebSocketResponseAssembler,
+    bridge: RuntimeWebBrowserStreamBridge,
+    event: BrowserStreamEvent,
+) -> _WebSocketWriteBatch | None:
+    """Discard the dequeued event when response assembly rejects it."""
+    try:
+        return assembler.feed(event)
+    except RuntimeError:
+        await bridge.discard_event(event)
+        raise
 
 
 async def _write_websocket_event(

@@ -11,7 +11,10 @@ from typing import AsyncContextManager
 
 import pytest
 from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_capacity import CapacityProfile
+from azents_runtime_control.runtime_web_capacity import (
+    CapacityProfile,
+    CapacityProtocol,
+)
 from azents_runtime_control.runtime_web_session import (
     APPROVED_SESSION_PROFILE,
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
@@ -49,18 +52,24 @@ from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
     RuntimeWebGatewaySessionGrpcServicer,
     RuntimeWebTrustedPeerAuthenticator,
     _BoundedEnvelopeQueue,
+    _register_joined_runner,
     _renew_owner_session,
     _RunnerConnection,
     _SourceSession,
+    _StreamBinding,
 )
 from azents.runtime.coordination.data import RuntimeSystemMetricsSample
+from azents.runtime.web_session_broker import BrokerStreamKey, BrokerTarget
 from azents.runtime.web_session_owner import (
     RuntimeWebAcceptedRunnerSession,
     RuntimeWebOwnedSession,
+    RuntimeWebOwnerSessionRegistry,
 )
 from azents.runtime.web_session_relay import (
     PersistentRelayConnection,
     RelaySessionKey,
+    RelaySourceStreamKey,
+    RelayStreamBinding,
     RuntimeWebRelayPool,
 )
 from azents.testing.grpc import FakeGrpcContext
@@ -130,6 +139,7 @@ class _OwnerLifecycle:
     def __init__(self, *, renew_results: tuple[bool, ...] = ()) -> None:
         self.renew_results = list(renew_results)
         self.renewed: list[OwnerSessionEpoch] = []
+        self.joined: list[OwnerSessionEpoch] = []
         self.draining: list[OwnerSessionEpoch] = []
         self.released: list[OwnerSessionEpoch] = []
 
@@ -146,12 +156,37 @@ class _OwnerLifecycle:
         self.renewed.append(owner)
         return self.renew_results.pop(0) if self.renew_results else True
 
+    async def mark_owner_joined(self, owner: OwnerSessionEpoch) -> bool:
+        self.joined.append(owner)
+        return True
+
     async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool:
         self.draining.append(owner)
         return True
 
     async def release_owner(self, owner: OwnerSessionEpoch) -> bool:
         self.released.append(owner)
+        return True
+
+
+class _FailingRegistrationDataPlane(RuntimeWebControlDataPlane):
+    def __init__(self) -> None:
+        pass
+
+    async def register_runner(
+        self,
+        accepted: RuntimeWebAcceptedRunnerSession,
+    ) -> _RunnerConnection:
+        del accepted
+        raise asyncio.CancelledError
+
+
+class _RecordingOwnerRegistry(RuntimeWebOwnerSessionRegistry):
+    def __init__(self) -> None:
+        self.released: list[RuntimeWebAcceptedRunnerSession] = []
+
+    async def release(self, accepted: RuntimeWebAcceptedRunnerSession) -> bool:
+        self.released.append(accepted)
         return True
 
 
@@ -225,6 +260,29 @@ def _owner() -> OwnerSessionEpoch:
         desired_generation=1,
         runner_generation=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_joined_owner_registration_cancellation_rolls_back_offer() -> None:
+    accepted = RuntimeWebAcceptedRunnerSession(
+        owner=_owner(),
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    lifecycle = _OwnerLifecycle()
+    registry = _RecordingOwnerRegistry()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _register_joined_runner(
+            data_plane=_FailingRegistrationDataPlane(),
+            offer_provider=lifecycle,
+            registry=registry,
+            accepted=accepted,
+        )
+
+    assert registry.released == [accepted]
+    assert lifecycle.released == [accepted.owner]
 
 
 def _runner_runtime_web_metrics(scale: int) -> RunnerRuntimeWebMetrics:
@@ -1512,6 +1570,52 @@ async def test_relay_runner_round_trip_restores_source_stream_and_epoch() -> Non
     assert reset.owner_boot_id == owner.owner_boot_id
     assert reset.session_lease_id == owner.session_lease_id
     assert reset.lease_generation == owner.lease_generation
+    await data_plane.unregister_source(source)
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_async_relay_disconnect_resets_and_releases_source_binding() -> None:
+    data_plane = _data_plane()
+    owner = _owner()
+    source = await data_plane.register_source(
+        session_id="gateway-session",
+        peer_boot_id="gateway-boot",
+        owner=None,
+    )
+    source_key = BrokerStreamKey(source.source_key, 7)
+    data_plane.bindings[source_key] = _StreamBinding(
+        source=source,
+        key=source_key,
+        target=BrokerTarget(owner=owner, local=False, relay_count=1),
+        broker=None,
+        capacity_stream_id=None,
+        runner_stream_id=None,
+        protocol=CapacityProtocol.HTTP,
+    )
+    assert data_plane.resources.try_open_stream()
+    relay_binding = RelayStreamBinding(
+        source=RelaySourceStreamKey(
+            source_session_id=source.session_id,
+            source_peer_boot_id=source.peer_boot_id,
+            source_stream_id=7,
+        ),
+        relay_stream_id=1,
+    )
+
+    await data_plane.relay_disconnected(
+        RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        (relay_binding,),
+    )
+    reset = await anext(source.queue.__aiter__())
+
+    assert reset.stream_id == 7
+    assert reset.WhichOneof("payload") == "reset"
+    assert reset.reset.reason == (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
+    )
+    assert data_plane.bindings == {}
+    assert data_plane.resources.snapshot().active_streams == 0
     await data_plane.unregister_source(source)
     await data_plane.close()
 

@@ -24,7 +24,11 @@ from azents_runtime_control.runner_transfer import RunnerTransferResult
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
-from azents_runtime_control.runtime_web_session import RunnerSessionOffer
+from azents_runtime_control.runtime_web_session import (
+    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    OwnerSessionEpoch,
+    RunnerSessionOffer,
+)
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_CAPABILITY,
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
@@ -46,10 +50,13 @@ from azents.runtime.control_protocol.data import (
     RuntimeRunnerOperation,
     RuntimeRunnerRegistration,
 )
+from azents.runtime.control_protocol.grpc import runner_server as runner_server_module
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
+    RuntimeWebSessionOfferProvider,
     _runner_transfer_cancel,
     _runner_transfer_intent,
+    _RunnerOutbound,
     _RunnerOutboundItem,
 )
 from azents.runtime.control_protocol.service import (
@@ -161,6 +168,47 @@ class _NoWebOfferProvider:
     ) -> RunnerSessionOffer | None:
         del runtime_id, runner_generation
         return None
+
+
+class _SequencedWebOfferProvider:
+    def __init__(self, offers: tuple[RunnerSessionOffer, ...]) -> None:
+        self.offers = offers
+        self.calls: list[tuple[str, int]] = []
+        self.exhausted = asyncio.Event()
+
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RunnerSessionOffer | None:
+        self.calls.append((runtime_id, runner_generation))
+        index = len(self.calls) - 1
+        if index < len(self.offers):
+            return self.offers[index]
+        self.exhausted.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+def _web_offer(*, lease_generation: int) -> RunnerSessionOffer:
+    owner = OwnerSessionEpoch(
+        owner_boot_id=f"owner-{lease_generation}",
+        session_lease_id=f"lease-{lease_generation}",
+        lease_generation=lease_generation,
+        runtime_id="runtime-1",
+        desired_generation=2,
+        runner_generation=3,
+    )
+    return RunnerSessionOffer(
+        owner=owner,
+        owner_replica_id="control-a",
+        connect_address="control-a.internal:8030",
+        tls_server_name="runtime-control.internal",
+        session_nonce=f"nonce-{lease_generation}",
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 @dataclasses.dataclass
@@ -2253,12 +2301,56 @@ def test_connect_runner_outbound_queue_is_bounded() -> None:
     assert "asyncio.Queue(maxsize=1)" in source
 
 
+@pytest.mark.asyncio
+async def test_runner_control_reissues_web_session_offer_for_current_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runner_server_module,
+        "_WEB_SESSION_OFFER_RETRY_SECONDS",
+        0.01,
+    )
+    first = _web_offer(lease_generation=1)
+    second = _web_offer(lease_generation=2)
+    provider = _SequencedWebOfferProvider((first, second))
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = _servicer(
+        service,
+        store,
+        FakeStateSink(),
+        web_session_offer_provider=provider,
+    )
+    outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue()
+
+    relaying = asyncio.create_task(
+        servicer._relay_web_session_offers(
+            outbound,
+            runtime_id="runtime-1",
+            generation=3,
+        )
+    )
+    try:
+        first_message = await asyncio.wait_for(outbound.get(), timeout=1)
+        second_message = await asyncio.wait_for(outbound.get(), timeout=1)
+    finally:
+        relaying.cancel()
+        await asyncio.gather(relaying, return_exceptions=True)
+
+    assert isinstance(first_message, runtime_runner_control_pb2.RunnerControlMessage)
+    assert isinstance(second_message, runtime_runner_control_pb2.RunnerControlMessage)
+    assert first_message.web_session_offer.session_lease_id == "lease-1"
+    assert second_message.web_session_offer.session_lease_id == "lease-2"
+    assert provider.calls[:2] == [("runtime-1", 3), ("runtime-1", 3)]
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     store: InMemoryRuntimeCoordinationStore,
     sink: FakeStateSink,
     *,
     runner_authenticator: FakeRunnerAuthenticator | None = None,
+    web_session_offer_provider: RuntimeWebSessionOfferProvider | None = None,
 ) -> RuntimeRunnerControlGrpcServicer:
     return RuntimeRunnerControlGrpcServicer(
         control_protocol=service,
@@ -2269,7 +2361,9 @@ def _servicer(
         consumer_id="runner-consumer-a",
         runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        web_session_offer_provider=(
+            web_session_offer_provider or _NoWebOfferProvider()
+        ),
         operation_block_ms=1,
     )
 

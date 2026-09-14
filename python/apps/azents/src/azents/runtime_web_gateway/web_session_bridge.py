@@ -13,10 +13,14 @@ from typing import Protocol
 from azents_runtime_control.proto import runtime_web_session_pb2
 from azents_runtime_control.runtime_web_flow import (
     AbsoluteCreditWindow,
+    FairFrameScheduler,
     HierarchicalCredit,
+    QueueLane,
+    ScheduledItem,
 )
 from azents_runtime_control.runtime_web_session import (
     CONTROL_RESERVE_BYTES,
+    MANDATORY_DATA_FRAME_BYTES,
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
@@ -38,7 +42,11 @@ from azents.runtime_web_gateway.web_session_pool import (
     RuntimeWebGatewaySessionPool,
 )
 
-_MAX_PENDING_ENVELOPES = 32
+_MAX_PENDING_ENVELOPES = {
+    QueueLane.CONTROL: 32,
+    QueueLane.LATENCY: 32,
+    QueueLane.DATA: 32,
+}
 _MAX_PENDING_BROWSER_EVENTS = 8
 _BROWSER_EVENT_QUEUE_SIZE = _MAX_PENDING_BROWSER_EVENTS + 1
 _CANCEL_DELIVERY_TIMEOUT_SECONDS = 0.1
@@ -91,7 +99,8 @@ class PersistentGatewaySessionTransport:
     ) -> None:
         self.stream = stream
         self.resources = resources
-        self.outbound: deque[_BufferedEnvelope] = deque()
+        self.outbound = _new_outbound_scheduler()
+        self.outbound_items = {lane: 0 for lane in QueueLane}
         self.handlers: dict[int, GatewayStreamHandler] = {}
         self.tombstones: deque[int] = deque(maxlen=MAX_STREAM_TOMBSTONES)
         self.tombstone_set: set[int] = set()
@@ -170,6 +179,7 @@ class PersistentGatewaySessionTransport:
                         accepted,
                         expected_fingerprint=hello.protocol_fingerprint,
                         expected_session_id=hello.session_id,
+                        expected_peer_boot_id=hello.peer_boot_id,
                     )
                 )
             except BaseException:
@@ -238,6 +248,7 @@ class PersistentGatewaySessionTransport:
         size_bytes = envelope.ByteSize()
         if not 1 <= size_bytes <= MAX_ENVELOPE_BYTES:
             raise ValueError("Runtime Web Gateway envelope size is invalid")
+        lane = _outbound_lane(envelope)
         application_bytes = _application_bytes(envelope)
         control_bytes = size_bytes - application_bytes
         if application_bytes and not self.resources.try_reserve_application_buffer(
@@ -252,10 +263,30 @@ class PersistentGatewaySessionTransport:
             async with self.condition:
 
                 def can_queue() -> bool:
+                    non_control_bytes = (
+                        self.outbound.data_bytes + self.outbound.latency_bytes
+                    )
+                    lane_available = {
+                        QueueLane.CONTROL: (
+                            self.outbound.control_bytes + size_bytes
+                            <= CONTROL_RESERVE_BYTES
+                        ),
+                        QueueLane.LATENCY: (
+                            self.outbound.latency_bytes + size_bytes
+                            <= SESSION_WINDOW_BYTES
+                            and non_control_bytes + size_bytes <= SESSION_WINDOW_BYTES
+                        ),
+                        QueueLane.DATA: (
+                            self.outbound.data_bytes + size_bytes
+                            <= SESSION_WINDOW_BYTES
+                            and non_control_bytes + size_bytes <= SESSION_WINDOW_BYTES
+                        ),
+                    }[lane]
                     return (
-                        len(self.outbound) < _MAX_PENDING_ENVELOPES
+                        self.outbound_items[lane] < _MAX_PENDING_ENVELOPES[lane]
                         and self.outbound_bytes + size_bytes
                         <= SESSION_WINDOW_BYTES + CONTROL_RESERVE_BYTES
+                        and lane_available
                     ) or not self.active
 
                 waiter_reserved = False
@@ -281,13 +312,19 @@ class PersistentGatewaySessionTransport:
                         "Runtime Web control buffer is exhausted"
                     )
                 control_reserved = True
-                self.outbound.append(
-                    _BufferedEnvelope(
-                        envelope=queued,
-                        application_bytes=application_bytes,
-                        control_bytes=control_bytes,
+                self.outbound.enqueue(
+                    ScheduledItem(
+                        lane=lane,
+                        stream_id=queued.stream_id if lane is QueueLane.DATA else None,
+                        size_bytes=size_bytes,
+                        value=_BufferedEnvelope(
+                            envelope=queued,
+                            application_bytes=application_bytes,
+                            control_bytes=control_bytes,
+                        ),
                     )
                 )
+                self.outbound_items[lane] += 1
                 self.outbound_bytes += size_bytes
                 self.condition.notify_all()
                 queued_successfully = True
@@ -310,8 +347,9 @@ class PersistentGatewaySessionTransport:
             ):
                 return ()
             self.active = False
-            buffered = tuple(self.outbound)
-            self.outbound.clear()
+            buffered = _drain_outbound_scheduler(self.outbound)
+            self.outbound = _new_outbound_scheduler()
+            self.outbound_items = {lane: 0 for lane in QueueLane}
             self.outbound_bytes = 0
             failed = tuple(sorted(self.handlers))
             receiver = self.receiver
@@ -353,11 +391,15 @@ class PersistentGatewaySessionTransport:
         while True:
             async with self.condition:
                 await self.condition.wait_for(
-                    lambda: bool(self.outbound) or not self.active
+                    lambda: sum(self.outbound_items.values()) > 0 or not self.active
                 )
                 if not self.active:
                     return
-                buffered = self.outbound.popleft()
+                scheduled = self.outbound.pop()
+                if scheduled is None:
+                    raise RuntimeError("Runtime Web Gateway scheduler lost an item")
+                buffered = scheduled.value
+                self.outbound_items[scheduled.lane] -= 1
                 self.outbound_bytes -= buffered.envelope.ByteSize()
                 self.condition.notify_all()
             try:
@@ -372,6 +414,7 @@ class PersistentGatewaySessionTransport:
         *,
         expected_fingerprint: str,
         expected_session_id: str,
+        expected_peer_boot_id: str,
     ) -> None:
         first = True
         peer_boot_id: str | None = None
@@ -418,10 +461,33 @@ class PersistentGatewaySessionTransport:
                     )
                     self.resources.transport_heartbeat_acknowledgements += 1
                     continue
+                if payload == "heartbeat":
+                    if envelope.stream_id != 0:
+                        raise RuntimeError(
+                            "Runtime Web Gateway heartbeat must be session-scoped"
+                        )
+                    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                        protocol_fingerprint=expected_fingerprint,
+                        session_id=expected_session_id,
+                        peer_boot_id=expected_peer_boot_id,
+                    )
+                    acknowledgement.heartbeat_ack.monotonic_sequence = (
+                        envelope.heartbeat.monotonic_sequence
+                    )
+                    await self.send(acknowledgement)
+                    continue
                 if payload == "go_away":
                     self.resources.transport_go_aways += 1
                     await self._receive_go_away(envelope)
                     continue
+                if payload == "session_error":
+                    if envelope.stream_id != 0:
+                        raise RuntimeError(
+                            "Runtime Web Gateway session error must be session-scoped"
+                        )
+                    raise RuntimeError(
+                        "Runtime Web Control reported a Gateway session error"
+                    )
                 if envelope.stream_id == 0:
                     raise RuntimeError("Runtime Web Gateway session frame is invalid")
                 async with self.condition:
@@ -446,8 +512,9 @@ class PersistentGatewaySessionTransport:
         finally:
             async with self.condition:
                 self.active = False
-                buffered = tuple(self.outbound)
-                self.outbound.clear()
+                buffered = _drain_outbound_scheduler(self.outbound)
+                self.outbound = _new_outbound_scheduler()
+                self.outbound_items = {lane: 0 for lane in QueueLane}
                 self.outbound_bytes = 0
                 handlers = tuple(self.handlers.items())
                 self.handlers.clear()
@@ -981,14 +1048,11 @@ class RuntimeWebBrowserStreamBridge:
             if direction is not StreamDirection.RESPONSE:
                 raise ValueError("Runtime Web Gateway received request-side WebSocket")
             opcode = _websocket_opcode(envelope.websocket.opcode)
-            if envelope.websocket.data and opcode in {
-                WebSocketOpcode.TEXT,
-                WebSocketOpcode.BINARY,
-                WebSocketOpcode.CONTINUATION,
-            }:
-                _validate_credit_reserve(
-                    self.response_credit, len(envelope.websocket.data)
-                )
+            application_bytes = _websocket_application_bytes(
+                opcode, envelope.websocket.data
+            )
+            if application_bytes:
+                _validate_credit_reserve(self.response_credit, application_bytes)
             self.binding.state.receive_websocket(
                 direction=direction,
                 sequence=envelope.frame_sequence,
@@ -996,12 +1060,8 @@ class RuntimeWebBrowserStreamBridge:
                 final=envelope.websocket.final,
                 data=envelope.websocket.data,
             )
-            if envelope.websocket.data and opcode in {
-                WebSocketOpcode.TEXT,
-                WebSocketOpcode.BINARY,
-                WebSocketOpcode.CONTINUATION,
-            }:
-                self.response_credit.reserve(len(envelope.websocket.data))
+            if application_bytes:
+                self.response_credit.reserve(application_bytes)
             if not await self._queue_event(
                 BrowserStreamEvent(
                     payload=payload,
@@ -1011,9 +1071,7 @@ class RuntimeWebBrowserStreamBridge:
                     websocket_opcode=opcode,
                     websocket_final=envelope.websocket.final,
                     terminal_reason=None,
-                    control_buffer_bytes=(
-                        envelope.ByteSize() - len(envelope.websocket.data)
-                    ),
+                    control_buffer_bytes=(envelope.ByteSize() - application_bytes),
                 )
             ):
                 return
@@ -1112,13 +1170,14 @@ class RuntimeWebBrowserStreamBridge:
         if event_id not in self.buffered_event_ids:
             return
         self.buffered_event_ids.remove(event_id)
+        application_bytes = _browser_event_application_bytes(event)
         try:
-            if acknowledge and event.data and not self.response_credit.closed:
-                stream_total = self.response_credit.stream.consumed_total + len(
-                    event.data
+            if acknowledge and application_bytes and not self.response_credit.closed:
+                stream_total = (
+                    self.response_credit.stream.consumed_total + application_bytes
                 )
-                session_total = self.response_credit.session.consumed_total + len(
-                    event.data
+                session_total = (
+                    self.response_credit.session.consumed_total + application_bytes
                 )
                 self.response_credit.update_consumed(
                     stream_consumed_total=stream_total,
@@ -1135,8 +1194,8 @@ class RuntimeWebBrowserStreamBridge:
         finally:
             if event.control_buffer_bytes:
                 self.resources.release_control_buffer(event.control_buffer_bytes)
-            if event.data:
-                await self.resources.release_application_buffer(len(event.data))
+            if application_bytes:
+                await self.resources.release_application_buffer(application_bytes)
 
     async def discard_buffered_events(self) -> None:
         """Release queued application bytes when the browser exchange terminates."""
@@ -1241,7 +1300,7 @@ class RuntimeWebBrowserStreamBridge:
         )
 
     async def _queue_event(self, event: BrowserStreamEvent) -> bool:
-        application_bytes = len(event.data)
+        application_bytes = _browser_event_application_bytes(event)
         control_bytes = event.control_buffer_bytes
         if application_bytes and not await self.resources.reserve_application_buffer(
             application_bytes
@@ -1333,14 +1392,65 @@ def _validate_credit_reserve(
     credit.session.validate_reserve(size_bytes)
 
 
+def _new_outbound_scheduler() -> FairFrameScheduler[_BufferedEnvelope]:
+    return FairFrameScheduler(
+        latency_capacity_bytes=SESSION_WINDOW_BYTES,
+        data_capacity_bytes=SESSION_WINDOW_BYTES,
+        quantum_bytes=MANDATORY_DATA_FRAME_BYTES,
+        maximum_priority_items_before_data=4,
+    )
+
+
+def _drain_outbound_scheduler(
+    scheduler: FairFrameScheduler[_BufferedEnvelope],
+) -> tuple[_BufferedEnvelope, ...]:
+    buffered: list[_BufferedEnvelope] = []
+    while (item := scheduler.pop()) is not None:
+        buffered.append(item.value)
+    return tuple(buffered)
+
+
+def _outbound_lane(
+    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+) -> QueueLane:
+    payload = envelope.WhichOneof("payload")
+    if payload in {"data", "direction_end", "stream_end", "websocket"}:
+        return QueueLane.DATA
+    if payload in {"open", "response_head"}:
+        return QueueLane.LATENCY
+    return QueueLane.CONTROL
+
+
 def _application_bytes(
     envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
 ) -> int:
     payload = envelope.WhichOneof("payload")
     if payload == "data":
         return len(envelope.data.data)
-    if payload == "websocket":
+    if payload == "websocket" and envelope.websocket.opcode in {
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT,
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY,
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION,
+    }:
         return len(envelope.websocket.data)
+    return 0
+
+
+def _websocket_application_bytes(opcode: WebSocketOpcode, data: bytes) -> int:
+    if opcode in {
+        WebSocketOpcode.TEXT,
+        WebSocketOpcode.BINARY,
+        WebSocketOpcode.CONTINUATION,
+    }:
+        return len(data)
+    return 0
+
+
+def _browser_event_application_bytes(event: BrowserStreamEvent) -> int:
+    if event.payload == "data":
+        return len(event.data)
+    if event.payload == "websocket" and event.websocket_opcode is not None:
+        return _websocket_application_bytes(event.websocket_opcode, event.data)
     return 0
 
 

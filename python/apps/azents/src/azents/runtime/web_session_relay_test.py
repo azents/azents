@@ -17,6 +17,7 @@ from azents.runtime.web_session_broker import BrokerTarget
 from azents.runtime.web_session_relay import (
     GrpcPersistentControlRelay,
     RelaySessionKey,
+    RelayStreamBinding,
     RuntimeWebRelayPool,
 )
 
@@ -240,6 +241,40 @@ async def test_relay_failure_retires_without_replay() -> None:
     assert replacement.sent == []
     await pool.forward(target=target, envelope=_source_envelope(2))
     assert [message.stream_id for message in replacement.sent] == [1]
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_monitor_reports_every_retired_source_binding() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    retired = asyncio.Event()
+    observations: list[tuple[RelaySessionKey, tuple[RelayStreamBinding, ...]]] = []
+
+    async def handle_retirement(
+        key: RelaySessionKey,
+        bindings: tuple[RelayStreamBinding, ...],
+    ) -> None:
+        observations.append((key, bindings))
+        retired.set()
+
+    pool.bind_retirement_handler(handle_retirement)
+    binding = await pool.forward(target=target, envelope=_source_envelope(7))
+    assert binding is not None
+
+    connection.closed.set()
+    await asyncio.wait_for(retired.wait(), timeout=1)
+
+    assert observations == [
+        (
+            RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+            (binding,),
+        )
+    ]
+    assert pool.sessions == {}
+    assert pool.source_bindings == {}
+    assert pool.relay_bindings == {}
     await pool.close()
 
 

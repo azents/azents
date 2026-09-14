@@ -430,6 +430,7 @@ async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
         allow_insecure=True,
         loopback=loopback,
         client_factory=None,
+        outbound_resources=None,
     )
     manager.client = FailingCloseClient()
 

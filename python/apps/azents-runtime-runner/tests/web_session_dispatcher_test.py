@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 from collections.abc import AsyncIterator, Callable
+from typing import Literal
 
 import h11
 import pytest
@@ -60,6 +61,16 @@ class _RecordingClient(GrpcRunnerWebSessionClient):
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _ObservedCondition(asyncio.Condition):
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.waiting.set()
+        return await super().wait()
 
 
 class _HandshakeClient(_RecordingClient):
@@ -318,6 +329,37 @@ async def test_shared_response_credit_wakes_another_stream() -> None:
     await asyncio.wait_for(waiting, timeout=1)
 
     assert stream_b.response_credit.stream.sent_total == 1
+
+
+async def test_stream_end_waits_for_downstream_response_credit() -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    dispatcher = _dispatcher(_manager(client_factory=None))
+    credit_changed = _ObservedCondition()
+    stream = _stream(
+        offer=offer,
+        client=client,
+        session_credit=dispatcher.response_session_credit,
+        credit_changed=credit_changed,
+    )
+    stream.response_credit.stream.sent_total = 1
+    dispatcher.response_session_credit.sent_total = 1
+
+    ending = asyncio.create_task(dispatcher._stream_end(7, stream))
+    await credit_changed.waiting.wait()
+    assert not ending.done()
+
+    async with credit_changed:
+        stream.response_credit.update_consumed(
+            stream_consumed_total=1,
+            session_consumed_total=1,
+        )
+        credit_changed.notify_all()
+    await asyncio.wait_for(ending, timeout=1)
+
+    assert len(client.sent) == 1
+    assert client.sent[0].stream_id == 7
+    assert client.sent[0].WhichOneof("payload") == "stream_end"
 
 
 @pytest.mark.parametrize(

@@ -166,7 +166,11 @@ def test_runtime_control_web_transport_renders_capacity_and_internal_lifecycle()
     }
     for name, value in expected_capacity.items():
         assert f'name: {name}\n              value: "{value}"' in deployment
-    assert "path: /__azents/runtime-web/ready" in deployment
+    assert "path: /__azents/runtime-web/ready" not in deployment
+    assert (
+        "readinessProbe:\n            tcpSocket:\n              port: grpc"
+        in deployment
+    )
     assert deployment.count("path: /__azents/runtime-web/live") == 2
     assert "/__azents/runtime-web/drain" in deployment
     assert 'method="POST"' in deployment

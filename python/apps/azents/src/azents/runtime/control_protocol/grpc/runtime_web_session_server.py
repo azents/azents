@@ -68,6 +68,7 @@ from azents.runtime.web_session_owner import (
 )
 from azents.runtime.web_session_relay import (
     RelaySessionKey,
+    RelayStreamBinding,
     RuntimeWebRelayPool,
 )
 
@@ -357,6 +358,8 @@ class RuntimeWebOwnedSessionProvider(Protocol):
     ) -> RuntimeWebOwnedSession | None: ...
 
     async def renew_owner(self, owner: OwnerSessionEpoch) -> bool: ...
+
+    async def mark_owner_joined(self, owner: OwnerSessionEpoch) -> bool: ...
 
     async def mark_owner_draining(self, owner: OwnerSessionEpoch) -> bool: ...
 
@@ -1253,6 +1256,7 @@ class RuntimeWebControlDataPlane:
             resident_memory_bytes=resident_memory_bytes,
         )
         self.relay_pool.bind_resources(self.resources)
+        self.relay_pool.bind_retirement_handler(self.relay_disconnected)
         self.runners: dict[OwnerSessionEpoch, _RunnerConnection] = {}
         self.brokers: dict[OwnerSessionEpoch, RuntimeWebSessionBroker] = {}
         self.bindings: dict[BrokerStreamKey, _StreamBinding] = {}
@@ -1333,6 +1337,60 @@ class RuntimeWebControlDataPlane:
             *(runner.release_source(source.source_key) for runner in runners),
         )
         await source.queue.close()
+
+    async def relay_disconnected(
+        self,
+        key: RelaySessionKey,
+        relay_bindings: tuple[RelayStreamBinding, ...],
+    ) -> None:
+        """Reset every exact source binding after asynchronous relay loss."""
+        for relay_binding in relay_bindings:
+            source_identity = relay_binding.source
+            async with self.lock:
+                source = next(
+                    (
+                        candidate
+                        for candidate in self.sources.values()
+                        if candidate.session_id == source_identity.source_session_id
+                        and candidate.peer_boot_id
+                        == source_identity.source_peer_boot_id
+                    ),
+                    None,
+                )
+                source_key = (
+                    None
+                    if source is None
+                    else BrokerStreamKey(
+                        source.source_key,
+                        source_identity.source_stream_id,
+                    )
+                )
+                binding = None if source_key is None else self.bindings.get(source_key)
+                current = (
+                    source is not None
+                    and source_key is not None
+                    and binding is not None
+                    and not binding.target.local
+                    and binding.target.owner == key.owner
+                )
+            if not current or source is None or source_key is None:
+                continue
+            try:
+                await source.queue.put(
+                    _reset(
+                        source,
+                        self.control_boot_id,
+                        source_identity.source_stream_id,
+                        CloseReason.TRANSPORT_UNAVAILABLE,
+                    )
+                )
+            except _RuntimeWebControlResourceExhausted:
+                await source.queue.close()
+            except RuntimeError:
+                if not source.queue.closed:
+                    raise
+            finally:
+                await self._release(source_key)
 
     async def register_runner(
         self,
@@ -2440,11 +2498,21 @@ class RuntimeRunnerWebSessionGrpcServicer(
                 runner_generation=owner.runner_generation,
             ),
         )
-        try:
-            connection = await self.data_plane.register_runner(accepted)
-        except _RuntimeWebControlResourceExhausted:
+        if not await self.offer_provider.mark_owner_joined(owner):
             await self.registry.release(accepted)
-            await self.offer_provider.release_owner(owner)
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Runtime Web Runner session offer changed during join",
+            )
+            raise AssertionError("unreachable")
+        try:
+            connection = await _register_joined_runner(
+                data_plane=self.data_plane,
+                offer_provider=self.offer_provider,
+                registry=self.registry,
+                accepted=accepted,
+            )
+        except _RuntimeWebControlResourceExhausted:
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Runtime Web Control hard session limit is exhausted",
@@ -2517,6 +2585,26 @@ class RuntimeRunnerWebSessionGrpcServicer(
                 yield response
         finally:
             await cleanup()
+
+
+async def _register_joined_runner(
+    *,
+    data_plane: RuntimeWebControlDataPlane,
+    offer_provider: RuntimeWebOwnedSessionProvider,
+    registry: RuntimeWebOwnerSessionRegistry,
+    accepted: RuntimeWebAcceptedRunnerSession,
+) -> _RunnerConnection:
+    """Rollback the joined offer if data-plane registration does not complete."""
+    try:
+        return await data_plane.register_runner(accepted)
+    except asyncio.CancelledError:
+        await registry.release(accepted)
+        await offer_provider.release_owner(accepted.owner)
+        raise
+    except Exception:
+        await registry.release(accepted)
+        await offer_provider.release_owner(accepted.owner)
+        raise
 
 
 def add_runtime_web_session_servicers(

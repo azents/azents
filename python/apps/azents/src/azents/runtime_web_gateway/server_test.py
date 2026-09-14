@@ -46,11 +46,13 @@ from azents.runtime_web_gateway.operations import (
 )
 from azents.runtime_web_gateway.server import (
     LinuxProcResidentMemorySampler,
+    _assemble_websocket_response_event,
     _response_is_sse,
     _selected_websocket_subprotocol,
     _send_websocket_frames,
     _websocket_data,
     _websocket_subprotocol_tokens,
+    _WebSocketResponseAssembler,
     create_runtime_web_gateway_application,
     create_runtime_web_resident_memory_sampler,
 )
@@ -59,6 +61,7 @@ from azents.runtime_web_gateway.settings import (
     RuntimeWebGatewaySettings,
 )
 from azents.runtime_web_gateway.web_session_bridge import (
+    BrowserStreamEvent,
     RuntimeWebBrowserStreamBridge,
     RuntimeWebGatewayResourceExhausted,
 )
@@ -256,9 +259,11 @@ class _WebSocketTransport:
         *,
         resources: RuntimeWebGatewayResourceTracker,
         response_headers: tuple[tuple[bytes, bytes], ...],
+        response_frames: tuple[tuple[WebSocketOpcode, bool, bytes], ...],
     ) -> None:
         self.resources = resources
         self.response_headers = response_headers
+        self.response_frames = response_frames
         self.handlers: dict[int, RuntimeWebBrowserStreamBridge] = {}
         self.sent: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
         self.credit_condition = asyncio.Condition()
@@ -294,7 +299,20 @@ class _WebSocketTransport:
         if payload == "open":
             await handler.receive(self._accepted(envelope.stream_id))
             await handler.receive(self._response_head(envelope.stream_id))
-        elif payload == "direction_end":
+            for sequence, (opcode, final, data) in enumerate(
+                self.response_frames,
+                start=1,
+            ):
+                await handler.receive(
+                    self._websocket_frame(
+                        envelope.stream_id,
+                        sequence=sequence,
+                        opcode=opcode,
+                        final=final,
+                        data=data,
+                    )
+                )
+        elif payload == "direction_end" and not self.response_frames:
             await handler.receive(self._reset(envelope.stream_id))
 
     @staticmethod
@@ -349,6 +367,45 @@ class _WebSocketTransport:
         envelope.reset.reason = reason
         return envelope
 
+    @classmethod
+    def _websocket_frame(
+        cls,
+        stream_id: int,
+        *,
+        sequence: int,
+        opcode: WebSocketOpcode,
+        final: bool,
+        data: bytes,
+    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+        envelope = cls._base(stream_id)
+        envelope.frame_sequence = sequence
+        envelope.websocket.direction = (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        )
+        envelope.websocket.opcode = {
+            WebSocketOpcode.TEXT: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT
+            ),
+            WebSocketOpcode.BINARY: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+            ),
+            WebSocketOpcode.CONTINUATION: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION
+            ),
+            WebSocketOpcode.PING: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+            ),
+            WebSocketOpcode.PONG: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG
+            ),
+            WebSocketOpcode.CLOSE: (
+                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE
+            ),
+        }[opcode]
+        envelope.websocket.final = final
+        envelope.websocket.data = data
+        return envelope
+
 
 @dataclasses.dataclass(frozen=True)
 class _WebSocketHarness:
@@ -361,12 +418,15 @@ class _WebSocketHarness:
 
 async def _websocket_harness(
     response_headers: tuple[tuple[bytes, bytes], ...],
+    *,
+    response_frames: tuple[tuple[WebSocketOpcode, bool, bytes], ...],
 ) -> _WebSocketHarness:
     operations, operational_state = _operations()
     control_sessions = _ControlSessions()
     transport = _WebSocketTransport(
         resources=operational_state.resources,
         response_headers=response_headers,
+        response_frames=response_frames,
     )
     await control_sessions.pool.register(
         identity=SessionIdentity(
@@ -630,6 +690,79 @@ def test_websocket_control_payload_normalizes_buffer_views(
     )
 
 
+def test_websocket_response_assembler_preserves_fragmented_message_and_controls() -> (
+    None
+):
+    assembler = _WebSocketResponseAssembler()
+    first = BrowserStreamEvent(
+        payload="websocket",
+        status=None,
+        headers=(),
+        data=b"hello ",
+        websocket_opcode=WebSocketOpcode.TEXT,
+        websocket_final=False,
+        terminal_reason=None,
+        control_buffer_bytes=1,
+    )
+    ping = dataclasses.replace(
+        first,
+        data=b"ping",
+        websocket_opcode=WebSocketOpcode.PING,
+        websocket_final=True,
+    )
+    continuation = dataclasses.replace(
+        first,
+        data=b"world",
+        websocket_opcode=WebSocketOpcode.CONTINUATION,
+        websocket_final=True,
+    )
+
+    assert assembler.feed(first) is None
+    control = assembler.feed(ping)
+    assert control is not None
+    assert control.event is ping
+    assert control.release_events == (ping,)
+    assembled = assembler.feed(continuation)
+    assert assembled is not None
+    assert assembled.event.websocket_opcode is WebSocketOpcode.TEXT
+    assert assembled.event.websocket_final is True
+    assert assembled.event.data == b"hello world"
+    assert assembled.release_events == (first, continuation)
+    assert assembler.discard_pending() == ()
+
+
+class _DiscardingBridge(RuntimeWebBrowserStreamBridge):
+    def __init__(self) -> None:
+        self.discarded: list[BrowserStreamEvent] = []
+
+    async def discard_event(self, event: BrowserStreamEvent) -> None:
+        self.discarded.append(event)
+
+
+@pytest.mark.asyncio
+async def test_websocket_response_assembly_discards_rejected_current_event() -> None:
+    assembler = _WebSocketResponseAssembler()
+    first = BrowserStreamEvent(
+        payload="websocket",
+        status=None,
+        headers=(),
+        data=b"partial",
+        websocket_opcode=WebSocketOpcode.TEXT,
+        websocket_final=False,
+        terminal_reason=None,
+        control_buffer_bytes=1,
+    )
+    invalid = dataclasses.replace(first, websocket_final=True)
+    assert assembler.feed(first) is None
+    bridge = _DiscardingBridge()
+
+    with pytest.raises(RuntimeError, match="changed mid-message"):
+        await _assemble_websocket_response_event(assembler, bridge, invalid)
+
+    assert bridge.discarded == [invalid]
+    assert assembler.discard_pending() == (first,)
+
+
 @pytest.mark.parametrize(
     ("offered_headers", "response_headers"),
     [
@@ -701,7 +834,7 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         (b"Set-Cookie", b"upstream=forbidden"),
         (b"X-Upstream-Handshake", b"forbidden"),
     )
-    harness = await _websocket_harness(response_headers)
+    harness = await _websocket_harness(response_headers, response_frames=())
     try:
         websocket = await harness.client.ws_connect(
             "/socket",
@@ -741,6 +874,39 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         await harness.client.close()
 
 
+@pytest.mark.asyncio
+async def test_public_websocket_close_discards_incomplete_response_message() -> None:
+    harness = await _websocket_harness(
+        (),
+        response_frames=(
+            (WebSocketOpcode.TEXT, False, b"partial"),
+            (WebSocketOpcode.CLOSE, True, b"\x03\xe8application close"),
+        ),
+    )
+    try:
+        websocket = await harness.client.ws_connect(
+            "/socket",
+            headers={
+                "Host": "endpoint.services.example.net",
+                "Cookie": "__Http-Azents-Runtime-Web=opaque-secret",
+                "Origin": "https://endpoint.services.example.net",
+            },
+        )
+        message = await asyncio.wait_for(websocket.receive(), timeout=1)
+        assert message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED}
+        await asyncio.wait_for(harness.transport.unbound.wait(), timeout=1)
+
+        payloads = [
+            envelope.WhichOneof("payload") for envelope in harness.transport.sent
+        ]
+        assert "cancel" in payloads
+        assert harness.operational_state.resources.application_buffer_bytes == 0
+        assert harness.operational_state.resources.control_buffer_bytes == 0
+        assert harness.transport.handlers == {}
+    finally:
+        await harness.client.close()
+
+
 @pytest.mark.parametrize(
     "offered_headers",
     [
@@ -754,7 +920,10 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
 async def test_public_websocket_rejects_ambiguous_offered_subprotocol_before_101(
     offered_headers: tuple[tuple[bytes, bytes], ...],
 ) -> None:
-    harness = await _websocket_harness(((b"Sec-WebSocket-Protocol", b"Chat.V2"),))
+    harness = await _websocket_harness(
+        ((b"Sec-WebSocket-Protocol", b"Chat.V2"),),
+        response_frames=(),
+    )
     server_port = harness.client.server.port
     assert server_port is not None
     reader, writer = await asyncio.open_connection("127.0.0.1", server_port)
@@ -819,7 +988,7 @@ async def test_public_websocket_rejects_ambiguous_offered_subprotocol_before_101
 async def test_public_websocket_rejects_invalid_selected_subprotocol_before_101(
     response_headers: tuple[tuple[bytes, bytes], ...],
 ) -> None:
-    harness = await _websocket_harness(response_headers)
+    harness = await _websocket_harness(response_headers, response_frames=())
     try:
         with pytest.raises(WSServerHandshakeError) as rejected:
             await harness.client.ws_connect(

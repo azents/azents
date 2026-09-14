@@ -85,6 +85,7 @@ from azents.services.runtime_connection_registration.service import (
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
+_WEB_SESSION_OFFER_RETRY_SECONDS = 1.0
 _TERMINAL_OPEN_OPERATION_TYPE = "terminal.open.v1"
 _TERMINAL_TERMINATE_OPERATION_TYPE = "terminal.terminate.v1"
 _LOGGER = logging.getLogger(__name__)
@@ -259,6 +260,13 @@ class RuntimeRunnerControlGrpcServicer(
                 active_transfer_dispatches=active_transfer_dispatches,
             )
         )
+        offer_task = asyncio.create_task(
+            self._relay_web_session_offers(
+                outbound,
+                runtime_id=accepted.runtime_id,
+                generation=accepted.generation,
+            )
+        )
         try:
             yield runtime_runner_control_pb2.RunnerControlMessage(
                 request_id=first_message.request_id,
@@ -270,18 +278,11 @@ class RuntimeRunnerControlGrpcServicer(
                     heartbeat_interval_seconds=accepted.heartbeat_interval_seconds,
                 ),
             )
-            web_session_offer = await self._web_session_offer_provider.offer_for_runner(
-                runtime_id=accepted.runtime_id,
-                runner_generation=accepted.generation,
-            )
-            if web_session_offer is not None:
-                yield runtime_runner_control_pb2.RunnerControlMessage(
-                    web_session_offer=runner_session_offer_to_message(web_session_offer)
-                )
             async for message in _outbound_messages(
                 outbound,
                 inbound_task,
                 operation_task,
+                offer_task,
                 control_protocol=self._control_protocol,
                 authorize=lambda: self._runner_authenticator.authorize_runner(
                     authentication
@@ -298,7 +299,7 @@ class RuntimeRunnerControlGrpcServicer(
                     "runner_generation": accepted.generation,
                 },
             )
-            for task in (inbound_task, operation_task):
+            for task in (inbound_task, operation_task, offer_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -318,6 +319,27 @@ class RuntimeRunnerControlGrpcServicer(
                         "runner_generation": accepted.generation,
                     },
                 )
+
+    async def _relay_web_session_offers(
+        self,
+        outbound: asyncio.Queue[_RunnerOutbound],
+        *,
+        runtime_id: str,
+        generation: int,
+    ) -> None:
+        """Reissue exact Web session offers while Runner control remains current."""
+        while True:
+            offer = await self._web_session_offer_provider.offer_for_runner(
+                runtime_id=runtime_id,
+                runner_generation=generation,
+            )
+            if offer is not None:
+                await outbound.put(
+                    runtime_runner_control_pb2.RunnerControlMessage(
+                        web_session_offer=runner_session_offer_to_message(offer)
+                    )
+                )
+            await asyncio.sleep(_WEB_SESSION_OFFER_RETRY_SECONDS)
 
     async def _record_runner_stream_closed(
         self,
@@ -1041,6 +1063,7 @@ async def _outbound_messages(
     outbound: asyncio.Queue[_RunnerOutbound],
     inbound_task: asyncio.Task[None],
     operation_task: asyncio.Task[None],
+    offer_task: asyncio.Task[None],
     *,
     control_protocol: RuntimeControlProtocolService,
     authorize: Callable[[], Awaitable[bool]],
@@ -1049,7 +1072,7 @@ async def _outbound_messages(
     try:
         while True:
             done, _pending = await asyncio.wait(
-                {inbound_task, operation_task, get_task},
+                {inbound_task, operation_task, offer_task, get_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if get_task in done:
@@ -1065,7 +1088,7 @@ async def _outbound_messages(
                     yield item
                 get_task = asyncio.create_task(outbound.get())
                 continue
-            for task in (inbound_task, operation_task):
+            for task in (inbound_task, operation_task, offer_task):
                 if task in done:
                     await task
                     return
