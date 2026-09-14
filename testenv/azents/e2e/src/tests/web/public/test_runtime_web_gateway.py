@@ -80,6 +80,7 @@ from tests.required.public.test_runtime_terminal import (
     _start_runtime,
     _TerminalSocket,
     _TerminalWorkspace,
+    _wait_terminal_projection,
 )
 
 
@@ -116,6 +117,48 @@ class _RuntimeWebWorkspace:
     handle: str
     agent_id: str
     session_id: str
+
+
+class _RuntimeApplicationCommands:
+    """Run fixture commands through short-lived Terminal attachments."""
+
+    def __init__(
+        self,
+        *,
+        public_api_client: azentspublicclient.ApiClient,
+        workspace: _TerminalWorkspace,
+        server_url: str,
+    ) -> None:
+        self.public_api_client = public_api_client
+        self.workspace = workspace
+        self.server_url = server_url
+        self.last_output_sequence: int | None = None
+
+    def command(self, command: str, marker: str) -> bytes:
+        """Attach for one command so idle fixture work cannot become a slow consumer."""
+        terminal = _TerminalSocket.connect(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            server_url=self.server_url,
+            origin=_TERMINAL_ORIGIN,
+            last_output_sequence=self.last_output_sequence,
+        )
+        try:
+            return terminal.command(command, marker)
+        finally:
+            self.last_output_sequence = terminal.output_sequence
+            terminal.close()
+            terminal_id = terminal.accepted.terminal_id
+            _wait_terminal_projection(
+                public_api_client=self.public_api_client,
+                workspace=self.workspace,
+                predicate=lambda projection: (
+                    projection.terminal is not None
+                    and projection.terminal.terminal_id == terminal_id
+                    and not projection.terminal.attached
+                ),
+                message="Runtime Web fixture Terminal did not detach after command",
+            )
 
 
 @dataclass(frozen=True)
@@ -1125,34 +1168,32 @@ def _runtime_application(
     public_api_client: azentspublicclient.ApiClient,
     workspace: _RuntimeWebWorkspace,
     server_url: str,
-) -> Generator[_TerminalSocket, None, None]:
-    """Keep the fixture app's Runtime Terminal attached through transport checks."""
+) -> Generator[_RuntimeApplicationCommands, None, None]:
+    """Start the fixture app without retaining an unread Terminal attachment."""
     terminal_workspace = _TerminalWorkspace(
         token=workspace.token,
         handle=workspace.handle,
         agent_id=workspace.agent_id,
         session_id=workspace.session_id,
     )
-    terminal = _TerminalSocket.connect(
+    commands = _RuntimeApplicationCommands(
         public_api_client=public_api_client,
         workspace=terminal_workspace,
         server_url=server_url,
-        origin=_TERMINAL_ORIGIN,
     )
-    try:
-        encoded = base64.b64encode(
-            zlib.compress(_runtime_application_script().encode(), level=9)
-        ).decode()
-        terminal.command(
-            (
-                f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib;'
-                "exec(zlib.decompress(base64.b64decode('"
-                f"{encoded}')))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
-            ),
-            f"APP_STARTED_{unique()}",
-        )
-        ready_marker = f"APP_READY_{unique()}"
-        probe_script = f"""
+    encoded = base64.b64encode(
+        zlib.compress(_runtime_application_script().encode(), level=9)
+    ).decode()
+    commands.command(
+        (
+            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib;'
+            "exec(zlib.decompress(base64.b64decode('"
+            f"{encoded}')))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
+        ),
+        f"APP_STARTED_{unique()}",
+    )
+    ready_marker = f"APP_READY_{unique()}"
+    probe_script = f"""
 import socket
 import time
 
@@ -1169,15 +1210,13 @@ while True:
         print("{ready_marker}")
         break
 """.strip()
-        encoded_probe = base64.b64encode(probe_script.encode()).decode()
-        probe_output = terminal.command(
-            f"python -c \"import base64;exec(base64.b64decode('{encoded_probe}'))\"",
-            f"APP_PROBE_DONE_{unique()}",
-        )
-        assert ready_marker.encode() in probe_output, probe_output[-4_096:]
-        yield terminal
-    finally:
-        terminal.close()
+    encoded_probe = base64.b64encode(probe_script.encode()).decode()
+    probe_output = commands.command(
+        f"python -c \"import base64;exec(base64.b64decode('{encoded_probe}'))\"",
+        f"APP_PROBE_DONE_{unique()}",
+    )
+    assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+    yield commands
 
 
 def _browser(
@@ -1753,7 +1792,7 @@ def _decode_runtime_application_state(payload: object) -> _RuntimeApplicationSta
 
 
 def _runtime_application_state_via_terminal(
-    terminal: _TerminalSocket,
+    terminal: _RuntimeApplicationCommands,
 ) -> _RuntimeApplicationState:
     """Read loopback fixture state after public admission has been drained."""
     label = f"RUNTIME_WEB_STATE_{unique()}"
