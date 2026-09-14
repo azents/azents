@@ -20,7 +20,7 @@ Details of all living specs. Synchronized from frontmatter.
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-13 | 25 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-12 | 12 |
-| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-13 | 6 |
+| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-14 | 6 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-13 | 117 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-13 | 19 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-13 | 83 |

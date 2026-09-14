@@ -8,6 +8,7 @@ domain: system-settings
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/system_setting.py
+  - python/apps/azents/src/azents/core/system_setting_registry.py
   - python/apps/azents/src/azents/core/github_system_setting.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
@@ -50,7 +51,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-13
+last_verified_at: 2026-09-14
 spec_version: 6
 ---
 
