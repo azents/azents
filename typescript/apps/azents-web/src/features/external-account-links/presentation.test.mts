@@ -20,7 +20,7 @@ void test("elevation waits for the real methods response", () => {
   );
 });
 
-void test("provider availability is ordered and retains independent status", () => {
+void test("provider availability keeps only actionable providers in order", () => {
   assert.deepEqual(
     normalizeProviderAvailability([
       {
@@ -36,10 +36,27 @@ void test("provider availability is ordered and retains independent status", () 
         callback_url: "https://azents.example/callback",
       },
     ]),
-    [
-      { provider: "slack", status: "ready", available: true },
-      { provider: "discord", status: "unavailable", available: false },
-    ],
+    [{ provider: "slack", status: "ready", available: true }],
+  );
+});
+
+void test("all unavailable providers produce an empty actionable list", () => {
+  assert.deepEqual(
+    normalizeProviderAvailability([
+      {
+        provider: "slack",
+        status: "incomplete",
+        available: false,
+        callback_url: null,
+      },
+      {
+        provider: "discord",
+        status: "unavailable",
+        available: false,
+        callback_url: null,
+      },
+    ]),
+    [],
   );
 });
 

@@ -66,15 +66,24 @@ export const Empty = {
   },
 } satisfies Story;
 
-export const ProviderUnavailable = {
+export const OnlySlackAvailable = {
   args: {
     state: {
       type: "READY",
-      providers: [
-        { provider: "slack", status: "ready", available: true },
-        { provider: "discord", status: "incomplete", available: false },
-      ],
+      providers: [{ provider: "slack", status: "ready", available: true }],
       links: [slackLink],
+      disconnect: { type: "IDLE" },
+    } satisfies ExternalAccountLinksState,
+    ...handlers,
+  },
+} satisfies Story;
+
+export const NoProvidersAvailable = {
+  args: {
+    state: {
+      type: "READY",
+      providers: [],
+      links: [],
       disconnect: { type: "IDLE" },
     } satisfies ExternalAccountLinksState,
     ...handlers,

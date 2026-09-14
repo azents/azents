@@ -736,7 +736,8 @@ def _settings_response(
     )
     description_parts = [_settings_description(settings)]
     if personal is not None:
-        description_parts.append(personal.account.summary)
+        if personal.account.summary is not None:
+            description_parts.append(personal.account.summary)
         if personal.model.summary is not None:
             description_parts.append(personal.model.summary)
     description = "\n\n".join(description_parts)
@@ -1038,9 +1039,10 @@ def _link_only_response(
     account: DiscordAccountLinkPresentation,
     response_type: Literal[4, 7],
 ) -> dict[str, object]:
-    description = (
-        f"Conversation settings are unavailable for this account.\n\n{account.summary}"
-    )
+    description_parts = ["Conversation settings are unavailable for this account."]
+    if account.summary is not None:
+        description_parts.append(account.summary)
+    description = "\n\n".join(description_parts)
     data: dict[str, object] = {
         "content": description,
         "embeds": [

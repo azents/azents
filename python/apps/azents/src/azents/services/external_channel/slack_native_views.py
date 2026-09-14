@@ -48,6 +48,9 @@ def add_personal_controls(
     model_metadata: str | None,
 ) -> SlackInteractionView:
     """Append direct account URLs without changing the guest form or submission."""
+    if not linked and connect_url is None:
+        return view
+
     controls: list[dict[str, object]] = []
     if linked:
         controls.append(
@@ -71,12 +74,10 @@ def add_personal_controls(
         )
     if linked:
         status_text = "Account connected"
-    elif connect_url is not None:
+    else:
         status_text = (
             "Connect your account to use your authorized conversation settings."
         )
-    else:
-        status_text = "Slack account connection is currently unavailable."
     return replace(
         view,
         blocks=[

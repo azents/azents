@@ -38,5 +38,11 @@ export function normalizeProviderAvailability(
 ): ExternalAccountProviderAvailability[] | null {
   const slack = providerAvailability("slack", items);
   const discord = providerAvailability("discord", items);
-  return slack === null || discord === null ? null : [slack, discord];
+  if (slack === null || discord === null) {
+    return null;
+  }
+  return [slack, discord].filter(
+    (availability): availability is ExternalAccountProviderAvailability =>
+      availability.available,
+  );
 }

@@ -99,8 +99,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-13
-spec_version: 79
+last_verified_at: 2026-09-14
+spec_version: 80
 ---
 
 # External Channel
@@ -609,10 +609,14 @@ Main Web exposes `/account/external-accounts` for the current User's platform-wi
 links, `/account/external-accounts/connect/{provider}` for authenticated provider
 authorization start, and `/oauth/external-account/{provider}/callback` for the
 protected callback exchange. Provider availability is redacted and independent per
-provider. OAuth start and exchange responses use no-store handling; state, callback
-codes, provider tokens, and raw query values are never persisted or shown in durable
-UI/test evidence. Unlink remains behind the existing elevation boundary. Configuration
-or provider failures are typed, generic, and nondisclosing.
+provider. Normal end-user Web account management and provider-native private settings
+expose only actionable connection controls; unavailable providers are omitted rather
+than rendered as status cards or explanatory lines. A direct or already-started OAuth
+route may still return a generic typed recovery result when availability changes after
+the User enters the flow. OAuth start and exchange responses use no-store handling;
+state, callback codes, provider tokens, and raw query values are never persisted or
+shown in durable UI/test evidence. Unlink remains behind the existing elevation
+boundary. Configuration or provider failures are typed, generic, and nondisclosing.
 
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
@@ -640,6 +644,10 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-09-14** (spec_version 80) — Omitted unavailable provider controls and
+  explanatory status text from normal end-user account-linking surfaces while
+  retaining recovery results for already-started OAuth flows.
 
 - **2026-09-13** (spec_version 79) — Replaced the Workspace-scoped browser-code
   proof flow with authenticated Slack/Discord OAuth attempts, platform-wide link
