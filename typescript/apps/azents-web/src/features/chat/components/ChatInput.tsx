@@ -16,6 +16,7 @@ import {
   Text,
   Textarea,
   UnstyledButton,
+  VisuallyHidden,
 } from "@mantine/core";
 import {
   IconCheck,
@@ -26,7 +27,7 @@ import {
   IconSend,
   IconX,
 } from "@tabler/icons-react";
-import { memo } from "react";
+import { memo, useId } from "react";
 import { AttachmentPreviewBarContainer } from "../containers/AttachmentPreviewBarContainer";
 import { useChatInputContainer } from "../containers/useChatInputContainer";
 import { modelAvailabilityBadge } from "../modelAvailability";
@@ -77,6 +78,7 @@ function ChatInputView({
 }: {
   view: ChatInputContainer;
 }): React.ReactElement {
+  const messageInputId = useId();
   const {
     t,
     isMobile,
@@ -921,9 +923,13 @@ function ChatInputView({
                 )}
               </Stack>
             )}
+            <label htmlFor={messageInputId}>
+              <VisuallyHidden>{t("inputLabel")}</VisuallyHidden>
+            </label>
             <Textarea
+              id={messageInputId}
               ref={textareaRef}
-              name="message"
+              name="chat-message"
               inputMode="text"
               autoCorrect="on"
               autoCapitalize="sentences"
