@@ -15,6 +15,7 @@ const activeRun = {
     reasoning_effort: "high",
     enabled_execution_options: ["fast"],
   },
+  usingFallback: false,
   modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
   retry: null,
 } satisfies ChatLiveRunState;

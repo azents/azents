@@ -658,6 +658,7 @@ export interface ChatLiveRunState {
   phase: AgentRunPhase;
   status: AgentRunStatus;
   inferenceProfile: AppliedInferenceProfile;
+  usingFallback: boolean;
   modelCallStartedAt: string | null;
   retry?: ChatLiveRunRetryState | null;
   operation?: ChatLiveRunOperation | null;

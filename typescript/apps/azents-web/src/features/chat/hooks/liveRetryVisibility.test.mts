@@ -22,6 +22,7 @@ function createLiveRun(
       reasoning_effort: "high",
       enabled_execution_options: [],
     },
+    usingFallback: false,
     modelCallStartedAt: null,
     retry: {
       errorKind: "model_provider",

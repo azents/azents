@@ -150,3 +150,4 @@ def test_session_state_projects_only_applied_public_settings() -> None:
     assert "llm_provider_integration_id" not in state.applied_profile.model_dump()
     assert state.applied_model_route is not None
     assert state.applied_model_route.candidate_role == "fallback"
+    assert state.using_fallback is True

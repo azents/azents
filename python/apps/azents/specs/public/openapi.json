@@ -22718,6 +22718,11 @@
             "$ref": "#/components/schemas/AppliedInferenceProfile",
             "description": "Inference settings applied to the active turn"
           },
+          "using_fallback": {
+            "type": "boolean",
+            "title": "Using Fallback",
+            "description": "Whether the active foreground model route uses a fallback candidate"
+          },
           "model_call_started_at": {
             "anyOf": [
               {
@@ -22760,6 +22765,7 @@
           "phase",
           "status",
           "inference_profile",
+          "using_fallback",
           "model_call_started_at"
         ],
         "title": "ChatLiveRunStateResponse",

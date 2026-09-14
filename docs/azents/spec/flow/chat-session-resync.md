@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-09-13
-spec_version: 50
+spec_version: 51
 ---
 
 # Chat Session Resync
@@ -282,19 +282,13 @@ The Composer presents separate desktop Model and effort controls and a combined 
 
 Draft persistence and last-selected-profile persistence are separate agent/session-scoped entries. The draft stores message, selected action, target label, and nullable effort atomically. A successful normal send clears message/action draft data while retaining the selected target and raw effort as last selected. Restoration precedence is unsent draft profile, last-selected profile, durable/default profile, then Agent default. A deleted or unavailable stored target removes only that stale selection and falls through without deleting draft content. Edit mode initializes from the edited message's requested profile, does not overwrite normal Composer persistence, and restores the ordinary persisted draft when edit is cancelled or completed. Commands may display the current selection but submit a null profile.
 
-The Composer reads model availability through the dedicated generated public API for the concrete
-Agent and root Session. The compact model control shows no badge for `available`, `Fallback` for
-`cooldown` or `probing`, and `Primary next` for an active exact reservation. Desktop details remain
-inside the existing Popover and mobile details remain inside the existing bottom Drawer. The detail
-surface shows Primary display, current compatible fallback, a server-time-anchored countdown, and
-generation-fenced reserve/cancel actions; the normal model picker remains semantic-label-only.
-
-Availability is authoritative query state rather than a WebSocket-owned projection. The frontend
-invalidates the exact query on focus, picker open, deadline, profile apply, reserve/cancel, Session
-run-state transitions, and terminal live-Run convergence. Redis/WebSocket observations only prompt
-refetch; PostgreSQL-derived REST data remains the source of truth. The visible whole-minute countdown
-advances from the response `server_time` plus local elapsed time and refetches at the authoritative
-deadline.
+The Composer keeps the model, reasoning-effort, execution-option, and existing context controls
+semantic-label-only outside an active fallback Run. While the active live Run's prepared foreground
+route uses a fallback candidate, the compact model control shows a localized non-color-only `Fallback`
+badge. The badge is derived only from the live Run projection and disappears when that Run ends or
+reports Primary use. The Web resync path does not query or render Session model availability,
+cooldown, countdown, reservation, or Primary recovery controls; the existing backend availability
+and reservation contracts remain available to non-Web consumers.
 
 ## 6. Timeline State Rules
 
@@ -534,6 +528,8 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-13** — v51. Replaced persistent Web Composer availability and Primary recovery
+  presentation with the active live Run `using_fallback` badge while retaining live REST/WS resync.
 - **2026-09-13** — v50. Restored Services as a URL-addressable desktop/mobile
   Session supporting-panel destination with visible-only current-projection polling.
 - **2026-09-13** — v49. Added semantic-label-only Composer availability, desktop/mobile

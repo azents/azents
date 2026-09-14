@@ -148,9 +148,10 @@ acceptance evidence. Each feature Design maps every required scenario to one pri
 owner and keeps live-provider tests diagnostic only.
 
 Model quota fallback follows this allocation. Credential-free API/browser E2E verifies clean
-candidate-chain consumption, a real quota-to-fallback response, immutable route provenance,
-availability and reservation behavior, and desktop/mobile recovery presentation. Migration,
-candidate-health half-open claims, reservation generation races, operation handover, compaction/title
+candidate-chain consumption, a real quota-to-fallback response, immutable route provenance, and
+desktop/mobile transient fallback presentation that disappears after terminal completion. Public
+availability and reservation contracts remain covered by the API E2E; their internal health,
+generation-fencing, half-open claims, reservation races, operation handover, compaction/title
 ordering, and Redis-empty recovery use deterministic production repository/Worker integration tests.
 
 Scheduled Task required E2E creates Workspace, Agent, Runtime, Session, and Task

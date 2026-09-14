@@ -2276,6 +2276,10 @@ class ChatSessionService:
                 phase=run.phase,
                 status=run.status,
                 inference_profile=inference_profile,
+                using_fallback=(
+                    agent_session.inference_state is not None
+                    and agent_session.inference_state.using_fallback
+                ),
                 model_call_started_at=run.model_call_started_at,
                 operation=(
                     ChatLiveRunOperation(

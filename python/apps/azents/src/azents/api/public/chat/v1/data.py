@@ -1944,6 +1944,11 @@ class ChatLiveRunStateResponse(BaseModel):
     inference_profile: AppliedInferenceProfile = Field(
         description="Inference settings applied to the active turn",
     )
+    using_fallback: bool = Field(
+        description=(
+            "Whether the active foreground model route uses a fallback candidate"
+        ),
+    )
     model_call_started_at: datetime.datetime | None = Field(
         description="Current model call start time, or null outside a model call",
     )
@@ -1966,6 +1971,7 @@ class ChatLiveRunStateResponse(BaseModel):
             phase=run.phase,
             status=run.status,
             inference_profile=run.inference_profile,
+            using_fallback=run.using_fallback,
             model_call_started_at=run.model_call_started_at,
             operation=None
             if run.operation is None

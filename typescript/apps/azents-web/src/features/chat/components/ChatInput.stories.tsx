@@ -3,7 +3,11 @@ import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
-import type { InputActionDefinition, TodoStateSnapshot } from "../types";
+import type {
+  ChatLiveRunState,
+  InputActionDefinition,
+  TodoStateSnapshot,
+} from "../types";
 import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
 import type {
   AgentModelSelection,
@@ -250,8 +254,41 @@ const baseArgs = {
   inputActions,
 };
 
+const activeFallbackRun = {
+  run_id: "run-fallback-active",
+  phase: "streaming_model",
+  status: "running",
+  inferenceProfile: {
+    model_target_label: "Default",
+    model_display_name: "GPT 5.5 fallback",
+    reasoning_effort: "high",
+    enabled_execution_options: [],
+  },
+  usingFallback: true,
+  modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
+  retry: null,
+  operation: null,
+} satisfies ChatLiveRunState;
+
 export const Ready = {
   args: baseArgs,
+} satisfies Story;
+
+export const ActiveFallback = {
+  args: {
+    ...baseArgs,
+    contextUsageActiveRun: activeFallbackRun,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Fallback")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(page.queryByText("Model availability")).toBeNull();
+    await expect(
+      page.queryByRole("button", { name: "Try Primary next" }),
+    ).toBeNull();
+  },
 } satisfies Story;
 
 export const ExecutionOptionToggle = {

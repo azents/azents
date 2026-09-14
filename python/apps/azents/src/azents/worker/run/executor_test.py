@@ -6272,10 +6272,12 @@ async def test_quota_progresses_candidate_before_generic_retry(
     )
     engine = _QuotaThenSuccessEngine()
     lifecycle = _SessionLifecycle()
+    live_event_projector = _LiveEventProjector()
     executor = _executor(
         session_lifecycle=lifecycle,
         engine=engine,
         agent=agent,
+        live_event_projector=live_event_projector,
         failed_run_max_retries=0,
     )
 
@@ -6372,6 +6374,9 @@ async def test_quota_progresses_candidate_before_generic_retry(
         to_runtime_model(primary.provider, primary.model_identifier),
         to_runtime_model(fallback.provider, fallback.model_identifier),
     ]
+    live_runs = [run for _, run in live_event_projector.live_run_updates]
+    assert any(run.using_fallback for run in live_runs)
+    assert live_runs[-1].using_fallback is True
     assert lifecycle.retry_states == []
     operation_state = lifecycle.agent_run_repository.run.model_operation_state
     assert operation_state is not None

@@ -238,3 +238,13 @@ class SessionInferenceState(BaseModel):
             reasoning_effort=self.reasoning_effort,
             enabled_execution_options=self.enabled_execution_options,
         )
+
+    @property
+    def using_fallback(self) -> bool:
+        """Return whether the current foreground route uses a fallback candidate."""
+        route = self.applied_model_route
+        return (
+            route is not None
+            and route.operation_kind == "foreground"
+            and route.candidate_role == "fallback"
+        )

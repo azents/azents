@@ -139,7 +139,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-13
-spec_version: 170
+spec_version: 171
 ---
 
 # Conversation & Events
@@ -916,8 +916,8 @@ event-list APIs:
 
 Durable human `user_message` events preserve their immutable requested profile intent. They do not
 embed an associated AgentRun summary and do not change when later run provenance changes. Pending mailbox items likewise expose only requested intent and source-safe presentation data. The dedicated live Run projection carries the current
-Session inference snapshot's allowlisted physical provenance; clients never infer it from Composer or
-Agent defaults.
+Session inference snapshot's allowlisted physical provenance, including whether its current foreground
+route uses a fallback candidate; clients never infer it from Composer or Agent defaults.
 
 Each `turn_marker` with provider usage copies the exact Session inference snapshot and applied
 physical route for that completed logical operation. Immutable provenance separates the requested
@@ -1399,6 +1399,8 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-13** — v171. Added the required live Run fallback-route projection for transient Web
+  status while retaining the public availability and reservation contracts as backend behavior.
 - **2026-09-13** — v170. Added frozen foreground/compaction candidate operation state,
   quota-before-retry progression, PostgreSQL-derived Session availability and Primary reservation
   APIs, and immutable actual-candidate turn provenance.
