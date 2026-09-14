@@ -62,9 +62,8 @@ Before writing the plan:
 
 1. identify approved mechanism IDs, workstreams, dependencies, interfaces, paths,
    validation, and removal obligations;
-2. assign one exact independent reviewer and distribute that reviewer identity to
-   every implementation owner; add a specialist only for an explicit review gap
-   that reviewer cannot cover; and
+2. assign one exact independent reviewer for the complete feature; this reviewer is
+   mandatory and no area-specific or specialist reviewer is added; and
 3. limit implementation discovery to assigned paths, approved mechanisms,
    interfaces, tests, dependencies, risks, validation, and blockers; and
 4. classify new findings:
@@ -105,19 +104,24 @@ remains `None`.
 ## Execution ownership and context
 
 - The primary agent owns orchestration, shared decisions, assigned implementation,
-  reviewer assignment, phase progression, and final integration.
-- Implementation owners stay within assigned paths and interfaces, run focused
-  checks, and request the exact reviewer directly.
-- The reviewer is read-only and reviews from confirmed Requirements, accepted ADR,
-  approved Design and Design Authority, the phase contract, and the current diff.
+  reviewer requests, review finding resolution, integrated validation, phase
+  progression, and final integration.
+- Implementation subagents are optional. When used, they stay within assigned paths
+  and interfaces, run focused checks, and hand their completed work and evidence to
+  the primary agent. They do not request review or re-review.
+- The single reviewer is read-only and reviews the complete root-integrated stable
+  phase diff from confirmed Requirements, accepted ADR, approved Design and Design
+  Authority, and the phase contract.
+- Do not create a separate validation-owner role. The primary agent owns integrated
+  validation, its execution, and its result.
 - Requirements, ADR, approved Design, and current Specs are product and design
   authority. Plans are authoritative only for approved execution scope, ownership,
   paths, ordering, and validation.
 
 At phase boundaries, record completed behavior, changed interfaces, evidence,
 remaining scope, relevant paths, risks, and blockers. Reuse an active role only
-while its context remains relevant and compact; record role changes and redistribute
-the exact reviewer identity. Update incomplete execution decomposition in the plan;
+while its context remains relevant and compact; record role changes and preserve the
+exact reviewer identity. Update incomplete execution decomposition in the plan;
 return product intent or a material mechanism to `technical-feature-design`. While waiting,
 prepare later inputs without starting later-phase work; silence is not progress.
 
@@ -135,15 +139,21 @@ For each phase:
    - the diff adds a material mechanism absent from Design Authority;
 5. remove unrelated, unauthorized, or later-phase changes and update current Specs
    when a behavior change cannot wait for spec promotion;
-6. have each owner run focused checks and request one read-only review from the
-   assigned reviewer;
-7. batch required corrections, apply the `/code-review` re-review criteria, and run
-   affected checks; when re-review is required, the same owner directly requests it
-   from the same reviewer;
-8. have the primary agent verify integration and run final validation on the stable
-   diff; reuse evidence only while the diff is unchanged, prerequisites are fresh,
-   and the environment is equivalent; and
-9. record the checkpoint, commit, and open the phase PR before the next phase.
+6. have each implementation owner run focused checks and hand completed work and
+   evidence to the primary agent;
+7. after all implementation work is complete, have the primary agent integrate the
+   work and run final validation; reuse evidence only while the diff is unchanged,
+   prerequisites are fresh, and the environment is equivalent;
+8. freeze the integrated diff and have the primary agent request one read-only
+   review from the single assigned reviewer;
+9. have the primary agent apply review findings and run affected integrated checks.
+   Do not delegate incremental review corrections. Only when one subagent's
+   self-contained implementation must be discarded and rewritten in full may the
+   primary agent remove that implementation and reassign the complete rewrite to
+   that subagent;
+10. when re-review is required, have the primary agent request it from the same
+    reviewer only after corrections and integrated validation are complete; and
+11. record the checkpoint, commit, and open the phase PR before the next phase.
 
 A phase may refine local implementation details within approved contracts. It may
 not add material behavior, state, configuration, contracts, fallbacks,
@@ -167,11 +177,14 @@ Before spec promotion, record:
   unauthorized behavior; and
 - completed removal obligations and absence evidence.
 
-Fix discovered bugs in the validation PR or responsible earlier phase. Rerun only
-evidence invalidated by the correction; rerun the full matrix when it crosses
-interfaces or shared behavior. Apply `/code-review` re-review criteria and rebase
-dependent branches when an earlier phase changes. When re-review is required, the
-implementation owner directly requests the existing independent reviewer.
+The primary agent fixes discovered bugs in the validation PR or responsible earlier
+phase and owns every integrated validation rerun. Rerun only evidence invalidated by
+the correction; rerun the full matrix when it crosses interfaces or shared behavior.
+Apply `/code-review` re-review criteria and rebase dependent branches when an earlier
+phase changes. When re-review is required, the primary agent requests the existing
+single reviewer after the corrected diff and integrated validation are stable. The
+full-rewrite exception for a discarded subagent-owned implementation remains the
+only case where correction work returns to an implementation subagent.
 
 ## Phase 4: Promote Specs
 
@@ -218,7 +231,10 @@ validation, checkpoint, and next branch.
 - Plans never create Design authority; every phase starts with `Design delta: None`.
 - Return new material decisions to `technical-feature-design` and keep local details
   agent-owned.
-- Keep implementation and independent review separate and use the exact reviewer.
+- Keep implementation and independent review separate, use exactly one reviewer,
+  and allow only the primary agent to request review or re-review.
+- Keep integrated validation owned and executed by the primary agent; do not create
+  a validation-owner role.
 - Do not start the next phase before opening the current phase PR.
 - Keep snapshot basenames aligned and generated clients source-generated.
 - Remove temporary plans only after validated spec promotion.

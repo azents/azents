@@ -25,8 +25,8 @@ the phase branch.
 | ... | ... | ... | ... | ... | ... |
 
 - Integration order: `<sequence>`
-- Independent review: `<exact reviewer, scope, criteria, inputs, output>`
-- Final validation: `<commands>`
+- Independent review: `<single exact reviewer; root requests review after every implementation workstream is complete and the integrated diff is stable>`
+- Final validation: `<root-owned commands and evidence>`
 - Scope-drift check: `<approved coverage, unauthorized additions, non-goals>`
 - Context checkpoint: `<completed behavior, changed interfaces, evidence, remaining scope, paths, risks>`
 ```
