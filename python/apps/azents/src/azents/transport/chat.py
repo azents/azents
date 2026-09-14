@@ -198,6 +198,7 @@ def chat_live_run_updated_dump(
             "phase": run.phase.value,
             "status": run.status.value,
             "inference_profile": run.inference_profile.model_dump(mode="json"),
+            "using_fallback": run.using_fallback,
             "model_call_started_at": run.model_call_started_at.isoformat()
             if run.model_call_started_at is not None
             else None,

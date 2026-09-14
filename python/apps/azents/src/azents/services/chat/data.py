@@ -208,6 +208,7 @@ class ChatLiveRunState:
     phase: AgentRunPhase
     status: AgentRunStatus
     inference_profile: AppliedInferenceProfile
+    using_fallback: bool
     model_call_started_at: datetime.datetime | None
     operation: ChatLiveRunOperation | None = None
     retry: ChatLiveRunRetryState | None = None

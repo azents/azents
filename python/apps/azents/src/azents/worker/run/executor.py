@@ -1719,6 +1719,9 @@ class RunExecutor:
 
         async def publish_live_run() -> None:
             """Publish the current live run snapshot to WebSocket clients."""
+            active_request = run_request
+            if active_request is None or active_request.inference_state is None:
+                raise RuntimeError("Active model request has no inference state")
             await self.live_event_projector.publish_live_run_updated(
                 snapshot.session_id,
                 ChatLiveRunState(
@@ -1726,6 +1729,7 @@ class RunExecutor:
                     phase=active_phase or AgentRunPhase.IDLE,
                     status=AgentRunStatus.RUNNING,
                     inference_profile=inference_profile,
+                    using_fallback=active_request.inference_state.using_fallback,
                     model_call_started_at=active_model_call_started_at,
                     operation=(
                         ChatLiveRunOperation(

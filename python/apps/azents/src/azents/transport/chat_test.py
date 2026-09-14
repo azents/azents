@@ -43,6 +43,7 @@ def test_live_run_dump_exposes_minimal_operation() -> None:
             phase=AgentRunPhase.COMPACTING,
             status=AgentRunStatus.RUNNING,
             inference_profile=profile,
+            using_fallback=False,
             model_call_started_at=datetime.datetime(
                 2026,
                 7,
@@ -59,6 +60,7 @@ def test_live_run_dump_exposes_minimal_operation() -> None:
 
     run = dumped["run"]
     assert is_string_object_dict(run)
+    assert run["using_fallback"] is False
     assert run["operation"] == {
         "kind": "preparing_context",
         "operation_id": "run-1:preparing-context",

@@ -638,6 +638,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
   const runId = stringField(value, "run_id");
   const phase = agentRunPhaseFromValue(value.phase);
   const status = agentRunStatusFromValue(value.status);
+  const usingFallback = booleanField(value, "using_fallback");
   const inferenceProfile = appliedInferenceProfileFromValue(
     value.inference_profile,
   );
@@ -645,6 +646,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     runId === null ||
     phase === null ||
     status === null ||
+    usingFallback === null ||
     inferenceProfile === null
   ) {
     return null;
@@ -657,6 +659,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     phase,
     status,
     inferenceProfile,
+    usingFallback,
     modelCallStartedAt: stringField(value, "model_call_started_at"),
     retry,
     operation: liveRunOperationFromValue(value.operation),
@@ -2265,10 +2268,6 @@ export function useChatSessionContainer(
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
     void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
     void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
-    void utils.chat.getAgentSessionModelAvailability.invalidate({
-      agentId: agent.id,
-      sessionId,
-    });
   }, [agent.id, sessionId, sessionRunState, utils.chat]);
 
   useEffect(() => {

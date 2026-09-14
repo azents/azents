@@ -893,6 +893,7 @@ export const WithLiveRunRetry = {
         reasoning_effort: null,
         enabled_execution_options: [],
       },
+      usingFallback: false,
       modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
       retry: {
         errorKind: "model_provider",
@@ -935,6 +936,7 @@ export const WithPreparingContext = {
         reasoning_effort: null,
         enabled_execution_options: [],
       },
+      usingFallback: false,
       modelCallStartedAt: null,
       retry: null,
       operation: {
@@ -971,6 +973,7 @@ export const EmptyStreamingModelHidesWaitingRow = {
         reasoning_effort: null,
         enabled_execution_options: [],
       },
+      usingFallback: false,
       modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
       retry: null,
     },
@@ -1032,6 +1035,7 @@ export const StreamingModelWithPartialOutput = {
         reasoning_effort: null,
         enabled_execution_options: [],
       },
+      usingFallback: false,
       modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
       retry: null,
     },

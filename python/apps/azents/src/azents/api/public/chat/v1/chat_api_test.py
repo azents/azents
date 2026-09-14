@@ -1198,6 +1198,7 @@ class _EventService(ChatSessionService):
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                     status=AgentRunStatus.RUNNING,
                     inference_profile=self.inference_profile,
+                    using_fallback=False,
                     model_call_started_at=datetime.datetime(
                         2026, 7, 14, tzinfo=datetime.UTC
                     ),
@@ -2408,6 +2409,7 @@ class TestEventRoutes:
                 "reasoning_effort": "high",
                 "enabled_execution_options": [],
             },
+            "using_fallback": False,
             "model_call_started_at": "2026-07-14T00:00:00Z",
         }
         assert dump["session_run_state"] == "running"

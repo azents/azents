@@ -1,4 +1,4 @@
-"""Browser E2E coverage for model fallback and Primary recovery controls."""
+"""Browser E2E coverage for model fallback and transient status."""
 
 from typing import NamedTuple
 
@@ -160,38 +160,6 @@ def _create_configured_session(
     )
 
 
-def _wait_for_cooldown(
-    *,
-    server_url: str,
-    token: str,
-    agent_id: str,
-    session_id: str,
-) -> None:
-    """Wait for authoritative Primary cooldown across Runtime startup."""
-    availability_url = (
-        f"{server_url}/chat/v1/agents/{agent_id}/sessions/"
-        f"{session_id}/model-availability"
-    )
-
-    def cooldown_reached() -> bool:
-        response = requests.get(
-            availability_url,
-            headers=_headers(token),
-            timeout=10,
-        )
-        return (
-            response.status_code == 200
-            and _response_object(response).get("state") == "cooldown"
-        )
-
-    wait_until(
-        cooldown_reached,
-        timeout=120,
-        interval=0.5,
-        message="Primary candidate did not enter cooldown",
-    )
-
-
 def test_agent_editor_reorders_and_persists_fallback_candidates(
     browser_driver: WebDriver,
     azents_main_web_url: str,
@@ -279,7 +247,7 @@ def test_agent_editor_reorders_and_persists_fallback_candidates(
     ],
     ids=["desktop-popover", "mobile-drawer"],
 )
-def test_fallback_badge_and_primary_next_reservation_are_reachable(
+def test_fallback_status_is_transient_and_picker_has_no_availability_controls(
     browser_driver: WebDriver,
     azents_main_web_url: str,
     azents_public_server_url: str,
@@ -290,7 +258,7 @@ def test_fallback_badge_and_primary_next_reservation_are_reachable(
     height: int,
     prompt: str,
 ) -> None:
-    """Desktop and mobile expose authoritative fallback and reservation actions."""
+    """Fallback execution remains automatic while the picker stays ordinary."""
     email, handle, token, agent_id, session_id = _create_configured_session(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
@@ -308,14 +276,20 @@ def test_fallback_badge_and_primary_next_reservation_are_reachable(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))
     )
     assert "Fallback" not in (trigger.get_attribute("textContent") or "")
+    assert not browser_driver.find_elements(
+        By.XPATH,
+        "//*[normalize-space()='Model availability']",
+    )
+    assert not browser_driver.find_elements(
+        By.XPATH,
+        "//button[normalize-space()='Try Primary next']",
+    )
+    assert not browser_driver.find_elements(
+        By.XPATH,
+        "//button[normalize-space()='Cancel Primary next']",
+    )
     requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
     message_input.send_keys(prompt, Keys.ENTER)
-    _wait_for_cooldown(
-        server_url=azents_public_server_url,
-        token=token,
-        agent_id=agent_id,
-        session_id=session_id,
-    )
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
             (
@@ -325,31 +299,5 @@ def test_fallback_badge_and_primary_next_reservation_are_reachable(
         )
     )
     _wait(browser_driver).until(
-        lambda driver: "Fallback" in _model_trigger_text(driver)
-    )
-    _model_trigger(browser_driver).click()
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[contains(normalize-space(), 'Current fallback:')]")
-        )
-    )
-    reserve = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[normalize-space()='Try Primary next']")
-        )
-    )
-    reserve.click()
-    cancel = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[normalize-space()='Cancel Primary next']")
-        )
-    )
-    _wait(browser_driver).until(
-        lambda driver: "Primary next" in _model_trigger_text(driver)
-    )
-    cancel.click()
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[normalize-space()='Try Primary next']")
-        )
+        lambda driver: "Fallback" not in _model_trigger_text(driver)
     )
