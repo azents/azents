@@ -15,6 +15,7 @@ import {
   Divider,
   Group,
   Loader,
+  rem,
   Stack,
   Text,
   Title,
@@ -59,9 +60,9 @@ function InvitationCard({
   return (
     <Box
       style={{
-        border: "1px solid var(--mantine-color-default-border)",
-        borderRadius: 12,
-        padding: "12px 16px",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
+        borderRadius: rem(12),
+        padding: `${rem(12)} ${rem(16)}`,
       }}
     >
       <Stack gap="xs">
@@ -220,9 +221,9 @@ function WorkspacesListForm({
               key={ws.handle}
               onClick={() => onSelectWorkspace(ws.handle)}
               style={{
-                border: "1px solid var(--mantine-color-default-border)",
-                borderRadius: 12,
-                padding: "12px 16px",
+                border: `${rem(1)} solid var(--mantine-color-default-border)`,
+                borderRadius: rem(12),
+                padding: `${rem(12)} ${rem(16)}`,
                 transition: "background 0.15s ease",
                 cursor: "pointer",
               }}

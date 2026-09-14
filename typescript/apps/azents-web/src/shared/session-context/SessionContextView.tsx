@@ -56,16 +56,31 @@ interface BreakdownColor {
 }
 
 const BREAKDOWN_COLORS: Record<string, BreakdownColor> = {
-  system: { background: "#6D5F93", text: "#F8F7FC" },
-  user: { background: "#4F7F68", text: "#F3FAF7" },
-  assistant: { background: "#4F748D", text: "#F3F8FB" },
-  tool: { background: "#8A6A4D", text: "#FBF7F2" },
-  other: { background: "#667085", text: "#F8FAFC" },
+  system: {
+    background: "var(--mantine-color-violet-7)",
+    text: "var(--mantine-color-gray-0)",
+  },
+  user: {
+    background: "var(--mantine-color-green-8)",
+    text: "var(--mantine-color-gray-0)",
+  },
+  assistant: {
+    background: "var(--mantine-color-blue-8)",
+    text: "var(--mantine-color-gray-0)",
+  },
+  tool: {
+    background: "var(--mantine-color-orange-9)",
+    text: "var(--mantine-color-gray-0)",
+  },
+  other: {
+    background: "var(--mantine-color-gray-7)",
+    text: "var(--mantine-color-gray-0)",
+  },
 };
 
 const DEFAULT_BREAKDOWN_COLOR: BreakdownColor = {
-  background: "#667085",
-  text: "#F8FAFC",
+  background: "var(--mantine-color-gray-7)",
+  text: "var(--mantine-color-gray-0)",
 };
 
 const PROMPT_SOURCE_COLORS: Record<string, string> = {

@@ -3,13 +3,11 @@
 import asyncio
 import datetime
 from contextlib import AbstractAsyncContextManager
-from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import (
-    WebSocketBroadcast,
     WebSocketBroadcastPublishError,
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
@@ -32,7 +30,6 @@ from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     InMemoryLiveEventStore,
     LiveOwnerAdvance,
-    RedisLiveEventStore,
 )
 from azents.testing.types import is_string_object_dict
 from azents.worker.live.event_projector import LiveEventProjector
@@ -43,7 +40,7 @@ class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
 
     async def __aenter__(self) -> AsyncSession:
         """Enter the placeholder session scope."""
-        return cast(AsyncSession, object())
+        return object()  # ty: ignore[invalid-return-type] # Projector paths under test do not access the placeholder session.
 
     async def __aexit__(self, *exc_info: object) -> None:
         """Exit the placeholder session scope."""
@@ -248,14 +245,12 @@ def _projector(
 ) -> LiveEventProjector:
     """Create a projector with durable correlation doubles."""
     return LiveEventProjector(
-        live_event_store=cast(RedisLiveEventStore, store),
-        broadcast=cast(WebSocketBroadcast, broadcast),
+        live_event_store=store,  # ty: ignore[invalid-argument-type] # Focused stores implement only exercised live-event operations.
+        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast double implements publish().
         session_manager=_SessionManager(),
-        agent_run_repository=cast(Any, _AgentRunRepository(current_run)),
-        agent_session_repository=cast(
-            Any,
-            session_repository or _AgentSessionRepository(owner_generation),
-        ),
+        agent_run_repository=_AgentRunRepository(current_run),  # ty: ignore[invalid-argument-type] # Focused repository double implements current-run lookup.
+        agent_session_repository=session_repository
+        or _AgentSessionRepository(owner_generation),  # ty: ignore[invalid-argument-type] # Focused repository double implements owner lookup.
     )
 
 
@@ -765,7 +760,9 @@ async def test_supersession_and_clear_evict_generation_local_state() -> None:
     old_batcher = projector._partial_batchers[old_key]
     old_timer = old_batcher._timers["session-001"]
     projector._active_run_ids[old_key] = "run-old"
-    projector._active_tool_events[old_key] = {"event-old": cast(Event, object())}
+    projector._active_tool_events[old_key] = {  # ty: ignore[invalid-assignment] # Sentinel value is removed without being read.
+        "event-old": object()
+    }
 
     sessions.owner_generation = 2
     await projector.publish_control_event(

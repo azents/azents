@@ -2,17 +2,15 @@
  * MCP OAuth2 callback server component.
  *
  * Receives code/state from OAuth provider and requests token exchange to backend,
- * then passes result to client component (CallbackResult).
+ * then passes the result to the feature page.
  *
  * authorization code is one-time-use, so React.cache prevents duplicate calls.
  */
 
-import { Container, Stack, Title } from "@mantine/core";
 import { TRPCError } from "@trpc/server";
-import { getTranslations } from "next-intl/server";
 import { cache } from "react";
+import { OAuthMcpCallbackPage } from "@/features/toolkits/OAuthMcpCallbackPage";
 import { trpc } from "@/trpc/server";
-import { CallbackResult } from "./CallbackResult";
 
 type ExchangeResult = { success: true } | { success: false; message: string };
 
@@ -56,10 +54,9 @@ interface PageProps {
   searchParams: Promise<Record<string, string | string[] | null>>;
 }
 
-export default async function OAuthMcpCallbackPage({
+export default async function Page({
   searchParams,
 }: PageProps): Promise<React.ReactElement> {
-  const t = await getTranslations("oauth");
   const params = await searchParams;
   const code = typeof params.code === "string" ? params.code : null;
   const state = typeof params.state === "string" ? params.state : null;
@@ -85,19 +82,14 @@ export default async function OAuthMcpCallbackPage({
         };
 
   return (
-    <Container size="xs" py="xl">
-      <Stack align="center" gap="lg">
-        <Title order={2}>{t("title")}</Title>
-        <CallbackResult
-          success={result.success}
-          message={result.success ? null : result.message}
-          returnHref={
-            handle != null && agentId != null
-              ? `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`
-              : null
-          }
-        />
-      </Stack>
-    </Container>
+    <OAuthMcpCallbackPage
+      success={result.success}
+      message={result.success ? null : result.message}
+      returnHref={
+        handle != null && agentId != null
+          ? `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`
+          : null
+      }
+    />
   );
 }

@@ -4,7 +4,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any, NamedTuple, TypeVar, cast
+from typing import NamedTuple, TypeVar
 
 import azentsadminclient
 import azentspublicclient
@@ -105,6 +105,145 @@ class AgentSessionSetup:
     session_id: str
 
 
+def _json_object(value: object, *, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise AssertionError(f"{label} must be a JSON object.")
+    if not all(isinstance(key, str) for key in value):
+        raise AssertionError(f"{label} contains a non-string key.")
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
+def _required_string(
+    payload: dict[str, object],
+    key: str,
+    *,
+    label: str,
+) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise AssertionError(f"{label}.{key} must be a non-empty string.")
+    return value
+
+
+@dataclass(frozen=True)
+class _SignupTokenPayload:
+    plaintext_token: str
+
+    @classmethod
+    def decode(cls, value: object) -> "_SignupTokenPayload":
+        payload = _json_object(value, label="signup token response")
+        return cls(
+            plaintext_token=_required_string(
+                payload,
+                "plaintext_token",
+                label="signup token response",
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _EmailSendCodePayload:
+    csrf_token: str
+
+    @classmethod
+    def decode(cls, value: object) -> "_EmailSendCodePayload":
+        payload = _json_object(value, label="email send-code response")
+        return cls(
+            csrf_token=_required_string(
+                payload,
+                "csrf_token",
+                label="email send-code response",
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _EmailVerificationPayload:
+    code: str
+
+    @classmethod
+    def decode(cls, value: object) -> "_EmailVerificationPayload":
+        payload = _json_object(value, label="email verification response")
+        return cls(
+            code=_required_string(
+                payload,
+                "code",
+                label="email verification response",
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _AuthenticatedTokenPayload:
+    access_token: str
+    refresh_token: str
+
+    @classmethod
+    def decode(cls, value: object) -> "_AuthenticatedTokenPayload":
+        payload = _json_object(value, label="authentication response")
+        return cls(
+            access_token=_required_string(
+                payload,
+                "access_token",
+                label="authentication response",
+            ),
+            refresh_token=_required_string(
+                payload,
+                "refresh_token",
+                label="authentication response",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class _IntegrationCatalogEntry:
+    provider_model_identifier: str
+
+    @classmethod
+    def decode(cls, value: object) -> "_IntegrationCatalogEntry":
+        payload = _json_object(value, label="integration catalog entry")
+        return cls(
+            provider_model_identifier=_required_string(
+                payload,
+                "provider_model_identifier",
+                label="integration catalog entry",
+            )
+        )
+
+
+@dataclass(frozen=True)
+class IntegrationCatalogSnapshot:
+    catalog_scope: str
+    latest_attempt_status: str
+    entries: tuple[_IntegrationCatalogEntry, ...]
+
+    @classmethod
+    def decode(cls, value: object) -> "IntegrationCatalogSnapshot":
+        payload = _json_object(value, label="integration catalog response")
+        latest_attempt = _json_object(
+            payload.get("latest_attempt"),
+            label="integration catalog latest attempt",
+        )
+        raw_entries = payload.get("entries")
+        if not isinstance(raw_entries, list):
+            raise AssertionError("Integration catalog entries must be a list.")
+        return cls(
+            catalog_scope=_required_string(
+                payload,
+                "catalog_scope",
+                label="integration catalog response",
+            ),
+            latest_attempt_status=_required_string(
+                latest_attempt,
+                "status",
+                label="integration catalog latest attempt",
+            ),
+            entries=tuple(
+                _IntegrationCatalogEntry.decode(item) for item in raw_entries
+            ),
+        )
+
+
 PNG_1X1: bytes = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
     b"\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
@@ -166,9 +305,9 @@ def authenticate_user(
     if email is None:
         email = f"test-{unique()}@example.com"
 
-    public_base_url = str(cast(Any, public_api_client).configuration.host)
-    admin_base_url = str(cast(Any, admin_api_client).configuration.host)
-    admin_access_token = cast(Any, admin_api_client).configuration.access_token
+    public_base_url = str(public_api_client.configuration.host)
+    admin_base_url = str(admin_api_client.configuration.host)
+    admin_access_token = admin_api_client.configuration.access_token
     if not isinstance(admin_access_token, str):
         raise AssertionError("Admin API client is not authenticated")
     admin_headers = {"Authorization": f"Bearer {admin_access_token}"}
@@ -184,7 +323,7 @@ def authenticate_user(
             "Failed to create signup token: "
             f"{token_response.status_code} {token_response.text}"
         )
-    token = cast(str, token_response.json()["plaintext_token"])
+    token = _SignupTokenPayload.decode(token_response.json()).plaintext_token
 
     redeem_response = http_requests.post(
         f"{public_base_url}/auth/v1/signup-tokens/redeem",
@@ -202,7 +341,7 @@ def authenticate_user(
                 "Failed to send login code: "
                 f"{send_response.status_code} {send_response.text}"
             )
-        csrf_token = cast(str, send_response.json()["csrf_token"])
+        csrf_token = _EmailSendCodePayload.decode(send_response.json()).csrf_token
         verification_response = http_requests.get(
             f"{admin_base_url}/auth/v1/email-verifications/by-email",
             headers=admin_headers,
@@ -214,7 +353,7 @@ def authenticate_user(
                 "Failed to fetch login code: "
                 f"{verification_response.status_code} {verification_response.text}"
             )
-        code = cast(str, verification_response.json()["code"])
+        code = _EmailVerificationPayload.decode(verification_response.json()).code
         verify_response = http_requests.post(
             f"{public_base_url}/auth/v1/email/verify",
             json={"email": email, "code": code, "csrf_token": csrf_token},
@@ -225,18 +364,18 @@ def authenticate_user(
                 "Failed to login existing user: "
                 f"{verify_response.status_code} {verify_response.text}"
             )
-        payload = verify_response.json()
+        authenticated = _AuthenticatedTokenPayload.decode(verify_response.json())
     else:
         if not redeem_response.ok:
             raise AssertionError(
                 "Failed to redeem signup token: "
                 f"{redeem_response.status_code} {redeem_response.text}"
             )
-        payload = redeem_response.json()
+        authenticated = _AuthenticatedTokenPayload.decode(redeem_response.json())
 
     return AuthenticatedUser(
-        access_token=cast(str, payload["access_token"]),
-        refresh_token=cast(str, payload["refresh_token"]),
+        access_token=authenticated.access_token,
+        refresh_token=authenticated.refresh_token,
         email=email,
     )
 
@@ -246,7 +385,7 @@ def list_ready_integration_models(
     token: str,
     handle: str,
     integration_id: str,
-) -> dict[str, object]:
+) -> IntegrationCatalogSnapshot:
     """Return the stored catalog once its initial projection has entries."""
     response = http_requests.get(
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}"
@@ -258,17 +397,12 @@ def list_ready_integration_models(
     if response.status_code == 404:
         raise AssertionError("Stored catalog has not been created yet.")
     response.raise_for_status()
-    payload = cast("dict[str, object]", response.json())
-    if payload.get("catalog_scope") != "integration":
+    payload = IntegrationCatalogSnapshot.decode(response.json())
+    if payload.catalog_scope != "integration":
         raise AssertionError("Integration-scoped catalog is not ready yet.")
-    latest_attempt_payload = payload.get("latest_attempt")
-    if not isinstance(latest_attempt_payload, dict):
-        raise AssertionError("Integration catalog sync has not started yet.")
-    latest_attempt = cast("dict[str, object]", latest_attempt_payload)
-    if latest_attempt.get("status") != "succeeded":
+    if payload.latest_attempt_status != "succeeded":
         raise AssertionError("Integration catalog sync has not succeeded yet.")
-    entries = payload.get("entries")
-    if not isinstance(entries, list) or not entries:
+    if not payload.entries:
         raise AssertionError("Stored catalog does not have selectable entries yet.")
     return payload
 
@@ -288,13 +422,7 @@ def model_selection_from_first_candidate(
         interval=0.2,
         message="Stored catalog did not become readable",
     )
-    entries = listing.get("entries")
-    if not isinstance(entries, list) or not entries:
-        raise RuntimeError("Stored catalog did not return usable entries.")
-    candidate = cast("dict[str, Any]", entries[0])
-    model_identifier = candidate.get("provider_model_identifier")
-    if not isinstance(model_identifier, str):
-        raise RuntimeError("Stored catalog entry did not include model identifier.")
+    model_identifier = listing.entries[0].provider_model_identifier
     return AgentModelSelectionInput(
         llm_provider_integration_id=integration_id,
         model_identifier=model_identifier,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, cast
+from typing import Callable, NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -305,9 +305,12 @@ async def main():
 asyncio.run(main())
 """
     result = container.get_wrapped_container().exec_run(["python", "-c", script])
-    exit_code = cast(Any, result).exit_code
+    exit_code = result.exit_code
     if exit_code != 0:
-        output = cast(Any, result).output.decode(errors="replace")
+        raw_output = result.output
+        if not isinstance(raw_output, bytes):
+            raw_output = b"".join(raw_output)
+        output = raw_output.decode(errors="replace")
         raise AssertionError(
             f"scheduler task {task_key} failed with exit {exit_code}:\n{output}"
         )

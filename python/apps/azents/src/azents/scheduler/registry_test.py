@@ -1,7 +1,6 @@
 """Scheduled task registry tests."""
 
 import datetime
-from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -81,7 +80,7 @@ class _OAuthCleanupContainer:
 @pytest.mark.asyncio
 async def test_session_auto_archive_handler_returns_batch_summary() -> None:
     """Auto-archive task delegates one bounded pass to the chat service."""
-    service = cast(Any, Mock())
+    service = Mock()
     service.auto_archive_once = AsyncMock(
         return_value={"scanned": 5, "archived": 2, "skipped": 3}
     )
@@ -92,7 +91,7 @@ async def test_session_auto_archive_handler_returns_batch_summary() -> None:
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=10),
         manual_triggered=False,
-        container=cast(Any, _AutoArchiveContainer(service)),
+        container=_AutoArchiveContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await registry.session_auto_archive_handler(context)
@@ -118,7 +117,7 @@ async def test_user_scheduled_task_dispatch_handler_returns_aggregate_summary() 
         skipped=2,
         wake_failed=1,
     )
-    dispatcher = cast(Any, Mock())
+    dispatcher = Mock()
     dispatcher.dispatch_once = AsyncMock(return_value=summary)
     now = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
     context = TaskContext(
@@ -127,10 +126,7 @@ async def test_user_scheduled_task_dispatch_handler_returns_aggregate_summary() 
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=2),
         manual_triggered=False,
-        container=cast(
-            Any,
-            _ScheduledTaskDispatchContainer(dispatcher),
-        ),
+        container=_ScheduledTaskDispatchContainer(dispatcher),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await user_scheduled_task_dispatch_handler(context)
@@ -185,7 +181,7 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         avatar_cleanup_completed=12,
         avatar_cleanup_failed=13,
     )
-    service = cast(Any, Mock())
+    service = Mock()
     service.cleanup_once = AsyncMock(return_value=summary)
     logger_info = Mock()
     monkeypatch.setattr(registry.logger, "info", logger_info)
@@ -196,7 +192,7 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=2),
         manual_triggered=False,
-        container=cast(Any, _Container(service)),
+        container=_Container(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await registry.file_lifecycle_cleanup_handler(context)
@@ -223,7 +219,7 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
 async def test_external_account_oauth_cleanup_handler_returns_batch_summary() -> None:
     """OAuth cleanup uses the scheduler timestamp and a bounded batch."""
     summary = ExternalAccountOAuthAttemptCleanupSummary(deleted_count=7)
-    service = cast(Any, Mock())
+    service = Mock()
     service.cleanup_expired = AsyncMock(return_value=summary)
     now = datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC)
     context = TaskContext(
@@ -232,10 +228,7 @@ async def test_external_account_oauth_cleanup_handler_returns_batch_summary() ->
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=2),
         manual_triggered=True,
-        container=cast(
-            Any,
-            _OAuthCleanupContainer(service),
-        ),
+        container=_OAuthCleanupContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await registry.external_account_oauth_cleanup_handler(context)

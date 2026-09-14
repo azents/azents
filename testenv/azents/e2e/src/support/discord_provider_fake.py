@@ -452,26 +452,37 @@ def _form_body(raw: bytes) -> dict[str, object]:
     }
 
 
+class _OAuthClientCredentials(NamedTuple):
+    client_id: str | None
+    client_secret: str | None
+
+
 def _oauth_client_credentials(
     body: dict[str, object],
     authorization: str,
-) -> tuple[str | None, str | None]:
+) -> _OAuthClientCredentials:
     """Resolve form or Basic client credentials for Authlib exchange."""
     client_id = body.get("client_id")
     client_secret = body.get("client_secret")
     if isinstance(client_id, str) and isinstance(client_secret, str):
-        return client_id, client_secret
+        return _OAuthClientCredentials(
+            client_id=client_id,
+            client_secret=client_secret,
+        )
     encoded = authorization.removeprefix("Basic ").strip()
     if not encoded:
-        return None, None
+        return _OAuthClientCredentials(client_id=None, client_secret=None)
     try:
         decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
     except ValueError, UnicodeDecodeError:
-        return None, None
+        return _OAuthClientCredentials(client_id=None, client_secret=None)
     basic_client_id, separator, basic_client_secret = decoded.partition(":")
     if not separator:
-        return None, None
-    return basic_client_id, basic_client_secret
+        return _OAuthClientCredentials(client_id=None, client_secret=None)
+    return _OAuthClientCredentials(
+        client_id=basic_client_id,
+        client_secret=basic_client_secret,
+    )
 
 
 class FakeState:

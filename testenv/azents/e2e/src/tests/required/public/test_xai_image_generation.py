@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -232,17 +232,15 @@ def _setup_xai_agent(
         message="Deterministic xAI catalog entries did not become readable",
     )
     assert entries is not None
-    by_identifier = {
-        cast(str, entry["provider_model_identifier"]): entry for entry in entries
-    }
+    by_identifier = {entry["provider_model_identifier"]: entry for entry in entries}
 
     def selection(identifier: str) -> dict[str, str]:
+        model_identifier = by_identifier[identifier].get("provider_model_identifier")
+        if not isinstance(model_identifier, str):
+            raise AssertionError("xAI catalog entry is missing its model identifier.")
         return {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": cast(
-                str,
-                by_identifier[identifier]["provider_model_identifier"],
-            ),
+            "model_identifier": model_identifier,
         }
 
     image_builtin_tools: list[dict[str, str]] = (
@@ -435,7 +433,7 @@ def _tool_name(tool: dict[str, object]) -> str | None:
         return name
     function = tool.get("function")
     if isinstance(function, dict):
-        nested_name = cast(dict[str, object], function).get("name")
+        nested_name = function.get("name")
         return nested_name if isinstance(nested_name, str) else None
     return None
 

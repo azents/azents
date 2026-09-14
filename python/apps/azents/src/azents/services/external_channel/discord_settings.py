@@ -118,6 +118,12 @@ class _DiscordAccountPresentationResult(NamedTuple):
     presentation: DiscordAccountLinkPresentation
 
 
+class _SelectOption(NamedTuple):
+    label: str
+    value: str
+    default: bool
+
+
 @dataclass
 class DiscordSettingsResponseService:
     """Render and mutate provider-native settings through canonical participation."""
@@ -817,16 +823,16 @@ def _settings_components(
                     ),
                     placeholder="Where to respond",
                     options=(
-                        (
-                            "This channel",
-                            "channel",
-                            setting.location
+                        _SelectOption(
+                            label="This channel",
+                            value="channel",
+                            default=setting.location
                             is ExternalChannelConversationLocation.CHANNEL,
                         ),
-                        (
-                            "Threads",
-                            "threads",
-                            setting.location
+                        _SelectOption(
+                            label="Threads",
+                            value="threads",
+                            default=setting.location
                             is ExternalChannelConversationLocation.THREADS,
                         ),
                     ),
@@ -882,7 +888,7 @@ def _select_row(
     *,
     custom_id: str,
     placeholder: str,
-    options: tuple[tuple[str, str, bool], ...],
+    options: tuple[_SelectOption, ...],
 ) -> dict[str, object]:
     return {
         "type": 1,
@@ -894,8 +900,12 @@ def _select_row(
                 "min_values": 1,
                 "max_values": 1,
                 "options": [
-                    {"label": label, "value": value, "default": default}
-                    for label, value, default in options
+                    {
+                        "label": option.label,
+                        "value": option.value,
+                        "default": option.default,
+                    }
+                    for option in options
                 ],
             }
         ],
@@ -904,17 +914,17 @@ def _select_row(
 
 def _response_mode_options(
     response_mode: ExternalChannelResponseMode,
-) -> tuple[tuple[str, str, bool], ...]:
+) -> tuple[_SelectOption, ...]:
     return (
-        (
-            "When mentioned",
-            "mention_only",
-            response_mode is ExternalChannelResponseMode.MENTION_ONLY,
+        _SelectOption(
+            label="When mentioned",
+            value="mention_only",
+            default=response_mode is ExternalChannelResponseMode.MENTION_ONLY,
         ),
-        (
-            "Every message",
-            "all_messages",
-            response_mode is ExternalChannelResponseMode.ALL_MESSAGES,
+        _SelectOption(
+            label="Every message",
+            value="all_messages",
+            default=response_mode is ExternalChannelResponseMode.ALL_MESSAGES,
         ),
     )
 

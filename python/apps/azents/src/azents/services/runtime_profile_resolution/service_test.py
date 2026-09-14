@@ -38,11 +38,12 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime import (
+    AgentRuntimeConfigurationAttachment,
+    AgentRuntimeRepository,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationDesiredStateWrite,
-    RuntimeConfigurationState,
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileCreate,
     WorkspaceRuntimeProfile,
@@ -184,7 +185,7 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
         workspace_runtime_profile_id: str,
         workspace_runtime_profile_version: int,
         write: RuntimeConfigurationDesiredStateWrite,
-    ) -> tuple[AgentRuntime, RuntimeConfigurationState] | None:
+    ) -> AgentRuntimeConfigurationAttachment | None:
         if not self.raced:
             self.raced = True
             async with self.session_manager() as race_session:

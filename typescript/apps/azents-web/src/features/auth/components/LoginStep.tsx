@@ -50,9 +50,9 @@ function LoginStepForm({
     };
   }, []);
 
-  function handleSubmit(e: React.FormEvent): void {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const formData = new FormData(e.currentTarget);
     const email = formData.get("email");
     if (typeof email === "string" && email.trim()) {
       onSubmit(email.trim());

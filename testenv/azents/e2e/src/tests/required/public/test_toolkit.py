@@ -3,7 +3,7 @@
 Toolkit CRUD, Scope t, Agent t/t t verifyt.
 """
 
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -132,7 +132,7 @@ def _setup_workspace(
 
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
     """Generated client t API host stringt t."""
-    configuration = cast(Any, public_api_client).configuration
+    configuration = public_api_client.configuration
     return str(configuration.host)
 
 

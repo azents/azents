@@ -1,16 +1,12 @@
 "use client";
 
-/**
- * Callback client component for GitHub OAuth installation list fetch.
- *
- * Pass authorization code and state received after OAuth authentication
- * to parent window via postMessage and close popup automatically.
- */
+/** Send a GitHub installations authorization result to the opener. */
 
 import { Alert, Text } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
 
 interface GitHubInstallationsCodeRelayProps {
   code: string;
@@ -24,8 +20,8 @@ export function GitHubInstallationsCodeRelay({
   const t = useTranslations("oauth");
 
   useEffect(() => {
-    const opener = window.opener as Window | null;
-    if (opener) {
+    const opener: unknown = window.opener;
+    if (isWindowMessageTarget(opener)) {
       opener.postMessage(
         {
           type: "azents-github-installations-code",
