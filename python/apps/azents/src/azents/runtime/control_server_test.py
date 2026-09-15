@@ -42,9 +42,6 @@ def _web_offer(*, deadline_at: datetime) -> RunnerSessionOffer:
     )
     return RunnerSessionOffer(
         owner=owner,
-        owner_replica_id="control-a",
-        connect_address="control-a.internal:8030",
-        tls_server_name="runtime-control.internal",
         session_nonce="nonce",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         deadline_at=deadline_at,
@@ -78,7 +75,6 @@ def test_joined_owner_offer_blocks_reissue_after_join_deadline() -> None:
 def test_runtime_control_heartbeat_interval_defaults_to_production_value() -> None:
     assert _settings().testenv_runtime_control_heartbeat_interval_seconds == 20
     assert not _settings().runtime_control_web_transport_enabled
-    assert _settings().runtime_control_runner_web_connect_address == ""
 
 
 def test_runtime_control_heartbeat_interval_accepts_positive_testenv_override() -> None:

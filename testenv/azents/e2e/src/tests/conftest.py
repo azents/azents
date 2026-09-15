@@ -1849,14 +1849,6 @@ def azents_runtime_control_container(
             "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS",
             "runtime-control:8032",
         )
-        .with_env(
-            "AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS",
-            "runtime-control:8030",
-        )
-        .with_env(
-            "AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME",
-            "runtime-control",
-        )
         .with_env("AZ_RUNTIME_CONTROL_WEB_METRICS_PORT", "8033")
         .with_env(
             "AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND",

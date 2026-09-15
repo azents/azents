@@ -105,7 +105,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
         RUNTIME_WEB_PROTOCOL_FINGERPRINT
-        == "d81d33a004e4089e07f00b0c24a7b9e0e770b35bd624f06b576da2cd110bdb6e"
+        == "0228697aa1df0aa123b6a53f2b661f4292e3a226b02819d72b759e197376fd9b"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")
@@ -125,44 +125,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "address",
-    (
-        "control.internal:not-a-port",
-        "control.internal:0",
-        "control.internal:65536",
-        "https://control.internal:8030",
-        "control.internal:8030/path",
-        "control.internal",
-        "control.internal:8030?query",
-    ),
-)
-def test_runner_offer_requires_direct_authenticated_control_port(
-    address: str,
-) -> None:
-    with pytest.raises(ValueError, match="connect address|port"):
-        RunnerSessionOffer(
-            owner=OwnerSessionEpoch(
-                owner_boot_id="boot-1",
-                session_lease_id="lease-1",
-                lease_generation=1,
-                runtime_id="runtime-1",
-                desired_generation=2,
-                runner_generation=3,
-            ),
-            owner_replica_id="control-1",
-            connect_address=address,
-            tls_server_name="runtime-control.internal",
-            session_nonce="nonce",
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
-            deadline_at=NOW + timedelta(seconds=10),
-        )
-
-
-@pytest.mark.parametrize("address", ("control.internal:8030", "control.internal:8031"))
-def test_runner_offer_accepts_configured_authenticated_control_port(
-    address: str,
-) -> None:
+def test_runner_offer_accepts_authority_without_destination() -> None:
     RunnerSessionOffer(
         owner=OwnerSessionEpoch(
             owner_boot_id="boot-1",
@@ -172,9 +135,6 @@ def test_runner_offer_accepts_configured_authenticated_control_port(
             desired_generation=2,
             runner_generation=3,
         ),
-        owner_replica_id="control-1",
-        connect_address=address,
-        tls_server_name="runtime-control.internal",
         session_nonce="nonce",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         deadline_at=NOW + timedelta(seconds=10),

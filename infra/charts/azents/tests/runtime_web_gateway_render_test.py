@@ -99,14 +99,8 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
         kind="Deployment",
         name="runtime-control",
     )
-    assert (
-        "name: AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS\n"
-        '              value: "runtime-control.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc.cluster.local:8030"'
-    ) in runtime_control
-    assert (
-        "runtime-control-headless.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc:8030"
-        not in runtime_control
-    )
+    assert "AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS" not in runtime_control
+    assert "AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME" not in runtime_control
     assert "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS" in rendered
     assert "AZ_RUNTIME_CONTROL_TRUSTED_GATEWAY_PEER_IDENTITIES" in rendered
     assert "AZ_RUNTIME_CONTROL_TRUSTED_CONTROL_PEER_IDENTITIES" in rendered

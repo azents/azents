@@ -16,7 +16,6 @@ from azents_runtime_control.runtime_web_session import (
     OwnerSessionEpoch,
     RunnerSessionOffer,
     SessionProfile,
-    validate_runner_web_connect_address,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -187,8 +186,6 @@ class RuntimeWebSessionOwnerManager:
         owner_replica_id: str,
         owner_boot_id: str,
         trusted_owner_address: str,
-        runner_connect_address: str,
-        runner_tls_server_name: str,
         lease_seconds: float,
         clock: Callable[[], datetime.datetime],
     ) -> None:
@@ -198,8 +195,6 @@ class RuntimeWebSessionOwnerManager:
             ("owner_replica_id", owner_replica_id),
             ("owner_boot_id", owner_boot_id),
             ("trusted_owner_address", trusted_owner_address),
-            ("runner_connect_address", runner_connect_address),
-            ("runner_tls_server_name", runner_tls_server_name),
         ):
             if not value:
                 raise ValueError(f"Runtime Web {name} must not be empty")
@@ -208,9 +203,6 @@ class RuntimeWebSessionOwnerManager:
         self.owner_replica_id = owner_replica_id
         self.owner_boot_id = owner_boot_id
         self.trusted_owner_address = trusted_owner_address
-        validate_runner_web_connect_address(runner_connect_address)
-        self.runner_connect_address = runner_connect_address
-        self.runner_tls_server_name = runner_tls_server_name
         self.lease_seconds = lease_seconds
         self.clock = clock
 
@@ -249,9 +241,6 @@ class RuntimeWebSessionOwnerManager:
             route=route,
             offer=RunnerSessionOffer(
                 owner=owner,
-                owner_replica_id=route.owner_replica_id,
-                connect_address=self.runner_connect_address,
-                tls_server_name=self.runner_tls_server_name,
                 session_nonce=nonce,
                 protocol_fingerprint=route.protocol_fingerprint,
                 deadline_at=min(

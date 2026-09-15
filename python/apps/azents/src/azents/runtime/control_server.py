@@ -34,7 +34,6 @@ from azents_runtime_control.runtime_web_session import (
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
-    validate_runner_web_connect_address,
 )
 from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1Api
 from kubernetes_asyncio.client.api_client import ApiClient
@@ -539,8 +538,6 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_trusted_gateway_peer_identities: str = ""
     runtime_control_trusted_control_peer_identities: str = ""
     runtime_control_web_route_lease_seconds: float = 10.0
-    runtime_control_runner_web_connect_address: str = ""
-    runtime_control_runner_web_tls_server_name: str = ""
     runtime_control_web_metrics_port: int = Field(default=8033, ge=1, le=65_535)
     runtime_control_web_capacity_backend: Literal["memory", "redis"] = "memory"
     runtime_control_web_capacity_maximum_active_streams: int | None = None
@@ -858,12 +855,6 @@ async def runtime_control_server_lifespan(
             owner_replica_id=settings.runtime_control_instance_id,
             owner_boot_id=control_boot_id,
             trusted_owner_address=(settings.runtime_control_trusted_advertise_address),
-            runner_connect_address=(
-                settings.runtime_control_runner_web_connect_address
-            ),
-            runner_tls_server_name=(
-                settings.runtime_control_runner_web_tls_server_name
-            ),
             lease_seconds=settings.runtime_control_web_route_lease_seconds,
             clock=clock,
         )
@@ -1520,11 +1511,6 @@ def validate_runtime_control_web_settings(
     address = settings.runtime_control_trusted_advertise_address.strip()
     if not address or "://" in address or ":" not in address:
         raise ValueError("Runtime Web trusted advertise address must be host:port")
-    validate_runner_web_connect_address(
-        settings.runtime_control_runner_web_connect_address
-    )
-    if not settings.runtime_control_runner_web_tls_server_name.strip():
-        raise ValueError("Runtime Web Runner TLS server name is required")
     if settings.runtime_control_trusted_port < 0:
         raise ValueError("Runtime Web trusted port must not be negative")
     if settings.runtime_control_web_metrics_port in {

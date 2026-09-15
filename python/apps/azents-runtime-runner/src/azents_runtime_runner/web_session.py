@@ -11,9 +11,7 @@ import h11
 import httpcore
 from azents_runtime_control.grpc_runner_web_session_client import (
     GrpcRunnerWebSessionClient,
-    RunnerWebEnvelopeResources,
 )
-from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.proto import runtime_web_session_pb2
 from azents_runtime_control.runtime_web_session import (
     APPROVED_SESSION_PROFILE,
@@ -22,7 +20,6 @@ from azents_runtime_control.runtime_web_session import (
     RunnerSessionOffer,
     SessionPeerRole,
     SessionProfile,
-    validate_runner_web_connect_address,
 )
 from wsproto import ConnectionType, WSConnection
 from wsproto.events import (
@@ -369,32 +366,17 @@ class RunnerWebSessionManager:
         runner_boot_id: str,
         accepted_desired_generation: Callable[[], int | None],
         accepted_generation: Callable[[], int | None],
-        control_endpoint: str,
-        runner_auth_token: str,
-        tls: GrpcClientTlsConfig | None,
-        allow_insecure: bool,
         loopback: RunnerWebLoopbackPool,
-        client_factory: Callable[
-            [str, RunnerSessionOffer],
-            GrpcRunnerWebSessionClient,
-        ]
-        | None,
-        outbound_resources: RunnerWebEnvelopeResources | None,
+        client_factory: Callable[[], GrpcRunnerWebSessionClient],
     ) -> None:
-        if not runtime_id or not runner_boot_id or not runner_auth_token:
-            raise ValueError("Runtime and Runner authentication identity are required")
-        validate_runner_web_connect_address(control_endpoint)
+        if not runtime_id or not runner_boot_id:
+            raise ValueError("Runtime and Runner identity are required")
         self.runtime_id = runtime_id
         self.runner_boot_id = runner_boot_id
         self.accepted_desired_generation = accepted_desired_generation
         self.accepted_generation = accepted_generation
-        self.control_endpoint = control_endpoint
-        self.runner_auth_token = runner_auth_token
-        self.tls = tls
-        self.allow_insecure = allow_insecure
         self.loopback = loopback
         self.client_factory = client_factory
-        self.outbound_resources = outbound_resources
         self.client: GrpcRunnerWebSessionClient | None = None
         self.offer: RunnerSessionOffer | None = None
         self.consumed_offers: deque[tuple[OwnerSessionEpoch, str]] = deque(maxlen=64)
@@ -426,18 +408,7 @@ class RunnerWebSessionManager:
             previous = self.client
             self.client = None
             self.offer = None
-            client = (
-                self.client_factory(self.control_endpoint, offer)
-                if self.client_factory is not None
-                else GrpcRunnerWebSessionClient.from_endpoint(
-                    self.control_endpoint,
-                    tls_server_name=offer.tls_server_name,
-                    runner_auth_token=self.runner_auth_token,
-                    tls=self.tls,
-                    allow_insecure=self.allow_insecure,
-                    outbound_resources=self.outbound_resources,
-                )
-            )
+            client = self.client_factory()
             if previous is not None:
                 await previous.close()
             try:

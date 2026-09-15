@@ -261,25 +261,15 @@ class OwnerSessionEpoch:
 
 @dataclasses.dataclass(frozen=True)
 class RunnerSessionOffer:
-    """One-time Owner-specific address and authority for a Runner session."""
+    """One-time authority for joining an exact Owner session."""
 
     owner: OwnerSessionEpoch
-    owner_replica_id: str
-    connect_address: str
-    tls_server_name: str
     session_nonce: str
     protocol_fingerprint: str
     deadline_at: datetime
 
     def __post_init__(self) -> None:
         """Reject an incomplete, stale-capable, or incompatible offer."""
-        _validate_text(self.owner_replica_id, "owner_replica_id", 255)
-        validate_runner_web_connect_address(self.connect_address)
-        _validate_text(
-            self.tls_server_name,
-            "tls_server_name",
-            253,
-        )
         _validate_text(self.session_nonce, "session_nonce", _MAX_NONCE_BYTES)
         _validate_deadline(self.deadline_at, "deadline_at")
         if self.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT:
@@ -290,22 +280,6 @@ RunnerSessionOfferHandler: TypeAlias = Callable[
     [RunnerSessionOffer],
     Awaitable[None],
 ]
-
-
-def validate_runner_web_connect_address(value: str) -> None:
-    """Require one direct Runner-authenticated Control host and numeric port."""
-    _validate_text(value, "connect_address", 255)
-    if any(character.isspace() for character in value):
-        raise ValueError("Runner Web connect address must not contain whitespace")
-    if "://" in value or any(character in value for character in "/?#"):
-        raise ValueError("Runner Web connect address must use host:port form")
-    host, separator, port = value.rpartition(":")
-    if separator != ":" or not host or not port.isdigit():
-        raise ValueError("Runner Web connect address must use host:port form")
-    if not 1 <= int(port) <= 65_535:
-        raise ValueError("Runner Web connect address port is invalid")
-    if ":" in host and not (host.startswith("[") and host.endswith("]")):
-        raise ValueError("Runner Web IPv6 connect address must be bracketed")
 
 
 @dataclasses.dataclass(frozen=True)

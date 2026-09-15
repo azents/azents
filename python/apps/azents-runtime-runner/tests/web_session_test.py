@@ -37,11 +37,6 @@ def _offer(*, runner_generation: int = 4) -> RunnerSessionOffer:
             desired_generation=3,
             runner_generation=runner_generation,
         ),
-        owner_replica_id="control-a",
-        connect_address=(
-            "runtime-control-pod-a.runtime-control-headless.azents.svc:8030"
-        ),
-        tls_server_name="runtime-control.internal",
         session_nonce="nonce-a",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.datetime.now(datetime.UTC)
@@ -70,6 +65,10 @@ def _accepted(
 
 async def _failure_handler() -> None:
     pass
+
+
+def _unused_client_factory() -> GrpcRunnerWebSessionClient:
+    raise AssertionError("test must not create a Runner Web client")
 
 
 def test_runner_hello_binds_exact_owner_generation_and_profile() -> None:
@@ -377,12 +376,8 @@ async def test_loopback_websocket_rejects_unoffered_selected_subprotocol() -> No
 async def test_runner_manager_rejects_obsolete_generation_without_connecting() -> None:
     calls = 0
 
-    def client_factory(
-        endpoint: str,
-        offer: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerWebSessionClient:
         nonlocal calls
-        del endpoint, offer
         calls += 1
         raise AssertionError("obsolete offer must not create a client")
 
@@ -391,13 +386,8 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 5,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
-        outbound_resources=None,
     )
 
     async def handler(envelope: object) -> None:
@@ -431,13 +421,8 @@ async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=loopback,
-        client_factory=None,
-        outbound_resources=None,
+        client_factory=_unused_client_factory,
     )
     manager.client = FailingCloseClient()
 
@@ -469,12 +454,7 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         await permit_accept.wait()
         yield _accepted(offer)
 
-    def client_factory(
-        endpoint: str,
-        candidate: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
-        assert endpoint == "runtime-control.internal:8030"
-        assert candidate == offer
+    def client_factory() -> GrpcRunnerWebSessionClient:
         return GrpcRunnerWebSessionClient(
             stream,
             runner_auth_token="runner-token",
@@ -487,13 +467,8 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: generation,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
-        outbound_resources=None,
     )
 
     async def handler(
@@ -545,13 +520,8 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
 
     client: _StreamScopedClient | None = None
 
-    def client_factory(
-        endpoint: str,
-        candidate: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerWebSessionClient:
         nonlocal client
-        assert endpoint == "runtime-control.internal:8030"
-        assert candidate == offer
         client = _StreamScopedClient()
         return client
 
@@ -560,13 +530,8 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
-        outbound_resources=None,
     )
 
     async def handler(
@@ -598,13 +563,8 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
         yield _accepted(offer)
         await asyncio.Event().wait()
 
-    def client_factory(
-        endpoint: str,
-        candidate: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerWebSessionClient:
         nonlocal clients
-        assert endpoint == "runtime-control.internal:8030"
-        assert candidate == offer
         clients += 1
         return GrpcRunnerWebSessionClient(
             stream,
@@ -618,13 +578,8 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
-        outbound_resources=None,
     )
 
     async def handler(
@@ -675,12 +630,7 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
                 accepted.session_accepted.response_session_window_bytes = 0
         yield accepted
 
-    def client_factory(
-        endpoint: str,
-        candidate: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
-        assert endpoint == "runtime-control.internal:8030"
-        assert candidate == offer
+    def client_factory() -> GrpcRunnerWebSessionClient:
         return GrpcRunnerWebSessionClient(
             stream,
             runner_auth_token="runner-token",
@@ -693,13 +643,8 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="runner-token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=8),
         client_factory=client_factory,
-        outbound_resources=None,
     )
 
     async def handler(

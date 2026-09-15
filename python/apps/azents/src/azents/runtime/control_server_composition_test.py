@@ -125,8 +125,6 @@ def _settings() -> RuntimeControlSettings:
         runtime_control_port=0,
         runtime_control_trusted_port=0,
         runtime_control_trusted_advertise_address="127.0.0.1:0",
-        runtime_control_runner_web_connect_address="runtime-control:8030",
-        runtime_control_runner_web_tls_server_name="runtime-control",
         runtime_control_web_capacity_maximum_active_streams=64,
         runtime_control_web_capacity_maximum_sse_streams=8,
         runtime_control_web_capacity_maximum_websocket_streams=8,

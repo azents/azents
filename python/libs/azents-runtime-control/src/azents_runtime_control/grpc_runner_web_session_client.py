@@ -5,24 +5,11 @@ import enum
 import logging
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 import grpc
 
-from azents_runtime_control.grpc_tls import GrpcClientTlsConfig, create_grpc_aio_channel
 from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
-    validate_runner_web_connect_address,
-)
-
-if TYPE_CHECKING:
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeRunnerWebSessionAsyncStub as _RuntimeRunnerWebSessionStub,
-    )
-else:
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeRunnerWebSessionStub as _RuntimeRunnerWebSessionStub,
-    )
 
 _MAX_PENDING_ENVELOPES = 8
 _LOGGER = logging.getLogger(__name__)
@@ -96,40 +83,6 @@ class GrpcRunnerWebSessionClient:
         self.accepted: (
             asyncio.Future[runtime_web_session_pb2.RuntimeWebSessionEnvelope] | None
         ) = None
-
-    @classmethod
-    def from_endpoint(
-        cls,
-        endpoint: str,
-        *,
-        tls_server_name: str,
-        runner_auth_token: str,
-        tls: GrpcClientTlsConfig | None,
-        allow_insecure: bool,
-        outbound_resources: RunnerWebEnvelopeResources | None,
-    ) -> "GrpcRunnerWebSessionClient":
-        validate_runner_web_connect_address(endpoint)
-        options: tuple[tuple[str, int | str], ...] = (
-            ("grpc.use_local_subchannel_pool", 1),
-            ("grpc.max_send_message_length", 2 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 2 * 1024 * 1024),
-        )
-        if tls is not None:
-            if not tls_server_name:
-                raise ValueError("Runner Web TLS server name must not be empty")
-            options = (*options, ("grpc.ssl_target_name_override", tls_server_name))
-        channel = create_grpc_aio_channel(
-            endpoint,
-            tls=tls,
-            allow_insecure=allow_insecure,
-            options=options,
-        )
-        return cls(
-            _RuntimeRunnerWebSessionStub(channel).Connect,
-            runner_auth_token=runner_auth_token,
-            channel=channel,
-            outbound_resources=outbound_resources,
-        )
 
     async def start(
         self,

@@ -148,9 +148,6 @@ def _offer(*, boot: str = "owner-a", lease: str = "lease-a") -> RunnerSessionOff
             desired_generation=3,
             runner_generation=4,
         ),
-        owner_replica_id="control-a",
-        connect_address="control-a.internal:8030",
-        tls_server_name="runtime-control.internal",
         session_nonce=f"nonce-{lease}",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.datetime.now(datetime.UTC)
@@ -171,26 +168,21 @@ def _accepted(
     return envelope
 
 
+def _unused_client_factory() -> GrpcRunnerWebSessionClient:
+    raise AssertionError("test must not create a Runner Web client")
+
+
 def _manager(
     *,
-    client_factory: Callable[
-        [str, RunnerSessionOffer],
-        GrpcRunnerWebSessionClient,
-    ]
-    | None,
+    client_factory: Callable[[], GrpcRunnerWebSessionClient] | None,
 ) -> RunnerWebSessionManager:
     return RunnerWebSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
-        control_endpoint="runtime-control.internal:8030",
-        runner_auth_token="token",
-        tls=None,
-        allow_insecure=True,
         loopback=RunnerWebLoopbackPool(maximum_connections=2),
-        client_factory=client_factory,
-        outbound_resources=None,
+        client_factory=client_factory or _unused_client_factory,
     )
 
 
@@ -525,11 +517,8 @@ async def test_replacement_offer_closes_old_stream_before_new_client_starts() ->
         finally:
             old_task_finished.set()
 
-    def client_factory(
-        endpoint: str,
-        offer: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
-        assert endpoint == "runtime-control.internal:8030"
+    def client_factory() -> GrpcRunnerWebSessionClient:
+        offer = first_offer if not created else second_offer
         before_start = None
         if offer == second_offer:
 
@@ -639,12 +628,7 @@ async def test_receiver_eof_retires_manager_and_dispatcher_work() -> None:
         yield _accepted(offer)
         await release.wait()
 
-    def client_factory(
-        endpoint: str,
-        candidate: RunnerSessionOffer,
-    ) -> GrpcRunnerWebSessionClient:
-        assert endpoint == "runtime-control.internal:8030"
-        assert candidate == offer
+    def client_factory() -> GrpcRunnerWebSessionClient:
         client = GrpcRunnerWebSessionClient(
             transport,
             runner_auth_token="token",
