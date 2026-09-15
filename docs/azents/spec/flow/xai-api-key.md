@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/core/llm_mapping.py
@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-09-10
+last_verified_at: 2026-09-15
 spec_version: 4
 ---
 

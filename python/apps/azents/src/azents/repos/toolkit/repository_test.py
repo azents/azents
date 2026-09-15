@@ -129,7 +129,8 @@ async def _seed_effective_toolkits(session: AsyncSession) -> None:
                 INSERT INTO agents (
                     id, workspace_id, name, model_selection,
                     lightweight_model_selection, selectable_model_options,
-                    main_model_label, lightweight_model_label
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
                 )
                 VALUES (
                     :agent_id,
@@ -151,7 +152,10 @@ async def _seed_effective_toolkits(session: AsyncSession) -> None:
                         "subagent_guidance": null
                     }]'::jsonb,
                     'default',
-                    'default'
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
                 )
                 """
             ),

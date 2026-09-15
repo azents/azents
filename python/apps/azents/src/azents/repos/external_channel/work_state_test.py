@@ -85,7 +85,8 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                 INSERT INTO agents (
                     id, workspace_id, name, model_selection,
                     lightweight_model_selection, selectable_model_options,
-                    main_model_label, lightweight_model_label
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
                 )
                 VALUES
                     (
@@ -119,7 +120,7 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                                 "subagent_guidance": null
                             }
                         ]'::jsonb,
-                        'main', 'light'
+                        'main', 'light', TRUE, 'public', TRUE
                     ),
                     (
                         :other_agent_id, :workspace_id, 'Other Agent',
@@ -152,7 +153,7 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                                 "subagent_guidance": null
                             }
                         ]'::jsonb,
-                        'main', 'light'
+                        'main', 'light', TRUE, 'public', TRUE
                     )
                 """
             ),

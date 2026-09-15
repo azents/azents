@@ -133,7 +133,7 @@ async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
         foreign_key
         for foreign_key in worktree_foreign_keys
         if foreign_key.constraint_name
-        == "session_agent_ctx_git_worktrees_context_id_fkey"
+        == "session_agent_context_git_worktre_session_agent_context_id_fkey"
     )
     assert context_foreign_key.target_table == "public.session_agent_contexts"
     assert (

@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
@@ -43,7 +43,7 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-09-13
+last_verified_at: 2026-09-15
 spec_version: 20
 ---
 
