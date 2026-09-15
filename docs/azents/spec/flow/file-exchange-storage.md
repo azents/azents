@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/s3/deps.py
@@ -58,7 +58,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-13
+last_verified_at: 2026-09-15
 spec_version: 49
 ---
 

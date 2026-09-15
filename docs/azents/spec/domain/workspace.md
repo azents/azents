@@ -4,7 +4,7 @@ spec_type: domain
 domain: workspace
 owner: "@Hardtack"
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
@@ -116,7 +116,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-13
+last_verified_at: 2026-09-15
 spec_version: 83
 ---
 

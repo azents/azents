@@ -661,7 +661,8 @@ async def _seed_slug_race(
                 INSERT INTO agents (
                     id, workspace_id, name, model_selection,
                     lightweight_model_selection, selectable_model_options,
-                    main_model_label, lightweight_model_label
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
                 )
                 VALUES (
                     'agent-race',
@@ -683,7 +684,10 @@ async def _seed_slug_race(
                         "subagent_guidance": null
                     }]'::jsonb,
                     'default',
-                    'default'
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
                 )
                 """
             )
@@ -692,7 +696,8 @@ async def _seed_slug_race(
             sa.text(
                 """
                 INSERT INTO toolkit_configs (
-                    id, workspace_id, owner_agent_id, toolkit_type, slug, name, config
+                    id, workspace_id, owner_agent_id, toolkit_type, slug, name,
+                    config, enabled
                 )
                 VALUES
                     (
@@ -702,7 +707,8 @@ async def _seed_slug_race(
                         'mcp',
                         'shared',
                         'Shared race',
-                        '{}'::jsonb
+                        '{}'::jsonb,
+                        TRUE
                     ),
                     (
                         'toolkit-race-owned',
@@ -711,7 +717,8 @@ async def _seed_slug_race(
                         'mcp',
                         'conflict',
                         'Owned race',
-                        '{}'::jsonb
+                        '{}'::jsonb,
+                        TRUE
                     )
                 """
             )

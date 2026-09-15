@@ -16,5 +16,10 @@ The standard checks cover:
 
 - one Alembic head;
 - base-to-head upgrade;
-- the pre-consolidation public-schema fingerprint and required singleton seeds; and
+- model definitions matching the migration DDL;
+- the production-equivalent public-schema fingerprint and required singleton seeds;
+- named model CHECK constraints; and
 - baseline upgrade/downgrade consistency.
+
+CI also runs `alembic upgrade head` followed by `alembic check` against PostgreSQL
+so model drift fails independently of the pytest-alembic wrapper.

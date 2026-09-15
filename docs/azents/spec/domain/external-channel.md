@@ -6,11 +6,7 @@ spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/7e77cf7a8877_add_provider_identity_oauth_foundation.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/e905bfe74372_globalize_external_account_links.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/c05bc1b811fa_add_external_account_linking_and_native_.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/102901c54450_drop_legacy_external_account_link_proof_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
@@ -102,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-14
+last_verified_at: 2026-09-15
 spec_version: 80
 ---
 

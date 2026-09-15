@@ -19,7 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/system_setting/**
   - python/apps/azents/src/azents/repos/github_platform_system_setting/**
   - python/apps/azents/src/azents/rdb/models/system_setting.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
@@ -51,7 +51,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-14
+last_verified_at: 2026-09-15
 spec_version: 6
 ---
 

@@ -836,6 +836,12 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
                 )
             )
             await rdb_session.flush()
+            await rdb_session.execute(
+                sa.text(
+                    "SET CONSTRAINTS "
+                    "fk_external_channel_agent_routes_connection_app_mode IMMEDIATE"
+                )
+            )
     with pytest.raises(ValueError, match="must be active"):
         await repo.create_channel_default(
             rdb_session,

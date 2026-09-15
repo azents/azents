@@ -14,6 +14,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from azents.core.config import Config
+from azents.rdb import alembic_foreign_key_compare  # noqa: F401
 from azents.rdb.models.base import RDBModel
 
 
@@ -48,6 +49,7 @@ target_metadata = RDBModel.metadata
 _AUTOGENERATE_PLUGINS = [
     "alembic.autogenerate.*",
     "alembic.ext.checkconstraint_byname",
+    "azents.autogenerate.foreign_key_options",
 ]
 _MIGRATION_LOCK_KEY = (0x415A454E, 0x54534442)
 

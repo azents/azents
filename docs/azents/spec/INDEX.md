@@ -13,17 +13,17 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-15 | 80 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-13 | 171 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-14 | 80 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-15 | 171 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-15 | 80 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-13 | 25 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-15 | 25 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
-| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-12 | 12 |
-| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-14 | 6 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-13 | 117 |
+| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-15 | 12 |
+| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 117 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-13 | 19 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-13 | 83 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-15 | 83 |
 
 ## Flow Specs
 
@@ -31,7 +31,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 180 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 85 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-14 | 38 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-15 | 38 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 51 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
@@ -39,13 +39,13 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-13 | 49 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-15 | 49 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-04 | 2 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
-| [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-10 | 4 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-13 | 20 |
+| [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-15 | 63 |
-| [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-10 | 4 |
-| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-10 | 8 |
+| [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
+| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-15 | 8 |

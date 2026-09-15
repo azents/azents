@@ -276,6 +276,18 @@ jobs:
         run: |
           cd python/apps/azents
           uv run pytest -vv migration_tests
+      - name: Verify Alembic model drift
+        env:
+          AZ_AUTH_JWT_SECRET_KEY: migration-ci
+          AZ_CREDENTIAL_ENCRYPTION_KEY: migration-ci
+          AZ_RDB_DB_NAME: azents_migrations
+          AZ_RDB_HOST: localhost
+          AZ_RDB_PASSWORD: postgres
+          AZ_RDB_USER: postgres
+        run: |
+          cd python/apps/azents
+          uv run alembic -c db-schemas/rdb/alembic.ini upgrade head
+          uv run alembic -c db-schemas/rdb/alembic.ini check
 
   ci-python:
     name: ci-python

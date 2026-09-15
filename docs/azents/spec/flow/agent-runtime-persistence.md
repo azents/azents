@@ -13,11 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/776db49c8368_drop_runtime_web_browser_profile.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/eebc06bf6bf0_add_runtime_web_session_routes.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_drop_legacy_runtime_web_transport.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/6b53a0a15d11_create_current_schema_baseline.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/agent_runtime_add/**
@@ -49,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-14
+last_verified_at: 2026-09-15
 spec_version: 38
 ---
 

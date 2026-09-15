@@ -1,8 +1,8 @@
-"""Create the consolidated current-schema baseline.
+"""Create the production-equivalent operational schema baseline.
 
-Revision ID: 6b53a0a15d11
+Revision ID: 097a97177350
 Revises:
-Create Date: 2026-09-10 07:39:46.615430
+Create Date: 2026-09-15 11:49:44.131621
 
 """
 
@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "6b53a0a15d11"
+revision: str = "097a97177350"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -23,8 +23,8 @@ _BASELINE_SQL = r"""
 --
 
 
--- Dumped from database version 17.11 (Debian 17.11-1.pgdg13+2)
--- Dumped by pg_dump version 17.11 (Debian 17.11-1.pgdg13+2)
+-- Dumped from database version 18.4
+-- Dumped by pg_dump version 18.4
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -36,6 +36,8 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
+
+
 
 --
 -- Name: action_execution_event_kind; Type: TYPE; Schema: public; Owner: -
@@ -148,13 +150,13 @@ CREATE TYPE public.agent_run_phase AS ENUM (
 --
 
 CREATE TYPE public.agent_run_status AS ENUM (
+    'pending',
     'running',
     'completed',
     'stopped',
     'failed',
     'interrupted',
-    'cancelled',
-    'pending'
+    'cancelled'
 );
 
 
@@ -200,11 +202,8 @@ CREATE TYPE public.agent_runtime_removal_status AS ENUM (
 --
 
 CREATE TYPE public.agent_session_end_reason AS ENUM (
-    'manual_new',
-    'manual_reset',
     'idle',
     'safety',
-    'compact_rotate',
     'deleted'
 );
 
@@ -254,11 +253,8 @@ CREATE TYPE public.agent_session_run_state AS ENUM (
 
 CREATE TYPE public.agent_session_start_reason AS ENUM (
     'initial',
-    'manual_new',
-    'manual_reset',
-    'system_recovery',
-    'compact_rotate',
-    'external_channel'
+    'external_channel',
+    'system_recovery'
 );
 
 
@@ -346,11 +342,11 @@ CREATE TYPE public.artifact_status AS ENUM (
 --
 
 CREATE TYPE public.chat_write_request_type AS ENUM (
+    'message',
+    'turn_action',
     'edit_message',
     'command',
     'failed_run_retry',
-    'message',
-    'turn_action',
     'model_profile'
 );
 
@@ -385,9 +381,14 @@ CREATE TYPE public.chatgpt_oauth_session_status AS ENUM (
 CREATE TYPE public.event_kind AS ENUM (
     'user_message',
     'goal_continuation',
+    'external_channel_continuation',
+    'scheduled_task_trigger',
+    'scheduled_task_continuation',
+    'scheduled_task_result',
     'goal_updated',
     'action_message',
     'agent_message',
+    'external_channel_message',
     'action_execution_result',
     'skill_loaded',
     'goal_briefing',
@@ -403,12 +404,7 @@ CREATE TYPE public.event_kind AS ENUM (
     'compaction_summary',
     'system_reminder',
     'system_error',
-    'unknown_adapter_output',
-    'external_channel_message',
-    'external_channel_continuation',
-    'scheduled_task_trigger',
-    'scheduled_task_continuation',
-    'scheduled_task_result'
+    'unknown_adapter_output'
 );
 
 
@@ -443,6 +439,30 @@ CREATE TYPE public.exchange_file_provenance_kind AS ENUM (
 
 CREATE TYPE public.exchange_file_status AS ENUM (
     'available',
+    'expired'
+);
+
+
+--
+-- Name: external_account_link_revocation_reason; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.external_account_link_revocation_reason AS ENUM (
+    'owner_disconnected',
+    'legacy_redundant',
+    'legacy_conflict'
+);
+
+
+--
+-- Name: external_account_oauth_attempt_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.external_account_oauth_attempt_status AS ENUM (
+    'open',
+    'claimed',
+    'completed',
+    'failed',
     'expired'
 );
 
@@ -704,6 +724,17 @@ CREATE TYPE public.external_channel_work_projection_status AS ENUM (
 
 
 --
+-- Name: external_model_notice_outcome; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.external_model_notice_outcome AS ENUM (
+    'unknown',
+    'delivered',
+    'failed'
+);
+
+
+--
 -- Name: git_worktree_path_claim_owner_kind; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -725,31 +756,6 @@ CREATE TYPE public.git_worktree_path_claim_state AS ENUM (
     'already_absent',
     'failed',
     'unresolved'
-);
-
-
---
--- Name: inference_profile_failure_code; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.inference_profile_failure_code AS ENUM (
-    'model_target_not_found',
-    'model_target_resolution_failed',
-    'reasoning_effort_unsupported'
-);
-
-
---
--- Name: inference_profile_source; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.inference_profile_source AS ENUM (
-    'explicit_input',
-    'session_last_used',
-    'agent_default',
-    'parent_run',
-    'retry_original',
-    'spawn_override'
 );
 
 
@@ -827,6 +833,16 @@ CREATE TYPE public.llm_catalog_lowerer_target AS ENUM (
 
 
 --
+-- Name: llm_catalog_purpose; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.llm_catalog_purpose AS ENUM (
+    'conversation',
+    'image_generation'
+);
+
+
+--
 -- Name: llm_catalog_scope; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -874,13 +890,13 @@ CREATE TYPE public.llm_provider AS ENUM (
 CREATE TYPE public.mailbox_item_kind AS ENUM (
     'user_message',
     'goal_continuation',
+    'external_channel_continuation',
+    'scheduled_task_trigger',
+    'scheduled_task_continuation',
+    'turn_action_continuation',
     'action_message',
     'agent_message',
-    'external_channel_message',
-    'external_channel_continuation',
-    'turn_action_continuation',
-    'scheduled_task_trigger',
-    'scheduled_task_continuation'
+    'external_channel_message'
 );
 
 
@@ -911,6 +927,16 @@ CREATE TYPE public.mcp_oauth_connection_status AS ENUM (
 CREATE TYPE public.memory_scope AS ENUM (
     'agent',
     'user'
+);
+
+
+--
+-- Name: model_candidate_claim_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.model_candidate_claim_kind AS ENUM (
+    'reservation',
+    'probe'
 );
 
 
@@ -1344,47 +1370,71 @@ CREATE TYPE public.runtime_terminal_delete_acknowledgement_kind AS ENUM (
 
 
 --
--- Name: sandbox_checkpoint_format; Type: TYPE; Schema: public; Owner: -
+-- Name: runtime_web_auth_mode; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.sandbox_checkpoint_format AS ENUM (
-    'tar_zst'
+CREATE TYPE public.runtime_web_auth_mode AS ENUM (
+    'shared_cookie',
+    'separate_domain'
 );
 
 
 --
--- Name: sandbox_checkpoint_kind; Type: TYPE; Schema: public; Owner: -
+-- Name: runtime_web_cycle_end_reason; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.sandbox_checkpoint_kind AS ENUM (
-    'hibernate',
-    'debounce',
-    'manual'
+CREATE TYPE public.runtime_web_cycle_end_reason AS ENUM (
+    'closed',
+    'expired',
+    'replaced',
+    'session_removed'
 );
 
 
 --
--- Name: sandbox_runtime_lease_state; Type: TYPE; Schema: public; Owner: -
+-- Name: runtime_web_operation_kind; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.sandbox_runtime_lease_state AS ENUM (
-    'allocating',
-    'starting',
-    'running',
-    'hibernating',
-    'hibernated',
-    'deleting',
-    'lost'
+CREATE TYPE public.runtime_web_operation_kind AS ENUM (
+    'prepare',
+    'request',
+    'direct_create',
+    'approve',
+    'reject',
+    'cancel',
+    'close'
 );
 
 
 --
--- Name: schedule_type; Type: TYPE; Schema: public; Owner: -
+-- Name: runtime_web_quota_scope_kind; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.schedule_type AS ENUM (
-    'cron',
-    'once'
+CREATE TYPE public.runtime_web_quota_scope_kind AS ENUM (
+    'agent',
+    'session'
+);
+
+
+--
+-- Name: runtime_web_request_state; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.runtime_web_request_state AS ENUM (
+    'pending',
+    'approved',
+    'rejected',
+    'cancelled'
+);
+
+
+--
+-- Name: runtime_web_requester_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.runtime_web_requester_kind AS ENUM (
+    'user',
+    'agent'
 );
 
 
@@ -1479,16 +1529,6 @@ CREATE TYPE public.signup_token_delivery_method AS ENUM (
 
 
 --
--- Name: snapshot_kind; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.snapshot_kind AS ENUM (
-    'hibernate',
-    'debounce'
-);
-
-
---
 -- Name: system_data_migration_outcome; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -1538,9 +1578,11 @@ CREATE TYPE public.system_setting_health_status AS ENUM (
 --
 
 CREATE TYPE public.system_setting_section AS ENUM (
+    'external_channel_files',
     'platform_github_app',
     'platform_runtime',
-    'external_channel_files'
+    'slack_identity_oauth',
+    'discord_identity_oauth'
 );
 
 
@@ -1655,49 +1697,6 @@ CREATE FUNCTION public.initialize_runtime_provider_connection_generation() RETUR
             $$;
 
 
---
--- Name: preserve_external_channel_route_agent_snapshot(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.preserve_external_channel_route_agent_snapshot() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-        BEGIN
-            IF TG_OP = 'INSERT' THEN
-                IF NEW.agent_id_snapshot IS NULL THEN
-                    NEW.agent_id_snapshot := NEW.agent_id;
-                END IF;
-                IF NEW.agent_id_snapshot IS NULL
-                   OR NEW.agent_id_snapshot IS DISTINCT FROM NEW.agent_id THEN
-                    RAISE EXCEPTION
-                        'External Channel route Agent snapshot must match Agent';
-                END IF;
-            ELSIF NEW.agent_id_snapshot
-                    IS DISTINCT FROM OLD.agent_id_snapshot THEN
-                RAISE EXCEPTION
-                    'External Channel route Agent snapshot is immutable';
-            END IF;
-            RETURN NEW;
-        END;
-        $$;
-
-
---
--- Name: prevent_external_channel_connection_app_mode_update(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.prevent_external_channel_connection_app_mode_update() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-            BEGIN
-                IF NEW.app_mode IS DISTINCT FROM OLD.app_mode THEN
-                    RAISE EXCEPTION 'External Channel App mode is immutable';
-                END IF;
-                RETURN NEW;
-            END;
-            $$;
-
-
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -1728,20 +1727,20 @@ CREATE TABLE public.action_executions (
     id character varying(32) NOT NULL,
     session_id character varying(32) NOT NULL,
     mailbox_item_id character varying(32) NOT NULL,
+    sender_user_id character varying(32),
     action_type text NOT NULL,
+    action jsonb NOT NULL,
+    owner_generation bigint NOT NULL,
+    result jsonb,
     status public.action_execution_status DEFAULT 'pending'::public.action_execution_status NOT NULL,
     failure_summary text,
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
     failed_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    action jsonb NOT NULL,
-    owner_generation bigint NOT NULL,
     cancelled_at timestamp with time zone,
     cancellation_summary text,
-    sender_user_id character varying(32),
-    result jsonb
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1812,6 +1811,7 @@ CREATE TABLE public.agent_decommission_jobs (
     id character varying(32) NOT NULL,
     agent_id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
+    requested_by_workspace_user_id character varying(32),
     status public.agent_decommission_status DEFAULT 'pending'::public.agent_decommission_status NOT NULL,
     attempt_count integer DEFAULT 0 NOT NULL,
     lease_owner character varying(120),
@@ -1822,8 +1822,7 @@ CREATE TABLE public.agent_decommission_jobs (
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    requested_by_workspace_user_id character varying(32)
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1834,12 +1833,12 @@ CREATE TABLE public.agent_decommission_jobs (
 CREATE TABLE public.agent_memories (
     id character varying(32) NOT NULL,
     agent_id character varying(32) NOT NULL,
-    user_id character varying(32),
     scope public.memory_scope NOT NULL,
     type character varying(50) NOT NULL,
     name character varying(255) NOT NULL,
     description text NOT NULL,
     content text NOT NULL,
+    user_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -1869,10 +1868,10 @@ CREATE TABLE public.agent_project_defaults (
     agent_id character varying(32) NOT NULL,
     path text NOT NULL,
     "position" integer NOT NULL,
+    item_type public.agent_project_default_item_type NOT NULL,
     id character varying(32) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    item_type public.agent_project_default_item_type NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1908,29 +1907,30 @@ CREATE TABLE public.agent_run_input_events (
 CREATE TABLE public.agent_runs (
     id character varying(32) NOT NULL,
     session_id character varying(32) NOT NULL,
+    scheduled_task_cycle_id character varying(32),
+    run_index integer NOT NULL,
+    parent_agent_run_id character varying(32),
+    requested_model_target_label character varying(80),
+    requested_reasoning_effort public.model_reasoning_effort,
     phase public.agent_run_phase DEFAULT 'idle'::public.agent_run_phase NOT NULL,
     status public.agent_run_status DEFAULT 'running'::public.agent_run_status NOT NULL,
     active_tool_calls jsonb DEFAULT '[]'::jsonb NOT NULL,
-    last_completed_event_id character varying(32),
-    stop_requested_at timestamp with time zone,
-    started_at timestamp with time zone,
-    ended_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    run_index integer NOT NULL,
     retry_state jsonb,
+    vfs_projection jsonb,
+    last_completed_event_id character varying(32),
     terminal_result_event_id character varying(32),
     terminal_result_message text,
-    parent_agent_run_id character varying(32),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    model_call_started_at timestamp with time zone,
     parent_result_delivery_state public.agent_run_parent_result_delivery_state,
     parent_result_mailbox_item_id character varying(32),
     parent_result_enqueued_at timestamp with time zone,
-    vfs_projection jsonb,
-    scheduled_task_cycle_id character varying(32),
-    requested_model_target_label character varying(80),
-    requested_reasoning_effort public.model_reasoning_effort,
+    stop_requested_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    started_at timestamp with time zone,
+    model_call_started_at timestamp with time zone,
+    ended_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     requested_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
+    model_operation_state jsonb,
     CONSTRAINT ck_agent_runs_requested_profile CHECK (((requested_model_target_label IS NOT NULL) OR ((requested_reasoning_effort IS NULL) AND (requested_enabled_execution_options = '[]'::jsonb))))
 );
 
@@ -1943,16 +1943,16 @@ CREATE TABLE public.agent_runtime_add_receipts (
     agent_id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
     idempotency_key character varying(120) NOT NULL,
-    workspace_runtime_profile_id character varying(32) NOT NULL,
+    workspace_runtime_profile_id character varying(32) CONSTRAINT agent_runtime_add_receipts_workspace_runtime_profile_i_not_null NOT NULL,
     expected_capability_version bigint NOT NULL,
-    committed_capability_version bigint NOT NULL,
-    committed_runtime_profile_selection_version bigint NOT NULL,
+    committed_capability_version bigint CONSTRAINT agent_runtime_add_receipts_committed_capability_versio_not_null NOT NULL,
+    committed_runtime_profile_selection_version bigint CONSTRAINT agent_runtime_add_receipts_committed_runtime_profile_s_not_null NOT NULL,
     agent_runtime_id character varying(32) NOT NULL,
+    runtime_configuration_sequence bigint CONSTRAINT agent_runtime_add_receipts_runtime_configuration_seque_not_null NOT NULL,
+    runtime_configuration_digest character varying(64) CONSTRAINT agent_runtime_add_receipts_runtime_configuration_diges_not_null NOT NULL,
     runtime_desired_generation bigint NOT NULL,
     id character varying(32) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    runtime_configuration_sequence bigint NOT NULL,
-    runtime_configuration_digest character varying(64) NOT NULL,
     CONSTRAINT ck_agent_runtime_add_receipts_capability_versions CHECK (((expected_capability_version >= 1) AND (committed_capability_version = (expected_capability_version + 1)))),
     CONSTRAINT ck_agent_runtime_add_receipts_configuration_sequence CHECK ((runtime_configuration_sequence >= 1)),
     CONSTRAINT ck_agent_runtime_add_receipts_profile_version CHECK ((committed_runtime_profile_selection_version >= 2)),
@@ -1969,21 +1969,21 @@ CREATE TABLE public.agent_runtime_removal_operations (
     workspace_id character varying(32) NOT NULL,
     requested_by_workspace_user_id character varying(32),
     idempotency_key character varying(120) NOT NULL,
-    expected_capability_version bigint NOT NULL,
-    committed_capability_version bigint NOT NULL,
+    expected_capability_version bigint CONSTRAINT agent_runtime_removal_opera_expected_capability_versio_not_null NOT NULL,
+    committed_capability_version bigint CONSTRAINT agent_runtime_removal_opera_committed_capability_versi_not_null NOT NULL,
     agent_runtime_id character varying(32),
     confirmed_at timestamp with time zone NOT NULL,
-    destructive_scope_version integer NOT NULL,
+    destructive_scope_version integer CONSTRAINT agent_runtime_removal_operat_destructive_scope_version_not_null NOT NULL,
     id character varying(32) NOT NULL,
     status public.agent_runtime_removal_status DEFAULT 'pending'::public.agent_runtime_removal_status NOT NULL,
     stage public.agent_runtime_removal_stage DEFAULT 'fencing'::public.agent_runtime_removal_stage NOT NULL,
-    active_root_session_count integer DEFAULT 0 NOT NULL,
+    active_root_session_count integer DEFAULT 0 CONSTRAINT agent_runtime_removal_operat_active_root_session_count_not_null NOT NULL,
     active_subagent_count integer DEFAULT 0 NOT NULL,
     active_run_count integer DEFAULT 0 NOT NULL,
-    queued_runtime_action_count integer DEFAULT 0 NOT NULL,
+    queued_runtime_action_count integer DEFAULT 0 CONSTRAINT agent_runtime_removal_opera_queued_runtime_action_coun_not_null NOT NULL,
     cleanup_cursor_context_id character varying(32),
-    cleanup_scanned_context_count integer DEFAULT 0 NOT NULL,
-    cleanup_invalidated_context_count integer DEFAULT 0 NOT NULL,
+    cleanup_scanned_context_count integer DEFAULT 0 CONSTRAINT agent_runtime_removal_opera_cleanup_scanned_context_co_not_null NOT NULL,
+    cleanup_invalidated_context_count integer DEFAULT 0 CONSTRAINT agent_runtime_removal_opera_cleanup_invalidated_contex_not_null NOT NULL,
     product_cleanup_completed_at timestamp with time zone,
     physical_deletion_required boolean,
     target_terminal_delete_generation bigint,
@@ -2018,15 +2018,25 @@ CREATE TABLE public.agent_runtimes (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
     agent_id character varying(32) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     runtime_provider_id character varying(120),
+    runtime_provider_resource_id character varying(32),
+    provider_binding_origin public.runtime_provider_binding_origin,
+    provider_binding_evidence jsonb,
+    configuration_sequence bigint DEFAULT '0'::bigint NOT NULL,
     desired_state public.runtime_desired_state DEFAULT 'stopped'::public.runtime_desired_state NOT NULL,
     desired_generation integer DEFAULT 0 NOT NULL,
     last_lifecycle_command public.runtime_lifecycle_command_type,
     reset_final_desired_state public.runtime_desired_state,
+    terminal_delete_requested_generation integer,
+    terminal_delete_acknowledged_generation integer,
+    terminal_delete_acknowledged_at timestamp with time zone,
+    terminal_delete_acknowledgement_kind public.runtime_terminal_delete_acknowledgement_kind,
     provider_observed_state public.runtime_provider_observed_state DEFAULT 'unknown'::public.runtime_provider_observed_state NOT NULL,
+    provider_generation bigint DEFAULT 0 NOT NULL,
     provider_observed_generation integer DEFAULT 0 NOT NULL,
+    provider_observed_at timestamp with time zone,
+    provider_observe_requested_at timestamp with time zone,
+    last_lifecycle_dispatch_generation integer DEFAULT 0 NOT NULL,
     provider_connection_state public.runtime_provider_connection_state DEFAULT 'disconnected'::public.runtime_provider_connection_state NOT NULL,
     runner_state public.runtime_runner_state DEFAULT 'unknown'::public.runtime_runner_state NOT NULL,
     runner_generation bigint DEFAULT 0 NOT NULL,
@@ -2035,18 +2045,8 @@ CREATE TABLE public.agent_runtimes (
     failure_code character varying(120),
     failure_message text,
     last_state_change_at timestamp with time zone,
-    last_lifecycle_dispatch_generation integer DEFAULT 0 NOT NULL,
-    provider_observed_at timestamp with time zone,
-    provider_observe_requested_at timestamp with time zone,
-    provider_generation bigint DEFAULT 0 NOT NULL,
-    terminal_delete_requested_generation integer,
-    terminal_delete_acknowledged_generation integer,
-    terminal_delete_acknowledged_at timestamp with time zone,
-    runtime_provider_resource_id character varying(32),
-    provider_binding_origin public.runtime_provider_binding_origin,
-    provider_binding_evidence jsonb,
-    terminal_delete_acknowledgement_kind public.runtime_terminal_delete_acknowledgement_kind,
-    configuration_sequence bigint DEFAULT '0'::bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_agent_runtimes_terminal_delete_acknowledgement CHECK ((((terminal_delete_acknowledged_generation IS NULL) AND (terminal_delete_acknowledged_at IS NULL) AND (terminal_delete_acknowledgement_kind IS NULL)) OR ((terminal_delete_acknowledged_generation IS NOT NULL) AND (terminal_delete_acknowledged_at IS NOT NULL) AND (terminal_delete_acknowledgement_kind IS NOT NULL))))
 );
 
@@ -2085,17 +2085,37 @@ CREATE TABLE public.agent_sessions (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
     agent_id character varying(32) NOT NULL,
+    handle character varying(120) NOT NULL,
+    current_model_target_label character varying(80),
+    applied_model_target_label character varying(80),
+    current_model_selection jsonb,
+    current_model_settings jsonb,
+    current_reasoning_effort public.model_reasoning_effort,
+    applied_reasoning_effort public.model_reasoning_effort,
+    current_effective_context_window_tokens integer,
+    current_effective_auto_compaction_threshold_tokens integer,
+    current_inference_resolved_at timestamp with time zone,
+    session_kind public.agent_session_kind NOT NULL,
     status public.agent_session_status NOT NULL,
+    primary_kind public.agent_session_primary_kind,
+    product_mode public.agent_session_product_mode,
+    associated_user_id character varying(32),
     start_reason public.agent_session_start_reason NOT NULL,
+    title character varying(200),
+    title_source public.agent_session_title_source,
+    title_generated_at timestamp with time zone,
+    title_generation_event_id character varying(32),
+    last_user_input_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_activity_at timestamp with time zone DEFAULT now() NOT NULL,
+    pinned boolean DEFAULT false NOT NULL,
     end_reason public.agent_session_end_reason,
     model_input_head_event_id character varying(32),
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    ended_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    lifecycle_started_at timestamp with time zone,
+    model_file_gc_cursor_event_id character varying(32),
+    model_file_gc_updated_at timestamp with time zone,
     run_state public.agent_session_run_state DEFAULT 'idle'::public.agent_session_run_state NOT NULL,
     run_heartbeat_at timestamp with time zone DEFAULT now() NOT NULL,
+    pending_idle_continuation_run_id character varying(32),
+    owner_generation bigint DEFAULT '0'::bigint NOT NULL,
     pending_command_id character varying(32),
     pending_command_name character varying(120),
     pending_command_payload jsonb,
@@ -2104,37 +2124,21 @@ CREATE TABLE public.agent_sessions (
     stop_requested_at timestamp with time zone,
     stop_requester_user_id character varying(32),
     stop_request_id character varying(32),
-    primary_kind public.agent_session_primary_kind,
-    title character varying(200),
-    title_source public.agent_session_title_source,
-    title_generated_at timestamp with time zone,
-    title_generation_event_id character varying(32),
-    last_user_input_at timestamp with time zone DEFAULT now() NOT NULL,
-    model_file_gc_cursor_event_id character varying(32),
-    model_file_gc_updated_at timestamp with time zone,
-    handle character varying(120) NOT NULL,
-    session_kind public.agent_session_kind NOT NULL,
-    current_model_target_label character varying(80),
-    current_model_selection jsonb,
-    current_reasoning_effort public.model_reasoning_effort,
-    current_effective_context_window_tokens integer,
-    current_effective_auto_compaction_threshold_tokens integer,
-    current_inference_resolved_at timestamp with time zone,
-    owner_generation bigint DEFAULT '0'::bigint NOT NULL,
-    current_model_settings jsonb,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    lifecycle_started_at timestamp with time zone,
     archived_at timestamp with time zone,
     purge_after timestamp with time zone,
     archive_policy_revision bigint,
     archive_retention_days_snapshot integer,
-    pending_idle_continuation_run_id character varying(32),
-    last_activity_at timestamp with time zone DEFAULT now() NOT NULL,
-    pinned boolean DEFAULT false NOT NULL,
-    product_mode public.agent_session_product_mode,
-    associated_user_id character varying(32),
-    applied_model_target_label character varying(80),
-    applied_reasoning_effort public.model_reasoning_effort,
+    ended_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     current_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
     applied_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
+    applied_profile_generation bigint DEFAULT '0'::bigint NOT NULL,
+    primary_model_reservation jsonb,
+    title_model_operation_state jsonb,
+    primary_model_reservation_generation bigint DEFAULT 0 NOT NULL,
     CONSTRAINT ck_agent_sessions_applied_inference_profile CHECK (((applied_model_target_label IS NOT NULL) OR ((applied_reasoning_effort IS NULL) AND (applied_enabled_execution_options = '[]'::jsonb)))),
     CONSTRAINT ck_agent_sessions_current_compaction_threshold CHECK (((current_effective_auto_compaction_threshold_tokens IS NULL) OR (current_effective_auto_compaction_threshold_tokens > 0))),
     CONSTRAINT ck_agent_sessions_current_context_window CHECK (((current_effective_context_window_tokens IS NULL) OR (current_effective_context_window_tokens > 0))),
@@ -2164,38 +2168,38 @@ CREATE TABLE public.agents (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
     name character varying(100) NOT NULL,
-    description text,
-    model_parameters jsonb,
-    system_prompt text,
-    enabled boolean DEFAULT true NOT NULL,
-    type public.agent_type DEFAULT 'public'::public.agent_type NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    memory_enabled boolean DEFAULT true NOT NULL,
-    avatar jsonb,
-    max_turns integer,
     model_selection jsonb NOT NULL,
     lightweight_model_selection jsonb NOT NULL,
-    subagent_settings jsonb DEFAULT '{"max_depth": 1, "max_subagents": 3}'::jsonb NOT NULL,
     selectable_model_options jsonb NOT NULL,
     main_model_label character varying(80) NOT NULL,
     lightweight_model_label character varying(80) NOT NULL,
-    tool_search_enabled boolean DEFAULT true NOT NULL,
+    description text,
+    model_parameters jsonb,
+    system_prompt text,
+    enabled boolean NOT NULL,
+    external_channel_default_response_mode public.external_channel_response_mode DEFAULT 'all_messages'::public.external_channel_response_mode NOT NULL,
     lifecycle_status public.agent_lifecycle_status DEFAULT 'active'::public.agent_lifecycle_status NOT NULL,
-    auto_archive_ttl_days integer DEFAULT 30 NOT NULL,
+    type public.agent_type NOT NULL,
     runtime_profile_id character varying(32),
     runtime_profile_selection_version integer DEFAULT 1 NOT NULL,
-    external_channel_default_response_mode public.external_channel_response_mode DEFAULT 'all_messages'::public.external_channel_response_mode NOT NULL,
     runtime_capability public.agent_runtime_capability DEFAULT 'managed'::public.agent_runtime_capability NOT NULL,
     runtime_capability_version integer DEFAULT 1 NOT NULL,
     terminal_enabled boolean DEFAULT true NOT NULL,
+    memory_enabled boolean NOT NULL,
+    tool_search_enabled boolean DEFAULT true NOT NULL,
+    max_turns integer,
+    auto_archive_ttl_days integer DEFAULT 30 NOT NULL,
+    subagent_settings jsonb DEFAULT '{"max_depth": 1, "max_subagents": 3}'::jsonb NOT NULL,
+    avatar jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_agents_auto_archive_ttl_days_positive CHECK ((auto_archive_ttl_days > 0)),
     CONSTRAINT ck_agents_max_turns_positive CHECK (((max_turns IS NULL) OR (max_turns > 0))),
     CONSTRAINT ck_agents_model_not_null CHECK (((model_selection IS NOT NULL) AND (lightweight_model_selection IS NOT NULL))),
     CONSTRAINT ck_agents_runtime_capability_profile CHECK (((runtime_capability = 'managed'::public.agent_runtime_capability) OR (runtime_profile_id IS NULL))),
     CONSTRAINT ck_agents_runtime_capability_version_positive CHECK ((runtime_capability_version >= 1)),
     CONSTRAINT ck_agents_runtime_profile_selection_version_positive CHECK ((runtime_profile_selection_version >= 1)),
-    CONSTRAINT ck_agents_selectable_model_options_shape CHECK (((jsonb_typeof(selectable_model_options) = 'array'::text) AND ((jsonb_array_length(selectable_model_options) >= 1) AND (jsonb_array_length(selectable_model_options) <= 10)))),
+    CONSTRAINT ck_agents_selectable_model_options_shape CHECK (((jsonb_typeof(selectable_model_options) = 'array'::text) AND ((jsonb_array_length(selectable_model_options) >= 1) AND (jsonb_array_length(selectable_model_options) <= 10)) AND (NOT jsonb_path_exists(selectable_model_options, '$[*]?(((!(exists (@."candidates")) || @."candidates".type() != "array") || @."candidates".size() < 1) || @."candidates".size() > 5)'::jsonpath)))),
     CONSTRAINT ck_agents_subagent_settings_shape CHECK (((jsonb_typeof(subagent_settings) = 'object'::text) AND (subagent_settings ? 'max_subagents'::text) AND (subagent_settings ? 'max_depth'::text) AND (jsonb_typeof((subagent_settings -> 'max_subagents'::text)) = 'number'::text) AND (jsonb_typeof((subagent_settings -> 'max_depth'::text)) = 'number'::text) AND (((subagent_settings ->> 'max_subagents'::text))::integer >= 0) AND (((subagent_settings ->> 'max_depth'::text))::integer >= 0)))
 );
 
@@ -2217,6 +2221,8 @@ CREATE TABLE public.archived_session_purge_jobs (
     next_attempt_at timestamp with time zone,
     last_error_kind character varying(120),
     last_error_summary text,
+    last_error_participant_key character varying(120),
+    last_error_phase public.archived_session_purge_participant_phase,
     model_file_count integer DEFAULT 0 NOT NULL,
     artifact_count integer DEFAULT 0 NOT NULL,
     exchange_file_count integer DEFAULT 0 NOT NULL,
@@ -2226,9 +2232,7 @@ CREATE TABLE public.archived_session_purge_jobs (
     cancelled_at timestamp with time zone,
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_error_participant_key character varying(120),
-    last_error_phase public.archived_session_purge_participant_phase
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2237,11 +2241,11 @@ CREATE TABLE public.archived_session_purge_jobs (
 --
 
 CREATE TABLE public.archived_session_purge_participant_executions (
-    purge_job_id character varying(32) NOT NULL,
-    participant_key character varying(120) NOT NULL,
-    policy_version integer NOT NULL,
+    purge_job_id character varying(32) CONSTRAINT archived_session_purge_participant_execut_purge_job_id_not_null NOT NULL,
+    participant_key character varying(120) CONSTRAINT archived_session_purge_participant_exe_participant_key_not_null NOT NULL,
+    policy_version integer CONSTRAINT archived_session_purge_participant_exec_policy_version_not_null NOT NULL,
     phase public.archived_session_purge_participant_phase DEFAULT 'pending'::public.archived_session_purge_participant_phase NOT NULL,
-    attempt_count integer DEFAULT 0 NOT NULL,
+    attempt_count integer DEFAULT 0 CONSTRAINT archived_session_purge_participant_execu_attempt_count_not_null NOT NULL,
     blocked_by_participant_key character varying(120),
     last_error_kind character varying(120),
     last_error_summary text,
@@ -2250,8 +2254,8 @@ CREATE TABLE public.archived_session_purge_participant_executions (
     cleanup_completed_at timestamp with time zone,
     verified_at timestamp with time zone,
     last_attempt_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() CONSTRAINT archived_session_purge_participant_executio_created_at_not_null NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT archived_session_purge_participant_executio_updated_at_not_null NOT NULL,
     CONSTRAINT ck_archived_purge_part_exec_attempt_nonnegative CHECK ((attempt_count >= 0)),
     CONSTRAINT ck_archived_purge_part_exec_policy_positive CHECK ((policy_version >= 1))
 );
@@ -2263,15 +2267,15 @@ CREATE TABLE public.archived_session_purge_participant_executions (
 
 CREATE TABLE public.archived_session_retention_applications (
     id character varying(32) NOT NULL,
-    target_revision bigint NOT NULL,
+    target_revision bigint CONSTRAINT archived_session_retention_application_target_revision_not_null NOT NULL,
     target_retention_days integer,
     requested_by_user_id character varying(32),
     status public.archived_session_retention_application_status DEFAULT 'pending'::public.archived_session_retention_application_status NOT NULL,
     cursor_session_id character varying(32),
     affected_count integer DEFAULT 0 NOT NULL,
-    immediately_eligible_count integer DEFAULT 0 NOT NULL,
-    cancelled_count integer DEFAULT 0 NOT NULL,
-    scheduled_count integer DEFAULT 0 NOT NULL,
+    immediately_eligible_count integer DEFAULT 0 CONSTRAINT archived_session_retention__immediately_eligible_count_not_null NOT NULL,
+    cancelled_count integer DEFAULT 0 CONSTRAINT archived_session_retention_application_cancelled_count_not_null NOT NULL,
+    scheduled_count integer DEFAULT 0 CONSTRAINT archived_session_retention_application_scheduled_count_not_null NOT NULL,
     skipped_count integer DEFAULT 0 NOT NULL,
     attempt_count integer DEFAULT 0 NOT NULL,
     lease_owner character varying(120),
@@ -2298,6 +2302,7 @@ CREATE TABLE public.artifacts (
     agent_id character varying(32) NOT NULL,
     created_run_id character varying(32) NOT NULL,
     created_run_index integer NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
     name character varying(255) NOT NULL,
     media_type character varying(255) NOT NULL,
     size_bytes bigint NOT NULL,
@@ -2311,7 +2316,6 @@ CREATE TABLE public.artifacts (
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expired_at timestamp with time zone,
-    expires_at timestamp with time zone NOT NULL,
     blob_deleted_at timestamp with time zone
 );
 
@@ -2324,14 +2328,14 @@ CREATE TABLE public.chat_write_requests (
     id character varying(32) NOT NULL,
     session_id character varying(32) NOT NULL,
     requester_user_id character varying(32) NOT NULL,
+    creation_agent_id character varying(32),
     client_request_id character varying(64) NOT NULL,
     write_type public.chat_write_request_type NOT NULL,
     accepted_type public.chat_write_request_type NOT NULL,
     accepted_id character varying(128) NOT NULL,
     history_reload_required boolean NOT NULL,
     payload jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    creation_agent_id character varying(32)
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2347,12 +2351,12 @@ CREATE TABLE public.chatgpt_oauth_sessions (
     state character varying(128) NOT NULL,
     encrypted_code_verifier text NOT NULL,
     redirect_uri text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
     encrypted_device_auth_id text,
     user_code character varying(64),
     verification_uri text,
     interval_seconds integer,
-    status public.chatgpt_oauth_session_status DEFAULT 'pending'::public.chatgpt_oauth_session_status NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
+    status public.chatgpt_oauth_session_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -2388,8 +2392,8 @@ CREATE TABLE public.events (
     model text,
     native_format text,
     schema_version character varying(20) DEFAULT '1'::character varying NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    reverted boolean DEFAULT false NOT NULL
+    reverted boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2408,27 +2412,69 @@ CREATE TABLE public.exchange_files (
     size_bytes bigint NOT NULL,
     sha256 character varying(64) NOT NULL,
     created_by_user_id character varying(32),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    preview_thumbnail_file_id character varying(32),
-    status public.exchange_file_status DEFAULT 'available'::public.exchange_file_status NOT NULL,
-    preview_title character varying(255),
-    preview_summary text,
-    preview_thumbnail_media_type character varying(255),
-    preview_thumbnail_width integer,
-    preview_thumbnail_height integer,
-    preview_generated_at timestamp with time zone,
-    expires_at timestamp with time zone DEFAULT (now() + '30 days'::interval) NOT NULL,
-    expired_at timestamp with time zone,
-    blob_deleted_at timestamp with time zone,
-    retention_root_session_id character varying(32),
-    retention_bound_at timestamp with time zone,
     provenance_kind public.exchange_file_provenance_kind,
     source_user_id character varying(32),
     source_agent_id character varying(32),
     source_run_id character varying(32),
     source_tool_name character varying(255),
     source_provider character varying(255),
-    source_exchange_file_id character varying(32)
+    source_exchange_file_id character varying(32),
+    retention_root_session_id character varying(32),
+    retention_bound_at timestamp with time zone,
+    expires_at timestamp with time zone DEFAULT (now() + '30 days'::interval) NOT NULL,
+    status public.exchange_file_status DEFAULT 'available'::public.exchange_file_status NOT NULL,
+    preview_thumbnail_file_id character varying(32),
+    preview_title character varying(255),
+    preview_summary text,
+    preview_thumbnail_media_type character varying(255),
+    preview_thumbnail_width integer,
+    preview_thumbnail_height integer,
+    preview_generated_at timestamp with time zone,
+    expired_at timestamp with time zone,
+    blob_deleted_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: external_account_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.external_account_links (
+    id character varying(32) NOT NULL,
+    legacy_workspace_id character varying(32),
+    user_id character varying(32) NOT NULL,
+    provider public.external_channel_provider NOT NULL,
+    identity_scope character varying(255) NOT NULL,
+    provider_user_id character varying(255) NOT NULL,
+    provider_tenant_display_label character varying(255),
+    provider_display_label character varying(255) NOT NULL,
+    linked_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revocation_reason public.external_account_link_revocation_reason
+);
+
+
+--
+-- Name: external_account_oauth_attempts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.external_account_oauth_attempts (
+    id character varying(32) NOT NULL,
+    state_hash character varying(64) NOT NULL,
+    user_id character varying(32) NOT NULL,
+    auth_session_id character varying(32) NOT NULL,
+    provider public.external_channel_provider NOT NULL,
+    setting_generation character varying(64) NOT NULL,
+    redirect_uri text NOT NULL,
+    encrypted_pkce_verifier text,
+    status public.external_account_oauth_attempt_status DEFAULT 'open'::public.external_account_oauth_attempt_status NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    claimed_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    failed_at timestamp with time zone,
+    failure_code character varying(120),
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2459,37 +2505,27 @@ CREATE TABLE public.external_channel_access_grants (
 CREATE TABLE public.external_channel_access_requests (
     id character varying(32) NOT NULL,
     route_id character varying(32) NOT NULL,
+    source_resource_id character varying(32) NOT NULL,
     resource_id character varying(32) NOT NULL,
+    trigger_provider_message_key text CONSTRAINT external_channel_access_req_trigger_provider_message_k_not_null NOT NULL,
     principal_id character varying(32) NOT NULL,
     status public.external_channel_access_request_status DEFAULT 'pending'::public.external_channel_access_request_status NOT NULL,
-    decision_policy_snapshot jsonb NOT NULL,
+    decision_policy_snapshot jsonb CONSTRAINT external_channel_access_reque_decision_policy_snapshot_not_null NOT NULL,
     expires_at timestamp with time zone NOT NULL,
-    agent_session_id character varying(32),
-    decided_by_user_id character varying(32),
-    decision_summary text,
-    decided_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    connection_id character varying(32),
     conversation_position_id character varying(32),
     range_start_position text,
     trigger_position text,
-    connection_id character varying(32),
-    trigger_provider_message_key text NOT NULL,
+    agent_session_id character varying(32),
     setup_claim_id character varying(32),
+    decided_by_user_id character varying(32),
+    decision_summary text,
+    decided_at timestamp with time zone,
     control_provider_message_key character varying(255),
     control_projection_status public.external_channel_work_projection_status,
-    source_resource_id character varying(32) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_external_channel_access_requests_pending_boundary CHECK (((status <> 'pending'::public.external_channel_access_request_status) OR ((connection_id IS NOT NULL) AND (conversation_position_id IS NOT NULL) AND (trigger_position IS NOT NULL))))
-);
-
-
---
--- Name: external_channel_agent_route_bot_policy_archive; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.external_channel_agent_route_bot_policy_archive (
-    route_id character varying(32) NOT NULL,
-    allow_bot_messages boolean NOT NULL
 );
 
 
@@ -2501,15 +2537,15 @@ CREATE TABLE public.external_channel_agent_routes (
     id character varying(32) NOT NULL,
     connection_id character varying(32) NOT NULL,
     agent_id character varying(32),
+    agent_id_snapshot character varying(32) NOT NULL,
     route_mode public.external_channel_route_mode DEFAULT 'dedicated'::public.external_channel_route_mode NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     connection_app_mode public.external_channel_app_mode DEFAULT 'single'::public.external_channel_app_mode NOT NULL,
     catalog_status public.external_channel_route_catalog_status DEFAULT 'available'::public.external_channel_route_catalog_status NOT NULL,
     catalog_removed_at timestamp with time zone,
     catalog_removed_by_user_id character varying(32),
-    agent_id_snapshot character varying(32) NOT NULL,
     open_access_enabled boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_external_channel_agent_routes_agent_snapshot CHECK (((agent_id IS NULL) OR ((agent_id)::text = (agent_id_snapshot)::text))),
     CONSTRAINT ck_external_channel_agent_routes_available_agent CHECK (((catalog_status = 'removed'::public.external_channel_route_catalog_status) OR (agent_id IS NOT NULL)))
 );
@@ -2539,12 +2575,12 @@ CREATE TABLE public.external_channel_bindings (
     resource_id character varying(32) NOT NULL,
     route_id character varying(32) NOT NULL,
     agent_session_id character varying(32) NOT NULL,
+    response_mode public.external_channel_response_mode DEFAULT 'all_messages'::public.external_channel_response_mode NOT NULL,
     connected_at timestamp with time zone DEFAULT now() NOT NULL,
     disconnected_at timestamp with time zone,
     disconnect_reason character varying(120),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    response_mode public.external_channel_response_mode DEFAULT 'all_messages'::public.external_channel_response_mode NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2576,11 +2612,11 @@ CREATE TABLE public.external_channel_channel_defaults (
     route_id character varying(32) NOT NULL,
     status public.external_channel_channel_default_status DEFAULT 'active'::public.external_channel_channel_default_status NOT NULL,
     configured_by_user_id character varying(32),
+    configured_by_principal_id character varying(32),
     invalidated_at timestamp with time zone,
     invalidation_reason character varying(255),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    configured_by_principal_id character varying(32),
     CONSTRAINT ck_external_channel_channel_defaults_configured_actor CHECK ((num_nonnulls(configured_by_user_id, configured_by_principal_id) = 1))
 );
 
@@ -2595,6 +2631,7 @@ CREATE TABLE public.external_channel_connections (
     provider public.external_channel_provider NOT NULL,
     transport public.external_channel_transport NOT NULL,
     status public.external_channel_connection_status DEFAULT 'configuring'::public.external_channel_connection_status NOT NULL,
+    app_mode public.external_channel_app_mode DEFAULT 'single'::public.external_channel_app_mode NOT NULL,
     provider_app_id character varying(255),
     provider_tenant_id character varying(255),
     provider_bot_user_id character varying(255),
@@ -2604,21 +2641,20 @@ CREATE TABLE public.external_channel_connections (
     provider_config jsonb,
     last_verified_at timestamp with time zone,
     last_health_at timestamp with time zone,
+    last_health_code character varying(64),
     disconnected_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     socket_lease_owner character varying(255),
     socket_lease_until timestamp with time zone,
     socket_heartbeat_at timestamp with time zone,
     socket_gap_detected_at timestamp with time zone,
     socket_gap_reason character varying(255),
-    app_mode public.external_channel_app_mode DEFAULT 'single'::public.external_channel_app_mode NOT NULL,
-    ingress_profile public.external_channel_ingress_profile NOT NULL,
-    configuration_generation integer DEFAULT 1 NOT NULL,
-    last_health_code character varying(64),
     slack_presence_lease_owner character varying(255),
     slack_presence_lease_until timestamp with time zone,
-    slack_presence_heartbeat_at timestamp with time zone
+    slack_presence_heartbeat_at timestamp with time zone,
+    ingress_profile public.external_channel_ingress_profile DEFAULT 'slack_http'::public.external_channel_ingress_profile NOT NULL,
+    configuration_generation integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2630,7 +2666,7 @@ CREATE TABLE public.external_channel_conversation_positions (
     id character varying(32) NOT NULL,
     connection_id character varying(32) NOT NULL,
     scope_kind public.external_channel_conversation_scope_kind NOT NULL,
-    provider_channel_id text NOT NULL,
+    provider_channel_id text CONSTRAINT external_channel_conversation_posi_provider_channel_id_not_null NOT NULL,
     provider_thread_key text,
     read_through_position text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -2645,13 +2681,14 @@ CREATE TABLE public.external_channel_conversation_positions (
 
 CREATE TABLE public.external_channel_ingress_items (
     id character varying(32) NOT NULL,
+    owner_id character varying(32) NOT NULL,
     queue_key character varying(32) NOT NULL,
     deduplication_key character varying(64) NOT NULL,
     provider_event_id character varying(255) NOT NULL,
     connection_id character varying(32) NOT NULL,
     provider public.external_channel_provider NOT NULL,
     ingress_profile public.external_channel_ingress_profile NOT NULL,
-    configuration_generation integer NOT NULL,
+    configuration_generation integer CONSTRAINT external_channel_ingress_item_configuration_generation_not_null NOT NULL,
     authority_kind public.external_channel_ingress_authority_kind NOT NULL,
     authority_lease_owner character varying(255),
     authority_lease_generation integer,
@@ -2663,13 +2700,15 @@ CREATE TABLE public.external_channel_ingress_items (
     provider_thread_key text,
     delivery_thread_key text,
     provider_resource_key text NOT NULL,
-    conversation_position_id character varying(32) NOT NULL,
+    source_resource_id character varying(32) NOT NULL,
+    conversation_position_id character varying(32) CONSTRAINT external_channel_ingress_item_conversation_position_id_not_null NOT NULL,
     principal_id character varying(32) NOT NULL,
-    trigger_provider_message_key text NOT NULL,
-    trigger_provider_message_id text NOT NULL,
+    trigger_provider_message_key text CONSTRAINT external_channel_ingress_it_trigger_provider_message_k_not_null NOT NULL,
+    trigger_provider_message_id text CONSTRAINT external_channel_ingress_it_trigger_provider_message_i_not_null NOT NULL,
     trigger_position text NOT NULL,
     provider_user_id character varying(255),
     invocation boolean NOT NULL,
+    expected_file_count integer,
     invocation_id character varying(255) NOT NULL,
     initial_title_eligible boolean NOT NULL,
     state public.external_channel_ingress_item_state DEFAULT 'pending'::public.external_channel_ingress_item_state NOT NULL,
@@ -2680,9 +2719,6 @@ CREATE TABLE public.external_channel_ingress_items (
     batch_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    owner_id character varying(32) NOT NULL,
-    source_resource_id character varying(32) NOT NULL,
-    expected_file_count integer,
     CONSTRAINT ck_external_channel_ingress_items_active_state CHECK ((((state = 'pending'::public.external_channel_ingress_item_state) AND (next_attempt_at IS NULL) AND (processing_owner IS NULL) AND (processing_generation IS NULL) AND (batch_id IS NULL)) OR ((state = 'retry_waiting'::public.external_channel_ingress_item_state) AND (next_attempt_at IS NOT NULL) AND (processing_owner IS NULL) AND (processing_generation IS NULL) AND (batch_id IS NULL)) OR ((state = 'processing'::public.external_channel_ingress_item_state) AND (next_attempt_at IS NULL) AND (processing_owner IS NOT NULL) AND (processing_generation IS NOT NULL) AND (batch_id IS NOT NULL)))),
     CONSTRAINT ck_external_channel_ingress_items_attempt_count CHECK (((attempt_count >= 0) AND (attempt_count <= 5))),
     CONSTRAINT ck_external_channel_ingress_items_authority CHECK ((((authority_kind = 'lease'::public.external_channel_ingress_authority_kind) AND (authority_lease_owner IS NOT NULL)) OR ((authority_kind <> 'lease'::public.external_channel_ingress_authority_kind) AND (authority_lease_owner IS NULL) AND (authority_lease_generation IS NULL)))),
@@ -2725,7 +2761,7 @@ CREATE TABLE public.external_channel_ingress_owners (
     response_mode public.external_channel_response_mode NOT NULL,
     binding_id character varying(32),
     session_id character varying(32),
-    preparation_attempt_count integer DEFAULT 0 NOT NULL,
+    preparation_attempt_count integer DEFAULT 0 CONSTRAINT external_channel_ingress_own_preparation_attempt_count_not_null NOT NULL,
     preparation_next_attempt_at timestamp with time zone,
     lease_owner character varying(255),
     lease_generation integer DEFAULT 0 NOT NULL,
@@ -2754,18 +2790,18 @@ CREATE TABLE public.external_channel_interactions (
     transport public.external_channel_transport NOT NULL,
     provider_interaction_key character varying(128) NOT NULL,
     interaction_type public.external_channel_interaction_type NOT NULL,
-    callback_id character varying(255),
-    action_id character varying(255),
-    principal_id character varying(32),
-    resource_correlation_key character varying(512),
     projection jsonb NOT NULL,
     status public.external_channel_interaction_status DEFAULT 'accepted'::public.external_channel_interaction_status NOT NULL,
     expires_at timestamp with time zone NOT NULL,
+    callback_id character varying(255),
+    action_id character varying(255),
+    principal_id character varying(32),
+    setup_claim_id character varying(32),
+    resource_correlation_key character varying(512),
     error_kind character varying(120),
     error_summary character varying(255),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    setup_claim_id character varying(32)
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2776,11 +2812,11 @@ CREATE TABLE public.external_channel_interactions (
 CREATE TABLE public.external_channel_participation_settings (
     id character varying(32) NOT NULL,
     connection_id character varying(32) NOT NULL,
-    provider_parent_channel_id character varying(255) NOT NULL,
+    provider_parent_channel_id character varying(255) CONSTRAINT external_channel_participat_provider_parent_channel_id_not_null NOT NULL,
     route_id character varying(32) NOT NULL,
     location public.external_channel_conversation_location NOT NULL,
     response_mode public.external_channel_response_mode NOT NULL,
-    settings_generation integer NOT NULL,
+    settings_generation integer CONSTRAINT external_channel_participation_set_settings_generation_not_null NOT NULL,
     status public.external_channel_participation_setting_status NOT NULL,
     configured_by_user_id character varying(32),
     configured_by_principal_id character varying(32),
@@ -2841,7 +2877,7 @@ CREATE TABLE public.external_channel_resources (
 CREATE TABLE public.external_channel_setup_claims (
     id character varying(32) NOT NULL,
     connection_id character varying(32) NOT NULL,
-    provider_parent_channel_id character varying(255) NOT NULL,
+    provider_parent_channel_id character varying(255) CONSTRAINT external_channel_setup_clai_provider_parent_channel_id_not_null NOT NULL,
     route_id character varying(32),
     conversation_position_id character varying(32) NOT NULL,
     source_resource_id character varying(32) NOT NULL,
@@ -2866,6 +2902,84 @@ CREATE TABLE public.external_channel_setup_claims (
 
 
 --
+-- Name: external_model_drafts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.external_model_drafts (
+    id character varying(32) NOT NULL,
+    provider public.external_channel_provider NOT NULL,
+    connection_id character varying(32) NOT NULL,
+    principal_id character varying(32) NOT NULL,
+    link_id character varying(32),
+    link_id_snapshot character varying(32) NOT NULL,
+    user_id character varying(32),
+    user_id_snapshot character varying(32) NOT NULL,
+    binding_id character varying(32) NOT NULL,
+    session_id character varying(32) NOT NULL,
+    agent_id character varying(32) NOT NULL,
+    owner_interaction_key character varying(128) NOT NULL,
+    expected_generation bigint NOT NULL,
+    options_snapshot jsonb NOT NULL,
+    selected_option_id character varying(64) NOT NULL,
+    selected_model_target_label character varying(80) NOT NULL,
+    selected_reasoning_effort public.model_reasoning_effort,
+    selected_enabled_execution_options jsonb DEFAULT '[]'::jsonb CONSTRAINT external_model_drafts_selected_enabled_execution_optio_not_null NOT NULL,
+    scope_label character varying(255) NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    cancelled_at timestamp with time zone,
+    applied_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_external_model_drafts_generation CHECK ((expected_generation >= 0)),
+    CONSTRAINT ck_external_model_drafts_terminal_times CHECK ((num_nonnulls(cancelled_at, applied_at) <= 1))
+);
+
+
+--
+-- Name: external_model_mutations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.external_model_mutations (
+    id character varying(32) NOT NULL,
+    provider public.external_channel_provider NOT NULL,
+    connection_id character varying(32) NOT NULL,
+    apply_interaction_key character varying(128) NOT NULL,
+    principal_id character varying(32),
+    principal_id_snapshot character varying(32) NOT NULL,
+    provider_tenant_id_snapshot character varying(255) NOT NULL,
+    provider_user_id_snapshot character varying(255) NOT NULL,
+    provider_tenant_display_label_snapshot character varying(255) CONSTRAINT external_model_mutations_provider_tenant_display_label_not_null NOT NULL,
+    actor_display_name_snapshot character varying(255) NOT NULL,
+    link_id character varying(32),
+    link_id_snapshot character varying(32) NOT NULL,
+    user_id character varying(32),
+    user_id_snapshot character varying(32) NOT NULL,
+    binding_id character varying(32),
+    binding_id_snapshot character varying(32) NOT NULL,
+    session_id character varying(32) NOT NULL,
+    agent_id character varying(32),
+    agent_id_snapshot character varying(32) NOT NULL,
+    old_model_target_label character varying(80),
+    old_reasoning_effort public.model_reasoning_effort,
+    old_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
+    new_model_target_label character varying(80) NOT NULL,
+    new_model_display_name character varying(255) NOT NULL,
+    new_reasoning_effort public.model_reasoning_effort,
+    new_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
+    expected_generation bigint NOT NULL,
+    resulting_generation bigint NOT NULL,
+    provider_conversation_id text NOT NULL,
+    provider_thread_id text,
+    notice_outcome public.external_model_notice_outcome DEFAULT 'unknown'::public.external_model_notice_outcome NOT NULL,
+    notice_attempted_at timestamp with time zone,
+    notice_error_summary character varying(255),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_external_model_mutations_generations CHECK (((expected_generation >= 0) AND (resulting_generation = (expected_generation + 1))))
+);
+
+
+--
 -- Name: git_worktree_path_claims; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2874,6 +2988,7 @@ CREATE TABLE public.git_worktree_path_claims (
     agent_runtime_id character varying(32) NOT NULL,
     worktree_path text NOT NULL,
     owner_kind public.git_worktree_path_claim_owner_kind NOT NULL,
+    lease_until timestamp with time zone NOT NULL,
     action_execution_id character varying(32),
     root_session_id character varying(32),
     owner_generation bigint,
@@ -2881,7 +2996,6 @@ CREATE TABLE public.git_worktree_path_claims (
     state public.git_worktree_path_claim_state NOT NULL,
     reason_code text,
     summary text,
-    lease_until timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -2897,10 +3011,33 @@ CREATE TABLE public.github_user_installations (
     installation_id bigint NOT NULL,
     account_login character varying(255) NOT NULL,
     account_type character varying(50) NOT NULL,
-    account_avatar_url text DEFAULT ''::text NOT NULL,
+    platform_app_id character varying(64) NOT NULL,
+    account_avatar_url text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    platform_app_id character varying(64) NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: image_generation_catalog_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.image_generation_catalog_entries (
+    id character varying(32) NOT NULL,
+    catalog_id character varying(32) NOT NULL,
+    snapshot_id character varying(32) NOT NULL,
+    provider public.llm_provider NOT NULL,
+    provider_model_identifier character varying(300) CONSTRAINT image_generation_catalog_ent_provider_model_identifier_not_null NOT NULL,
+    display_name character varying(300) NOT NULL,
+    description text NOT NULL,
+    recommendation_rank integer,
+    lifecycle_status public.llm_model_lifecycle_status NOT NULL,
+    visibility_status public.llm_catalog_entry_visibility NOT NULL,
+    provider_integration_id character varying(32) CONSTRAINT image_generation_catalog_entri_provider_integration_id_not_null NOT NULL,
+    source_metadata jsonb,
+    projection_metadata jsonb,
+    hidden_reason character varying(160),
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2926,34 +3063,18 @@ CREATE TABLE public.kimi_oauth_sessions (
 
 
 --
--- Name: kubernetes_sandbox_snapshots; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.kubernetes_sandbox_snapshots (
-    id character varying(32) NOT NULL,
-    image_ref character varying(512) NOT NULL,
-    base_image_ref character varying(512) NOT NULL,
-    kind public.snapshot_kind NOT NULL,
-    size_bytes bigint,
-    digest character varying(128),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    agent_runtime_id character varying(32) NOT NULL
-);
-
-
---
 -- Name: litellm_source_snapshots; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.litellm_source_snapshots (
     id character varying(32) NOT NULL,
     source_key character varying(120) NOT NULL,
-    source_url text,
     source_hash character varying(64) NOT NULL,
     model_count integer NOT NULL,
-    litellm_version character varying(80),
     loaded_source character varying(40) NOT NULL,
     payload jsonb NOT NULL,
+    source_url text,
+    litellm_version character varying(80),
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -2966,17 +3087,17 @@ CREATE TABLE public.llm_catalog_entries (
     id character varying(32) NOT NULL,
     catalog_id character varying(32) NOT NULL,
     snapshot_id character varying(32) NOT NULL,
-    provider_integration_id character varying(32),
     provider public.llm_provider NOT NULL,
-    publisher character varying(120),
     provider_model_identifier character varying(300) NOT NULL,
     lowerer_target public.llm_catalog_lowerer_target NOT NULL,
     runtime_model_identifier character varying(300) NOT NULL,
     display_name character varying(300) NOT NULL,
-    family character varying(160),
     normalized_capabilities jsonb NOT NULL,
     lifecycle_status public.llm_model_lifecycle_status NOT NULL,
     visibility_status public.llm_catalog_entry_visibility NOT NULL,
+    provider_integration_id character varying(32),
+    publisher character varying(120),
+    family character varying(160),
     source_metadata jsonb,
     projection_metadata jsonb,
     hidden_reason character varying(160),
@@ -2992,12 +3113,13 @@ CREATE TABLE public.llm_catalog_entries (
 CREATE TABLE public.llm_catalog_snapshots (
     id character varying(32) NOT NULL,
     catalog_id character varying(32) NOT NULL,
-    source_snapshot_id character varying(32),
     entry_count integer NOT NULL,
     visible_count integer NOT NULL,
     hidden_count integer NOT NULL,
+    source_snapshot_id character varying(32),
     diagnostics jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    catalog_configuration_version integer
 );
 
 
@@ -3007,20 +3129,21 @@ CREATE TABLE public.llm_catalog_snapshots (
 
 CREATE TABLE public.llm_catalog_sync_attempts (
     id character varying(32) NOT NULL,
-    catalog_id character varying(32),
     source_key character varying(120) NOT NULL,
     status public.llm_catalog_attempt_status NOT NULL,
     started_at timestamp with time zone NOT NULL,
+    fetched_count integer NOT NULL,
+    matched_count integer NOT NULL,
+    skipped_count integer NOT NULL,
+    hidden_count integer NOT NULL,
+    catalog_id character varying(32),
     finished_at timestamp with time zone,
     produced_snapshot_id character varying(32),
     failure_code character varying(120),
     failure_message text,
     action_hint text,
-    fetched_count integer NOT NULL,
-    matched_count integer NOT NULL,
-    skipped_count integer NOT NULL,
-    hidden_count integer NOT NULL,
-    diagnostics jsonb
+    diagnostics jsonb,
+    catalog_configuration_version integer
 );
 
 
@@ -3032,12 +3155,13 @@ CREATE TABLE public.llm_catalogs (
     id character varying(32) NOT NULL,
     scope public.llm_catalog_scope NOT NULL,
     provider public.llm_provider NOT NULL,
-    provider_integration_id character varying(32),
     lowerer_target public.llm_catalog_lowerer_target NOT NULL,
+    provider_integration_id character varying(32),
     current_snapshot_id character varying(32),
     latest_attempt_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    purpose public.llm_catalog_purpose NOT NULL
 );
 
 
@@ -3051,10 +3175,11 @@ CREATE TABLE public.llm_provider_integrations (
     provider public.llm_provider NOT NULL,
     name character varying(255) NOT NULL,
     encrypted_credentials text NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
+    config jsonb,
+    enabled boolean NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    config jsonb
+    catalog_configuration_version integer DEFAULT 1 CONSTRAINT llm_provider_integrations_catalog_configuration_versio_not_null NOT NULL
 );
 
 
@@ -3065,16 +3190,16 @@ CREATE TABLE public.llm_provider_integrations (
 CREATE TABLE public.mailbox_items (
     id character varying(32) NOT NULL,
     session_id character varying(32) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
     kind public.mailbox_item_kind NOT NULL,
-    sender_user_id character varying(32),
-    idempotency_key character varying(120),
+    scheduling_mode public.mailbox_item_scheduling_mode NOT NULL,
     requested_model_target_label character varying(80),
     requested_reasoning_effort public.model_reasoning_effort,
-    scheduling_mode public.mailbox_item_scheduling_mode NOT NULL,
-    payload jsonb NOT NULL,
+    sender_user_id character varying(32),
+    idempotency_key character varying(120),
     order_group character varying(32) NOT NULL,
     order_sequence integer NOT NULL,
+    payload jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     requested_enabled_execution_options jsonb DEFAULT '[]'::jsonb NOT NULL,
     CONSTRAINT ck_mailbox_items_order_sequence CHECK ((order_sequence >= 0)),
     CONSTRAINT ck_mailbox_items_requested_profile CHECK (((requested_model_target_label IS NOT NULL) OR ((requested_reasoning_effort IS NULL) AND (requested_enabled_execution_options = '[]'::jsonb)))),
@@ -3089,13 +3214,13 @@ CREATE TABLE public.mailbox_items (
 CREATE TABLE public.mcp_oauth_connections (
     id character varying(32) NOT NULL,
     toolkit_id character varying(32) NOT NULL,
-    issuer text,
-    resource text,
     server_url text NOT NULL,
     authorization_endpoint text NOT NULL,
     token_endpoint text NOT NULL,
-    registration_endpoint text,
     encrypted_client_id text NOT NULL,
+    issuer text,
+    resource text,
+    registration_endpoint text,
     encrypted_client_secret text,
     token_endpoint_auth_method character varying(64) NOT NULL,
     scope text,
@@ -3105,6 +3230,61 @@ CREATE TABLE public.mcp_oauth_connections (
     status public.mcp_oauth_connection_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: model_candidate_chain_cutovers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.model_candidate_chain_cutovers (
+    id smallint NOT NULL,
+    schema_version integer DEFAULT 1 NOT NULL,
+    cutover_at timestamp with time zone DEFAULT now() NOT NULL,
+    new_format_written_at timestamp with time zone,
+    CONSTRAINT ck_model_candidate_chain_cutovers_schema_version CHECK ((schema_version = 1)),
+    CONSTRAINT ck_model_candidate_chain_cutovers_singleton CHECK ((id = 1))
+);
+
+
+--
+-- Name: model_candidate_chain_cutovers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.model_candidate_chain_cutovers_id_seq
+    AS smallint
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: model_candidate_chain_cutovers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.model_candidate_chain_cutovers_id_seq OWNED BY public.model_candidate_chain_cutovers.id;
+
+
+--
+-- Name: model_candidate_health; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.model_candidate_health (
+    workspace_id character varying(32) NOT NULL,
+    llm_provider_integration_id character varying(32) NOT NULL,
+    model_identifier text NOT NULL,
+    generation bigint NOT NULL,
+    cooldown_until timestamp with time zone NOT NULL,
+    claim_kind public.model_candidate_claim_kind,
+    claim_owner_id character varying(32),
+    claim_token character varying(32),
+    claim_until timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_model_candidate_health_claim_complete CHECK ((((claim_kind IS NULL) AND (claim_owner_id IS NULL) AND (claim_token IS NULL) AND (claim_until IS NULL)) OR ((claim_kind IS NOT NULL) AND (claim_owner_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_until IS NOT NULL)))),
+    CONSTRAINT ck_model_candidate_health_generation_positive CHECK ((generation >= 1))
 );
 
 
@@ -3129,20 +3309,20 @@ CREATE TABLE public.model_files (
     workspace_id character varying(32) NOT NULL,
     session_id character varying(32) NOT NULL,
     agent_id character varying(32) NOT NULL,
-    name character varying(255),
     media_type character varying(255) NOT NULL,
     kind character varying(32) NOT NULL,
     size_bytes bigint NOT NULL,
+    created_run_id character varying(32),
+    created_run_index integer NOT NULL,
     storage_key character varying(1024) NOT NULL,
-    status public.model_file_status DEFAULT 'available'::public.model_file_status NOT NULL,
     normalized_format character varying(32) NOT NULL,
     sha256 character varying(64) NOT NULL,
+    name character varying(255),
+    status public.model_file_status DEFAULT 'available'::public.model_file_status NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
-    created_run_index integer NOT NULL,
-    blob_deleted_at timestamp with time zone,
-    created_run_id character varying(32)
+    blob_deleted_at timestamp with time zone
 );
 
 
@@ -3189,7 +3369,7 @@ CREATE TABLE public.password_logins (
 
 CREATE TABLE public.password_reset_token_redemptions (
     id character varying(32) NOT NULL,
-    password_reset_token_id character varying(32) NOT NULL,
+    password_reset_token_id character varying(32) CONSTRAINT password_reset_token_redemptio_password_reset_token_id_not_null NOT NULL,
     user_id character varying(32) NOT NULL,
     redeemed_at timestamp with time zone NOT NULL,
     ip_address character varying(64),
@@ -3205,8 +3385,8 @@ CREATE TABLE public.password_reset_tokens (
     id character varying(32) NOT NULL,
     token_hash character varying(64) NOT NULL,
     user_id character varying(32) NOT NULL,
-    created_by_user_id character varying(32),
     expires_at timestamp with time zone NOT NULL,
+    created_by_user_id character varying(32),
     used_at timestamp with time zone,
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -3268,7 +3448,7 @@ CREATE TABLE public.runtime_configuration_states (
 --
 
 CREATE TABLE public.runtime_connection_generation_cutovers (
-    allocator_version smallint NOT NULL,
+    allocator_version smallint CONSTRAINT runtime_connection_generation_cutove_allocator_version_not_null NOT NULL,
     cutover_at timestamp with time zone NOT NULL,
     CONSTRAINT ck_runtime_connection_generation_cutovers_positive_version CHECK ((allocator_version > 0))
 );
@@ -3325,13 +3505,13 @@ CREATE TABLE public.runtime_infrastructure_profiles (
     schema_version integer NOT NULL,
     spec jsonb NOT NULL,
     required_capabilities jsonb NOT NULL,
+    terminal_enabled boolean DEFAULT true NOT NULL,
     version integer NOT NULL,
     digest character varying(64) NOT NULL,
     created_by_user_id character varying(32),
     updated_by_user_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    terminal_enabled boolean DEFAULT true NOT NULL,
     CONSTRAINT ck_runtime_infrastructure_profiles_version_positive CHECK ((version >= 1))
 );
 
@@ -3397,11 +3577,11 @@ CREATE TABLE public.runtime_provider_auth_bindings (
 CREATE TABLE public.runtime_provider_bootstrap_declarations (
     id character varying(32) NOT NULL,
     source_id character varying(32) NOT NULL,
-    provider_logical_id character varying(120) NOT NULL,
+    provider_logical_id character varying(120) CONSTRAINT runtime_provider_bootstrap_declara_provider_logical_id_not_null NOT NULL,
     kind public.runtime_provider_kind NOT NULL,
     provider_id character varying(32),
-    declaration_key character varying(255) NOT NULL,
-    source_revision character varying(255) NOT NULL,
+    declaration_key character varying(255) CONSTRAINT runtime_provider_bootstrap_declaration_declaration_key_not_null NOT NULL,
+    source_revision character varying(255) CONSTRAINT runtime_provider_bootstrap_declaration_source_revision_not_null NOT NULL,
     source_digest character varying(64) NOT NULL,
     state public.runtime_provider_bootstrap_declaration_state NOT NULL,
     creation_seeds jsonb,
@@ -3440,11 +3620,11 @@ CREATE TABLE public.runtime_provider_config_revisions (
     id character varying(32) NOT NULL,
     provider_id character varying(32) NOT NULL,
     revision integer NOT NULL,
-    base_revision_id character varying(32),
     contract_revision_id character varying(32) NOT NULL,
     config jsonb NOT NULL,
     state public.runtime_provider_config_revision_state NOT NULL,
     validation_status public.runtime_provider_config_validation_status NOT NULL,
+    base_revision_id character varying(32),
     encrypted_secrets text,
     secret_metadata jsonb NOT NULL,
     validation_request_id character varying(32),
@@ -3467,22 +3647,22 @@ CREATE TABLE public.runtime_provider_config_revisions (
 CREATE TABLE public.runtime_provider_connections (
     id character varying(32) NOT NULL,
     provider_id character varying(32) NOT NULL,
+    binding_id character varying(32) NOT NULL,
     credential_id character varying(32),
+    auth_method public.runtime_provider_auth_method NOT NULL,
+    auth_subject character varying(255) NOT NULL,
+    evidence_expires_at timestamp with time zone,
     connection_id character varying(120) NOT NULL,
     generation bigint NOT NULL,
     status public.runtime_provider_connection_status NOT NULL,
     reported_provider_type character varying(120) NOT NULL,
     reported_protocol_version character varying(120) NOT NULL,
+    operational_diagnostics jsonb,
+    diagnostics_checked_at timestamp with time zone,
     connected_at timestamp with time zone NOT NULL,
     last_heartbeat_at timestamp with time zone NOT NULL,
     disconnected_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    binding_id character varying(32) NOT NULL,
-    auth_method public.runtime_provider_auth_method NOT NULL,
-    auth_subject character varying(255) NOT NULL,
-    evidence_expires_at timestamp with time zone,
-    operational_diagnostics jsonb,
-    diagnostics_checked_at timestamp with time zone
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3494,7 +3674,7 @@ CREATE TABLE public.runtime_provider_contract_revisions (
     id character varying(32) NOT NULL,
     provider_id character varying(32) NOT NULL,
     digest character varying(64) NOT NULL,
-    implementation_version character varying(120) NOT NULL,
+    implementation_version character varying(120) CONSTRAINT runtime_provider_contract_revis_implementation_version_not_null NOT NULL,
     protocol_version character varying(120) NOT NULL,
     contract jsonb NOT NULL,
     compatibility jsonb NOT NULL,
@@ -3509,6 +3689,7 @@ CREATE TABLE public.runtime_provider_contract_revisions (
 CREATE TABLE public.runtime_provider_credentials (
     id character varying(32) NOT NULL,
     provider_id character varying(32) NOT NULL,
+    binding_id character varying(32) NOT NULL,
     verifier character varying(64) NOT NULL,
     state public.runtime_provider_credential_state NOT NULL,
     expires_at timestamp with time zone,
@@ -3516,8 +3697,7 @@ CREATE TABLE public.runtime_provider_credentials (
     last_used_at timestamp with time zone,
     revoked_at timestamp with time zone,
     revoked_by_user_id character varying(32),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    binding_id character varying(32) NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3528,6 +3708,7 @@ CREATE TABLE public.runtime_provider_credentials (
 CREATE TABLE public.runtime_provider_enrollment_grants (
     id character varying(32) NOT NULL,
     provider_id character varying(32) NOT NULL,
+    binding_id character varying(32) NOT NULL,
     verifier character varying(64) NOT NULL,
     state public.runtime_provider_enrollment_grant_state NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -3538,7 +3719,6 @@ CREATE TABLE public.runtime_provider_enrollment_grants (
     revoked_at timestamp with time zone,
     revoked_by_user_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    binding_id character varying(32) NOT NULL,
     CONSTRAINT ck_runtime_provider_enrollment_grants_issuer CHECK ((((issued_by_user_id IS NOT NULL) AND (issued_by_source_id IS NULL)) OR ((issued_by_user_id IS NULL) AND (issued_by_source_id IS NOT NULL))))
 );
 
@@ -3564,19 +3744,19 @@ CREATE TABLE public.runtime_providers (
     scope public.runtime_provider_scope NOT NULL,
     kind public.runtime_provider_kind NOT NULL,
     display_name character varying(120) NOT NULL,
+    registration_method public.runtime_provider_registration_method DEFAULT 'admin'::public.runtime_provider_registration_method NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
+    lifecycle_state public.runtime_provider_lifecycle_state DEFAULT 'active'::public.runtime_provider_lifecycle_state NOT NULL,
+    availability_mode public.runtime_provider_availability_mode DEFAULT 'platform_wide'::public.runtime_provider_availability_mode NOT NULL,
+    admin_version integer DEFAULT 0 NOT NULL,
     capabilities jsonb NOT NULL,
+    current_contract_revision_id character varying(32),
+    active_config_revision_id character varying(32),
     config_schema jsonb,
     metadata jsonb,
     workspace_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    registration_method public.runtime_provider_registration_method DEFAULT 'admin'::public.runtime_provider_registration_method NOT NULL,
-    lifecycle_state public.runtime_provider_lifecycle_state DEFAULT 'active'::public.runtime_provider_lifecycle_state NOT NULL,
-    availability_mode public.runtime_provider_availability_mode DEFAULT 'platform_wide'::public.runtime_provider_availability_mode NOT NULL,
-    admin_version integer DEFAULT 0 NOT NULL,
-    active_config_revision_id character varying(32),
-    current_contract_revision_id character varying(32),
     CONSTRAINT ck_runtime_providers_workspace_scope CHECK ((((scope = 'workspace'::public.runtime_provider_scope) AND (workspace_id IS NOT NULL)) OR ((scope = 'system'::public.runtime_provider_scope) AND (workspace_id IS NULL))))
 );
 
@@ -3589,16 +3769,16 @@ CREATE TABLE public.runtime_recreation_operation_items (
     id character varying(32) NOT NULL,
     operation_id character varying(32) NOT NULL,
     runtime_id character varying(32) NOT NULL,
+    expected_configuration_sequence bigint CONSTRAINT runtime_recreation_operatio_expected_configuration_seq_not_null NOT NULL,
+    expected_configuration_digest character varying(64) CONSTRAINT runtime_recreation_operatio_expected_configuration_dig_not_null NOT NULL,
+    expected_desired_generation bigint CONSTRAINT runtime_recreation_operatio_expected_desired_generatio_not_null NOT NULL,
     status public.runtime_recreation_item_status NOT NULL,
     attempt integer NOT NULL,
+    dispatched_generation integer,
     failure_code character varying(120),
     failure_message text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    dispatched_generation integer,
-    expected_configuration_sequence bigint NOT NULL,
-    expected_configuration_digest character varying(64) NOT NULL,
-    expected_desired_generation bigint NOT NULL,
     CONSTRAINT ck_runtime_recreation_operation_items_attempt CHECK ((attempt >= 0)),
     CONSTRAINT ck_runtime_recreation_operation_items_expected_evidence CHECK (((expected_configuration_sequence >= 1) AND (expected_desired_generation >= 0)))
 );
@@ -3633,42 +3813,222 @@ CREATE TABLE public.runtime_recreation_operations (
 
 
 --
--- Name: sandbox_checkpoints; Type: TABLE; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.sandbox_checkpoints (
+CREATE TABLE public.runtime_web_auth_bindings (
+    id character varying(32) NOT NULL,
+    initiation_id character varying(32) NOT NULL,
+    main_binding_hash character varying(64) NOT NULL,
+    user_id character varying(32) NOT NULL,
+    auth_session_id character varying(32) NOT NULL,
+    endpoint_id character varying(32) NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    broker_binding_hash character varying(64),
+    broker_bound_at timestamp with time zone,
+    settled_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_auth_bindings_deadline CHECK ((expires_at > created_at))
+);
+
+
+--
+-- Name: runtime_web_auth_configuration; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_auth_configuration (
+    id smallint NOT NULL,
+    enabled boolean NOT NULL,
+    mode public.runtime_web_auth_mode NOT NULL,
+    fingerprint character varying(64) NOT NULL,
+    active_duration_seconds integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_auth_configuration_duration CHECK (((active_duration_seconds >= 300) AND (active_duration_seconds <= 28800))),
+    CONSTRAINT ck_runtime_web_auth_configuration_singleton CHECK ((id = 1))
+);
+
+
+--
+-- Name: runtime_web_auth_configuration_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.runtime_web_auth_configuration_id_seq
+    AS smallint
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: runtime_web_auth_configuration_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.runtime_web_auth_configuration_id_seq OWNED BY public.runtime_web_auth_configuration.id;
+
+
+--
+-- Name: runtime_web_auth_tickets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_auth_tickets (
+    id character varying(32) NOT NULL,
+    binding_id character varying(32) NOT NULL,
+    secret_hash character varying(64) NOT NULL,
+    user_id character varying(32) NOT NULL,
+    auth_session_id character varying(32) NOT NULL,
+    endpoint_id character varying(32) NOT NULL,
+    issued_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_auth_tickets_deadline CHECK ((expires_at > issued_at))
+);
+
+
+--
+-- Name: runtime_web_cycles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_cycles (
+    id character varying(32) NOT NULL,
+    endpoint_id character varying(32) NOT NULL,
+    request_id character varying(32) NOT NULL,
+    approver_user_id character varying(32) NOT NULL,
+    duration_seconds integer NOT NULL,
+    approved_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    close_barrier bigint NOT NULL,
+    ended_at timestamp with time zone,
+    end_reason public.runtime_web_cycle_end_reason,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_cycles_close_barrier CHECK ((close_barrier >= 0)),
+    CONSTRAINT ck_runtime_web_cycles_deadline CHECK ((expires_at > approved_at)),
+    CONSTRAINT ck_runtime_web_cycles_duration CHECK (((duration_seconds >= 300) AND (duration_seconds <= 28800))),
+    CONSTRAINT ck_runtime_web_cycles_end CHECK ((((ended_at IS NULL) AND (end_reason IS NULL)) OR ((ended_at IS NOT NULL) AND (end_reason IS NOT NULL))))
+);
+
+
+--
+-- Name: runtime_web_endpoints; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_endpoints (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
-    agent_runtime_id character varying(32) NOT NULL,
-    object_key character varying(1024) NOT NULL,
-    kind public.sandbox_checkpoint_kind NOT NULL,
-    format public.sandbox_checkpoint_format NOT NULL,
-    size_bytes bigint NOT NULL,
-    sha256 character varying(64) NOT NULL,
-    restored_at timestamp with time zone,
-    invalidated_at timestamp with time zone,
-    invalidation_reason text,
+    agent_id character varying(32) NOT NULL,
+    agent_session_id character varying(32) NOT NULL,
+    port integer NOT NULL,
+    hostname_key character varying(52) NOT NULL,
+    label character varying(120),
+    authority_revision bigint DEFAULT '0'::bigint NOT NULL,
+    close_barrier bigint DEFAULT '0'::bigint NOT NULL,
+    current_pending_request_id character varying(32),
+    current_cycle_id character varying(32),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_endpoints_port CHECK (((port >= 1) AND (port <= 65535))),
+    CONSTRAINT ck_runtime_web_endpoints_revisions CHECK (((authority_revision >= 0) AND (close_barrier >= 0)))
+);
+
+
+--
+-- Name: runtime_web_gateway_identities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_gateway_identities (
+    id character varying(32) NOT NULL,
+    secret_hash character varying(64) NOT NULL,
+    user_id character varying(32) NOT NULL,
+    auth_session_id character varying(32) NOT NULL,
+    mode public.runtime_web_auth_mode NOT NULL,
+    issued_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_gateway_identities_deadline CHECK ((expires_at > issued_at))
+);
+
+
+--
+-- Name: runtime_web_operation_receipts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_operation_receipts (
+    id character varying(32) NOT NULL,
+    actor_kind public.runtime_web_requester_kind NOT NULL,
+    actor_id character varying(32) NOT NULL,
+    execution_id character varying(32) NOT NULL,
+    operation_key character varying(128) NOT NULL,
+    operation_kind public.runtime_web_operation_kind NOT NULL,
+    result jsonb NOT NULL,
+    endpoint_id character varying(32),
+    request_id character varying(32),
+    cycle_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
 --
--- Name: sandbox_runtime_leases; Type: TABLE; Schema: public; Owner: -
+-- Name: runtime_web_quota_scopes; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.sandbox_runtime_leases (
+CREATE TABLE public.runtime_web_quota_scopes (
+    scope_kind public.runtime_web_quota_scope_kind NOT NULL,
+    subject_id character varying(32) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: runtime_web_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_requests (
     id character varying(32) NOT NULL,
-    agent_runtime_id character varying(32) NOT NULL,
-    workspace_id character varying(32) NOT NULL,
-    provider_id character varying(120) NOT NULL,
-    provider_runtime_id character varying(160),
-    allocation_generation bigint NOT NULL,
-    state public.sandbox_runtime_lease_state NOT NULL,
-    lease_owner character varying(120) NOT NULL,
-    expires_at timestamp with time zone,
-    last_observed_at timestamp with time zone,
+    endpoint_id character varying(32) NOT NULL,
+    requester_kind public.runtime_web_requester_kind NOT NULL,
+    operation_key character varying(128) NOT NULL,
+    state public.runtime_web_request_state NOT NULL,
+    revision bigint DEFAULT '1'::bigint NOT NULL,
+    requester_user_id character varying(32),
+    requester_agent_id character varying(32),
+    requester_execution_id character varying(32),
+    requester_call_id character varying(255),
+    label_snapshot character varying(120),
+    decided_by_user_id character varying(32),
+    decided_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_requests_decision CHECK ((((state = 'pending'::public.runtime_web_request_state) AND (decided_at IS NULL) AND (decided_by_user_id IS NULL)) OR ((state <> 'pending'::public.runtime_web_request_state) AND (decided_at IS NOT NULL)))),
+    CONSTRAINT ck_runtime_web_requests_requester CHECK ((((requester_kind = 'user'::public.runtime_web_requester_kind) AND (requester_user_id IS NOT NULL) AND (requester_agent_id IS NULL)) OR ((requester_kind = 'agent'::public.runtime_web_requester_kind) AND (requester_user_id IS NULL) AND (requester_agent_id IS NOT NULL)))),
+    CONSTRAINT ck_runtime_web_requests_revision CHECK ((revision >= 1))
+);
+
+
+--
+-- Name: runtime_web_session_routes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.runtime_web_session_routes (
+    runtime_id character varying(32) NOT NULL,
+    desired_generation bigint NOT NULL,
+    runner_generation bigint NOT NULL,
+    owner_replica_id character varying(255) NOT NULL,
+    owner_boot_id character varying(128) NOT NULL,
+    owner_address character varying(255) NOT NULL,
+    session_lease_id character varying(32) NOT NULL,
+    lease_generation bigint NOT NULL,
+    join_nonce_hash character varying(64) NOT NULL,
+    protocol_fingerprint character varying(64) NOT NULL,
+    lease_expires_at timestamp with time zone NOT NULL,
+    draining_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_web_session_routes_deadlines CHECK (((lease_expires_at > created_at) AND ((draining_at IS NULL) OR (draining_at <= lease_expires_at)))),
+    CONSTRAINT ck_runtime_web_session_routes_generations CHECK (((desired_generation >= 1) AND (runner_generation >= 1) AND (lease_generation >= 1)))
 );
 
 
@@ -3732,8 +4092,8 @@ CREATE TABLE public.scheduled_tasks (
 --
 
 CREATE TABLE public.session_agent_context_git_worktrees (
-    session_agent_context_id character varying(32) NOT NULL,
-    source_project_path text NOT NULL,
+    session_agent_context_id character varying(32) CONSTRAINT session_agent_context_git_wor_session_agent_context_id_not_null NOT NULL,
+    source_project_path text CONSTRAINT session_agent_context_git_worktree_source_project_path_not_null NOT NULL,
     starting_ref text NOT NULL,
     worktree_path text NOT NULL,
     branch_name text NOT NULL,
@@ -3760,7 +4120,7 @@ CREATE TABLE public.session_agent_context_git_worktrees (
 --
 
 CREATE TABLE public.session_agent_context_projects (
-    session_agent_context_id character varying(32) NOT NULL,
+    session_agent_context_id character varying(32) CONSTRAINT session_agent_context_project_session_agent_context_id_not_null NOT NULL,
     path text NOT NULL,
     id character varying(32) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -3775,18 +4135,18 @@ CREATE TABLE public.session_agent_context_projects (
 CREATE TABLE public.session_agent_contexts (
     agent_id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
-    root_session_agent_id character varying(32),
-    agent_runtime_id character varying(32),
-    id character varying(32) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     working_folder_path text,
     working_folder_cleanup_status public.session_working_folder_cleanup_status NOT NULL,
     working_folder_cleanup_summary text,
     working_folder_cleanup_completed_at timestamp with time zone,
     working_folder_binding_state public.session_working_folder_binding_state DEFAULT 'bound'::public.session_working_folder_binding_state NOT NULL,
+    root_session_agent_id character varying(32),
+    agent_runtime_id character varying(32),
     working_folder_invalidated_by_removal_id character varying(32),
     working_folder_invalidated_at timestamp with time zone,
+    id character varying(32) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_session_agent_contexts_working_folder_binding CHECK ((((working_folder_binding_state = 'none'::public.session_working_folder_binding_state) AND (working_folder_path IS NULL) AND (agent_runtime_id IS NULL) AND (working_folder_invalidated_by_removal_id IS NULL) AND (working_folder_invalidated_at IS NULL)) OR ((working_folder_binding_state = 'pending'::public.session_working_folder_binding_state) AND (working_folder_path IS NULL) AND (agent_runtime_id IS NOT NULL) AND (working_folder_invalidated_by_removal_id IS NULL) AND (working_folder_invalidated_at IS NULL)) OR ((working_folder_binding_state = 'bound'::public.session_working_folder_binding_state) AND (working_folder_path IS NOT NULL) AND (agent_runtime_id IS NOT NULL) AND (working_folder_invalidated_by_removal_id IS NULL) AND (working_folder_invalidated_at IS NULL)) OR ((working_folder_binding_state = 'invalidated'::public.session_working_folder_binding_state) AND (agent_runtime_id IS NOT NULL) AND (working_folder_invalidated_by_removal_id IS NOT NULL) AND (working_folder_invalidated_at IS NOT NULL))))
 );
 
@@ -3805,12 +4165,12 @@ CREATE TABLE public.session_agents (
     agent_type character varying(120) NOT NULL,
     parent_session_agent_id character varying(32),
     last_task_message text,
+    last_message_at timestamp with time zone,
     parent_observed_run_index integer,
     parent_observed_event_id character varying(32),
     id character varying(32) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_message_at timestamp with time zone
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3820,6 +4180,7 @@ CREATE TABLE public.session_agents (
 
 CREATE TABLE public.sessions (
     id character varying(32) NOT NULL,
+    user_id character varying(32) NOT NULL,
     refresh_token character varying(64) NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     prev_refresh_token character varying(64),
@@ -3830,8 +4191,7 @@ CREATE TABLE public.sessions (
     refresh_token_created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    user_id character varying(32) NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3844,9 +4204,9 @@ CREATE TABLE public.signup_token_redemptions (
     signup_token_id character varying(32) NOT NULL,
     user_id character varying(32) NOT NULL,
     email character varying(255) NOT NULL,
+    redeemed_at timestamp with time zone NOT NULL,
     ip_address character varying(64),
-    user_agent text,
-    redeemed_at timestamp with time zone NOT NULL
+    user_agent text
 );
 
 
@@ -3858,10 +4218,10 @@ CREATE TABLE public.signup_tokens (
     id character varying(32) NOT NULL,
     token_hash character varying(64) NOT NULL,
     email character varying(255) NOT NULL,
-    created_by_user_id character varying(32),
     delivery_method public.signup_token_delivery_method NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     max_uses integer NOT NULL,
+    created_by_user_id character varying(32),
     used_count integer NOT NULL,
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -3882,26 +4242,6 @@ CREATE TABLE public.system_bootstrap_states (
     consumed_at timestamp with time zone,
     CONSTRAINT ck_system_bootstrap_states_singleton_id CHECK ((id = 1))
 );
-
-
---
--- Name: system_bootstrap_states_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.system_bootstrap_states_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: system_bootstrap_states_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.system_bootstrap_states_id_seq OWNED BY public.system_bootstrap_states.id;
 
 
 --
@@ -4039,17 +4379,17 @@ CREATE TABLE public.toolkit_configs (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
     toolkit_type character varying(100) NOT NULL,
+    slug character varying(100) NOT NULL,
     name character varying(255) NOT NULL,
-    description text,
     config jsonb NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    slug character varying(100) DEFAULT ''::character varying NOT NULL,
+    description text,
     prompt text,
     encrypted_credentials text,
-    revision bigint DEFAULT 1 NOT NULL,
+    enabled boolean NOT NULL,
     always_expose_tools boolean DEFAULT false NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     owner_agent_id character varying(32)
 );
 
@@ -4073,15 +4413,15 @@ CREATE TABLE public.toolkit_scopes (
 
 CREATE TABLE public.toolkit_states (
     id character varying(32) NOT NULL,
-    session_id character varying(32),
+    agent_id character varying(32) NOT NULL,
+    session_id character varying(32) NOT NULL,
     toolkit_namespace character varying(100) NOT NULL,
     state_name character varying(100) NOT NULL,
     state_json jsonb NOT NULL,
     schema_version integer NOT NULL,
     version integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    agent_id character varying(32) NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -4106,10 +4446,10 @@ CREATE TABLE public.user_emails (
 CREATE TABLE public.users (
     id character varying(32) NOT NULL,
     primary_email_id character varying(32) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     locale character varying(35) DEFAULT 'en-US'::character varying NOT NULL,
-    access_disabled_at timestamp with time zone
+    access_disabled_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -4123,7 +4463,7 @@ CREATE TABLE public.workspace_invitations (
     email character varying(255) NOT NULL,
     role public.workspace_user_role NOT NULL,
     invited_by character varying(32) NOT NULL,
-    status public.invitation_status DEFAULT 'pending'::public.invitation_status NOT NULL,
+    status public.invitation_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -4138,7 +4478,7 @@ CREATE TABLE public.workspace_join_requests (
     workspace_id character varying(32) NOT NULL,
     user_id character varying(32) NOT NULL,
     message text,
-    status public.join_request_status DEFAULT 'pending'::public.join_request_status NOT NULL,
+    status public.join_request_status NOT NULL,
     last_notified_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
@@ -4153,12 +4493,12 @@ CREATE TABLE public.workspace_model_settings (
     workspace_id character varying(32) NOT NULL,
     default_model_selection jsonb,
     default_lightweight_model_selection jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     default_selectable_model_options jsonb,
     default_main_model_label character varying(80),
     default_lightweight_model_label character varying(80),
-    CONSTRAINT ck_ws_model_settings_selectable_options_shape CHECK (((default_selectable_model_options IS NULL) OR (jsonb_typeof(default_selectable_model_options) = 'null'::text) OR ((jsonb_typeof(default_selectable_model_options) = 'array'::text) AND ((jsonb_array_length(default_selectable_model_options) >= 1) AND (jsonb_array_length(default_selectable_model_options) <= 10)))))
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_ws_model_settings_selectable_options_shape CHECK (((default_selectable_model_options IS NULL) OR (jsonb_typeof(default_selectable_model_options) = 'null'::text) OR ((jsonb_typeof(default_selectable_model_options) = 'array'::text) AND ((jsonb_array_length(default_selectable_model_options) >= 1) AND (jsonb_array_length(default_selectable_model_options) <= 10)) AND (NOT jsonb_path_exists(default_selectable_model_options, '$[*]?(((!(exists (@."candidates")) || @."candidates".type() != "array") || @."candidates".size() < 1) || @."candidates".size() > 5)'::jsonpath)))))
 );
 
 
@@ -4175,13 +4515,13 @@ CREATE TABLE public.workspace_runtime_profiles (
     description text NOT NULL,
     lifecycle public.runtime_profile_lifecycle NOT NULL,
     policy jsonb NOT NULL,
+    terminal_enabled boolean DEFAULT true NOT NULL,
     version integer NOT NULL,
     digest character varying(64) NOT NULL,
     created_by_workspace_user_id character varying(32),
     updated_by_workspace_user_id character varying(32),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    terminal_enabled boolean DEFAULT true NOT NULL,
     CONSTRAINT ck_workspace_runtime_profiles_version_positive CHECK ((version >= 1))
 );
 
@@ -4193,11 +4533,11 @@ CREATE TABLE public.workspace_runtime_profiles (
 CREATE TABLE public.workspace_users (
     id character varying(32) NOT NULL,
     workspace_id character varying(32) NOT NULL,
+    user_id character varying(32) NOT NULL,
     name character varying(255) NOT NULL,
+    role public.workspace_user_role NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    role public.workspace_user_role DEFAULT 'member'::public.workspace_user_role NOT NULL,
-    user_id character varying(32) NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -4209,10 +4549,10 @@ CREATE TABLE public.workspaces (
     id character varying(32) NOT NULL,
     name character varying(255) NOT NULL,
     handle character varying(255) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     default_runtime_profile_id character varying(32),
     default_runtime_profile_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_workspaces_default_runtime_profile_version_positive CHECK ((default_runtime_profile_version >= 1))
 );
 
@@ -4230,11 +4570,18 @@ CREATE TABLE public.xai_oauth_sessions (
     user_code character varying(128) NOT NULL,
     verification_uri text NOT NULL,
     interval_seconds integer NOT NULL,
-    status public.xai_oauth_session_status DEFAULT 'pending'::public.xai_oauth_session_status NOT NULL,
     expires_at timestamp with time zone NOT NULL,
+    status public.xai_oauth_session_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: model_candidate_chain_cutovers id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_candidate_chain_cutovers ALTER COLUMN id SET DEFAULT nextval('public.model_candidate_chain_cutovers_id_seq'::regclass);
 
 
 --
@@ -4245,10 +4592,10 @@ ALTER TABLE ONLY public.runtime_connection_generation_cutovers ALTER COLUMN allo
 
 
 --
--- Name: system_bootstrap_states id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: runtime_web_auth_configuration id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.system_bootstrap_states ALTER COLUMN id SET DEFAULT nextval('public.system_bootstrap_states_id_seq'::regclass);
+ALTER TABLE ONLY public.runtime_web_auth_configuration ALTER COLUMN id SET DEFAULT nextval('public.runtime_web_auth_configuration_id_seq'::regclass);
 
 
 --
@@ -4348,6 +4695,14 @@ ALTER TABLE ONLY public.agent_run_input_events
 
 
 --
+-- Name: agent_runs agent_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT agent_runs_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: agent_runtime_add_receipts agent_runtime_add_receipts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4385,6 +4740,14 @@ ALTER TABLE ONLY public.agent_session_system_prompt_snapshots
 
 ALTER TABLE ONLY public.agent_session_unread_runs
     ADD CONSTRAINT agent_session_unread_runs_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: agent_sessions agent_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
 
 
 --
@@ -4460,11 +4823,35 @@ ALTER TABLE ONLY public.email_verifications
 
 
 --
+-- Name: events events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.events
+    ADD CONSTRAINT events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: exchange_files exchange_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.exchange_files
     ADD CONSTRAINT exchange_files_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: external_account_links external_account_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_links
+    ADD CONSTRAINT external_account_links_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: external_account_oauth_attempts external_account_oauth_attempts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_oauth_attempts
+    ADD CONSTRAINT external_account_oauth_attempts_pkey PRIMARY KEY (id);
 
 
 --
@@ -4481,14 +4868,6 @@ ALTER TABLE ONLY public.external_channel_access_grants
 
 ALTER TABLE ONLY public.external_channel_access_requests
     ADD CONSTRAINT external_channel_access_requests_pkey PRIMARY KEY (id);
-
-
---
--- Name: external_channel_agent_route_bot_policy_archive external_channel_agent_route_bot_policy_archive_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_agent_route_bot_policy_archive
-    ADD CONSTRAINT external_channel_agent_route_bot_policy_archive_pkey PRIMARY KEY (route_id);
 
 
 --
@@ -4612,6 +4991,22 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 
 
 --
+-- Name: external_model_drafts external_model_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: external_model_mutations external_model_mutations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: git_worktree_path_claims git_worktree_path_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4625,6 +5020,14 @@ ALTER TABLE ONLY public.git_worktree_path_claims
 
 ALTER TABLE ONLY public.github_user_installations
     ADD CONSTRAINT github_user_installations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: image_generation_catalog_entries image_generation_catalog_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.image_generation_catalog_entries
+    ADD CONSTRAINT image_generation_catalog_entries_pkey PRIMARY KEY (id);
 
 
 --
@@ -4684,11 +5087,35 @@ ALTER TABLE ONLY public.llm_provider_integrations
 
 
 --
+-- Name: mailbox_items mailbox_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mailbox_items
+    ADD CONSTRAINT mailbox_items_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: mcp_oauth_connections mcp_oauth_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mcp_oauth_connections
     ADD CONSTRAINT mcp_oauth_connections_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: model_candidate_chain_cutovers model_candidate_chain_cutovers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_candidate_chain_cutovers
+    ADD CONSTRAINT model_candidate_chain_cutovers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: model_candidate_health model_candidate_health_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_candidate_health
+    ADD CONSTRAINT model_candidate_health_pkey PRIMARY KEY (workspace_id, llm_provider_integration_id, model_identifier);
 
 
 --
@@ -4729,38 +5156,6 @@ ALTER TABLE ONLY public.password_reset_token_redemptions
 
 ALTER TABLE ONLY public.password_reset_tokens
     ADD CONSTRAINT password_reset_tokens_pkey PRIMARY KEY (id);
-
-
---
--- Name: agent_runs pk_agent_runs; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.agent_runs
-    ADD CONSTRAINT pk_agent_runs PRIMARY KEY (id);
-
-
---
--- Name: agent_sessions pk_agent_sessions; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT pk_agent_sessions PRIMARY KEY (id);
-
-
---
--- Name: events pk_events; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events
-    ADD CONSTRAINT pk_events PRIMARY KEY (id);
-
-
---
--- Name: mailbox_items pk_mailbox_items; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mailbox_items
-    ADD CONSTRAINT pk_mailbox_items PRIMARY KEY (id);
 
 
 --
@@ -4916,19 +5311,83 @@ ALTER TABLE ONLY public.runtime_recreation_operations
 
 
 --
--- Name: sandbox_checkpoints sandbox_checkpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings runtime_web_auth_bindings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_checkpoints
-    ADD CONSTRAINT sandbox_checkpoints_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT runtime_web_auth_bindings_pkey PRIMARY KEY (id);
 
 
 --
--- Name: sandbox_runtime_leases sandbox_runtime_leases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_configuration runtime_web_auth_configuration_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_runtime_leases
-    ADD CONSTRAINT sandbox_runtime_leases_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.runtime_web_auth_configuration
+    ADD CONSTRAINT runtime_web_auth_configuration_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_auth_tickets runtime_web_auth_tickets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT runtime_web_auth_tickets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_cycles runtime_web_cycles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_cycles
+    ADD CONSTRAINT runtime_web_cycles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_endpoints runtime_web_endpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT runtime_web_endpoints_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_gateway_identities runtime_web_gateway_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_gateway_identities
+    ADD CONSTRAINT runtime_web_gateway_identities_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_operation_receipts runtime_web_operation_receipts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_operation_receipts
+    ADD CONSTRAINT runtime_web_operation_receipts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_quota_scopes runtime_web_quota_scopes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_quota_scopes
+    ADD CONSTRAINT runtime_web_quota_scopes_pkey PRIMARY KEY (scope_kind, subject_id);
+
+
+--
+-- Name: runtime_web_requests runtime_web_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_requests
+    ADD CONSTRAINT runtime_web_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: runtime_web_session_routes runtime_web_session_routes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_session_routes
+    ADD CONSTRAINT runtime_web_session_routes_pkey PRIMARY KEY (runtime_id);
 
 
 --
@@ -4977,14 +5436,6 @@ ALTER TABLE ONLY public.session_agent_contexts
 
 ALTER TABLE ONLY public.session_agents
     ADD CONSTRAINT session_agents_pkey PRIMARY KEY (id);
-
-
---
--- Name: kubernetes_sandbox_snapshots session_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kubernetes_sandbox_snapshots
-    ADD CONSTRAINT session_snapshots_pkey PRIMARY KEY (id);
 
 
 --
@@ -5076,6 +5527,14 @@ ALTER TABLE ONLY public.system_user_roles
 
 
 --
+-- Name: toolkit_configs toolkit_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.toolkit_configs
+    ADD CONSTRAINT toolkit_configs_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: toolkit_scopes toolkit_scopes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5089,14 +5548,6 @@ ALTER TABLE ONLY public.toolkit_scopes
 
 ALTER TABLE ONLY public.toolkit_states
     ADD CONSTRAINT toolkit_states_pkey PRIMARY KEY (id);
-
-
---
--- Name: toolkit_configs toolkits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.toolkit_configs
-    ADD CONSTRAINT toolkits_pkey PRIMARY KEY (id);
 
 
 --
@@ -5260,6 +5711,14 @@ ALTER TABLE ONLY public.exchange_files
 
 
 --
+-- Name: external_account_oauth_attempts uq_external_account_oauth_attempts_state_hash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_oauth_attempts
+    ADD CONSTRAINT uq_external_account_oauth_attempts_state_hash UNIQUE (state_hash);
+
+
+--
 -- Name: external_channel_access_requests uq_external_channel_access_requests_route_trigger_message; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5404,11 +5863,35 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 
 
 --
+-- Name: external_model_drafts uq_external_model_drafts_connection_interaction; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT uq_external_model_drafts_connection_interaction UNIQUE (connection_id, owner_interaction_key);
+
+
+--
+-- Name: external_model_mutations uq_external_model_mutations_provider_connection_interaction; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT uq_external_model_mutations_provider_connection_interaction UNIQUE (provider, connection_id, apply_interaction_key);
+
+
+--
 -- Name: git_worktree_path_claims uq_git_worktree_path_claims_agent_runtime_path; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.git_worktree_path_claims
     ADD CONSTRAINT uq_git_worktree_path_claims_agent_runtime_path UNIQUE (agent_runtime_id, worktree_path);
+
+
+--
+-- Name: image_generation_catalog_entries uq_image_generation_catalog_entries_snapshot_model; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.image_generation_catalog_entries
+    ADD CONSTRAINT uq_image_generation_catalog_entries_snapshot_model UNIQUE (snapshot_id, provider_model_identifier);
 
 
 --
@@ -5548,19 +6031,83 @@ ALTER TABLE ONLY public.runtime_recreation_operation_items
 
 
 --
--- Name: sandbox_checkpoints uq_sandbox_checkpoints_object_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings uq_runtime_web_auth_bindings_broker_hash; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_checkpoints
-    ADD CONSTRAINT uq_sandbox_checkpoints_object_key UNIQUE (object_key);
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT uq_runtime_web_auth_bindings_broker_hash UNIQUE (broker_binding_hash);
 
 
 --
--- Name: sandbox_runtime_leases uq_sandbox_runtime_leases_runtime_generation; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings uq_runtime_web_auth_bindings_initiation; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_runtime_leases
-    ADD CONSTRAINT uq_sandbox_runtime_leases_runtime_generation UNIQUE (agent_runtime_id, allocation_generation);
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT uq_runtime_web_auth_bindings_initiation UNIQUE (initiation_id);
+
+
+--
+-- Name: runtime_web_auth_bindings uq_runtime_web_auth_bindings_main_hash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT uq_runtime_web_auth_bindings_main_hash UNIQUE (main_binding_hash);
+
+
+--
+-- Name: runtime_web_auth_tickets uq_runtime_web_auth_tickets_secret_hash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT uq_runtime_web_auth_tickets_secret_hash UNIQUE (secret_hash);
+
+
+--
+-- Name: runtime_web_endpoints uq_runtime_web_endpoints_hostname_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT uq_runtime_web_endpoints_hostname_key UNIQUE (hostname_key);
+
+
+--
+-- Name: runtime_web_endpoints uq_runtime_web_endpoints_session_port; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT uq_runtime_web_endpoints_session_port UNIQUE (agent_session_id, port);
+
+
+--
+-- Name: runtime_web_gateway_identities uq_runtime_web_gateway_identities_secret_hash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_gateway_identities
+    ADD CONSTRAINT uq_runtime_web_gateway_identities_secret_hash UNIQUE (secret_hash);
+
+
+--
+-- Name: runtime_web_operation_receipts uq_runtime_web_operation_receipts_operation; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_operation_receipts
+    ADD CONSTRAINT uq_runtime_web_operation_receipts_operation UNIQUE (actor_kind, actor_id, execution_id, operation_key, operation_kind);
+
+
+--
+-- Name: runtime_web_session_routes uq_runtime_web_session_routes_join_nonce_hash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_session_routes
+    ADD CONSTRAINT uq_runtime_web_session_routes_join_nonce_hash UNIQUE (join_nonce_hash);
+
+
+--
+-- Name: runtime_web_session_routes uq_runtime_web_session_routes_session_lease; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_session_routes
+    ADD CONSTRAINT uq_runtime_web_session_routes_session_lease UNIQUE (session_lease_id);
 
 
 --
@@ -6255,6 +6802,34 @@ CREATE INDEX ix_exchange_files_workspace_id ON public.exchange_files USING btree
 
 
 --
+-- Name: ix_external_account_links_legacy_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_account_links_legacy_workspace_id ON public.external_account_links USING btree (legacy_workspace_id);
+
+
+--
+-- Name: ix_external_account_links_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_account_links_user_id ON public.external_account_links USING btree (user_id);
+
+
+--
+-- Name: ix_external_account_oauth_attempts_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_account_oauth_attempts_expires_at ON public.external_account_oauth_attempts USING btree (expires_at);
+
+
+--
+-- Name: ix_external_account_oauth_attempts_user_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_account_oauth_attempts_user_session ON public.external_account_oauth_attempts USING btree (user_id, auth_session_id);
+
+
+--
 -- Name: ix_external_channel_access_grants_agent_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6437,6 +7012,34 @@ CREATE INDEX ix_external_channel_setup_claims_status_expires_at ON public.extern
 
 
 --
+-- Name: ix_external_model_drafts_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_model_drafts_expires_at ON public.external_model_drafts USING btree (expires_at);
+
+
+--
+-- Name: ix_external_model_drafts_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_model_drafts_session_id ON public.external_model_drafts USING btree (session_id);
+
+
+--
+-- Name: ix_external_model_mutations_link_id_snapshot; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_model_mutations_link_id_snapshot ON public.external_model_mutations USING btree (link_id_snapshot);
+
+
+--
+-- Name: ix_external_model_mutations_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_external_model_mutations_session_id ON public.external_model_mutations USING btree (session_id);
+
+
+--
 -- Name: ix_git_worktree_path_claims_action_execution_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6472,6 +7075,20 @@ CREATE INDEX ix_github_user_installations_user_id ON public.github_user_installa
 
 
 --
+-- Name: ix_image_generation_catalog_entries_catalog_rank; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_image_generation_catalog_entries_catalog_rank ON public.image_generation_catalog_entries USING btree (catalog_id, recommendation_rank, display_name);
+
+
+--
+-- Name: ix_image_generation_catalog_entries_snapshot_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_image_generation_catalog_entries_snapshot_id ON public.image_generation_catalog_entries USING btree (snapshot_id);
+
+
+--
 -- Name: ix_kimi_oauth_sessions_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6483,13 +7100,6 @@ CREATE INDEX ix_kimi_oauth_sessions_user_id ON public.kimi_oauth_sessions USING 
 --
 
 CREATE INDEX ix_kimi_oauth_sessions_workspace_id ON public.kimi_oauth_sessions USING btree (workspace_id);
-
-
---
--- Name: ix_kubernetes_sandbox_snapshots_agent_runtime_id_created_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_kubernetes_sandbox_snapshots_agent_runtime_id_created_at ON public.kubernetes_sandbox_snapshots USING btree (agent_runtime_id, created_at DESC);
 
 
 --
@@ -6574,6 +7184,13 @@ CREATE INDEX ix_mailbox_items_session_order ON public.mailbox_items USING btree 
 --
 
 CREATE INDEX ix_mcp_oauth_connections_toolkit_id ON public.mcp_oauth_connections USING btree (toolkit_id);
+
+
+--
+-- Name: ix_model_candidate_health_cooldown_until; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_model_candidate_health_cooldown_until ON public.model_candidate_health USING btree (cooldown_until);
 
 
 --
@@ -6738,6 +7355,13 @@ CREATE INDEX ix_runtime_provider_config_revisions_validation_request ON public.r
 
 
 --
+-- Name: ix_runtime_provider_connections_authentication; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_provider_connections_authentication ON public.runtime_provider_connections USING btree (binding_id, auth_method, auth_subject, status);
+
+
+--
 -- Name: ix_runtime_provider_connections_binding_status; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6850,52 +7474,87 @@ CREATE INDEX ix_runtime_recreation_operations_target ON public.runtime_recreatio
 
 
 --
--- Name: ix_sandbox_checkpoints_agent_runtime_id_created_at; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_runtime_web_auth_bindings_expiry; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_sandbox_checkpoints_agent_runtime_id_created_at ON public.sandbox_checkpoints USING btree (agent_runtime_id, created_at DESC);
-
-
---
--- Name: ix_sandbox_checkpoints_agent_runtime_id_invalidated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_sandbox_checkpoints_agent_runtime_id_invalidated_at ON public.sandbox_checkpoints USING btree (agent_runtime_id, invalidated_at);
+CREATE INDEX ix_runtime_web_auth_bindings_expiry ON public.runtime_web_auth_bindings USING btree (expires_at) WHERE (settled_at IS NULL);
 
 
 --
--- Name: ix_sandbox_checkpoints_workspace_id; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_runtime_web_auth_tickets_expiry; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_sandbox_checkpoints_workspace_id ON public.sandbox_checkpoints USING btree (workspace_id);
-
-
---
--- Name: ix_sandbox_runtime_leases_active_runtime; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX ix_sandbox_runtime_leases_active_runtime ON public.sandbox_runtime_leases USING btree (agent_runtime_id) WHERE (state = ANY (ARRAY['allocating'::public.sandbox_runtime_lease_state, 'starting'::public.sandbox_runtime_lease_state, 'running'::public.sandbox_runtime_lease_state, 'hibernating'::public.sandbox_runtime_lease_state, 'deleting'::public.sandbox_runtime_lease_state]));
+CREATE INDEX ix_runtime_web_auth_tickets_expiry ON public.runtime_web_auth_tickets USING btree (expires_at) WHERE (consumed_at IS NULL);
 
 
 --
--- Name: ix_sandbox_runtime_leases_provider_state; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_runtime_web_cycles_endpoint_approved; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_sandbox_runtime_leases_provider_state ON public.sandbox_runtime_leases USING btree (provider_id, state);
-
-
---
--- Name: ix_sandbox_runtime_leases_stale; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_sandbox_runtime_leases_stale ON public.sandbox_runtime_leases USING btree (state, expires_at) WHERE (expires_at IS NOT NULL);
+CREATE INDEX ix_runtime_web_cycles_endpoint_approved ON public.runtime_web_cycles USING btree (endpoint_id, approved_at);
 
 
 --
--- Name: ix_sandbox_runtime_leases_workspace_id; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_runtime_web_cycles_expires; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_sandbox_runtime_leases_workspace_id ON public.sandbox_runtime_leases USING btree (workspace_id);
+CREATE INDEX ix_runtime_web_cycles_expires ON public.runtime_web_cycles USING btree (expires_at) WHERE (ended_at IS NULL);
+
+
+--
+-- Name: ix_runtime_web_endpoints_agent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_endpoints_agent ON public.runtime_web_endpoints USING btree (agent_id, created_at);
+
+
+--
+-- Name: ix_runtime_web_endpoints_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_endpoints_session ON public.runtime_web_endpoints USING btree (agent_session_id, created_at);
+
+
+--
+-- Name: ix_runtime_web_gateway_identities_auth_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_gateway_identities_auth_session ON public.runtime_web_gateway_identities USING btree (auth_session_id, expires_at);
+
+
+--
+-- Name: ix_runtime_web_gateway_identities_expiry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_gateway_identities_expiry ON public.runtime_web_gateway_identities USING btree (expires_at) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: ix_runtime_web_operation_receipts_endpoint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_operation_receipts_endpoint ON public.runtime_web_operation_receipts USING btree (endpoint_id, created_at);
+
+
+--
+-- Name: ix_runtime_web_requests_endpoint_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_requests_endpoint_created ON public.runtime_web_requests USING btree (endpoint_id, created_at);
+
+
+--
+-- Name: ix_runtime_web_session_routes_generation; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_session_routes_generation ON public.runtime_web_session_routes USING btree (desired_generation, runner_generation, lease_expires_at);
+
+
+--
+-- Name: ix_runtime_web_session_routes_owner_lease; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_runtime_web_session_routes_owner_lease ON public.runtime_web_session_routes USING btree (owner_boot_id, lease_expires_at);
 
 
 --
@@ -7347,6 +8006,13 @@ CREATE UNIQUE INDEX uq_events_session_external ON public.events USING btree (ses
 
 
 --
+-- Name: uq_external_account_links_active_external_identity; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_external_account_links_active_external_identity ON public.external_account_links USING btree (provider, identity_scope, provider_user_id) WHERE (revoked_at IS NULL);
+
+
+--
 -- Name: uq_external_channel_access_grants_active_agent; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7392,7 +8058,7 @@ CREATE UNIQUE INDEX uq_external_channel_connections_http_callback_selector_hash 
 -- Name: uq_external_channel_connections_installation_identity; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_external_channel_connections_installation_identity ON public.external_channel_connections USING btree (provider, provider_tenant_id, provider_app_id) WHERE ((provider = 'slack'::public.external_channel_provider) AND (provider_tenant_id IS NOT NULL) AND (provider_app_id IS NOT NULL));
+CREATE UNIQUE INDEX uq_external_channel_connections_installation_identity ON public.external_channel_connections USING btree (provider, provider_tenant_id, provider_app_id) WHERE ((provider_tenant_id IS NOT NULL) AND (provider_app_id IS NOT NULL));
 
 
 --
@@ -7431,17 +8097,17 @@ CREATE UNIQUE INDEX uq_github_user_installations_user_app_installation ON public
 
 
 --
--- Name: uq_llm_catalogs_integration_target; Type: INDEX; Schema: public; Owner: -
+-- Name: uq_llm_catalogs_integration_target_purpose; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_llm_catalogs_integration_target ON public.llm_catalogs USING btree (provider_integration_id, lowerer_target) WHERE (scope = 'integration'::public.llm_catalog_scope);
+CREATE UNIQUE INDEX uq_llm_catalogs_integration_target_purpose ON public.llm_catalogs USING btree (provider_integration_id, lowerer_target, purpose) WHERE (scope = 'integration'::public.llm_catalog_scope);
 
 
 --
--- Name: uq_llm_catalogs_system_scope_provider_target; Type: INDEX; Schema: public; Owner: -
+-- Name: uq_llm_catalogs_system_scope_provider_target_purpose; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_llm_catalogs_system_scope_provider_target ON public.llm_catalogs USING btree (provider, lowerer_target) WHERE (scope = 'system'::public.llm_catalog_scope);
+CREATE UNIQUE INDEX uq_llm_catalogs_system_scope_provider_target_purpose ON public.llm_catalogs USING btree (provider, lowerer_target, purpose) WHERE (scope = 'system'::public.llm_catalog_scope);
 
 
 --
@@ -7480,6 +8146,20 @@ CREATE UNIQUE INDEX uq_runtime_provider_auth_bindings_method_subject_active ON p
 
 
 --
+-- Name: uq_runtime_web_cycles_current_endpoint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_runtime_web_cycles_current_endpoint ON public.runtime_web_cycles USING btree (endpoint_id) WHERE (ended_at IS NULL);
+
+
+--
+-- Name: uq_runtime_web_requests_pending_endpoint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_runtime_web_requests_pending_endpoint ON public.runtime_web_requests USING btree (endpoint_id) WHERE (state = 'pending'::public.runtime_web_request_state);
+
+
+--
 -- Name: uq_toolkit_configs_owner_agent_slug; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7491,20 +8171,6 @@ CREATE UNIQUE INDEX uq_toolkit_configs_owner_agent_slug ON public.toolkit_config
 --
 
 CREATE UNIQUE INDEX uq_toolkit_configs_shared_workspace_slug ON public.toolkit_configs USING btree (workspace_id, slug) WHERE (owner_agent_id IS NULL);
-
-
---
--- Name: external_channel_agent_routes external_channel_agent_routes_agent_snapshot_immutable; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER external_channel_agent_routes_agent_snapshot_immutable BEFORE INSERT OR UPDATE OF agent_id_snapshot ON public.external_channel_agent_routes FOR EACH ROW EXECUTE FUNCTION public.preserve_external_channel_route_agent_snapshot();
-
-
---
--- Name: external_channel_connections external_channel_connections_app_mode_immutable; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER external_channel_connections_app_mode_immutable BEFORE UPDATE OF app_mode ON public.external_channel_connections FOR EACH ROW EXECUTE FUNCTION public.prevent_external_channel_connection_app_mode_update();
 
 
 --
@@ -7526,7 +8192,7 @@ CREATE TRIGGER trg_runtime_providers_connection_generation AFTER INSERT ON publi
 --
 
 ALTER TABLE ONLY public.action_execution_events
-    ADD CONSTRAINT action_execution_events_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT action_execution_events_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7534,7 +8200,15 @@ ALTER TABLE ONLY public.action_execution_events
 --
 
 ALTER TABLE ONLY public.action_execution_events
-    ADD CONSTRAINT action_execution_events_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT action_execution_events_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: action_executions action_executions_sender_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.action_executions
+    ADD CONSTRAINT action_executions_sender_user_id_fkey FOREIGN KEY (sender_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7542,7 +8216,7 @@ ALTER TABLE ONLY public.action_execution_events
 --
 
 ALTER TABLE ONLY public.action_executions
-    ADD CONSTRAINT action_executions_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT action_executions_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7550,7 +8224,7 @@ ALTER TABLE ONLY public.action_executions
 --
 
 ALTER TABLE ONLY public.agent_admins
-    ADD CONSTRAINT agent_admins_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_admins_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7558,7 +8232,7 @@ ALTER TABLE ONLY public.agent_admins
 --
 
 ALTER TABLE ONLY public.agent_admins
-    ADD CONSTRAINT agent_admins_workspace_user_id_fkey FOREIGN KEY (workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_admins_workspace_user_id_fkey FOREIGN KEY (workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7566,7 +8240,7 @@ ALTER TABLE ONLY public.agent_admins
 --
 
 ALTER TABLE ONLY public.agent_automatic_project_items
-    ADD CONSTRAINT agent_automatic_project_items_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agent_automatic_project_settings(agent_id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_automatic_project_items_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agent_automatic_project_settings(agent_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7574,7 +8248,7 @@ ALTER TABLE ONLY public.agent_automatic_project_items
 --
 
 ALTER TABLE ONLY public.agent_automatic_project_settings
-    ADD CONSTRAINT agent_automatic_project_setti_updated_by_workspace_user_id_fkey FOREIGN KEY (updated_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT agent_automatic_project_setti_updated_by_workspace_user_id_fkey FOREIGN KEY (updated_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7582,7 +8256,7 @@ ALTER TABLE ONLY public.agent_automatic_project_settings
 --
 
 ALTER TABLE ONLY public.agent_automatic_project_settings
-    ADD CONSTRAINT agent_automatic_project_settings_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_automatic_project_settings_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7590,7 +8264,7 @@ ALTER TABLE ONLY public.agent_automatic_project_settings
 --
 
 ALTER TABLE ONLY public.agent_avatar_cleanup_jobs
-    ADD CONSTRAINT agent_avatar_cleanup_jobs_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT agent_avatar_cleanup_jobs_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7598,7 +8272,7 @@ ALTER TABLE ONLY public.agent_avatar_cleanup_jobs
 --
 
 ALTER TABLE ONLY public.agent_memories
-    ADD CONSTRAINT agent_memories_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_memories_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7606,7 +8280,7 @@ ALTER TABLE ONLY public.agent_memories
 --
 
 ALTER TABLE ONLY public.agent_project_catalog_entries
-    ADD CONSTRAINT agent_project_catalog_entries_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_project_catalog_entries_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7614,7 +8288,7 @@ ALTER TABLE ONLY public.agent_project_catalog_entries
 --
 
 ALTER TABLE ONLY public.agent_project_defaults
-    ADD CONSTRAINT agent_project_defaults_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_project_defaults_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7622,7 +8296,7 @@ ALTER TABLE ONLY public.agent_project_defaults
 --
 
 ALTER TABLE ONLY public.agent_project_presets
-    ADD CONSTRAINT agent_project_presets_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_project_presets_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7630,7 +8304,7 @@ ALTER TABLE ONLY public.agent_project_presets
 --
 
 ALTER TABLE ONLY public.agent_run_input_events
-    ADD CONSTRAINT agent_run_input_events_agent_run_id_fkey FOREIGN KEY (agent_run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_run_input_events_agent_run_id_fkey FOREIGN KEY (agent_run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7638,7 +8312,23 @@ ALTER TABLE ONLY public.agent_run_input_events
 --
 
 ALTER TABLE ONLY public.agent_run_input_events
-    ADD CONSTRAINT agent_run_input_events_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.events(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_run_input_events_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.events(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_runs agent_runs_parent_agent_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT agent_runs_parent_agent_run_id_fkey FOREIGN KEY (parent_agent_run_id) REFERENCES public.agent_runs(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_runs agent_runs_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT agent_runs_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7646,7 +8336,7 @@ ALTER TABLE ONLY public.agent_run_input_events
 --
 
 ALTER TABLE ONLY public.agent_runtime_add_receipts
-    ADD CONSTRAINT agent_runtime_add_receipts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_runtime_add_receipts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7654,7 +8344,7 @@ ALTER TABLE ONLY public.agent_runtime_add_receipts
 --
 
 ALTER TABLE ONLY public.agent_runtime_add_receipts
-    ADD CONSTRAINT agent_runtime_add_receipts_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_runtime_add_receipts_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7662,7 +8352,7 @@ ALTER TABLE ONLY public.agent_runtime_add_receipts
 --
 
 ALTER TABLE ONLY public.agent_runtime_add_receipts
-    ADD CONSTRAINT agent_runtime_add_receipts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_runtime_add_receipts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7670,7 +8360,7 @@ ALTER TABLE ONLY public.agent_runtime_add_receipts
 --
 
 ALTER TABLE ONLY public.agent_runtime_removal_operations
-    ADD CONSTRAINT agent_runtime_removal_operations_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_runtime_removal_operations_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7678,7 +8368,7 @@ ALTER TABLE ONLY public.agent_runtime_removal_operations
 --
 
 ALTER TABLE ONLY public.agent_runtime_removal_operations
-    ADD CONSTRAINT agent_runtime_removal_operations_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE SET NULL;
+    ADD CONSTRAINT agent_runtime_removal_operations_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7686,7 +8376,7 @@ ALTER TABLE ONLY public.agent_runtime_removal_operations
 --
 
 ALTER TABLE ONLY public.agent_runtime_removal_operations
-    ADD CONSTRAINT agent_runtime_removal_operations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_runtime_removal_operations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7694,7 +8384,15 @@ ALTER TABLE ONLY public.agent_runtime_removal_operations
 --
 
 ALTER TABLE ONLY public.agent_runtimes
-    ADD CONSTRAINT agent_runtimes_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agent_runtimes_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_runtimes agent_runtimes_runtime_provider_resource_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runtimes
+    ADD CONSTRAINT agent_runtimes_runtime_provider_resource_id_fkey FOREIGN KEY (runtime_provider_resource_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7702,7 +8400,7 @@ ALTER TABLE ONLY public.agent_runtimes
 --
 
 ALTER TABLE ONLY public.agent_runtimes
-    ADD CONSTRAINT agent_runtimes_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agent_runtimes_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7710,7 +8408,7 @@ ALTER TABLE ONLY public.agent_runtimes
 --
 
 ALTER TABLE ONLY public.agent_session_system_prompt_snapshots
-    ADD CONSTRAINT agent_session_system_prompt_snapshots_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_session_system_prompt_snapshots_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7718,7 +8416,7 @@ ALTER TABLE ONLY public.agent_session_system_prompt_snapshots
 --
 
 ALTER TABLE ONLY public.agent_session_unread_runs
-    ADD CONSTRAINT agent_session_unread_runs_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_session_unread_runs_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7726,7 +8424,7 @@ ALTER TABLE ONLY public.agent_session_unread_runs
 --
 
 ALTER TABLE ONLY public.agent_session_unread_runs
-    ADD CONSTRAINT agent_session_unread_runs_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_session_unread_runs_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7734,7 +8432,39 @@ ALTER TABLE ONLY public.agent_session_unread_runs
 --
 
 ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT agent_sessions_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agent_sessions_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_sessions agent_sessions_associated_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_associated_user_id_fkey FOREIGN KEY (associated_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_sessions agent_sessions_pending_command_requester_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_pending_command_requester_user_id_fkey FOREIGN KEY (pending_command_requester_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_sessions agent_sessions_pending_idle_continuation_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_pending_idle_continuation_run_id_fkey FOREIGN KEY (pending_idle_continuation_run_id) REFERENCES public.agent_runs(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: agent_sessions agent_sessions_stop_requester_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_stop_requester_user_id_fkey FOREIGN KEY (stop_requester_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7742,7 +8472,7 @@ ALTER TABLE ONLY public.agent_sessions
 --
 
 ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT agent_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agent_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7750,7 +8480,7 @@ ALTER TABLE ONLY public.agent_sessions
 --
 
 ALTER TABLE ONLY public.agent_toolkits
-    ADD CONSTRAINT agent_toolkits_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_toolkits_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7758,7 +8488,7 @@ ALTER TABLE ONLY public.agent_toolkits
 --
 
 ALTER TABLE ONLY public.agent_toolkits
-    ADD CONSTRAINT agent_toolkits_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_toolkits_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7766,7 +8496,7 @@ ALTER TABLE ONLY public.agent_toolkits
 --
 
 ALTER TABLE ONLY public.agents
-    ADD CONSTRAINT agents_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agents_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7774,7 +8504,7 @@ ALTER TABLE ONLY public.agents
 --
 
 ALTER TABLE ONLY public.archived_session_purge_participant_executions
-    ADD CONSTRAINT archived_session_purge_participant_executions_purge_job_id_fkey FOREIGN KEY (purge_job_id) REFERENCES public.archived_session_purge_jobs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT archived_session_purge_participant_executions_purge_job_id_fkey FOREIGN KEY (purge_job_id) REFERENCES public.archived_session_purge_jobs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7782,7 +8512,7 @@ ALTER TABLE ONLY public.archived_session_purge_participant_executions
 --
 
 ALTER TABLE ONLY public.archived_session_retention_applications
-    ADD CONSTRAINT archived_session_retention_applicatio_requested_by_user_id_fkey FOREIGN KEY (requested_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT archived_session_retention_applicatio_requested_by_user_id_fkey FOREIGN KEY (requested_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7790,7 +8520,7 @@ ALTER TABLE ONLY public.archived_session_retention_applications
 --
 
 ALTER TABLE ONLY public.artifacts
-    ADD CONSTRAINT artifacts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT artifacts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7798,7 +8528,7 @@ ALTER TABLE ONLY public.artifacts
 --
 
 ALTER TABLE ONLY public.artifacts
-    ADD CONSTRAINT artifacts_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT artifacts_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7806,7 +8536,23 @@ ALTER TABLE ONLY public.artifacts
 --
 
 ALTER TABLE ONLY public.artifacts
-    ADD CONSTRAINT artifacts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT artifacts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: chat_write_requests chat_write_requests_creation_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_write_requests
+    ADD CONSTRAINT chat_write_requests_creation_agent_id_fkey FOREIGN KEY (creation_agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: chat_write_requests chat_write_requests_requester_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_write_requests
+    ADD CONSTRAINT chat_write_requests_requester_user_id_fkey FOREIGN KEY (requester_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7814,7 +8560,7 @@ ALTER TABLE ONLY public.artifacts
 --
 
 ALTER TABLE ONLY public.chat_write_requests
-    ADD CONSTRAINT chat_write_requests_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT chat_write_requests_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7822,7 +8568,7 @@ ALTER TABLE ONLY public.chat_write_requests
 --
 
 ALTER TABLE ONLY public.chatgpt_oauth_sessions
-    ADD CONSTRAINT chatgpt_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT chatgpt_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7830,7 +8576,15 @@ ALTER TABLE ONLY public.chatgpt_oauth_sessions
 --
 
 ALTER TABLE ONLY public.chatgpt_oauth_sessions
-    ADD CONSTRAINT chatgpt_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT chatgpt_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: events events_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.events
+    ADD CONSTRAINT events_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7838,7 +8592,7 @@ ALTER TABLE ONLY public.chatgpt_oauth_sessions
 --
 
 ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT exchange_files_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT exchange_files_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7846,7 +8600,55 @@ ALTER TABLE ONLY public.exchange_files
 --
 
 ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT exchange_files_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT exchange_files_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_preview_thumbnail_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_preview_thumbnail_file_id_fkey FOREIGN KEY (preview_thumbnail_file_id) REFERENCES public.exchange_files(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_retention_root_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_retention_root_session_id_fkey FOREIGN KEY (retention_root_session_id) REFERENCES public.agent_sessions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_source_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_source_agent_id_fkey FOREIGN KEY (source_agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_source_exchange_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_source_exchange_file_id_fkey FOREIGN KEY (source_exchange_file_id) REFERENCES public.exchange_files(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_source_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_source_run_id_fkey FOREIGN KEY (source_run_id) REFERENCES public.agent_runs(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: exchange_files exchange_files_source_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_files
+    ADD CONSTRAINT exchange_files_source_user_id_fkey FOREIGN KEY (source_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7854,7 +8656,31 @@ ALTER TABLE ONLY public.exchange_files
 --
 
 ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT exchange_files_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT exchange_files_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_account_links external_account_links_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_links
+    ADD CONSTRAINT external_account_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: external_account_oauth_attempts external_account_oauth_attempts_auth_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_oauth_attempts
+    ADD CONSTRAINT external_account_oauth_attempts_auth_session_id_fkey FOREIGN KEY (auth_session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: external_account_oauth_attempts external_account_oauth_attempts_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_account_oauth_attempts
+    ADD CONSTRAINT external_account_oauth_attempts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
@@ -7862,7 +8688,7 @@ ALTER TABLE ONLY public.exchange_files
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7870,7 +8696,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7878,7 +8704,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7886,7 +8712,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7894,7 +8720,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7902,7 +8728,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_grants
-    ADD CONSTRAINT external_channel_access_grants_source_access_request_id_fkey FOREIGN KEY (source_access_request_id) REFERENCES public.external_channel_access_requests(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_grants_source_access_request_id_fkey FOREIGN KEY (source_access_request_id) REFERENCES public.external_channel_access_requests(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7910,7 +8736,7 @@ ALTER TABLE ONLY public.external_channel_access_grants
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_requests_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7918,7 +8744,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_requests_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7926,7 +8752,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_requests_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7934,7 +8760,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_requests_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7942,7 +8768,15 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_access_requests_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_channel_access_requests external_channel_access_requests_setup_claim_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_channel_access_requests
+    ADD CONSTRAINT external_channel_access_requests_setup_claim_id_fkey FOREIGN KEY (setup_claim_id) REFERENCES public.external_channel_setup_claims(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7950,15 +8784,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT external_channel_access_requests_source_resource_id_fkey FOREIGN KEY (source_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_agent_route_bot_policy_archive external_channel_agent_route_bot_policy_archive_route_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_agent_route_bot_policy_archive
-    ADD CONSTRAINT external_channel_agent_route_bot_policy_archive_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT external_channel_access_requests_source_resource_id_fkey FOREIGN KEY (source_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7966,7 +8792,7 @@ ALTER TABLE ONLY public.external_channel_agent_route_bot_policy_archive
 --
 
 ALTER TABLE ONLY public.external_channel_agent_routes
-    ADD CONSTRAINT external_channel_agent_routes_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT external_channel_agent_routes_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7974,7 +8800,7 @@ ALTER TABLE ONLY public.external_channel_agent_routes
 --
 
 ALTER TABLE ONLY public.external_channel_agent_routes
-    ADD CONSTRAINT external_channel_agent_routes_catalog_removed_by_user_id_fkey FOREIGN KEY (catalog_removed_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_agent_routes_catalog_removed_by_user_id_fkey FOREIGN KEY (catalog_removed_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7982,7 +8808,7 @@ ALTER TABLE ONLY public.external_channel_agent_routes
 --
 
 ALTER TABLE ONLY public.external_channel_app_claims
-    ADD CONSTRAINT external_channel_app_claims_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_app_claims_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7990,7 +8816,7 @@ ALTER TABLE ONLY public.external_channel_app_claims
 --
 
 ALTER TABLE ONLY public.external_channel_bindings
-    ADD CONSTRAINT external_channel_bindings_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_bindings_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -7998,7 +8824,7 @@ ALTER TABLE ONLY public.external_channel_bindings
 --
 
 ALTER TABLE ONLY public.external_channel_bindings
-    ADD CONSTRAINT external_channel_bindings_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_bindings_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8006,7 +8832,7 @@ ALTER TABLE ONLY public.external_channel_bindings
 --
 
 ALTER TABLE ONLY public.external_channel_bindings
-    ADD CONSTRAINT external_channel_bindings_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_bindings_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8014,7 +8840,7 @@ ALTER TABLE ONLY public.external_channel_bindings
 --
 
 ALTER TABLE ONLY public.external_channel_blocks
-    ADD CONSTRAINT external_channel_blocks_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_blocks_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8022,7 +8848,7 @@ ALTER TABLE ONLY public.external_channel_blocks
 --
 
 ALTER TABLE ONLY public.external_channel_blocks
-    ADD CONSTRAINT external_channel_blocks_blocked_by_user_id_fkey FOREIGN KEY (blocked_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_blocks_blocked_by_user_id_fkey FOREIGN KEY (blocked_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8030,7 +8856,7 @@ ALTER TABLE ONLY public.external_channel_blocks
 --
 
 ALTER TABLE ONLY public.external_channel_blocks
-    ADD CONSTRAINT external_channel_blocks_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_blocks_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8038,7 +8864,15 @@ ALTER TABLE ONLY public.external_channel_blocks
 --
 
 ALTER TABLE ONLY public.external_channel_blocks
-    ADD CONSTRAINT external_channel_blocks_removed_by_user_id_fkey FOREIGN KEY (removed_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_blocks_removed_by_user_id_fkey FOREIGN KEY (removed_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_channel_channel_defaults external_channel_channel_defaul_configured_by_principal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_channel_channel_defaults
+    ADD CONSTRAINT external_channel_channel_defaul_configured_by_principal_id_fkey FOREIGN KEY (configured_by_principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8046,7 +8880,7 @@ ALTER TABLE ONLY public.external_channel_blocks
 --
 
 ALTER TABLE ONLY public.external_channel_channel_defaults
-    ADD CONSTRAINT external_channel_channel_defaults_configured_by_user_id_fkey FOREIGN KEY (configured_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_channel_defaults_configured_by_user_id_fkey FOREIGN KEY (configured_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8054,7 +8888,7 @@ ALTER TABLE ONLY public.external_channel_channel_defaults
 --
 
 ALTER TABLE ONLY public.external_channel_connections
-    ADD CONSTRAINT external_channel_connections_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_connections_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8062,7 +8896,7 @@ ALTER TABLE ONLY public.external_channel_connections
 --
 
 ALTER TABLE ONLY public.external_channel_conversation_positions
-    ADD CONSTRAINT external_channel_conversation_positions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_conversation_positions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8070,7 +8904,7 @@ ALTER TABLE ONLY public.external_channel_conversation_positions
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_items
-    ADD CONSTRAINT external_channel_ingress_items_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_items_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8078,7 +8912,7 @@ ALTER TABLE ONLY public.external_channel_ingress_items
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_items
-    ADD CONSTRAINT external_channel_ingress_items_conversation_position_id_fkey FOREIGN KEY (conversation_position_id) REFERENCES public.external_channel_conversation_positions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_items_conversation_position_id_fkey FOREIGN KEY (conversation_position_id) REFERENCES public.external_channel_conversation_positions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8086,7 +8920,7 @@ ALTER TABLE ONLY public.external_channel_ingress_items
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_items
-    ADD CONSTRAINT external_channel_ingress_items_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.external_channel_ingress_owners(id) ON DELETE CASCADE;
+    ADD CONSTRAINT external_channel_ingress_items_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.external_channel_ingress_owners(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8094,7 +8928,7 @@ ALTER TABLE ONLY public.external_channel_ingress_items
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_items
-    ADD CONSTRAINT external_channel_ingress_items_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_items_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8102,7 +8936,7 @@ ALTER TABLE ONLY public.external_channel_ingress_items
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_items
-    ADD CONSTRAINT external_channel_ingress_items_source_resource_id_fkey FOREIGN KEY (source_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_items_source_resource_id_fkey FOREIGN KEY (source_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8110,7 +8944,7 @@ ALTER TABLE ONLY public.external_channel_ingress_items
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_leases
-    ADD CONSTRAINT external_channel_ingress_leases_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_leases_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8118,7 +8952,7 @@ ALTER TABLE ONLY public.external_channel_ingress_leases
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8126,7 +8960,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8134,7 +8968,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_participation_setting_id_fkey FOREIGN KEY (participation_setting_id) REFERENCES public.external_channel_participation_settings(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_participation_setting_id_fkey FOREIGN KEY (participation_setting_id) REFERENCES public.external_channel_participation_settings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8142,7 +8976,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_route_id_fkey FOREIGN KEY (route_id) REFERENCES public.external_channel_agent_routes(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8150,7 +8984,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8158,7 +8992,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_ingress_owners
-    ADD CONSTRAINT external_channel_ingress_owners_target_resource_id_fkey FOREIGN KEY (target_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_ingress_owners_target_resource_id_fkey FOREIGN KEY (target_resource_id) REFERENCES public.external_channel_resources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8166,7 +9000,7 @@ ALTER TABLE ONLY public.external_channel_ingress_owners
 --
 
 ALTER TABLE ONLY public.external_channel_interactions
-    ADD CONSTRAINT external_channel_interactions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_interactions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8174,7 +9008,31 @@ ALTER TABLE ONLY public.external_channel_interactions
 --
 
 ALTER TABLE ONLY public.external_channel_interactions
-    ADD CONSTRAINT external_channel_interactions_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_interactions_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_channel_interactions external_channel_interactions_setup_claim_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_channel_interactions
+    ADD CONSTRAINT external_channel_interactions_setup_claim_id_fkey FOREIGN KEY (setup_claim_id) REFERENCES public.external_channel_setup_claims(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_channel_participation_settings external_channel_participation__configured_by_principal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_channel_participation_settings
+    ADD CONSTRAINT external_channel_participation__configured_by_principal_id_fkey FOREIGN KEY (configured_by_principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: external_channel_participation_settings external_channel_participation_setti_configured_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_channel_participation_settings
+    ADD CONSTRAINT external_channel_participation_setti_configured_by_user_id_fkey FOREIGN KEY (configured_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8182,71 +9040,127 @@ ALTER TABLE ONLY public.external_channel_interactions
 --
 
 ALTER TABLE ONLY public.external_channel_resources
-    ADD CONSTRAINT external_channel_resources_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT external_channel_resources_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: action_executions fk_action_executions_sender_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_channel_setup_claims external_channel_setup_claims_principal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.action_executions
-    ADD CONSTRAINT fk_action_executions_sender_user_id_users FOREIGN KEY (sender_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
-
-
---
--- Name: agent_runs fk_agent_runs_parent_agent_run_id_agent_runs; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.agent_runs
-    ADD CONSTRAINT fk_agent_runs_parent_agent_run_id_agent_runs FOREIGN KEY (parent_agent_run_id) REFERENCES public.agent_runs(id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.external_channel_setup_claims
+    ADD CONSTRAINT external_channel_setup_claims_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: agent_runs fk_agent_runs_session_id_agent_sessions; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_model_drafts external_model_drafts_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.agent_runs
-    ADD CONSTRAINT fk_agent_runs_session_id_agent_sessions FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
-
-
---
--- Name: agent_runtimes fk_agent_runtimes_runtime_provider_resource_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.agent_runtimes
-    ADD CONSTRAINT fk_agent_runtimes_runtime_provider_resource_id FOREIGN KEY (runtime_provider_resource_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
 
 
 --
--- Name: agent_sessions fk_agent_sessions_associated_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_model_drafts external_model_drafts_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT fk_agent_sessions_associated_user_id_users FOREIGN KEY (associated_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
-
-
---
--- Name: agent_sessions fk_agent_sessions_pending_command_requester_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT fk_agent_sessions_pending_command_requester_user_id_users FOREIGN KEY (pending_command_requester_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE RESTRICT;
 
 
 --
--- Name: agent_sessions fk_agent_sessions_pending_idle_continuation_run_id_agent_runs; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_model_drafts external_model_drafts_connection_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT fk_agent_sessions_pending_idle_continuation_run_id_agent_runs FOREIGN KEY (pending_idle_continuation_run_id) REFERENCES public.agent_runs(id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
 
 
 --
--- Name: agent_sessions fk_agent_sessions_stop_requester_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_model_drafts external_model_drafts_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.agent_sessions
-    ADD CONSTRAINT fk_agent_sessions_stop_requester_user_id_users FOREIGN KEY (stop_requester_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_link_id_fkey FOREIGN KEY (link_id) REFERENCES public.external_account_links(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_drafts external_model_drafts_principal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: external_model_drafts external_model_drafts_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: external_model_drafts external_model_drafts_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_drafts
+    ADD CONSTRAINT external_model_drafts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_connection_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_channel_connections(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_link_id_fkey FOREIGN KEY (link_id) REFERENCES public.external_account_links(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_principal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE SET NULL;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: external_model_mutations external_model_mutations_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_model_mutations
+    ADD CONSTRAINT external_model_mutations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --
@@ -8254,79 +9168,15 @@ ALTER TABLE ONLY public.agent_sessions
 --
 
 ALTER TABLE ONLY public.agents
-    ADD CONSTRAINT fk_agents_runtime_profile_id FOREIGN KEY (runtime_profile_id) REFERENCES public.workspace_runtime_profiles(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_agents_runtime_profile_id FOREIGN KEY (runtime_profile_id) REFERENCES public.workspace_runtime_profiles(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: chat_write_requests fk_chat_write_requests_creation_agent_id_agents; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: external_account_links fk_external_account_links_legacy_workspace_id; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.chat_write_requests
-    ADD CONSTRAINT fk_chat_write_requests_creation_agent_id_agents FOREIGN KEY (creation_agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
-
-
---
--- Name: chat_write_requests fk_chat_write_requests_requester_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.chat_write_requests
-    ADD CONSTRAINT fk_chat_write_requests_requester_user_id_users FOREIGN KEY (requester_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
-
-
---
--- Name: events fk_events_session_id_agent_sessions; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events
-    ADD CONSTRAINT fk_events_session_id_agent_sessions FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
-
-
---
--- Name: exchange_files fk_exchange_files_preview_thumbnail_file_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_preview_thumbnail_file_id FOREIGN KEY (preview_thumbnail_file_id) REFERENCES public.exchange_files(id) ON DELETE SET NULL;
-
-
---
--- Name: exchange_files fk_exchange_files_retention_root_session_id_agent_sessions; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_retention_root_session_id_agent_sessions FOREIGN KEY (retention_root_session_id) REFERENCES public.agent_sessions(id) ON DELETE SET NULL;
-
-
---
--- Name: exchange_files fk_exchange_files_source_agent_id_agents; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_source_agent_id_agents FOREIGN KEY (source_agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
-
-
---
--- Name: exchange_files fk_exchange_files_source_exchange_file_id_exchange_files; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_source_exchange_file_id_exchange_files FOREIGN KEY (source_exchange_file_id) REFERENCES public.exchange_files(id) ON DELETE RESTRICT;
-
-
---
--- Name: exchange_files fk_exchange_files_source_run_id_agent_runs; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_source_run_id_agent_runs FOREIGN KEY (source_run_id) REFERENCES public.agent_runs(id) ON DELETE RESTRICT;
-
-
---
--- Name: exchange_files fk_exchange_files_source_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_files
-    ADD CONSTRAINT fk_exchange_files_source_user_id_users FOREIGN KEY (source_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY public.external_account_links
+    ADD CONSTRAINT fk_external_account_links_legacy_workspace_id FOREIGN KEY (legacy_workspace_id) REFERENCES public.workspaces(id) ON DELETE SET NULL;
 
 
 --
@@ -8334,7 +9184,7 @@ ALTER TABLE ONLY public.exchange_files
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT fk_external_channel_access_requests_connection_position FOREIGN KEY (connection_id, conversation_position_id) REFERENCES public.external_channel_conversation_positions(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_access_requests_connection_position FOREIGN KEY (connection_id, conversation_position_id) REFERENCES public.external_channel_conversation_positions(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8342,7 +9192,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT fk_external_channel_access_requests_connection_resource FOREIGN KEY (connection_id, resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_access_requests_connection_resource FOREIGN KEY (connection_id, resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8350,15 +9200,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT fk_external_channel_access_requests_connection_source_resource FOREIGN KEY (connection_id, source_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_access_requests fk_external_channel_access_requests_setup_claim; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_access_requests
-    ADD CONSTRAINT fk_external_channel_access_requests_setup_claim FOREIGN KEY (setup_claim_id) REFERENCES public.external_channel_setup_claims(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_access_requests_connection_source_resource FOREIGN KEY (connection_id, source_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8366,15 +9208,7 @@ ALTER TABLE ONLY public.external_channel_access_requests
 --
 
 ALTER TABLE ONLY public.external_channel_agent_routes
-    ADD CONSTRAINT fk_external_channel_agent_routes_connection_app_mode FOREIGN KEY (connection_id, connection_app_mode) REFERENCES public.external_channel_connections(id, app_mode) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_channel_defaults fk_external_channel_channel_defaults_configured_principal; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_channel_defaults
-    ADD CONSTRAINT fk_external_channel_channel_defaults_configured_principal FOREIGN KEY (configured_by_principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_agent_routes_connection_app_mode FOREIGN KEY (connection_id, connection_app_mode) REFERENCES public.external_channel_connections(id, app_mode) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8382,31 +9216,7 @@ ALTER TABLE ONLY public.external_channel_channel_defaults
 --
 
 ALTER TABLE ONLY public.external_channel_channel_defaults
-    ADD CONSTRAINT fk_external_channel_channel_defaults_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_interactions fk_external_channel_interactions_setup_claim; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_interactions
-    ADD CONSTRAINT fk_external_channel_interactions_setup_claim FOREIGN KEY (setup_claim_id) REFERENCES public.external_channel_setup_claims(id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_participation_settings fk_external_channel_participation_configured_principal; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_participation_settings
-    ADD CONSTRAINT fk_external_channel_participation_configured_principal FOREIGN KEY (configured_by_principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_participation_settings fk_external_channel_participation_configured_user; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_participation_settings
-    ADD CONSTRAINT fk_external_channel_participation_configured_user FOREIGN KEY (configured_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_channel_defaults_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8414,7 +9224,7 @@ ALTER TABLE ONLY public.external_channel_participation_settings
 --
 
 ALTER TABLE ONLY public.external_channel_participation_settings
-    ADD CONSTRAINT fk_external_channel_participation_settings_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_participation_settings_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8422,7 +9232,7 @@ ALTER TABLE ONLY public.external_channel_participation_settings
 --
 
 ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_connection_position FOREIGN KEY (connection_id, conversation_position_id) REFERENCES public.external_channel_conversation_positions(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_setup_claims_connection_position FOREIGN KEY (connection_id, conversation_position_id) REFERENCES public.external_channel_conversation_positions(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8430,7 +9240,7 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 --
 
 ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_setup_claims_connection_route FOREIGN KEY (connection_id, route_id) REFERENCES public.external_channel_agent_routes(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8438,7 +9248,7 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 --
 
 ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_connection_selected_resource FOREIGN KEY (connection_id, selected_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_setup_claims_connection_selected_resource FOREIGN KEY (connection_id, selected_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8446,7 +9256,7 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 --
 
 ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_connection_selected_setting FOREIGN KEY (connection_id, selected_setting_id) REFERENCES public.external_channel_participation_settings(connection_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_setup_claims_connection_selected_setting FOREIGN KEY (connection_id, selected_setting_id) REFERENCES public.external_channel_participation_settings(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8454,39 +9264,7 @@ ALTER TABLE ONLY public.external_channel_setup_claims
 --
 
 ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_connection_source_resource FOREIGN KEY (connection_id, source_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT;
-
-
---
--- Name: external_channel_setup_claims fk_external_channel_setup_claims_principal; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.external_channel_setup_claims
-    ADD CONSTRAINT fk_external_channel_setup_claims_principal FOREIGN KEY (principal_id) REFERENCES public.external_channel_principals(id) ON DELETE RESTRICT;
-
-
---
--- Name: mailbox_items fk_mailbox_items_sender_user_id_users; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mailbox_items
-    ADD CONSTRAINT fk_mailbox_items_sender_user_id_users FOREIGN KEY (sender_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
-
-
---
--- Name: mailbox_items fk_mailbox_items_session_id_agent_sessions; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mailbox_items
-    ADD CONSTRAINT fk_mailbox_items_session_id_agent_sessions FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
-
-
---
--- Name: model_files fk_model_files_created_run_id_agent_runs; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.model_files
-    ADD CONSTRAINT fk_model_files_created_run_id_agent_runs FOREIGN KEY (created_run_id) REFERENCES public.agent_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_external_channel_setup_claims_connection_source_resource FOREIGN KEY (connection_id, source_resource_id) REFERENCES public.external_channel_resources(connection_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8494,31 +9272,7 @@ ALTER TABLE ONLY public.model_files
 --
 
 ALTER TABLE ONLY public.runtime_provider_config_revisions
-    ADD CONSTRAINT fk_runtime_provider_config_revisions_base_revision_id FOREIGN KEY (base_revision_id) REFERENCES public.runtime_provider_config_revisions(id) ON DELETE RESTRICT;
-
-
---
--- Name: runtime_provider_connections fk_runtime_provider_connections_binding_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.runtime_provider_connections
-    ADD CONSTRAINT fk_runtime_provider_connections_binding_id FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT;
-
-
---
--- Name: runtime_provider_credentials fk_runtime_provider_credentials_binding_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.runtime_provider_credentials
-    ADD CONSTRAINT fk_runtime_provider_credentials_binding_id FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT;
-
-
---
--- Name: runtime_provider_enrollment_grants fk_runtime_provider_enrollment_grants_binding_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.runtime_provider_enrollment_grants
-    ADD CONSTRAINT fk_runtime_provider_enrollment_grants_binding_id FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_runtime_provider_config_revisions_base_revision_id FOREIGN KEY (base_revision_id) REFERENCES public.runtime_provider_config_revisions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8526,7 +9280,7 @@ ALTER TABLE ONLY public.runtime_provider_enrollment_grants
 --
 
 ALTER TABLE ONLY public.runtime_providers
-    ADD CONSTRAINT fk_runtime_providers_active_config_revision_id FOREIGN KEY (active_config_revision_id) REFERENCES public.runtime_provider_config_revisions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_runtime_providers_active_config_revision_id FOREIGN KEY (active_config_revision_id) REFERENCES public.runtime_provider_config_revisions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8534,7 +9288,23 @@ ALTER TABLE ONLY public.runtime_providers
 --
 
 ALTER TABLE ONLY public.runtime_providers
-    ADD CONSTRAINT fk_runtime_providers_current_contract_revision_id FOREIGN KEY (current_contract_revision_id) REFERENCES public.runtime_provider_contract_revisions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_runtime_providers_current_contract_revision_id FOREIGN KEY (current_contract_revision_id) REFERENCES public.runtime_provider_contract_revisions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: runtime_web_endpoints fk_runtime_web_endpoints_current_cycle; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT fk_runtime_web_endpoints_current_cycle FOREIGN KEY (current_cycle_id) REFERENCES public.runtime_web_cycles(id) ON DELETE SET NULL;
+
+
+--
+-- Name: runtime_web_endpoints fk_runtime_web_endpoints_current_pending; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT fk_runtime_web_endpoints_current_pending FOREIGN KEY (current_pending_request_id) REFERENCES public.runtime_web_requests(id) ON DELETE SET NULL;
 
 
 --
@@ -8542,7 +9312,7 @@ ALTER TABLE ONLY public.runtime_providers
 --
 
 ALTER TABLE ONLY public.scheduled_tasks
-    ADD CONSTRAINT fk_scheduled_tasks_agent_id FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_scheduled_tasks_agent_id FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8550,7 +9320,7 @@ ALTER TABLE ONLY public.scheduled_tasks
 --
 
 ALTER TABLE ONLY public.scheduled_tasks
-    ADD CONSTRAINT fk_scheduled_tasks_binding_id FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_scheduled_tasks_binding_id FOREIGN KEY (binding_id) REFERENCES public.external_channel_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8558,7 +9328,7 @@ ALTER TABLE ONLY public.scheduled_tasks
 --
 
 ALTER TABLE ONLY public.scheduled_tasks
-    ADD CONSTRAINT fk_scheduled_tasks_session_id FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_scheduled_tasks_session_id FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8566,7 +9336,7 @@ ALTER TABLE ONLY public.scheduled_tasks
 --
 
 ALTER TABLE ONLY public.scheduled_tasks
-    ADD CONSTRAINT fk_scheduled_tasks_workspace_id FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_scheduled_tasks_workspace_id FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8574,7 +9344,7 @@ ALTER TABLE ONLY public.scheduled_tasks
 --
 
 ALTER TABLE ONLY public.session_agent_contexts
-    ADD CONSTRAINT fk_session_agent_contexts_root_session_agent_id_session_agents FOREIGN KEY (root_session_agent_id) REFERENCES public.session_agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_session_agent_contexts_root_session_agent_id_session_agents FOREIGN KEY (root_session_agent_id) REFERENCES public.session_agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8582,15 +9352,7 @@ ALTER TABLE ONLY public.session_agent_contexts
 --
 
 ALTER TABLE ONLY public.session_agent_contexts
-    ADD CONSTRAINT fk_session_contexts_invalidated_removal_id FOREIGN KEY (working_folder_invalidated_by_removal_id) REFERENCES public.agent_runtime_removal_operations(id) ON DELETE RESTRICT;
-
-
---
--- Name: sessions fk_sessions_user_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.sessions
-    ADD CONSTRAINT fk_sessions_user_id FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_session_contexts_invalidated_removal_id FOREIGN KEY (working_folder_invalidated_by_removal_id) REFERENCES public.agent_runtime_removal_operations(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8614,15 +9376,7 @@ ALTER TABLE ONLY public.users
 --
 
 ALTER TABLE ONLY public.workspace_runtime_profiles
-    ADD CONSTRAINT fk_workspace_runtime_profiles_provider_infrastructure FOREIGN KEY (provider_id, infrastructure_profile_id) REFERENCES public.runtime_infrastructure_profiles(provider_id, id) ON DELETE RESTRICT;
-
-
---
--- Name: workspace_users fk_workspace_users_user_id; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.workspace_users
-    ADD CONSTRAINT fk_workspace_users_user_id FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_workspace_runtime_profiles_provider_infrastructure FOREIGN KEY (provider_id, infrastructure_profile_id) REFERENCES public.runtime_infrastructure_profiles(provider_id, id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8630,7 +9384,7 @@ ALTER TABLE ONLY public.workspace_users
 --
 
 ALTER TABLE ONLY public.workspaces
-    ADD CONSTRAINT fk_workspaces_default_runtime_profile_id FOREIGN KEY (default_runtime_profile_id) REFERENCES public.workspace_runtime_profiles(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_workspaces_default_runtime_profile_id FOREIGN KEY (default_runtime_profile_id) REFERENCES public.workspace_runtime_profiles(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8638,7 +9392,7 @@ ALTER TABLE ONLY public.workspaces
 --
 
 ALTER TABLE ONLY public.git_worktree_path_claims
-    ADD CONSTRAINT git_worktree_path_claims_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE SET NULL;
+    ADD CONSTRAINT git_worktree_path_claims_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8646,7 +9400,7 @@ ALTER TABLE ONLY public.git_worktree_path_claims
 --
 
 ALTER TABLE ONLY public.git_worktree_path_claims
-    ADD CONSTRAINT git_worktree_path_claims_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT git_worktree_path_claims_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8654,7 +9408,7 @@ ALTER TABLE ONLY public.git_worktree_path_claims
 --
 
 ALTER TABLE ONLY public.git_worktree_path_claims
-    ADD CONSTRAINT git_worktree_path_claims_root_session_id_fkey FOREIGN KEY (root_session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT git_worktree_path_claims_root_session_id_fkey FOREIGN KEY (root_session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8662,7 +9416,31 @@ ALTER TABLE ONLY public.git_worktree_path_claims
 --
 
 ALTER TABLE ONLY public.github_user_installations
-    ADD CONSTRAINT github_user_installations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT github_user_installations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: image_generation_catalog_entries image_generation_catalog_entries_catalog_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.image_generation_catalog_entries
+    ADD CONSTRAINT image_generation_catalog_entries_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: image_generation_catalog_entries image_generation_catalog_entries_provider_integration_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.image_generation_catalog_entries
+    ADD CONSTRAINT image_generation_catalog_entries_provider_integration_id_fkey FOREIGN KEY (provider_integration_id) REFERENCES public.llm_provider_integrations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: image_generation_catalog_entries image_generation_catalog_entries_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.image_generation_catalog_entries
+    ADD CONSTRAINT image_generation_catalog_entries_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.llm_catalog_snapshots(id) ON DELETE CASCADE;
 
 
 --
@@ -8670,7 +9448,7 @@ ALTER TABLE ONLY public.github_user_installations
 --
 
 ALTER TABLE ONLY public.kimi_oauth_sessions
-    ADD CONSTRAINT kimi_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT kimi_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8678,15 +9456,7 @@ ALTER TABLE ONLY public.kimi_oauth_sessions
 --
 
 ALTER TABLE ONLY public.kimi_oauth_sessions
-    ADD CONSTRAINT kimi_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
-
-
---
--- Name: kubernetes_sandbox_snapshots kubernetes_sandbox_snapshots_agent_runtime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kubernetes_sandbox_snapshots
-    ADD CONSTRAINT kubernetes_sandbox_snapshots_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT kimi_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8694,7 +9464,7 @@ ALTER TABLE ONLY public.kubernetes_sandbox_snapshots
 --
 
 ALTER TABLE ONLY public.llm_catalog_entries
-    ADD CONSTRAINT llm_catalog_entries_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_catalog_entries_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8702,7 +9472,7 @@ ALTER TABLE ONLY public.llm_catalog_entries
 --
 
 ALTER TABLE ONLY public.llm_catalog_entries
-    ADD CONSTRAINT llm_catalog_entries_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.llm_catalog_snapshots(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_catalog_entries_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.llm_catalog_snapshots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8710,7 +9480,7 @@ ALTER TABLE ONLY public.llm_catalog_entries
 --
 
 ALTER TABLE ONLY public.llm_catalog_snapshots
-    ADD CONSTRAINT llm_catalog_snapshots_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_catalog_snapshots_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8718,7 +9488,7 @@ ALTER TABLE ONLY public.llm_catalog_snapshots
 --
 
 ALTER TABLE ONLY public.llm_catalog_snapshots
-    ADD CONSTRAINT llm_catalog_snapshots_source_snapshot_id_fkey FOREIGN KEY (source_snapshot_id) REFERENCES public.litellm_source_snapshots(id) ON DELETE SET NULL;
+    ADD CONSTRAINT llm_catalog_snapshots_source_snapshot_id_fkey FOREIGN KEY (source_snapshot_id) REFERENCES public.litellm_source_snapshots(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8726,7 +9496,7 @@ ALTER TABLE ONLY public.llm_catalog_snapshots
 --
 
 ALTER TABLE ONLY public.llm_catalog_sync_attempts
-    ADD CONSTRAINT llm_catalog_sync_attempts_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_catalog_sync_attempts_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.llm_catalogs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8734,7 +9504,7 @@ ALTER TABLE ONLY public.llm_catalog_sync_attempts
 --
 
 ALTER TABLE ONLY public.llm_catalogs
-    ADD CONSTRAINT llm_catalogs_provider_integration_id_fkey FOREIGN KEY (provider_integration_id) REFERENCES public.llm_provider_integrations(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_catalogs_provider_integration_id_fkey FOREIGN KEY (provider_integration_id) REFERENCES public.llm_provider_integrations(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8742,7 +9512,23 @@ ALTER TABLE ONLY public.llm_catalogs
 --
 
 ALTER TABLE ONLY public.llm_provider_integrations
-    ADD CONSTRAINT llm_provider_integrations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT llm_provider_integrations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: mailbox_items mailbox_items_sender_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mailbox_items
+    ADD CONSTRAINT mailbox_items_sender_user_id_fkey FOREIGN KEY (sender_user_id) REFERENCES public.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: mailbox_items mailbox_items_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mailbox_items
+    ADD CONSTRAINT mailbox_items_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8750,7 +9536,23 @@ ALTER TABLE ONLY public.llm_provider_integrations
 --
 
 ALTER TABLE ONLY public.mcp_oauth_connections
-    ADD CONSTRAINT mcp_oauth_connections_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT mcp_oauth_connections_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: model_candidate_health model_candidate_health_llm_provider_integration_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_candidate_health
+    ADD CONSTRAINT model_candidate_health_llm_provider_integration_id_fkey FOREIGN KEY (llm_provider_integration_id) REFERENCES public.llm_provider_integrations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: model_candidate_health model_candidate_health_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_candidate_health
+    ADD CONSTRAINT model_candidate_health_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
 
 
 --
@@ -8758,7 +9560,7 @@ ALTER TABLE ONLY public.mcp_oauth_connections
 --
 
 ALTER TABLE ONLY public.model_file_pins
-    ADD CONSTRAINT model_file_pins_model_file_id_fkey FOREIGN KEY (model_file_id) REFERENCES public.model_files(id) ON DELETE CASCADE;
+    ADD CONSTRAINT model_file_pins_model_file_id_fkey FOREIGN KEY (model_file_id) REFERENCES public.model_files(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8766,7 +9568,7 @@ ALTER TABLE ONLY public.model_file_pins
 --
 
 ALTER TABLE ONLY public.model_file_pins
-    ADD CONSTRAINT model_file_pins_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT model_file_pins_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8774,7 +9576,7 @@ ALTER TABLE ONLY public.model_file_pins
 --
 
 ALTER TABLE ONLY public.model_file_pins
-    ADD CONSTRAINT model_file_pins_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT model_file_pins_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8782,7 +9584,15 @@ ALTER TABLE ONLY public.model_file_pins
 --
 
 ALTER TABLE ONLY public.model_files
-    ADD CONSTRAINT model_files_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT model_files_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: model_files model_files_created_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_files
+    ADD CONSTRAINT model_files_created_run_id_fkey FOREIGN KEY (created_run_id) REFERENCES public.agent_runs(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8790,7 +9600,7 @@ ALTER TABLE ONLY public.model_files
 --
 
 ALTER TABLE ONLY public.model_files
-    ADD CONSTRAINT model_files_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT model_files_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8798,7 +9608,7 @@ ALTER TABLE ONLY public.model_files
 --
 
 ALTER TABLE ONLY public.model_files
-    ADD CONSTRAINT model_files_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT model_files_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8806,7 +9616,7 @@ ALTER TABLE ONLY public.model_files
 --
 
 ALTER TABLE ONLY public.password_logins
-    ADD CONSTRAINT password_logins_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT password_logins_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8814,7 +9624,7 @@ ALTER TABLE ONLY public.password_logins
 --
 
 ALTER TABLE ONLY public.password_reset_token_redemptions
-    ADD CONSTRAINT password_reset_token_redemptions_password_reset_token_id_fkey FOREIGN KEY (password_reset_token_id) REFERENCES public.password_reset_tokens(id) ON DELETE CASCADE;
+    ADD CONSTRAINT password_reset_token_redemptions_password_reset_token_id_fkey FOREIGN KEY (password_reset_token_id) REFERENCES public.password_reset_tokens(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8822,7 +9632,7 @@ ALTER TABLE ONLY public.password_reset_token_redemptions
 --
 
 ALTER TABLE ONLY public.password_reset_token_redemptions
-    ADD CONSTRAINT password_reset_token_redemptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT password_reset_token_redemptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8830,7 +9640,7 @@ ALTER TABLE ONLY public.password_reset_token_redemptions
 --
 
 ALTER TABLE ONLY public.password_reset_tokens
-    ADD CONSTRAINT password_reset_tokens_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT password_reset_tokens_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8838,7 +9648,7 @@ ALTER TABLE ONLY public.password_reset_tokens
 --
 
 ALTER TABLE ONLY public.password_reset_tokens
-    ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8846,7 +9656,7 @@ ALTER TABLE ONLY public.password_reset_tokens
 --
 
 ALTER TABLE ONLY public.runtime_configuration_states
-    ADD CONSTRAINT runtime_configuration_states_runtime_id_fkey FOREIGN KEY (runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT runtime_configuration_states_runtime_id_fkey FOREIGN KEY (runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8854,7 +9664,7 @@ ALTER TABLE ONLY public.runtime_configuration_states
 --
 
 ALTER TABLE ONLY public.runtime_infrastructure_profiles
-    ADD CONSTRAINT runtime_infrastructure_profiles_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_infrastructure_profiles_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8862,7 +9672,7 @@ ALTER TABLE ONLY public.runtime_infrastructure_profiles
 --
 
 ALTER TABLE ONLY public.runtime_infrastructure_profiles
-    ADD CONSTRAINT runtime_infrastructure_profiles_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_infrastructure_profiles_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8870,7 +9680,7 @@ ALTER TABLE ONLY public.runtime_infrastructure_profiles
 --
 
 ALTER TABLE ONLY public.runtime_infrastructure_profiles
-    ADD CONSTRAINT runtime_infrastructure_profiles_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_infrastructure_profiles_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8878,7 +9688,7 @@ ALTER TABLE ONLY public.runtime_infrastructure_profiles
 --
 
 ALTER TABLE ONLY public.runtime_provider_audit_events
-    ADD CONSTRAINT runtime_provider_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8886,7 +9696,7 @@ ALTER TABLE ONLY public.runtime_provider_audit_events
 --
 
 ALTER TABLE ONLY public.runtime_provider_audit_events
-    ADD CONSTRAINT runtime_provider_audit_events_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_audit_events_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8894,7 +9704,7 @@ ALTER TABLE ONLY public.runtime_provider_audit_events
 --
 
 ALTER TABLE ONLY public.runtime_provider_auth_binding_audit_events
-    ADD CONSTRAINT runtime_provider_auth_binding_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_auth_binding_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8902,7 +9712,7 @@ ALTER TABLE ONLY public.runtime_provider_auth_binding_audit_events
 --
 
 ALTER TABLE ONLY public.runtime_provider_auth_binding_audit_events
-    ADD CONSTRAINT runtime_provider_auth_binding_audit_events_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_auth_binding_audit_events_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8910,7 +9720,7 @@ ALTER TABLE ONLY public.runtime_provider_auth_binding_audit_events
 --
 
 ALTER TABLE ONLY public.runtime_provider_auth_bindings
-    ADD CONSTRAINT runtime_provider_auth_bindings_bootstrap_declaration_id_fkey FOREIGN KEY (bootstrap_declaration_id) REFERENCES public.runtime_provider_bootstrap_declarations(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_auth_bindings_bootstrap_declaration_id_fkey FOREIGN KEY (bootstrap_declaration_id) REFERENCES public.runtime_provider_bootstrap_declarations(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8918,7 +9728,7 @@ ALTER TABLE ONLY public.runtime_provider_auth_bindings
 --
 
 ALTER TABLE ONLY public.runtime_provider_auth_bindings
-    ADD CONSTRAINT runtime_provider_auth_bindings_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_auth_bindings_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8926,7 +9736,7 @@ ALTER TABLE ONLY public.runtime_provider_auth_bindings
 --
 
 ALTER TABLE ONLY public.runtime_provider_auth_bindings
-    ADD CONSTRAINT runtime_provider_auth_bindings_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_auth_bindings_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8934,7 +9744,7 @@ ALTER TABLE ONLY public.runtime_provider_auth_bindings
 --
 
 ALTER TABLE ONLY public.runtime_provider_bootstrap_declarations
-    ADD CONSTRAINT runtime_provider_bootstrap_declarations_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_bootstrap_declarations_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8942,7 +9752,7 @@ ALTER TABLE ONLY public.runtime_provider_bootstrap_declarations
 --
 
 ALTER TABLE ONLY public.runtime_provider_bootstrap_declarations
-    ADD CONSTRAINT runtime_provider_bootstrap_declarations_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.runtime_provider_bootstrap_sources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_bootstrap_declarations_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.runtime_provider_bootstrap_sources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8950,7 +9760,7 @@ ALTER TABLE ONLY public.runtime_provider_bootstrap_declarations
 --
 
 ALTER TABLE ONLY public.runtime_provider_config_revisions
-    ADD CONSTRAINT runtime_provider_config_revisions_activated_by_user_id_fkey FOREIGN KEY (activated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_config_revisions_activated_by_user_id_fkey FOREIGN KEY (activated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8958,7 +9768,7 @@ ALTER TABLE ONLY public.runtime_provider_config_revisions
 --
 
 ALTER TABLE ONLY public.runtime_provider_config_revisions
-    ADD CONSTRAINT runtime_provider_config_revisions_contract_revision_id_fkey FOREIGN KEY (contract_revision_id) REFERENCES public.runtime_provider_contract_revisions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_config_revisions_contract_revision_id_fkey FOREIGN KEY (contract_revision_id) REFERENCES public.runtime_provider_contract_revisions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8966,7 +9776,7 @@ ALTER TABLE ONLY public.runtime_provider_config_revisions
 --
 
 ALTER TABLE ONLY public.runtime_provider_config_revisions
-    ADD CONSTRAINT runtime_provider_config_revisions_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_config_revisions_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8974,7 +9784,15 @@ ALTER TABLE ONLY public.runtime_provider_config_revisions
 --
 
 ALTER TABLE ONLY public.runtime_provider_config_revisions
-    ADD CONSTRAINT runtime_provider_config_revisions_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_config_revisions_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: runtime_provider_connections runtime_provider_connections_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_provider_connections
+    ADD CONSTRAINT runtime_provider_connections_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8982,7 +9800,7 @@ ALTER TABLE ONLY public.runtime_provider_config_revisions
 --
 
 ALTER TABLE ONLY public.runtime_provider_connections
-    ADD CONSTRAINT runtime_provider_connections_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES public.runtime_provider_credentials(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_connections_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES public.runtime_provider_credentials(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8990,7 +9808,7 @@ ALTER TABLE ONLY public.runtime_provider_connections
 --
 
 ALTER TABLE ONLY public.runtime_provider_connections
-    ADD CONSTRAINT runtime_provider_connections_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_connections_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -8998,7 +9816,15 @@ ALTER TABLE ONLY public.runtime_provider_connections
 --
 
 ALTER TABLE ONLY public.runtime_provider_contract_revisions
-    ADD CONSTRAINT runtime_provider_contract_revisions_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_contract_revisions_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: runtime_provider_credentials runtime_provider_credentials_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_provider_credentials
+    ADD CONSTRAINT runtime_provider_credentials_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9006,7 +9832,7 @@ ALTER TABLE ONLY public.runtime_provider_contract_revisions
 --
 
 ALTER TABLE ONLY public.runtime_provider_credentials
-    ADD CONSTRAINT runtime_provider_credentials_issued_grant_id_fkey FOREIGN KEY (issued_grant_id) REFERENCES public.runtime_provider_enrollment_grants(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_credentials_issued_grant_id_fkey FOREIGN KEY (issued_grant_id) REFERENCES public.runtime_provider_enrollment_grants(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9014,7 +9840,7 @@ ALTER TABLE ONLY public.runtime_provider_credentials
 --
 
 ALTER TABLE ONLY public.runtime_provider_credentials
-    ADD CONSTRAINT runtime_provider_credentials_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_credentials_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9022,7 +9848,15 @@ ALTER TABLE ONLY public.runtime_provider_credentials
 --
 
 ALTER TABLE ONLY public.runtime_provider_credentials
-    ADD CONSTRAINT runtime_provider_credentials_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_credentials_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: runtime_provider_enrollment_grants runtime_provider_enrollment_grants_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_provider_enrollment_grants
+    ADD CONSTRAINT runtime_provider_enrollment_grants_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_provider_auth_bindings(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9030,7 +9864,7 @@ ALTER TABLE ONLY public.runtime_provider_credentials
 --
 
 ALTER TABLE ONLY public.runtime_provider_enrollment_grants
-    ADD CONSTRAINT runtime_provider_enrollment_grants_issued_by_source_id_fkey FOREIGN KEY (issued_by_source_id) REFERENCES public.runtime_provider_bootstrap_sources(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_enrollment_grants_issued_by_source_id_fkey FOREIGN KEY (issued_by_source_id) REFERENCES public.runtime_provider_bootstrap_sources(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9038,7 +9872,7 @@ ALTER TABLE ONLY public.runtime_provider_enrollment_grants
 --
 
 ALTER TABLE ONLY public.runtime_provider_enrollment_grants
-    ADD CONSTRAINT runtime_provider_enrollment_grants_issued_by_user_id_fkey FOREIGN KEY (issued_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_enrollment_grants_issued_by_user_id_fkey FOREIGN KEY (issued_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9046,7 +9880,7 @@ ALTER TABLE ONLY public.runtime_provider_enrollment_grants
 --
 
 ALTER TABLE ONLY public.runtime_provider_enrollment_grants
-    ADD CONSTRAINT runtime_provider_enrollment_grants_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_enrollment_grants_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9054,7 +9888,7 @@ ALTER TABLE ONLY public.runtime_provider_enrollment_grants
 --
 
 ALTER TABLE ONLY public.runtime_provider_enrollment_grants
-    ADD CONSTRAINT runtime_provider_enrollment_grants_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_provider_enrollment_grants_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9062,7 +9896,7 @@ ALTER TABLE ONLY public.runtime_provider_enrollment_grants
 --
 
 ALTER TABLE ONLY public.runtime_provider_workspace_availability
-    ADD CONSTRAINT runtime_provider_workspace_availability_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_workspace_availability_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.runtime_providers(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9070,7 +9904,7 @@ ALTER TABLE ONLY public.runtime_provider_workspace_availability
 --
 
 ALTER TABLE ONLY public.runtime_provider_workspace_availability
-    ADD CONSTRAINT runtime_provider_workspace_availability_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_provider_workspace_availability_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9078,7 +9912,7 @@ ALTER TABLE ONLY public.runtime_provider_workspace_availability
 --
 
 ALTER TABLE ONLY public.runtime_providers
-    ADD CONSTRAINT runtime_providers_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT runtime_providers_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9086,7 +9920,7 @@ ALTER TABLE ONLY public.runtime_providers
 --
 
 ALTER TABLE ONLY public.runtime_recreation_operation_items
-    ADD CONSTRAINT runtime_recreation_operation_items_operation_id_fkey FOREIGN KEY (operation_id) REFERENCES public.runtime_recreation_operations(id) ON DELETE CASCADE;
+    ADD CONSTRAINT runtime_recreation_operation_items_operation_id_fkey FOREIGN KEY (operation_id) REFERENCES public.runtime_recreation_operations(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9094,7 +9928,7 @@ ALTER TABLE ONLY public.runtime_recreation_operation_items
 --
 
 ALTER TABLE ONLY public.runtime_recreation_operation_items
-    ADD CONSTRAINT runtime_recreation_operation_items_runtime_id_fkey FOREIGN KEY (runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT runtime_recreation_operation_items_runtime_id_fkey FOREIGN KEY (runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9102,7 +9936,7 @@ ALTER TABLE ONLY public.runtime_recreation_operation_items
 --
 
 ALTER TABLE ONLY public.runtime_recreation_operations
-    ADD CONSTRAINT runtime_recreation_operations_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_recreation_operations_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9110,39 +9944,191 @@ ALTER TABLE ONLY public.runtime_recreation_operations
 --
 
 ALTER TABLE ONLY public.runtime_recreation_operations
-    ADD CONSTRAINT runtime_recreation_operations_actor_workspace_user_id_fkey FOREIGN KEY (actor_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT runtime_recreation_operations_actor_workspace_user_id_fkey FOREIGN KEY (actor_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: sandbox_checkpoints sandbox_checkpoints_agent_runtime_id_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings runtime_web_auth_bindings_auth_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_checkpoints
-    ADD CONSTRAINT sandbox_checkpoints_agent_runtime_id_workspace_id_fkey FOREIGN KEY (agent_runtime_id, workspace_id) REFERENCES public.agent_runtimes(id, workspace_id) ON DELETE CASCADE;
-
-
---
--- Name: sandbox_checkpoints sandbox_checkpoints_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.sandbox_checkpoints
-    ADD CONSTRAINT sandbox_checkpoints_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT runtime_web_auth_bindings_auth_session_id_fkey FOREIGN KEY (auth_session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
 
 
 --
--- Name: sandbox_runtime_leases sandbox_runtime_leases_agent_runtime_id_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings runtime_web_auth_bindings_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_runtime_leases
-    ADD CONSTRAINT sandbox_runtime_leases_agent_runtime_id_workspace_id_fkey FOREIGN KEY (agent_runtime_id, workspace_id) REFERENCES public.agent_runtimes(id, workspace_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT runtime_web_auth_bindings_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.runtime_web_endpoints(id) ON DELETE CASCADE;
 
 
 --
--- Name: sandbox_runtime_leases sandbox_runtime_leases_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: runtime_web_auth_bindings runtime_web_auth_bindings_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.sandbox_runtime_leases
-    ADD CONSTRAINT sandbox_runtime_leases_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.runtime_web_auth_bindings
+    ADD CONSTRAINT runtime_web_auth_bindings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_auth_tickets runtime_web_auth_tickets_auth_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT runtime_web_auth_tickets_auth_session_id_fkey FOREIGN KEY (auth_session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_auth_tickets runtime_web_auth_tickets_binding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT runtime_web_auth_tickets_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES public.runtime_web_auth_bindings(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_auth_tickets runtime_web_auth_tickets_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT runtime_web_auth_tickets_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.runtime_web_endpoints(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_auth_tickets runtime_web_auth_tickets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_auth_tickets
+    ADD CONSTRAINT runtime_web_auth_tickets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_cycles runtime_web_cycles_approver_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_cycles
+    ADD CONSTRAINT runtime_web_cycles_approver_user_id_fkey FOREIGN KEY (approver_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_cycles runtime_web_cycles_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_cycles
+    ADD CONSTRAINT runtime_web_cycles_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.runtime_web_endpoints(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_cycles runtime_web_cycles_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_cycles
+    ADD CONSTRAINT runtime_web_cycles_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.runtime_web_requests(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_endpoints runtime_web_endpoints_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT runtime_web_endpoints_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_endpoints runtime_web_endpoints_agent_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT runtime_web_endpoints_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_endpoints runtime_web_endpoints_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_endpoints
+    ADD CONSTRAINT runtime_web_endpoints_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_gateway_identities runtime_web_gateway_identities_auth_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_gateway_identities
+    ADD CONSTRAINT runtime_web_gateway_identities_auth_session_id_fkey FOREIGN KEY (auth_session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_gateway_identities runtime_web_gateway_identities_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_gateway_identities
+    ADD CONSTRAINT runtime_web_gateway_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_operation_receipts runtime_web_operation_receipts_cycle_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_operation_receipts
+    ADD CONSTRAINT runtime_web_operation_receipts_cycle_id_fkey FOREIGN KEY (cycle_id) REFERENCES public.runtime_web_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_operation_receipts runtime_web_operation_receipts_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_operation_receipts
+    ADD CONSTRAINT runtime_web_operation_receipts_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.runtime_web_endpoints(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_operation_receipts runtime_web_operation_receipts_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_operation_receipts
+    ADD CONSTRAINT runtime_web_operation_receipts_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.runtime_web_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_requests runtime_web_requests_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_requests
+    ADD CONSTRAINT runtime_web_requests_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_requests runtime_web_requests_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_requests
+    ADD CONSTRAINT runtime_web_requests_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.runtime_web_endpoints(id) ON DELETE CASCADE;
+
+
+--
+-- Name: runtime_web_requests runtime_web_requests_requester_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_requests
+    ADD CONSTRAINT runtime_web_requests_requester_agent_id_fkey FOREIGN KEY (requester_agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_requests runtime_web_requests_requester_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_requests
+    ADD CONSTRAINT runtime_web_requests_requester_user_id_fkey FOREIGN KEY (requester_user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: runtime_web_session_routes runtime_web_session_routes_runtime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.runtime_web_session_routes
+    ADD CONSTRAINT runtime_web_session_routes_runtime_id_fkey FOREIGN KEY (runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE CASCADE;
 
 
 --
@@ -9150,7 +10136,7 @@ ALTER TABLE ONLY public.sandbox_runtime_leases
 --
 
 ALTER TABLE ONLY public.session_agent_context_git_worktrees
-    ADD CONSTRAINT session_agent_context_git_wor_session_agent_context_projec_fkey FOREIGN KEY (session_agent_context_project_id) REFERENCES public.session_agent_context_projects(id) ON DELETE SET NULL;
+    ADD CONSTRAINT session_agent_context_git_wor_session_agent_context_projec_fkey FOREIGN KEY (session_agent_context_project_id) REFERENCES public.session_agent_context_projects(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9158,7 +10144,7 @@ ALTER TABLE ONLY public.session_agent_context_git_worktrees
 --
 
 ALTER TABLE ONLY public.session_agent_context_git_worktrees
-    ADD CONSTRAINT session_agent_context_git_work_created_by_agent_session_id_fkey FOREIGN KEY (created_by_agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE SET NULL;
+    ADD CONSTRAINT session_agent_context_git_work_created_by_agent_session_id_fkey FOREIGN KEY (created_by_agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9166,7 +10152,15 @@ ALTER TABLE ONLY public.session_agent_context_git_worktrees
 --
 
 ALTER TABLE ONLY public.session_agent_context_git_worktrees
-    ADD CONSTRAINT session_agent_context_git_work_created_by_session_agent_id_fkey FOREIGN KEY (created_by_session_agent_id) REFERENCES public.session_agents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT session_agent_context_git_work_created_by_session_agent_id_fkey FOREIGN KEY (created_by_session_agent_id) REFERENCES public.session_agents(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: session_agent_context_git_worktrees session_agent_context_git_worktre_session_agent_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.session_agent_context_git_worktrees
+    ADD CONSTRAINT session_agent_context_git_worktre_session_agent_context_id_fkey FOREIGN KEY (session_agent_context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9174,7 +10168,7 @@ ALTER TABLE ONLY public.session_agent_context_git_worktrees
 --
 
 ALTER TABLE ONLY public.session_agent_context_git_worktrees
-    ADD CONSTRAINT session_agent_context_git_worktrees_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE SET NULL;
+    ADD CONSTRAINT session_agent_context_git_worktrees_action_execution_id_fkey FOREIGN KEY (action_execution_id) REFERENCES public.action_executions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9182,7 +10176,7 @@ ALTER TABLE ONLY public.session_agent_context_git_worktrees
 --
 
 ALTER TABLE ONLY public.session_agent_context_projects
-    ADD CONSTRAINT session_agent_context_projects_session_agent_context_id_fkey FOREIGN KEY (session_agent_context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agent_context_projects_session_agent_context_id_fkey FOREIGN KEY (session_agent_context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9190,7 +10184,7 @@ ALTER TABLE ONLY public.session_agent_context_projects
 --
 
 ALTER TABLE ONLY public.session_agent_contexts
-    ADD CONSTRAINT session_agent_contexts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agent_contexts_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9198,7 +10192,7 @@ ALTER TABLE ONLY public.session_agent_contexts
 --
 
 ALTER TABLE ONLY public.session_agent_contexts
-    ADD CONSTRAINT session_agent_contexts_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE SET NULL;
+    ADD CONSTRAINT session_agent_contexts_agent_runtime_id_fkey FOREIGN KEY (agent_runtime_id) REFERENCES public.agent_runtimes(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9206,15 +10200,7 @@ ALTER TABLE ONLY public.session_agent_contexts
 --
 
 ALTER TABLE ONLY public.session_agent_contexts
-    ADD CONSTRAINT session_agent_contexts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
-
-
---
--- Name: session_agent_context_git_worktrees session_agent_ctx_git_worktrees_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.session_agent_context_git_worktrees
-    ADD CONSTRAINT session_agent_ctx_git_worktrees_context_id_fkey FOREIGN KEY (session_agent_context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agent_contexts_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9222,7 +10208,7 @@ ALTER TABLE ONLY public.session_agent_context_git_worktrees
 --
 
 ALTER TABLE ONLY public.session_agents
-    ADD CONSTRAINT session_agents_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agents_agent_session_id_fkey FOREIGN KEY (agent_session_id) REFERENCES public.agent_sessions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9230,7 +10216,7 @@ ALTER TABLE ONLY public.session_agents
 --
 
 ALTER TABLE ONLY public.session_agents
-    ADD CONSTRAINT session_agents_context_id_fkey FOREIGN KEY (context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agents_context_id_fkey FOREIGN KEY (context_id) REFERENCES public.session_agent_contexts(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9238,7 +10224,7 @@ ALTER TABLE ONLY public.session_agents
 --
 
 ALTER TABLE ONLY public.session_agents
-    ADD CONSTRAINT session_agents_parent_session_agent_id_fkey FOREIGN KEY (parent_session_agent_id) REFERENCES public.session_agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT session_agents_parent_session_agent_id_fkey FOREIGN KEY (parent_session_agent_id) REFERENCES public.session_agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9246,7 +10232,15 @@ ALTER TABLE ONLY public.session_agents
 --
 
 ALTER TABLE ONLY public.session_agents
-    ADD CONSTRAINT session_agents_root_session_agent_id_fkey FOREIGN KEY (root_session_agent_id) REFERENCES public.session_agents(id) ON DELETE CASCADE;
+    ADD CONSTRAINT session_agents_root_session_agent_id_fkey FOREIGN KEY (root_session_agent_id) REFERENCES public.session_agents(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: sessions sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9254,7 +10248,7 @@ ALTER TABLE ONLY public.session_agents
 --
 
 ALTER TABLE ONLY public.signup_token_redemptions
-    ADD CONSTRAINT signup_token_redemptions_signup_token_id_fkey FOREIGN KEY (signup_token_id) REFERENCES public.signup_tokens(id) ON DELETE CASCADE;
+    ADD CONSTRAINT signup_token_redemptions_signup_token_id_fkey FOREIGN KEY (signup_token_id) REFERENCES public.signup_tokens(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9262,7 +10256,7 @@ ALTER TABLE ONLY public.signup_token_redemptions
 --
 
 ALTER TABLE ONLY public.signup_token_redemptions
-    ADD CONSTRAINT signup_token_redemptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT signup_token_redemptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9270,7 +10264,7 @@ ALTER TABLE ONLY public.signup_token_redemptions
 --
 
 ALTER TABLE ONLY public.signup_tokens
-    ADD CONSTRAINT signup_tokens_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT signup_tokens_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9278,7 +10272,7 @@ ALTER TABLE ONLY public.signup_tokens
 --
 
 ALTER TABLE ONLY public.system_file_lifecycle_settings
-    ADD CONSTRAINT system_file_lifecycle_settings_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_file_lifecycle_settings_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9286,7 +10280,7 @@ ALTER TABLE ONLY public.system_file_lifecycle_settings
 --
 
 ALTER TABLE ONLY public.system_setting_audit_events
-    ADD CONSTRAINT system_setting_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_setting_audit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9294,7 +10288,7 @@ ALTER TABLE ONLY public.system_setting_audit_events
 --
 
 ALTER TABLE ONLY public.system_setting_candidates
-    ADD CONSTRAINT system_setting_candidates_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_setting_candidates_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9302,7 +10296,7 @@ ALTER TABLE ONLY public.system_setting_candidates
 --
 
 ALTER TABLE ONLY public.system_setting_health
-    ADD CONSTRAINT system_setting_health_checked_by_user_id_fkey FOREIGN KEY (checked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_setting_health_checked_by_user_id_fkey FOREIGN KEY (checked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9310,7 +10304,7 @@ ALTER TABLE ONLY public.system_setting_health
 --
 
 ALTER TABLE ONLY public.system_settings
-    ADD CONSTRAINT system_settings_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_settings_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9318,7 +10312,7 @@ ALTER TABLE ONLY public.system_settings
 --
 
 ALTER TABLE ONLY public.system_user_roles
-    ADD CONSTRAINT system_user_roles_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT system_user_roles_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9326,7 +10320,15 @@ ALTER TABLE ONLY public.system_user_roles
 --
 
 ALTER TABLE ONLY public.system_user_roles
-    ADD CONSTRAINT system_user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT system_user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: toolkit_configs toolkit_configs_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.toolkit_configs
+    ADD CONSTRAINT toolkit_configs_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9334,7 +10336,7 @@ ALTER TABLE ONLY public.system_user_roles
 --
 
 ALTER TABLE ONLY public.toolkit_scopes
-    ADD CONSTRAINT toolkit_scopes_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT toolkit_scopes_toolkit_id_fkey FOREIGN KEY (toolkit_id) REFERENCES public.toolkit_configs(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9342,7 +10344,7 @@ ALTER TABLE ONLY public.toolkit_scopes
 --
 
 ALTER TABLE ONLY public.toolkit_states
-    ADD CONSTRAINT toolkit_states_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT toolkit_states_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9350,15 +10352,7 @@ ALTER TABLE ONLY public.toolkit_states
 --
 
 ALTER TABLE ONLY public.toolkit_states
-    ADD CONSTRAINT toolkit_states_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
-
-
---
--- Name: toolkit_configs toolkits_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.toolkit_configs
-    ADD CONSTRAINT toolkits_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT toolkit_states_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9366,7 +10360,7 @@ ALTER TABLE ONLY public.toolkit_configs
 --
 
 ALTER TABLE ONLY public.user_emails
-    ADD CONSTRAINT user_emails_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT user_emails_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9374,7 +10368,7 @@ ALTER TABLE ONLY public.user_emails
 --
 
 ALTER TABLE ONLY public.workspace_invitations
-    ADD CONSTRAINT workspace_invitations_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES public.workspace_users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_invitations_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES public.workspace_users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9382,7 +10376,7 @@ ALTER TABLE ONLY public.workspace_invitations
 --
 
 ALTER TABLE ONLY public.workspace_invitations
-    ADD CONSTRAINT workspace_invitations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_invitations_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9390,7 +10384,7 @@ ALTER TABLE ONLY public.workspace_invitations
 --
 
 ALTER TABLE ONLY public.workspace_join_requests
-    ADD CONSTRAINT workspace_join_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_join_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9398,7 +10392,7 @@ ALTER TABLE ONLY public.workspace_join_requests
 --
 
 ALTER TABLE ONLY public.workspace_join_requests
-    ADD CONSTRAINT workspace_join_requests_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_join_requests_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9406,7 +10400,7 @@ ALTER TABLE ONLY public.workspace_join_requests
 --
 
 ALTER TABLE ONLY public.workspace_model_settings
-    ADD CONSTRAINT workspace_model_settings_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_model_settings_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9414,7 +10408,7 @@ ALTER TABLE ONLY public.workspace_model_settings
 --
 
 ALTER TABLE ONLY public.workspace_runtime_profiles
-    ADD CONSTRAINT workspace_runtime_profiles_created_by_workspace_user_id_fkey FOREIGN KEY (created_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT workspace_runtime_profiles_created_by_workspace_user_id_fkey FOREIGN KEY (created_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9422,7 +10416,7 @@ ALTER TABLE ONLY public.workspace_runtime_profiles
 --
 
 ALTER TABLE ONLY public.workspace_runtime_profiles
-    ADD CONSTRAINT workspace_runtime_profiles_updated_by_workspace_user_id_fkey FOREIGN KEY (updated_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT workspace_runtime_profiles_updated_by_workspace_user_id_fkey FOREIGN KEY (updated_by_workspace_user_id) REFERENCES public.workspace_users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9430,7 +10424,15 @@ ALTER TABLE ONLY public.workspace_runtime_profiles
 --
 
 ALTER TABLE ONLY public.workspace_runtime_profiles
-    ADD CONSTRAINT workspace_runtime_profiles_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_runtime_profiles_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: workspace_users workspace_users_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workspace_users
+    ADD CONSTRAINT workspace_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9438,7 +10440,7 @@ ALTER TABLE ONLY public.workspace_runtime_profiles
 --
 
 ALTER TABLE ONLY public.workspace_users
-    ADD CONSTRAINT workspace_users_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT workspace_users_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9446,7 +10448,7 @@ ALTER TABLE ONLY public.workspace_users
 --
 
 ALTER TABLE ONLY public.xai_oauth_sessions
-    ADD CONSTRAINT xai_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD CONSTRAINT xai_oauth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -9454,11 +10456,11 @@ ALTER TABLE ONLY public.xai_oauth_sessions
 --
 
 ALTER TABLE ONLY public.xai_oauth_sessions
-    ADD CONSTRAINT xai_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT xai_oauth_sessions_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Baseline seed rows required by current runtime behavior
+-- Deterministic singleton rows required by current runtime behavior
 --
 
 INSERT INTO public.system_file_lifecycle_settings (
@@ -9472,6 +10474,25 @@ INSERT INTO public.runtime_connection_generation_cutovers (
     cutover_at
 ) VALUES (1, statement_timestamp());
 
+INSERT INTO public.model_candidate_chain_cutovers (
+    id,
+    schema_version
+) VALUES (1, 1);
+
+INSERT INTO public.runtime_web_auth_configuration (
+    id,
+    enabled,
+    mode,
+    fingerprint,
+    active_duration_seconds
+) VALUES (
+    1,
+    false,
+    'separate_domain',
+    '9d83c5f39577f63a9e9ce3eeef51751ed5798537fcea984a30dcdb21105d339d',
+    7200
+);
+
 --
 -- PostgreSQL database dump complete
 --
@@ -9481,6 +10502,7 @@ _DOWNGRADE_SQL = r"""
 ALTER TABLE IF EXISTS ONLY public.xai_oauth_sessions DROP CONSTRAINT IF EXISTS xai_oauth_sessions_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.xai_oauth_sessions DROP CONSTRAINT IF EXISTS xai_oauth_sessions_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspace_users DROP CONSTRAINT IF EXISTS workspace_users_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.workspace_users DROP CONSTRAINT IF EXISTS workspace_users_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspace_runtime_profiles DROP CONSTRAINT IF EXISTS workspace_runtime_profiles_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspace_runtime_profiles DROP CONSTRAINT IF EXISTS workspace_runtime_profiles_updated_by_workspace_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspace_runtime_profiles DROP CONSTRAINT IF EXISTS workspace_runtime_profiles_created_by_workspace_user_id_fkey;
@@ -9490,10 +10512,10 @@ ALTER TABLE IF EXISTS ONLY public.workspace_join_requests DROP CONSTRAINT IF EXI
 ALTER TABLE IF EXISTS ONLY public.workspace_invitations DROP CONSTRAINT IF EXISTS workspace_invitations_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspace_invitations DROP CONSTRAINT IF EXISTS workspace_invitations_invited_by_fkey;
 ALTER TABLE IF EXISTS ONLY public.user_emails DROP CONSTRAINT IF EXISTS user_emails_user_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.toolkit_configs DROP CONSTRAINT IF EXISTS toolkits_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.toolkit_states DROP CONSTRAINT IF EXISTS toolkit_states_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.toolkit_states DROP CONSTRAINT IF EXISTS toolkit_states_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.toolkit_scopes DROP CONSTRAINT IF EXISTS toolkit_scopes_toolkit_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.toolkit_configs DROP CONSTRAINT IF EXISTS toolkit_configs_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.system_user_roles DROP CONSTRAINT IF EXISTS system_user_roles_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.system_user_roles DROP CONSTRAINT IF EXISTS system_user_roles_granted_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.system_settings DROP CONSTRAINT IF EXISTS system_settings_updated_by_user_id_fkey;
@@ -9504,23 +10526,43 @@ ALTER TABLE IF EXISTS ONLY public.system_file_lifecycle_settings DROP CONSTRAINT
 ALTER TABLE IF EXISTS ONLY public.signup_tokens DROP CONSTRAINT IF EXISTS signup_tokens_created_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.signup_token_redemptions DROP CONSTRAINT IF EXISTS signup_token_redemptions_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.signup_token_redemptions DROP CONSTRAINT IF EXISTS signup_token_redemptions_signup_token_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.sessions DROP CONSTRAINT IF EXISTS sessions_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS session_agents_root_session_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS session_agents_parent_session_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS session_agents_context_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS session_agents_agent_session_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_ctx_git_worktrees_context_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS session_agent_contexts_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS session_agent_contexts_agent_runtime_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS session_agent_contexts_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_projects DROP CONSTRAINT IF EXISTS session_agent_context_projects_session_agent_context_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_worktrees_action_execution_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_worktre_session_agent_context_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_work_created_by_session_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_work_created_by_agent_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_wor_session_agent_context_projec_fkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_runtime_leases DROP CONSTRAINT IF EXISTS sandbox_runtime_leases_workspace_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_runtime_leases DROP CONSTRAINT IF EXISTS sandbox_runtime_leases_agent_runtime_id_workspace_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_checkpoints DROP CONSTRAINT IF EXISTS sandbox_checkpoints_workspace_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_checkpoints DROP CONSTRAINT IF EXISTS sandbox_checkpoints_agent_runtime_id_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_session_routes DROP CONSTRAINT IF EXISTS runtime_web_session_routes_runtime_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_requests DROP CONSTRAINT IF EXISTS runtime_web_requests_requester_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_requests DROP CONSTRAINT IF EXISTS runtime_web_requests_requester_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_requests DROP CONSTRAINT IF EXISTS runtime_web_requests_endpoint_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_requests DROP CONSTRAINT IF EXISTS runtime_web_requests_decided_by_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_operation_receipts DROP CONSTRAINT IF EXISTS runtime_web_operation_receipts_request_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_operation_receipts DROP CONSTRAINT IF EXISTS runtime_web_operation_receipts_endpoint_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_operation_receipts DROP CONSTRAINT IF EXISTS runtime_web_operation_receipts_cycle_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_gateway_identities DROP CONSTRAINT IF EXISTS runtime_web_gateway_identities_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_gateway_identities DROP CONSTRAINT IF EXISTS runtime_web_gateway_identities_auth_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS runtime_web_endpoints_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS runtime_web_endpoints_agent_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS runtime_web_endpoints_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_cycles DROP CONSTRAINT IF EXISTS runtime_web_cycles_request_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_cycles DROP CONSTRAINT IF EXISTS runtime_web_cycles_endpoint_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_cycles DROP CONSTRAINT IF EXISTS runtime_web_cycles_approver_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS runtime_web_auth_tickets_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS runtime_web_auth_tickets_endpoint_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS runtime_web_auth_tickets_binding_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS runtime_web_auth_tickets_auth_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS runtime_web_auth_bindings_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS runtime_web_auth_bindings_endpoint_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS runtime_web_auth_bindings_auth_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operations DROP CONSTRAINT IF EXISTS runtime_recreation_operations_actor_workspace_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operations DROP CONSTRAINT IF EXISTS runtime_recreation_operations_actor_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operation_items DROP CONSTRAINT IF EXISTS runtime_recreation_operation_items_runtime_id_fkey;
@@ -9532,12 +10574,15 @@ ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTR
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTRAINT IF EXISTS runtime_provider_enrollment_grants_provider_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTRAINT IF EXISTS runtime_provider_enrollment_grants_issued_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTRAINT IF EXISTS runtime_provider_enrollment_grants_issued_by_source_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTRAINT IF EXISTS runtime_provider_enrollment_grants_binding_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_credentials DROP CONSTRAINT IF EXISTS runtime_provider_credentials_revoked_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_credentials DROP CONSTRAINT IF EXISTS runtime_provider_credentials_provider_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_credentials DROP CONSTRAINT IF EXISTS runtime_provider_credentials_issued_grant_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_provider_credentials DROP CONSTRAINT IF EXISTS runtime_provider_credentials_binding_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_contract_revisions DROP CONSTRAINT IF EXISTS runtime_provider_contract_revisions_provider_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_connections DROP CONSTRAINT IF EXISTS runtime_provider_connections_provider_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_connections DROP CONSTRAINT IF EXISTS runtime_provider_connections_credential_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_provider_connections DROP CONSTRAINT IF EXISTS runtime_provider_connections_binding_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_config_revisions DROP CONSTRAINT IF EXISTS runtime_provider_config_revisions_provider_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_config_revisions DROP CONSTRAINT IF EXISTS runtime_provider_config_revisions_created_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_config_revisions DROP CONSTRAINT IF EXISTS runtime_provider_config_revisions_contract_revision_id_fkey;
@@ -9562,11 +10607,16 @@ ALTER TABLE IF EXISTS ONLY public.password_reset_token_redemptions DROP CONSTRAI
 ALTER TABLE IF EXISTS ONLY public.password_logins DROP CONSTRAINT IF EXISTS password_logins_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS model_files_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS model_files_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS model_files_created_run_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS model_files_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_file_pins DROP CONSTRAINT IF EXISTS model_file_pins_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_file_pins DROP CONSTRAINT IF EXISTS model_file_pins_run_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.model_file_pins DROP CONSTRAINT IF EXISTS model_file_pins_model_file_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.model_candidate_health DROP CONSTRAINT IF EXISTS model_candidate_health_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.model_candidate_health DROP CONSTRAINT IF EXISTS model_candidate_health_llm_provider_integration_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.mcp_oauth_connections DROP CONSTRAINT IF EXISTS mcp_oauth_connections_toolkit_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS mailbox_items_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS mailbox_items_sender_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.llm_provider_integrations DROP CONSTRAINT IF EXISTS llm_provider_integrations_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalogs DROP CONSTRAINT IF EXISTS llm_catalogs_provider_integration_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_sync_attempts DROP CONSTRAINT IF EXISTS llm_catalog_sync_attempts_catalog_id_fkey;
@@ -9574,70 +10624,62 @@ ALTER TABLE IF EXISTS ONLY public.llm_catalog_snapshots DROP CONSTRAINT IF EXIST
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_snapshots DROP CONSTRAINT IF EXISTS llm_catalog_snapshots_catalog_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_entries DROP CONSTRAINT IF EXISTS llm_catalog_entries_snapshot_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_entries DROP CONSTRAINT IF EXISTS llm_catalog_entries_catalog_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.kubernetes_sandbox_snapshots DROP CONSTRAINT IF EXISTS kubernetes_sandbox_snapshots_agent_runtime_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.kimi_oauth_sessions DROP CONSTRAINT IF EXISTS kimi_oauth_sessions_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.kimi_oauth_sessions DROP CONSTRAINT IF EXISTS kimi_oauth_sessions_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.image_generation_catalog_entries DROP CONSTRAINT IF EXISTS image_generation_catalog_entries_snapshot_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.image_generation_catalog_entries DROP CONSTRAINT IF EXISTS image_generation_catalog_entries_provider_integration_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.image_generation_catalog_entries DROP CONSTRAINT IF EXISTS image_generation_catalog_entries_catalog_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.github_user_installations DROP CONSTRAINT IF EXISTS github_user_installations_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.git_worktree_path_claims DROP CONSTRAINT IF EXISTS git_worktree_path_claims_root_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.git_worktree_path_claims DROP CONSTRAINT IF EXISTS git_worktree_path_claims_agent_runtime_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.git_worktree_path_claims DROP CONSTRAINT IF EXISTS git_worktree_path_claims_action_execution_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.workspaces DROP CONSTRAINT IF EXISTS fk_workspaces_default_runtime_profile_id;
-ALTER TABLE IF EXISTS ONLY public.workspace_users DROP CONSTRAINT IF EXISTS fk_workspace_users_user_id;
 ALTER TABLE IF EXISTS ONLY public.workspace_runtime_profiles DROP CONSTRAINT IF EXISTS fk_workspace_runtime_profiles_provider_infrastructure;
 ALTER TABLE IF EXISTS ONLY public.users DROP CONSTRAINT IF EXISTS fk_users_primary_email_id;
 ALTER TABLE IF EXISTS ONLY public.toolkit_configs DROP CONSTRAINT IF EXISTS fk_toolkit_configs_owner_agent_id_agents;
-ALTER TABLE IF EXISTS ONLY public.sessions DROP CONSTRAINT IF EXISTS fk_sessions_user_id;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS fk_session_contexts_invalidated_removal_id;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS fk_session_agent_contexts_root_session_agent_id_session_agents;
 ALTER TABLE IF EXISTS ONLY public.scheduled_tasks DROP CONSTRAINT IF EXISTS fk_scheduled_tasks_workspace_id;
 ALTER TABLE IF EXISTS ONLY public.scheduled_tasks DROP CONSTRAINT IF EXISTS fk_scheduled_tasks_session_id;
 ALTER TABLE IF EXISTS ONLY public.scheduled_tasks DROP CONSTRAINT IF EXISTS fk_scheduled_tasks_binding_id;
 ALTER TABLE IF EXISTS ONLY public.scheduled_tasks DROP CONSTRAINT IF EXISTS fk_scheduled_tasks_agent_id;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS fk_runtime_web_endpoints_current_pending;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS fk_runtime_web_endpoints_current_cycle;
 ALTER TABLE IF EXISTS ONLY public.runtime_providers DROP CONSTRAINT IF EXISTS fk_runtime_providers_current_contract_revision_id;
 ALTER TABLE IF EXISTS ONLY public.runtime_providers DROP CONSTRAINT IF EXISTS fk_runtime_providers_active_config_revision_id;
-ALTER TABLE IF EXISTS ONLY public.runtime_provider_enrollment_grants DROP CONSTRAINT IF EXISTS fk_runtime_provider_enrollment_grants_binding_id;
-ALTER TABLE IF EXISTS ONLY public.runtime_provider_credentials DROP CONSTRAINT IF EXISTS fk_runtime_provider_credentials_binding_id;
-ALTER TABLE IF EXISTS ONLY public.runtime_provider_connections DROP CONSTRAINT IF EXISTS fk_runtime_provider_connections_binding_id;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_config_revisions DROP CONSTRAINT IF EXISTS fk_runtime_provider_config_revisions_base_revision_id;
-ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS fk_model_files_created_run_id_agent_runs;
-ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS fk_mailbox_items_session_id_agent_sessions;
-ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS fk_mailbox_items_sender_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_principal;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_connection_source_resource;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_connection_selected_setting;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_connection_selected_resource;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_connection_route;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS fk_external_channel_setup_claims_connection_position;
 ALTER TABLE IF EXISTS ONLY public.external_channel_participation_settings DROP CONSTRAINT IF EXISTS fk_external_channel_participation_settings_connection_route;
-ALTER TABLE IF EXISTS ONLY public.external_channel_participation_settings DROP CONSTRAINT IF EXISTS fk_external_channel_participation_configured_user;
-ALTER TABLE IF EXISTS ONLY public.external_channel_participation_settings DROP CONSTRAINT IF EXISTS fk_external_channel_participation_configured_principal;
-ALTER TABLE IF EXISTS ONLY public.external_channel_interactions DROP CONSTRAINT IF EXISTS fk_external_channel_interactions_setup_claim;
 ALTER TABLE IF EXISTS ONLY public.external_channel_channel_defaults DROP CONSTRAINT IF EXISTS fk_external_channel_channel_defaults_connection_route;
-ALTER TABLE IF EXISTS ONLY public.external_channel_channel_defaults DROP CONSTRAINT IF EXISTS fk_external_channel_channel_defaults_configured_principal;
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS fk_external_channel_agent_routes_connection_app_mode;
-ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS fk_external_channel_access_requests_setup_claim;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS fk_external_channel_access_requests_connection_source_resource;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS fk_external_channel_access_requests_connection_resource;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS fk_external_channel_access_requests_connection_position;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_source_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_source_run_id_agent_runs;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_source_exchange_file_id_exchange_files;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_source_agent_id_agents;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_retention_root_session_id_agent_sessions;
-ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS fk_exchange_files_preview_thumbnail_file_id;
-ALTER TABLE IF EXISTS ONLY public.events DROP CONSTRAINT IF EXISTS fk_events_session_id_agent_sessions;
-ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS fk_chat_write_requests_requester_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS fk_chat_write_requests_creation_agent_id_agents;
+ALTER TABLE IF EXISTS ONLY public.external_account_links DROP CONSTRAINT IF EXISTS fk_external_account_links_legacy_workspace_id;
 ALTER TABLE IF EXISTS ONLY public.agents DROP CONSTRAINT IF EXISTS fk_agents_runtime_profile_id;
-ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_stop_requester_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_pending_idle_continuation_run_id_agent_runs;
-ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_pending_command_requester_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_associated_user_id_users;
-ALTER TABLE IF EXISTS ONLY public.agent_runtimes DROP CONSTRAINT IF EXISTS fk_agent_runtimes_runtime_provider_resource_id;
-ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS fk_agent_runs_session_id_agent_sessions;
-ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS fk_agent_runs_parent_agent_run_id_agent_runs;
-ALTER TABLE IF EXISTS ONLY public.action_executions DROP CONSTRAINT IF EXISTS fk_action_executions_sender_user_id_users;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_principal_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_link_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_connection_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_binding_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_principal_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_link_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_connection_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_binding_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS external_channel_setup_claims_principal_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_resources DROP CONSTRAINT IF EXISTS external_channel_resources_connection_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_participation_settings DROP CONSTRAINT IF EXISTS external_channel_participation_setti_configured_by_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_participation_settings DROP CONSTRAINT IF EXISTS external_channel_participation__configured_by_principal_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_interactions DROP CONSTRAINT IF EXISTS external_channel_interactions_setup_claim_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_interactions DROP CONSTRAINT IF EXISTS external_channel_interactions_principal_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_interactions DROP CONSTRAINT IF EXISTS external_channel_interactions_connection_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_ingress_owners DROP CONSTRAINT IF EXISTS external_channel_ingress_owners_target_resource_id_fkey;
@@ -9655,6 +10697,7 @@ ALTER TABLE IF EXISTS ONLY public.external_channel_ingress_items DROP CONSTRAINT
 ALTER TABLE IF EXISTS ONLY public.external_channel_conversation_positions DROP CONSTRAINT IF EXISTS external_channel_conversation_positions_connection_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_connections DROP CONSTRAINT IF EXISTS external_channel_connections_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_channel_defaults DROP CONSTRAINT IF EXISTS external_channel_channel_defaults_configured_by_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_channel_defaults DROP CONSTRAINT IF EXISTS external_channel_channel_defaul_configured_by_principal_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_blocks DROP CONSTRAINT IF EXISTS external_channel_blocks_removed_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_blocks DROP CONSTRAINT IF EXISTS external_channel_blocks_principal_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_blocks DROP CONSTRAINT IF EXISTS external_channel_blocks_blocked_by_user_id_fkey;
@@ -9665,8 +10708,8 @@ ALTER TABLE IF EXISTS ONLY public.external_channel_bindings DROP CONSTRAINT IF E
 ALTER TABLE IF EXISTS ONLY public.external_channel_app_claims DROP CONSTRAINT IF EXISTS external_channel_app_claims_connection_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS external_channel_agent_routes_catalog_removed_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS external_channel_agent_routes_agent_id_fkey;
-ALTER TABLE IF EXISTS ONLY public.external_channel_agent_route_bot_policy_archive DROP CONSTRAINT IF EXISTS external_channel_agent_route_bot_policy_archive_route_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_source_resource_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_setup_claim_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_route_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_resource_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_principal_id_fkey;
@@ -9678,12 +10721,24 @@ ALTER TABLE IF EXISTS ONLY public.external_channel_access_grants DROP CONSTRAINT
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_grants DROP CONSTRAINT IF EXISTS external_channel_access_grants_granted_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_grants DROP CONSTRAINT IF EXISTS external_channel_access_grants_agent_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_grants DROP CONSTRAINT IF EXISTS external_channel_access_grants_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_account_oauth_attempts DROP CONSTRAINT IF EXISTS external_account_oauth_attempts_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_account_oauth_attempts DROP CONSTRAINT IF EXISTS external_account_oauth_attempts_auth_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.external_account_links DROP CONSTRAINT IF EXISTS external_account_links_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_source_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_source_run_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_source_exchange_file_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_source_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_retention_root_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_preview_thumbnail_file_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_created_by_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.events DROP CONSTRAINT IF EXISTS events_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.chatgpt_oauth_sessions DROP CONSTRAINT IF EXISTS chatgpt_oauth_sessions_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.chatgpt_oauth_sessions DROP CONSTRAINT IF EXISTS chatgpt_oauth_sessions_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS chat_write_requests_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS chat_write_requests_requester_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS chat_write_requests_creation_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.artifacts DROP CONSTRAINT IF EXISTS artifacts_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.artifacts DROP CONSTRAINT IF EXISTS artifacts_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.artifacts DROP CONSTRAINT IF EXISTS artifacts_agent_id_fkey;
@@ -9693,11 +10748,16 @@ ALTER TABLE IF EXISTS ONLY public.agents DROP CONSTRAINT IF EXISTS agents_worksp
 ALTER TABLE IF EXISTS ONLY public.agent_toolkits DROP CONSTRAINT IF EXISTS agent_toolkits_toolkit_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_toolkits DROP CONSTRAINT IF EXISTS agent_toolkits_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_stop_requester_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_pending_idle_continuation_run_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_pending_command_requester_user_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_associated_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_session_unread_runs DROP CONSTRAINT IF EXISTS agent_session_unread_runs_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_session_unread_runs DROP CONSTRAINT IF EXISTS agent_session_unread_runs_run_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_session_system_prompt_snapshots DROP CONSTRAINT IF EXISTS agent_session_system_prompt_snapshots_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtimes DROP CONSTRAINT IF EXISTS agent_runtimes_workspace_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_runtimes DROP CONSTRAINT IF EXISTS agent_runtimes_runtime_provider_resource_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtimes DROP CONSTRAINT IF EXISTS agent_runtimes_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_removal_operations DROP CONSTRAINT IF EXISTS agent_runtime_removal_operations_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_removal_operations DROP CONSTRAINT IF EXISTS agent_runtime_removal_operations_agent_runtime_id_fkey;
@@ -9705,6 +10765,8 @@ ALTER TABLE IF EXISTS ONLY public.agent_runtime_removal_operations DROP CONSTRAI
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_add_receipts DROP CONSTRAINT IF EXISTS agent_runtime_add_receipts_workspace_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_add_receipts DROP CONSTRAINT IF EXISTS agent_runtime_add_receipts_agent_runtime_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_add_receipts DROP CONSTRAINT IF EXISTS agent_runtime_add_receipts_agent_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS agent_runs_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS agent_runs_parent_agent_run_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_run_input_events DROP CONSTRAINT IF EXISTS agent_run_input_events_event_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_run_input_events DROP CONSTRAINT IF EXISTS agent_run_input_events_agent_run_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_project_presets DROP CONSTRAINT IF EXISTS agent_project_presets_agent_id_fkey;
@@ -9718,21 +10780,22 @@ ALTER TABLE IF EXISTS ONLY public.agent_automatic_project_items DROP CONSTRAINT 
 ALTER TABLE IF EXISTS ONLY public.agent_admins DROP CONSTRAINT IF EXISTS agent_admins_workspace_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agent_admins DROP CONSTRAINT IF EXISTS agent_admins_agent_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.action_executions DROP CONSTRAINT IF EXISTS action_executions_session_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.action_executions DROP CONSTRAINT IF EXISTS action_executions_sender_user_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.action_execution_events DROP CONSTRAINT IF EXISTS action_execution_events_session_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.action_execution_events DROP CONSTRAINT IF EXISTS action_execution_events_action_execution_id_fkey;
 DROP TRIGGER IF EXISTS trg_runtime_providers_connection_generation ON public.runtime_providers;
 DROP TRIGGER IF EXISTS trg_agent_runtimes_connection_generation ON public.agent_runtimes;
-DROP TRIGGER IF EXISTS external_channel_connections_app_mode_immutable ON public.external_channel_connections;
-DROP TRIGGER IF EXISTS external_channel_agent_routes_agent_snapshot_immutable ON public.external_channel_agent_routes;
 DROP INDEX IF EXISTS public.uq_toolkit_configs_shared_workspace_slug;
 DROP INDEX IF EXISTS public.uq_toolkit_configs_owner_agent_slug;
+DROP INDEX IF EXISTS public.uq_runtime_web_requests_pending_endpoint;
+DROP INDEX IF EXISTS public.uq_runtime_web_cycles_current_endpoint;
 DROP INDEX IF EXISTS public.uq_runtime_provider_auth_bindings_method_subject_active;
 DROP INDEX IF EXISTS public.uq_runtime_provider_auth_bindings_bootstrap_declaration_active;
 DROP INDEX IF EXISTS public.uq_owner_lifecycle_jobs_membership_archive;
 DROP INDEX IF EXISTS public.uq_owner_lifecycle_jobs_account_purge;
 DROP INDEX IF EXISTS public.uq_mailbox_items_session_kind_idempotency;
-DROP INDEX IF EXISTS public.uq_llm_catalogs_system_scope_provider_target;
-DROP INDEX IF EXISTS public.uq_llm_catalogs_integration_target;
+DROP INDEX IF EXISTS public.uq_llm_catalogs_system_scope_provider_target_purpose;
+DROP INDEX IF EXISTS public.uq_llm_catalogs_integration_target_purpose;
 DROP INDEX IF EXISTS public.uq_github_user_installations_user_app_installation;
 DROP INDEX IF EXISTS public.uq_external_channel_setup_claims_nonterminal_connection_channel;
 DROP INDEX IF EXISTS public.uq_external_channel_participation_active_channel;
@@ -9745,6 +10808,7 @@ DROP INDEX IF EXISTS public.uq_external_channel_bindings_connected_resource;
 DROP INDEX IF EXISTS public.uq_external_channel_agent_routes_single_connection;
 DROP INDEX IF EXISTS public.uq_external_channel_access_grants_active_session;
 DROP INDEX IF EXISTS public.uq_external_channel_access_grants_active_agent;
+DROP INDEX IF EXISTS public.uq_external_account_links_active_external_identity;
 DROP INDEX IF EXISTS public.uq_events_session_external;
 DROP INDEX IF EXISTS public.uq_chat_write_requests_creation_agent_requester_client;
 DROP INDEX IF EXISTS public.uq_archived_session_retention_applications_active;
@@ -9809,13 +10873,18 @@ DROP INDEX IF EXISTS public.ix_scheduled_tasks_binding_id;
 DROP INDEX IF EXISTS public.ix_scheduled_tasks_active_cycle_id;
 DROP INDEX IF EXISTS public.ix_scheduled_task_states_next_run_at;
 DROP INDEX IF EXISTS public.ix_scheduled_task_states_lease_until;
-DROP INDEX IF EXISTS public.ix_sandbox_runtime_leases_workspace_id;
-DROP INDEX IF EXISTS public.ix_sandbox_runtime_leases_stale;
-DROP INDEX IF EXISTS public.ix_sandbox_runtime_leases_provider_state;
-DROP INDEX IF EXISTS public.ix_sandbox_runtime_leases_active_runtime;
-DROP INDEX IF EXISTS public.ix_sandbox_checkpoints_workspace_id;
-DROP INDEX IF EXISTS public.ix_sandbox_checkpoints_agent_runtime_id_invalidated_at;
-DROP INDEX IF EXISTS public.ix_sandbox_checkpoints_agent_runtime_id_created_at;
+DROP INDEX IF EXISTS public.ix_runtime_web_session_routes_owner_lease;
+DROP INDEX IF EXISTS public.ix_runtime_web_session_routes_generation;
+DROP INDEX IF EXISTS public.ix_runtime_web_requests_endpoint_created;
+DROP INDEX IF EXISTS public.ix_runtime_web_operation_receipts_endpoint;
+DROP INDEX IF EXISTS public.ix_runtime_web_gateway_identities_expiry;
+DROP INDEX IF EXISTS public.ix_runtime_web_gateway_identities_auth_session;
+DROP INDEX IF EXISTS public.ix_runtime_web_endpoints_session;
+DROP INDEX IF EXISTS public.ix_runtime_web_endpoints_agent;
+DROP INDEX IF EXISTS public.ix_runtime_web_cycles_expires;
+DROP INDEX IF EXISTS public.ix_runtime_web_cycles_endpoint_approved;
+DROP INDEX IF EXISTS public.ix_runtime_web_auth_tickets_expiry;
+DROP INDEX IF EXISTS public.ix_runtime_web_auth_bindings_expiry;
 DROP INDEX IF EXISTS public.ix_runtime_recreation_operations_target;
 DROP INDEX IF EXISTS public.ix_runtime_recreation_operations_status;
 DROP INDEX IF EXISTS public.ix_runtime_recreation_operation_items_operation_status;
@@ -9832,6 +10901,7 @@ DROP INDEX IF EXISTS public.ix_runtime_provider_contract_revisions_provider_crea
 DROP INDEX IF EXISTS public.ix_runtime_provider_connections_provider_status;
 DROP INDEX IF EXISTS public.ix_runtime_provider_connections_credential_status;
 DROP INDEX IF EXISTS public.ix_runtime_provider_connections_binding_status;
+DROP INDEX IF EXISTS public.ix_runtime_provider_connections_authentication;
 DROP INDEX IF EXISTS public.ix_runtime_provider_config_revisions_validation_request;
 DROP INDEX IF EXISTS public.ix_runtime_provider_config_revisions_provider_state;
 DROP INDEX IF EXISTS public.ix_runtime_provider_bootstrap_sources_adapter_kind;
@@ -9855,6 +10925,7 @@ DROP INDEX IF EXISTS public.ix_model_files_workspace_id;
 DROP INDEX IF EXISTS public.ix_model_files_session_status;
 DROP INDEX IF EXISTS public.ix_model_file_pins_run_id;
 DROP INDEX IF EXISTS public.ix_model_file_pins_model_file_id;
+DROP INDEX IF EXISTS public.ix_model_candidate_health_cooldown_until;
 DROP INDEX IF EXISTS public.ix_mcp_oauth_connections_toolkit_id;
 DROP INDEX IF EXISTS public.ix_mailbox_items_session_order;
 DROP INDEX IF EXISTS public.ix_mailbox_items_session_id_scheduling_mode;
@@ -9867,14 +10938,19 @@ DROP INDEX IF EXISTS public.ix_llm_catalog_snapshots_catalog_id;
 DROP INDEX IF EXISTS public.ix_llm_catalog_entries_snapshot_id;
 DROP INDEX IF EXISTS public.ix_llm_catalog_entries_catalog_model;
 DROP INDEX IF EXISTS public.ix_llm_catalog_entries_catalog_display;
-DROP INDEX IF EXISTS public.ix_kubernetes_sandbox_snapshots_agent_runtime_id_created_at;
 DROP INDEX IF EXISTS public.ix_kimi_oauth_sessions_workspace_id;
 DROP INDEX IF EXISTS public.ix_kimi_oauth_sessions_user_id;
+DROP INDEX IF EXISTS public.ix_image_generation_catalog_entries_snapshot_id;
+DROP INDEX IF EXISTS public.ix_image_generation_catalog_entries_catalog_rank;
 DROP INDEX IF EXISTS public.ix_github_user_installations_user_id;
 DROP INDEX IF EXISTS public.ix_github_user_installations_platform_app_id;
 DROP INDEX IF EXISTS public.ix_git_worktree_path_claims_root_session_id;
 DROP INDEX IF EXISTS public.ix_git_worktree_path_claims_agent_runtime_id;
 DROP INDEX IF EXISTS public.ix_git_worktree_path_claims_action_execution_id;
+DROP INDEX IF EXISTS public.ix_external_model_mutations_session_id;
+DROP INDEX IF EXISTS public.ix_external_model_mutations_link_id_snapshot;
+DROP INDEX IF EXISTS public.ix_external_model_drafts_session_id;
+DROP INDEX IF EXISTS public.ix_external_model_drafts_expires_at;
 DROP INDEX IF EXISTS public.ix_external_channel_setup_claims_status_expires_at;
 DROP INDEX IF EXISTS public.ix_external_channel_setup_claims_route_id_status;
 DROP INDEX IF EXISTS public.ix_external_channel_resources_latest_activity_at;
@@ -9901,6 +10977,10 @@ DROP INDEX IF EXISTS public.ix_external_channel_access_requests_setup_claim_id;
 DROP INDEX IF EXISTS public.ix_external_channel_access_requests_agent_session_id;
 DROP INDEX IF EXISTS public.ix_external_channel_access_grants_agent_session_id;
 DROP INDEX IF EXISTS public.ix_external_channel_access_grants_agent_id;
+DROP INDEX IF EXISTS public.ix_external_account_oauth_attempts_user_session;
+DROP INDEX IF EXISTS public.ix_external_account_oauth_attempts_expires_at;
+DROP INDEX IF EXISTS public.ix_external_account_links_user_id;
+DROP INDEX IF EXISTS public.ix_external_account_links_legacy_workspace_id;
 DROP INDEX IF EXISTS public.ix_exchange_files_workspace_id;
 DROP INDEX IF EXISTS public.ix_exchange_files_status_expires_at;
 DROP INDEX IF EXISTS public.ix_exchange_files_retention_root_status;
@@ -9996,8 +11076,16 @@ ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS uq_se
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS uq_session_agent_contexts_working_folder_path;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS uq_session_agent_contexts_root_session_agent_id;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_projects DROP CONSTRAINT IF EXISTS uq_session_agent_context_projects_context_path;
-ALTER TABLE IF EXISTS ONLY public.sandbox_runtime_leases DROP CONSTRAINT IF EXISTS uq_sandbox_runtime_leases_runtime_generation;
-ALTER TABLE IF EXISTS ONLY public.sandbox_checkpoints DROP CONSTRAINT IF EXISTS uq_sandbox_checkpoints_object_key;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_session_routes DROP CONSTRAINT IF EXISTS uq_runtime_web_session_routes_session_lease;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_session_routes DROP CONSTRAINT IF EXISTS uq_runtime_web_session_routes_join_nonce_hash;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_operation_receipts DROP CONSTRAINT IF EXISTS uq_runtime_web_operation_receipts_operation;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_gateway_identities DROP CONSTRAINT IF EXISTS uq_runtime_web_gateway_identities_secret_hash;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS uq_runtime_web_endpoints_session_port;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS uq_runtime_web_endpoints_hostname_key;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS uq_runtime_web_auth_tickets_secret_hash;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS uq_runtime_web_auth_bindings_main_hash;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS uq_runtime_web_auth_bindings_initiation;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS uq_runtime_web_auth_bindings_broker_hash;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operation_items DROP CONSTRAINT IF EXISTS uq_runtime_recreation_operation_items_operation_runtime;
 ALTER TABLE IF EXISTS ONLY public.runtime_providers DROP CONSTRAINT IF EXISTS uq_runtime_providers_provider_id;
 ALTER TABLE IF EXISTS ONLY public.runtime_provider_connections DROP CONSTRAINT IF EXISTS uq_runtime_provider_connections_provider_generation;
@@ -10015,7 +11103,10 @@ ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS uq_model
 ALTER TABLE IF EXISTS ONLY public.model_file_pins DROP CONSTRAINT IF EXISTS uq_model_file_pins_model_file_run;
 ALTER TABLE IF EXISTS ONLY public.mcp_oauth_connections DROP CONSTRAINT IF EXISTS uq_mcp_oauth_connections_toolkit_id;
 ALTER TABLE IF EXISTS ONLY public.litellm_source_snapshots DROP CONSTRAINT IF EXISTS uq_litellm_source_snapshots_source_hash;
+ALTER TABLE IF EXISTS ONLY public.image_generation_catalog_entries DROP CONSTRAINT IF EXISTS uq_image_generation_catalog_entries_snapshot_model;
 ALTER TABLE IF EXISTS ONLY public.git_worktree_path_claims DROP CONSTRAINT IF EXISTS uq_git_worktree_path_claims_agent_runtime_path;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS uq_external_model_mutations_provider_connection_interaction;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS uq_external_model_drafts_connection_interaction;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS uq_external_channel_setup_claims_connection_id_id;
 ALTER TABLE IF EXISTS ONLY public.external_channel_resources DROP CONSTRAINT IF EXISTS uq_external_channel_resources_connection_type_provider_key;
 ALTER TABLE IF EXISTS ONLY public.external_channel_resources DROP CONSTRAINT IF EXISTS uq_external_channel_resources_connection_id_id;
@@ -10034,6 +11125,7 @@ ALTER TABLE IF EXISTS ONLY public.external_channel_app_claims DROP CONSTRAINT IF
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS uq_external_channel_agent_routes_connection_id_id;
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS uq_external_channel_agent_routes_connection_agent;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS uq_external_channel_access_requests_route_trigger_message;
+ALTER TABLE IF EXISTS ONLY public.external_account_oauth_attempts DROP CONSTRAINT IF EXISTS uq_external_account_oauth_attempts_state_hash;
 ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS uq_exchange_files_object_key;
 ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS uq_chat_write_requests_session_requester_client_request;
 ALTER TABLE IF EXISTS ONLY public.artifacts DROP CONSTRAINT IF EXISTS uq_artifacts_storage_key;
@@ -10054,9 +11146,9 @@ ALTER TABLE IF EXISTS ONLY public.agent_automatic_project_items DROP CONSTRAINT 
 ALTER TABLE IF EXISTS ONLY public.agent_admins DROP CONSTRAINT IF EXISTS uq_agent_admins_agent_workspace_user;
 ALTER TABLE IF EXISTS ONLY public.action_executions DROP CONSTRAINT IF EXISTS uq_action_executions_mailbox_item_id;
 ALTER TABLE IF EXISTS ONLY public.action_execution_events DROP CONSTRAINT IF EXISTS uq_action_execution_events_execution_sequence;
-ALTER TABLE IF EXISTS ONLY public.toolkit_configs DROP CONSTRAINT IF EXISTS toolkits_pkey;
 ALTER TABLE IF EXISTS ONLY public.toolkit_states DROP CONSTRAINT IF EXISTS toolkit_states_pkey;
 ALTER TABLE IF EXISTS ONLY public.toolkit_scopes DROP CONSTRAINT IF EXISTS toolkit_scopes_pkey;
+ALTER TABLE IF EXISTS ONLY public.toolkit_configs DROP CONSTRAINT IF EXISTS toolkit_configs_pkey;
 ALTER TABLE IF EXISTS ONLY public.system_user_roles DROP CONSTRAINT IF EXISTS system_user_roles_pkey;
 ALTER TABLE IF EXISTS ONLY public.system_settings DROP CONSTRAINT IF EXISTS system_settings_pkey;
 ALTER TABLE IF EXISTS ONLY public.system_setting_health DROP CONSTRAINT IF EXISTS system_setting_health_pkey;
@@ -10068,15 +11160,22 @@ ALTER TABLE IF EXISTS ONLY public.system_bootstrap_states DROP CONSTRAINT IF EXI
 ALTER TABLE IF EXISTS ONLY public.signup_tokens DROP CONSTRAINT IF EXISTS signup_tokens_pkey;
 ALTER TABLE IF EXISTS ONLY public.signup_token_redemptions DROP CONSTRAINT IF EXISTS signup_token_redemptions_pkey;
 ALTER TABLE IF EXISTS ONLY public.sessions DROP CONSTRAINT IF EXISTS sessions_pkey;
-ALTER TABLE IF EXISTS ONLY public.kubernetes_sandbox_snapshots DROP CONSTRAINT IF EXISTS session_snapshots_pkey;
 ALTER TABLE IF EXISTS ONLY public.session_agents DROP CONSTRAINT IF EXISTS session_agents_pkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_contexts DROP CONSTRAINT IF EXISTS session_agent_contexts_pkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_projects DROP CONSTRAINT IF EXISTS session_agent_context_projects_pkey;
 ALTER TABLE IF EXISTS ONLY public.session_agent_context_git_worktrees DROP CONSTRAINT IF EXISTS session_agent_context_git_worktrees_pkey;
 ALTER TABLE IF EXISTS ONLY public.scheduled_tasks DROP CONSTRAINT IF EXISTS scheduled_tasks_pkey;
 ALTER TABLE IF EXISTS ONLY public.scheduled_task_states DROP CONSTRAINT IF EXISTS scheduled_task_states_pkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_runtime_leases DROP CONSTRAINT IF EXISTS sandbox_runtime_leases_pkey;
-ALTER TABLE IF EXISTS ONLY public.sandbox_checkpoints DROP CONSTRAINT IF EXISTS sandbox_checkpoints_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_session_routes DROP CONSTRAINT IF EXISTS runtime_web_session_routes_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_requests DROP CONSTRAINT IF EXISTS runtime_web_requests_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_quota_scopes DROP CONSTRAINT IF EXISTS runtime_web_quota_scopes_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_operation_receipts DROP CONSTRAINT IF EXISTS runtime_web_operation_receipts_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_gateway_identities DROP CONSTRAINT IF EXISTS runtime_web_gateway_identities_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_endpoints DROP CONSTRAINT IF EXISTS runtime_web_endpoints_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_cycles DROP CONSTRAINT IF EXISTS runtime_web_cycles_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_tickets DROP CONSTRAINT IF EXISTS runtime_web_auth_tickets_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_configuration DROP CONSTRAINT IF EXISTS runtime_web_auth_configuration_pkey;
+ALTER TABLE IF EXISTS ONLY public.runtime_web_auth_bindings DROP CONSTRAINT IF EXISTS runtime_web_auth_bindings_pkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operations DROP CONSTRAINT IF EXISTS runtime_recreation_operations_pkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_recreation_operation_items DROP CONSTRAINT IF EXISTS runtime_recreation_operation_items_pkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_providers DROP CONSTRAINT IF EXISTS runtime_providers_pkey;
@@ -10096,16 +11195,15 @@ ALTER TABLE IF EXISTS ONLY public.runtime_connection_generations DROP CONSTRAINT
 ALTER TABLE IF EXISTS ONLY public.runtime_connection_generation_cutovers DROP CONSTRAINT IF EXISTS runtime_connection_generation_cutovers_pkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_configuration_states DROP CONSTRAINT IF EXISTS runtime_configuration_states_pkey;
 ALTER TABLE IF EXISTS ONLY public.runtime_configuration_reconcile_tasks DROP CONSTRAINT IF EXISTS runtime_configuration_reconcile_tasks_pkey;
-ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS pk_mailbox_items;
-ALTER TABLE IF EXISTS ONLY public.events DROP CONSTRAINT IF EXISTS pk_events;
-ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS pk_agent_sessions;
-ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS pk_agent_runs;
 ALTER TABLE IF EXISTS ONLY public.password_reset_tokens DROP CONSTRAINT IF EXISTS password_reset_tokens_pkey;
 ALTER TABLE IF EXISTS ONLY public.password_reset_token_redemptions DROP CONSTRAINT IF EXISTS password_reset_token_redemptions_pkey;
 ALTER TABLE IF EXISTS ONLY public.password_logins DROP CONSTRAINT IF EXISTS password_logins_pkey;
 ALTER TABLE IF EXISTS ONLY public.owner_lifecycle_jobs DROP CONSTRAINT IF EXISTS owner_lifecycle_jobs_pkey;
 ALTER TABLE IF EXISTS ONLY public.model_files DROP CONSTRAINT IF EXISTS model_files_pkey;
+ALTER TABLE IF EXISTS ONLY public.model_candidate_health DROP CONSTRAINT IF EXISTS model_candidate_health_pkey;
+ALTER TABLE IF EXISTS ONLY public.model_candidate_chain_cutovers DROP CONSTRAINT IF EXISTS model_candidate_chain_cutovers_pkey;
 ALTER TABLE IF EXISTS ONLY public.mcp_oauth_connections DROP CONSTRAINT IF EXISTS mcp_oauth_connections_pkey;
+ALTER TABLE IF EXISTS ONLY public.mailbox_items DROP CONSTRAINT IF EXISTS mailbox_items_pkey;
 ALTER TABLE IF EXISTS ONLY public.llm_provider_integrations DROP CONSTRAINT IF EXISTS llm_provider_integrations_pkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalogs DROP CONSTRAINT IF EXISTS llm_catalogs_pkey;
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_sync_attempts DROP CONSTRAINT IF EXISTS llm_catalog_sync_attempts_pkey;
@@ -10113,8 +11211,11 @@ ALTER TABLE IF EXISTS ONLY public.llm_catalog_snapshots DROP CONSTRAINT IF EXIST
 ALTER TABLE IF EXISTS ONLY public.llm_catalog_entries DROP CONSTRAINT IF EXISTS llm_catalog_entries_pkey;
 ALTER TABLE IF EXISTS ONLY public.litellm_source_snapshots DROP CONSTRAINT IF EXISTS litellm_source_snapshots_pkey;
 ALTER TABLE IF EXISTS ONLY public.kimi_oauth_sessions DROP CONSTRAINT IF EXISTS kimi_oauth_sessions_pkey;
+ALTER TABLE IF EXISTS ONLY public.image_generation_catalog_entries DROP CONSTRAINT IF EXISTS image_generation_catalog_entries_pkey;
 ALTER TABLE IF EXISTS ONLY public.github_user_installations DROP CONSTRAINT IF EXISTS github_user_installations_pkey;
 ALTER TABLE IF EXISTS ONLY public.git_worktree_path_claims DROP CONSTRAINT IF EXISTS git_worktree_path_claims_pkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_mutations DROP CONSTRAINT IF EXISTS external_model_mutations_pkey;
+ALTER TABLE IF EXISTS ONLY public.external_model_drafts DROP CONSTRAINT IF EXISTS external_model_drafts_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_setup_claims DROP CONSTRAINT IF EXISTS external_channel_setup_claims_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_resources DROP CONSTRAINT IF EXISTS external_channel_resources_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_principals DROP CONSTRAINT IF EXISTS external_channel_principals_pkey;
@@ -10130,10 +11231,12 @@ ALTER TABLE IF EXISTS ONLY public.external_channel_blocks DROP CONSTRAINT IF EXI
 ALTER TABLE IF EXISTS ONLY public.external_channel_bindings DROP CONSTRAINT IF EXISTS external_channel_bindings_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_app_claims DROP CONSTRAINT IF EXISTS external_channel_app_claims_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_agent_routes DROP CONSTRAINT IF EXISTS external_channel_agent_routes_pkey;
-ALTER TABLE IF EXISTS ONLY public.external_channel_agent_route_bot_policy_archive DROP CONSTRAINT IF EXISTS external_channel_agent_route_bot_policy_archive_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_requests DROP CONSTRAINT IF EXISTS external_channel_access_requests_pkey;
 ALTER TABLE IF EXISTS ONLY public.external_channel_access_grants DROP CONSTRAINT IF EXISTS external_channel_access_grants_pkey;
+ALTER TABLE IF EXISTS ONLY public.external_account_oauth_attempts DROP CONSTRAINT IF EXISTS external_account_oauth_attempts_pkey;
+ALTER TABLE IF EXISTS ONLY public.external_account_links DROP CONSTRAINT IF EXISTS external_account_links_pkey;
 ALTER TABLE IF EXISTS ONLY public.exchange_files DROP CONSTRAINT IF EXISTS exchange_files_pkey;
+ALTER TABLE IF EXISTS ONLY public.events DROP CONSTRAINT IF EXISTS events_pkey;
 ALTER TABLE IF EXISTS ONLY public.email_verifications DROP CONSTRAINT IF EXISTS email_verifications_pkey;
 ALTER TABLE IF EXISTS ONLY public.chatgpt_oauth_sessions DROP CONSTRAINT IF EXISTS chatgpt_oauth_sessions_pkey;
 ALTER TABLE IF EXISTS ONLY public.chat_write_requests DROP CONSTRAINT IF EXISTS chat_write_requests_pkey;
@@ -10143,11 +11246,13 @@ ALTER TABLE IF EXISTS ONLY public.archived_session_purge_participant_executions 
 ALTER TABLE IF EXISTS ONLY public.archived_session_purge_jobs DROP CONSTRAINT IF EXISTS archived_session_purge_jobs_pkey;
 ALTER TABLE IF EXISTS ONLY public.agents DROP CONSTRAINT IF EXISTS agents_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_toolkits DROP CONSTRAINT IF EXISTS agent_toolkits_pkey;
+ALTER TABLE IF EXISTS ONLY public.agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_session_unread_runs DROP CONSTRAINT IF EXISTS agent_session_unread_runs_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_session_system_prompt_snapshots DROP CONSTRAINT IF EXISTS agent_session_system_prompt_snapshots_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtimes DROP CONSTRAINT IF EXISTS agent_runtimes_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_removal_operations DROP CONSTRAINT IF EXISTS agent_runtime_removal_operations_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_runtime_add_receipts DROP CONSTRAINT IF EXISTS agent_runtime_add_receipts_pkey;
+ALTER TABLE IF EXISTS ONLY public.agent_runs DROP CONSTRAINT IF EXISTS agent_runs_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_run_input_events DROP CONSTRAINT IF EXISTS agent_run_input_events_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_project_presets DROP CONSTRAINT IF EXISTS agent_project_presets_pkey;
 ALTER TABLE IF EXISTS ONLY public.agent_project_defaults DROP CONSTRAINT IF EXISTS agent_project_defaults_pkey;
@@ -10160,8 +11265,9 @@ ALTER TABLE IF EXISTS ONLY public.agent_automatic_project_items DROP CONSTRAINT 
 ALTER TABLE IF EXISTS ONLY public.agent_admins DROP CONSTRAINT IF EXISTS agent_admins_pkey;
 ALTER TABLE IF EXISTS ONLY public.action_executions DROP CONSTRAINT IF EXISTS action_executions_pkey;
 ALTER TABLE IF EXISTS ONLY public.action_execution_events DROP CONSTRAINT IF EXISTS action_execution_events_pkey;
-ALTER TABLE IF EXISTS public.system_bootstrap_states ALTER COLUMN id DROP DEFAULT;
+ALTER TABLE IF EXISTS public.runtime_web_auth_configuration ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.runtime_connection_generation_cutovers ALTER COLUMN allocator_version DROP DEFAULT;
+ALTER TABLE IF EXISTS public.model_candidate_chain_cutovers ALTER COLUMN id DROP DEFAULT;
 DROP TABLE IF EXISTS public.xai_oauth_sessions;
 DROP TABLE IF EXISTS public.workspaces;
 DROP TABLE IF EXISTS public.workspace_users;
@@ -10181,7 +11287,6 @@ DROP TABLE IF EXISTS public.system_setting_candidates;
 DROP TABLE IF EXISTS public.system_setting_audit_events;
 DROP TABLE IF EXISTS public.system_file_lifecycle_settings;
 DROP TABLE IF EXISTS public.system_data_migrations;
-DROP SEQUENCE IF EXISTS public.system_bootstrap_states_id_seq;
 DROP TABLE IF EXISTS public.system_bootstrap_states;
 DROP TABLE IF EXISTS public.signup_tokens;
 DROP TABLE IF EXISTS public.signup_token_redemptions;
@@ -10192,8 +11297,17 @@ DROP TABLE IF EXISTS public.session_agent_context_projects;
 DROP TABLE IF EXISTS public.session_agent_context_git_worktrees;
 DROP TABLE IF EXISTS public.scheduled_tasks;
 DROP TABLE IF EXISTS public.scheduled_task_states;
-DROP TABLE IF EXISTS public.sandbox_runtime_leases;
-DROP TABLE IF EXISTS public.sandbox_checkpoints;
+DROP TABLE IF EXISTS public.runtime_web_session_routes;
+DROP TABLE IF EXISTS public.runtime_web_requests;
+DROP TABLE IF EXISTS public.runtime_web_quota_scopes;
+DROP TABLE IF EXISTS public.runtime_web_operation_receipts;
+DROP TABLE IF EXISTS public.runtime_web_gateway_identities;
+DROP TABLE IF EXISTS public.runtime_web_endpoints;
+DROP TABLE IF EXISTS public.runtime_web_cycles;
+DROP TABLE IF EXISTS public.runtime_web_auth_tickets;
+DROP SEQUENCE IF EXISTS public.runtime_web_auth_configuration_id_seq;
+DROP TABLE IF EXISTS public.runtime_web_auth_configuration;
+DROP TABLE IF EXISTS public.runtime_web_auth_bindings;
 DROP TABLE IF EXISTS public.runtime_recreation_operations;
 DROP TABLE IF EXISTS public.runtime_recreation_operation_items;
 DROP TABLE IF EXISTS public.runtime_providers;
@@ -10220,6 +11334,9 @@ DROP TABLE IF EXISTS public.password_logins;
 DROP TABLE IF EXISTS public.owner_lifecycle_jobs;
 DROP TABLE IF EXISTS public.model_files;
 DROP TABLE IF EXISTS public.model_file_pins;
+DROP TABLE IF EXISTS public.model_candidate_health;
+DROP SEQUENCE IF EXISTS public.model_candidate_chain_cutovers_id_seq;
+DROP TABLE IF EXISTS public.model_candidate_chain_cutovers;
 DROP TABLE IF EXISTS public.mcp_oauth_connections;
 DROP TABLE IF EXISTS public.mailbox_items;
 DROP TABLE IF EXISTS public.llm_provider_integrations;
@@ -10228,10 +11345,12 @@ DROP TABLE IF EXISTS public.llm_catalog_sync_attempts;
 DROP TABLE IF EXISTS public.llm_catalog_snapshots;
 DROP TABLE IF EXISTS public.llm_catalog_entries;
 DROP TABLE IF EXISTS public.litellm_source_snapshots;
-DROP TABLE IF EXISTS public.kubernetes_sandbox_snapshots;
 DROP TABLE IF EXISTS public.kimi_oauth_sessions;
+DROP TABLE IF EXISTS public.image_generation_catalog_entries;
 DROP TABLE IF EXISTS public.github_user_installations;
 DROP TABLE IF EXISTS public.git_worktree_path_claims;
+DROP TABLE IF EXISTS public.external_model_mutations;
+DROP TABLE IF EXISTS public.external_model_drafts;
 DROP TABLE IF EXISTS public.external_channel_setup_claims;
 DROP TABLE IF EXISTS public.external_channel_resources;
 DROP TABLE IF EXISTS public.external_channel_principals;
@@ -10247,9 +11366,10 @@ DROP TABLE IF EXISTS public.external_channel_blocks;
 DROP TABLE IF EXISTS public.external_channel_bindings;
 DROP TABLE IF EXISTS public.external_channel_app_claims;
 DROP TABLE IF EXISTS public.external_channel_agent_routes;
-DROP TABLE IF EXISTS public.external_channel_agent_route_bot_policy_archive;
 DROP TABLE IF EXISTS public.external_channel_access_requests;
 DROP TABLE IF EXISTS public.external_channel_access_grants;
+DROP TABLE IF EXISTS public.external_account_oauth_attempts;
+DROP TABLE IF EXISTS public.external_account_links;
 DROP TABLE IF EXISTS public.exchange_files;
 DROP TABLE IF EXISTS public.events;
 DROP TABLE IF EXISTS public.email_verifications;
@@ -10280,8 +11400,6 @@ DROP TABLE IF EXISTS public.agent_automatic_project_items;
 DROP TABLE IF EXISTS public.agent_admins;
 DROP TABLE IF EXISTS public.action_executions;
 DROP TABLE IF EXISTS public.action_execution_events;
-DROP FUNCTION IF EXISTS public.prevent_external_channel_connection_app_mode_update();
-DROP FUNCTION IF EXISTS public.preserve_external_channel_route_agent_snapshot();
 DROP FUNCTION IF EXISTS public.initialize_runtime_provider_connection_generation();
 DROP FUNCTION IF EXISTS public.initialize_agent_runtime_connection_generation();
 DROP TYPE IF EXISTS public.xai_oauth_session_status;
@@ -10295,7 +11413,6 @@ DROP TYPE IF EXISTS public.system_setting_health_status;
 DROP TYPE IF EXISTS public.system_setting_audit_source;
 DROP TYPE IF EXISTS public.system_setting_audit_event_type;
 DROP TYPE IF EXISTS public.system_data_migration_outcome;
-DROP TYPE IF EXISTS public.snapshot_kind;
 DROP TYPE IF EXISTS public.signup_token_delivery_method;
 DROP TYPE IF EXISTS public.session_working_folder_cleanup_status;
 DROP TYPE IF EXISTS public.session_working_folder_binding_state;
@@ -10304,10 +11421,12 @@ DROP TYPE IF EXISTS public.session_git_worktree_branch_created_by;
 DROP TYPE IF EXISTS public.session_agent_kind;
 DROP TYPE IF EXISTS public.scheduled_task_status;
 DROP TYPE IF EXISTS public.scheduled_task_schedule_type;
-DROP TYPE IF EXISTS public.schedule_type;
-DROP TYPE IF EXISTS public.sandbox_runtime_lease_state;
-DROP TYPE IF EXISTS public.sandbox_checkpoint_kind;
-DROP TYPE IF EXISTS public.sandbox_checkpoint_format;
+DROP TYPE IF EXISTS public.runtime_web_requester_kind;
+DROP TYPE IF EXISTS public.runtime_web_request_state;
+DROP TYPE IF EXISTS public.runtime_web_quota_scope_kind;
+DROP TYPE IF EXISTS public.runtime_web_operation_kind;
+DROP TYPE IF EXISTS public.runtime_web_cycle_end_reason;
+DROP TYPE IF EXISTS public.runtime_web_auth_mode;
 DROP TYPE IF EXISTS public.runtime_terminal_delete_acknowledgement_kind;
 DROP TYPE IF EXISTS public.runtime_runner_state;
 DROP TYPE IF EXISTS public.runtime_recreation_target_kind;
@@ -10345,6 +11464,7 @@ DROP TYPE IF EXISTS public.owner_lifecycle_status;
 DROP TYPE IF EXISTS public.owner_lifecycle_kind;
 DROP TYPE IF EXISTS public.model_reasoning_effort;
 DROP TYPE IF EXISTS public.model_file_status;
+DROP TYPE IF EXISTS public.model_candidate_claim_kind;
 DROP TYPE IF EXISTS public.memory_scope;
 DROP TYPE IF EXISTS public.mcp_oauth_connection_status;
 DROP TYPE IF EXISTS public.mailbox_item_scheduling_mode;
@@ -10352,6 +11472,7 @@ DROP TYPE IF EXISTS public.mailbox_item_kind;
 DROP TYPE IF EXISTS public.llm_provider;
 DROP TYPE IF EXISTS public.llm_model_lifecycle_status;
 DROP TYPE IF EXISTS public.llm_catalog_scope;
+DROP TYPE IF EXISTS public.llm_catalog_purpose;
 DROP TYPE IF EXISTS public.llm_catalog_lowerer_target;
 DROP TYPE IF EXISTS public.llm_catalog_entry_visibility;
 DROP TYPE IF EXISTS public.llm_catalog_attempt_status;
@@ -10359,10 +11480,9 @@ DROP TYPE IF EXISTS public.kimi_oauth_session_status;
 DROP TYPE IF EXISTS public.kimi_oauth_connection_method;
 DROP TYPE IF EXISTS public.join_request_status;
 DROP TYPE IF EXISTS public.invitation_status;
-DROP TYPE IF EXISTS public.inference_profile_source;
-DROP TYPE IF EXISTS public.inference_profile_failure_code;
 DROP TYPE IF EXISTS public.git_worktree_path_claim_state;
 DROP TYPE IF EXISTS public.git_worktree_path_claim_owner_kind;
+DROP TYPE IF EXISTS public.external_model_notice_outcome;
 DROP TYPE IF EXISTS public.external_channel_work_projection_status;
 DROP TYPE IF EXISTS public.external_channel_transport;
 DROP TYPE IF EXISTS public.external_channel_setup_claim_status;
@@ -10386,6 +11506,8 @@ DROP TYPE IF EXISTS public.external_channel_channel_default_status;
 DROP TYPE IF EXISTS public.external_channel_app_mode;
 DROP TYPE IF EXISTS public.external_channel_access_request_status;
 DROP TYPE IF EXISTS public.external_channel_access_grant_scope;
+DROP TYPE IF EXISTS public.external_account_oauth_attempt_status;
+DROP TYPE IF EXISTS public.external_account_link_revocation_reason;
 DROP TYPE IF EXISTS public.exchange_file_status;
 DROP TYPE IF EXISTS public.exchange_file_provenance_kind;
 DROP TYPE IF EXISTS public.exchange_file_origin;
@@ -10418,14 +11540,11 @@ DROP TYPE IF EXISTS public.agent_lifecycle_status;
 DROP TYPE IF EXISTS public.agent_decommission_status;
 DROP TYPE IF EXISTS public.action_execution_status;
 DROP TYPE IF EXISTS public.action_execution_event_kind;
---
--- Name: action_execution_event_kind; Type: TYPE; Schema: public; Owner: -
---
 """
 
 
 def upgrade() -> None:
-    """Create the complete current Azents RDB schema."""
+    """Create the production-equivalent Azents RDB schema."""
     op.get_bind().exec_driver_sql(_BASELINE_SQL)
 
 

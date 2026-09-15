@@ -115,7 +115,8 @@ def _seed_constraint_identity(connection: sa.Connection) -> None:
             INSERT INTO agents (
                 id, workspace_id, name, model_selection,
                 lightweight_model_selection, selectable_model_options,
-                main_model_label, lightweight_model_label
+                main_model_label, lightweight_model_label, enabled, type,
+                memory_enabled
             )
             VALUES (
                 'scheduled-task-constraint-ag0000',
@@ -137,7 +138,10 @@ def _seed_constraint_identity(connection: sa.Connection) -> None:
                     "subagent_guidance": null
                 }]'::jsonb,
                 'default',
-                'default'
+                'default',
+                TRUE,
+                'public',
+                TRUE
             )
             """
         )
