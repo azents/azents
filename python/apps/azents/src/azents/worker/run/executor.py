@@ -3636,8 +3636,14 @@ class RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> PollMessages:
         """Combine model-call boundary polling with turn action processing."""
+        # AgentRunExecution polls before its first model call and before later turns.
+        # The first poll follows this freshly prepared request; only a later
+        # non-terminal poll must stop dispatch before stale context is reused.
+        poll_count = 0
 
         async def poll() -> PollMessagesResult:
+            nonlocal poll_count
+            poll_count += 1
             result = await self.poll_run_inputs(
                 agent_id=snapshot.agent_id,
                 session_id=snapshot.session_id,
@@ -3651,6 +3657,11 @@ class RunExecutor:
                 process_actions=True,
                 dispatch_event=dispatch_event,
             )
+            follow_up_boundary = (
+                poll_count > 1
+                and not result.context_invalidated
+                and not result.complete_run
+            )
             if result.context_invalidated:
                 mark_context_invalidated()
                 if await self.mailbox_item_service.has_pending_session_mailbox_items(
@@ -3659,11 +3670,11 @@ class RunExecutor:
                     await self.session_lifecycle.send_session_wake_up(
                         SessionWakeUp(session_id=snapshot.session_id)
                     )
-            elif not result.complete_run:
+            elif follow_up_boundary:
                 mark_context_invalidated()
             return PollMessagesResult(
                 user_messages=result.user_messages,
-                context_invalidated=result.context_invalidated,
+                context_invalidated=(result.context_invalidated or follow_up_boundary),
                 complete_run=result.complete_run,
                 suppress_parent_result=result.suppress_parent_result,
             )

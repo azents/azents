@@ -5,7 +5,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, TypedDict, Unpack
@@ -1318,6 +1318,52 @@ class _BoundarySwitchEngine(_Engine):
                 poll_result = await poll_messages()
                 assert poll_result.context_invalidated is True
                 return
+            yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
+class _TwoPollBoundaryEngine(_Engine):
+    """Engine that simulates two model turns within one engine invocation."""
+
+    def __init__(self, before_second_poll: Callable[[], None]) -> None:
+        self.before_second_poll = before_second_poll
+        self.run_calls = 0
+        self.provider_requests: list[RunRequest] = []
+        self.poll_results: list[tuple[bool, bool]] = []
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: PollMessages | None = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Poll before each simulated model call and stop on invalidation."""
+        del check_stop
+        assert isinstance(context, RunContext)
+        if poll_messages is None:
+            raise AssertionError("poll_messages is required")
+        self.run_calls += 1
+
+        async def iterator() -> AsyncIterator[Emit]:
+            first = await poll_messages()
+            self.poll_results.append((first.context_invalidated, first.complete_run))
+            if first.context_invalidated or first.complete_run:
+                return
+            self.provider_requests.append(request)
+
+            if self.run_calls == 1:
+                self.before_second_poll()
+                second = await poll_messages()
+                self.poll_results.append(
+                    (second.context_invalidated, second.complete_run)
+                )
+                if second.context_invalidated or second.complete_run:
+                    return
+                self.provider_requests.append(request)
+
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -3976,6 +4022,181 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
     assert engine.requests[1].inference_state.reasoning_effort is None
     assert engine.requests[1].effective_max_input_tokens == 128_000
     assert engine.requests[1].auto_compaction_threshold_tokens == 115_200
+
+
+@pytest.mark.asyncio
+async def test_execute_refreshes_same_label_settings_before_next_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A same-label Agent edit is applied before the next model dispatch."""
+    old_selection = make_test_model_selection(model_identifier="gpt-old")
+    new_selection = make_test_model_selection(model_identifier="gpt-new")
+
+    def option(
+        selection: AgentModelSelection,
+        max_output_tokens: int,
+    ) -> SelectableModelOption:
+        return SelectableModelOption(
+            label="default",
+            candidates=[
+                SelectableModelCandidate(
+                    model_selection=selection,
+                    settings=make_test_model_settings().model_copy(
+                        update={"max_output_tokens": max_output_tokens}
+                    ),
+                )
+            ],
+            subagent_enabled=True,
+            subagent_guidance=None,
+        )
+
+    base_agent = _default_agent()
+    old_agent = base_agent.model_copy(
+        update={
+            "model_selection": old_selection,
+            "lightweight_model_selection": old_selection,
+            "selectable_model_options": [option(old_selection, 111)],
+        }
+    )
+    new_agent = old_agent.model_copy(
+        update={
+            "model_selection": new_selection,
+            "lightweight_model_selection": new_selection,
+            "selectable_model_options": [option(new_selection, 222)],
+        }
+    )
+    agent_repository: _AgentRepository | None = None
+
+    def replace_agent() -> None:
+        if agent_repository is None:
+            raise AssertionError("Agent repository is not initialized")
+        agent_repository.agent = new_agent
+
+    engine = _TwoPollBoundaryEngine(replace_agent)
+    executor = _executor(engine=engine, agent=old_agent)
+    assert isinstance(executor.agent_repository, _AgentRepository)
+    agent_repository = executor.agent_repository
+
+    async def resolve_current_profile(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        del args
+        requested_profile = kwargs["requested_profile"]
+        assert isinstance(requested_profile, RequestedInferenceProfile)
+        current_repository = agent_repository
+        if current_repository is None or not isinstance(
+            current_repository.agent, Agent
+        ):
+            raise AssertionError("Agent repository is not initialized")
+        current_agent = current_repository.agent
+        selected_option = next(
+            option
+            for option in current_agent.selectable_model_options
+            if option.label == requested_profile.model_target_label
+        )
+        candidate = selected_option.candidates[0]
+        selection = candidate.model_selection
+        runtime_model = to_runtime_model(
+            selection.provider,
+            selection.model_identifier,
+        )
+        resolved = await _resolve_success()
+        assert isinstance(resolved, Success)
+        request = dataclasses.replace(
+            resolved.value.run_request,
+            model=runtime_model,
+            provider=selection.provider,
+            model_developer=selection.model_developer,
+            max_output_tokens=candidate.settings.max_output_tokens,
+            compaction_provider_integration_id=(selection.llm_provider_integration_id),
+            compaction_model=runtime_model,
+            compaction_provider=selection.provider,
+            compaction_credential_kwargs={},
+            compaction_max_input_tokens=128_000,
+        )
+        return Success(
+            dataclasses.replace(
+                resolved.value,
+                run_request=request,
+                model_selection=selection,
+                model_settings=candidate.settings,
+            )
+        )
+
+    async def poll_run_inputs(
+        *args: object,
+        **kwargs: object,
+    ) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            has_actionable_work=True,
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    async def resolve_candidate_runtime(
+        *,
+        selection: AgentModelSelection,
+        **kwargs: object,
+    ) -> object:
+        del kwargs
+        return Success(
+            ResolvedModelCandidateRuntime(
+                provider=selection.provider,
+                provider_integration_id=selection.llm_provider_integration_id,
+                model=to_runtime_model(
+                    selection.provider,
+                    selection.model_identifier,
+                ),
+                credential_kwargs={},
+                effective_input_tokens=128_000,
+            )
+        )
+
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_current_profile,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_model_candidate_runtime",
+        resolve_candidate_runtime,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert engine.run_calls == 2
+    assert engine.poll_results == [
+        (False, False),
+        (True, False),
+        (False, False),
+    ]
+    assert [
+        (
+            request.model,
+            request.max_output_tokens,
+        )
+        for request in engine.provider_requests
+    ] == [("gpt-old", 111), ("gpt-new", 222)]
 
 
 @pytest.mark.parametrize(
