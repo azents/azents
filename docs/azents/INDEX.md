@@ -204,6 +204,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent User Folder Recognition Historical Requirements Reconstruction](requirements/folder-260403-folder-recognition.md) | folder-260403 | 2026-04-03 | 2026-04-03 |
 | [Mark Forked History Boundaries for Subagent Tasks Historical Requirements Reconstruction](requirements/forked-260709-subagent-forked-history-task-boundaries.md) | forked-260709 | 2026-07-09 | - |
 | [Agent Runtime and Session Foundation Historical Requirements Reconstruction](requirements/foundation-260504-foundation.md) | foundation-260504 | 2026-05-04 | 2026-05-04 |
+| [Runtime Web Application Framing Compatibility Requirements](requirements/framing-260915-runtime-web-application.md) | framing-260915 | 2026-09-15 | - |
 | [Split FunctionCallItem.output into a Separate FunctionCallOutputItem Historical Requirements Reconstruction](requirements/function-260429-function-call-output-item.md) | function-260429 | 2026-04-29 | 2026-04-29 |
 | [GA4 stdio MCP -> Native Toolkit Migration Historical Requirements Reconstruction](requirements/ga4-260401-ga4-toolkit.md) | ga4-260401 | 2026-04-01 | 2026-04-01 |
 | [Consistent Persistent Provider Ingress Requirements](requirements/gateway-260731-consistent-provider-ingress.md) | gateway-260731 | 2026-07-31 | - |
@@ -639,6 +640,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent User Folder Recognition Historical Decision Reconstruction](adr/folder-260403-folder-recognition.md)
 - [Mark Forked History Boundaries for Subagent Tasks](adr/forked-260709-subagent-forked-history-task-boundaries.md)
 - [Agent Runtime and Session Foundation Historical Decision Reconstruction](adr/foundation-260504-foundation.md)
+- [Runtime Web Application Framing Compatibility Decisions](adr/framing-260915-runtime-web-application.md)
 - [Split FunctionCallItem.output into a Separate FunctionCallOutputItem](adr/function-260429-function-call-output-item.md)
 - [GA4 stdio MCP -> Native Toolkit Migration Historical Decision Reconstruction](adr/ga4-260401-ga4-toolkit.md)
 - [Consistent Persistent Provider Ingress](adr/gateway-260731-consistent-provider-ingress.md)

@@ -140,8 +140,31 @@ def test_header_normalization_strips_platform_authority_and_replaces_security() 
         "https://abc.services.example.net/next?value=1",
     ) in response_headers
     assert ("Cache-Control", "no-store") in response_headers
-    assert ("X-Frame-Options", "DENY") in response_headers
+    assert not any(name.lower() == "x-frame-options" for name, _ in response_headers)
     assert not any(
         name == "Set-Cookie" and "__Http-Azents" in value
         for name, value in response_headers
     )
+
+
+def test_response_header_normalization_preserves_application_framing_policy() -> None:
+    response_headers = normalize_response_headers(
+        (
+            (b"X-Frame-Options", b"SAMEORIGIN"),
+            (b"Content-Security-Policy", b"frame-ancestors 'self'"),
+        ),
+        config=_CONFIG,
+        cors=evaluate_actual_origin(
+            origin=None,
+            fetch_site="same-origin",
+            fetch_mode="same-origin",
+            method="GET",
+            target_origin="https://abc.services.example.net",
+            source_origins=frozenset(),
+        ),
+        target_origin="https://abc.services.example.net",
+        port=8080,
+    )
+
+    assert ("X-Frame-Options", "SAMEORIGIN") in response_headers
+    assert ("Content-Security-Policy", "frame-ancestors 'self'") in response_headers

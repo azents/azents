@@ -1623,6 +1623,7 @@ const done = arguments[arguments.length - 1];
     redirectStatus: redirected.status,
     redirectedBody,
     redirectedUrl: redirected.url,
+    frameOptions: redirected.headers.get('x-frame-options'),
     bytes,
     assetCount: assets.length,
     assetsValid: assets.every(Boolean),
@@ -2076,6 +2077,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             redirected_body = evidence["redirectedBody"]
             assert isinstance(redirected_body, str)
             assert "Runtime Web E2E ready" in redirected_body
+            assert evidence["frameOptions"] is None
             assert evidence["bytes"] == _BROWSER_TRANSFER_BYTES
             assert evidence["assetCount"] == _BROWSER_ASSET_COUNT
             assert evidence["assetsValid"] is True

@@ -270,6 +270,10 @@ non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
 upgrades before application content is returned. Upstream access-control headers are
 replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
 rewritten for the service host, and security responses are content-free.
+Gateway-generated authentication, approval, transfer, and error documents deny
+framing. Proxied application responses receive no Gateway-invented framing policy;
+application-provided `X-Frame-Options` and Content Security Policy remain
+authoritative for application content.
 
 The Runner owns one pooled loopback HTTP client per accepted generation. It connects
 only to the requested numeric `127.0.0.1` port with an origin-form target, disables
