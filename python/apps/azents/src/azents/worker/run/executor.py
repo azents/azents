@@ -1750,6 +1750,7 @@ class RunExecutor:
         ) -> None:
             """Replace the active request with one freshly prepared model turn."""
             nonlocal inference_profile, run_request, selected_profile
+            nonlocal turn_inference_state
             current_request = run_request
             if current_request is None:
                 raise RuntimeError("Active model request is not prepared")
@@ -1771,6 +1772,7 @@ class RunExecutor:
                 ),
                 inference_state=next_inference_state,
             )
+            turn_inference_state = next_inference_state
             selected_profile = RequestedProfileSelection(
                 profile=prepared_value.profile,
                 source=prepared_value.source,
@@ -2106,6 +2108,7 @@ class RunExecutor:
                             snapshot=snapshot,
                             model=run_request.model,
                             requested_inference_profile=selected_profile.profile,
+                            prepared_inference_state=turn_inference_state,
                             run_id=run_id,
                             poll_fn=poll_fn,
                             owner_generation=owner_generation,
@@ -3622,12 +3625,67 @@ class RunExecutor:
                         },
                     )
 
+    async def _has_model_configuration_drift(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        requested_profile: RequestedInferenceProfile,
+        prepared_inference_state: SessionInferenceState,
+    ) -> bool:
+        """Return whether current model intent or label mapping supersedes a turn."""
+        async with self.session_manager() as session:
+            current_agent = await self.agent_repository.get_by_id(session, agent_id)
+            current_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+        if not isinstance(current_agent, Agent) or not isinstance(
+            current_session, AgentSession
+        ):
+            return True
+
+        applied_profile = current_session.applied_inference_profile
+        current_profile = (
+            RequestedInferenceProfile(
+                model_target_label=applied_profile.model_target_label,
+                reasoning_effort=applied_profile.reasoning_effort,
+                enabled_execution_options=applied_profile.enabled_execution_options,
+            )
+            if applied_profile is not None
+            else _agent_default_inference_profile(current_agent)
+        )
+        if current_profile != requested_profile:
+            return True
+
+        current_option = next(
+            (
+                option
+                for option in current_agent.selectable_model_options
+                if option.label == requested_profile.model_target_label
+            ),
+            None,
+        )
+        if current_option is None:
+            return True
+        route = prepared_inference_state.applied_model_route
+        candidate_ordinal = route.candidate_ordinal if route is not None else 1
+        if candidate_ordinal > len(current_option.candidates):
+            return True
+        current_candidate = current_option.candidates[candidate_ordinal - 1]
+        return (
+            current_candidate.model_selection
+            != prepared_inference_state.model_selection
+            or current_candidate.settings != prepared_inference_state.model_settings
+        )
+
     def make_boundary_poll(
         self,
         *,
         snapshot: CanonicalExecutionSnapshot,
         model: str | None,
         requested_inference_profile: RequestedInferenceProfile,
+        prepared_inference_state: SessionInferenceState,
         run_id: str,
         poll_fn: PollMessages | None,
         owner_generation: int,
@@ -3661,6 +3719,12 @@ class RunExecutor:
                 poll_count > 1
                 and not result.context_invalidated
                 and not result.complete_run
+                and await self._has_model_configuration_drift(
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
+                    requested_profile=requested_inference_profile,
+                    prepared_inference_state=prepared_inference_state,
+                )
             )
             if result.context_invalidated:
                 mark_context_invalidated()

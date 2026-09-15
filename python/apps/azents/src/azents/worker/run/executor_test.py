@@ -1324,7 +1324,7 @@ class _BoundarySwitchEngine(_Engine):
 
 
 class _TwoPollBoundaryEngine(_Engine):
-    """Engine that simulates two model turns within one engine invocation."""
+    """Engine that simulates two model turns within every engine invocation."""
 
     def __init__(self, before_second_poll: Callable[[], None]) -> None:
         self.before_second_poll = before_second_poll
@@ -1354,15 +1354,12 @@ class _TwoPollBoundaryEngine(_Engine):
                 return
             self.provider_requests.append(request)
 
-            if self.run_calls == 1:
-                self.before_second_poll()
-                second = await poll_messages()
-                self.poll_results.append(
-                    (second.context_invalidated, second.complete_run)
-                )
-                if second.context_invalidated or second.complete_run:
-                    return
-                self.provider_requests.append(request)
+            self.before_second_poll()
+            second = await poll_messages()
+            self.poll_results.append((second.context_invalidated, second.complete_run))
+            if second.context_invalidated or second.complete_run:
+                return
+            self.provider_requests.append(request)
 
             yield ephemeral(RunComplete(run_id=context.run_id))
 
@@ -4025,10 +4022,43 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("agent_updates", "expected_run_calls", "expected_poll_results", "expected_models"),
+    [
+        (
+            ("new", "new"),
+            2,
+            [
+                (False, False),
+                (True, False),
+                (False, False),
+                (False, False),
+            ],
+            ["gpt-old", "gpt-new", "gpt-new"],
+        ),
+        (
+            ("new", "old", "old"),
+            3,
+            [
+                (False, False),
+                (True, False),
+                (False, False),
+                (True, False),
+                (False, False),
+                (False, False),
+            ],
+            ["gpt-old", "gpt-new", "gpt-old", "gpt-old"],
+        ),
+    ],
+)
 async def test_execute_refreshes_same_label_settings_before_next_model_call(
     monkeypatch: pytest.MonkeyPatch,
+    agent_updates: tuple[str, ...],
+    expected_run_calls: int,
+    expected_poll_results: list[tuple[bool, bool]],
+    expected_models: list[str],
 ) -> None:
-    """A same-label Agent edit is applied before the next model dispatch."""
+    """Same-label Agent edits refresh only when the physical mapping changes."""
     old_selection = make_test_model_selection(model_identifier="gpt-old")
     new_selection = make_test_model_selection(model_identifier="gpt-new")
 
@@ -4067,10 +4097,17 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
     )
     agent_repository: _AgentRepository | None = None
 
+    update_index = 0
+
     def replace_agent() -> None:
+        nonlocal update_index
         if agent_repository is None:
             raise AssertionError("Agent repository is not initialized")
-        agent_repository.agent = new_agent
+        if update_index < len(agent_updates):
+            agent_repository.agent = (
+                new_agent if agent_updates[update_index] == "new" else old_agent
+            )
+            update_index += 1
 
     engine = _TwoPollBoundaryEngine(replace_agent)
     executor = _executor(engine=engine, agent=old_agent)
@@ -4184,19 +4221,62 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
     )
 
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert engine.run_calls == 2
-    assert engine.poll_results == [
-        (False, False),
-        (True, False),
-        (False, False),
+    assert engine.run_calls == expected_run_calls
+    assert engine.poll_results == expected_poll_results
+    assert [request.model for request in engine.provider_requests] == expected_models
+    assert [request.max_output_tokens for request in engine.provider_requests] == [
+        111 if model == "gpt-old" else 222 for model in expected_models
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_unchanged_model_turn_in_one_engine_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unchanged Agent mapping does not restart a normal follow-up turn."""
+    engine = _TwoPollBoundaryEngine(lambda: None)
+    executor = _executor(engine=engine)
+    _patch_successful_resolution(monkeypatch)
+
+    async def poll_run_inputs(
+        *args: object,
+        **kwargs: object,
+    ) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            has_actionable_work=True,
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert engine.run_calls == 1
+    assert engine.poll_results == [(False, False), (False, False)]
     assert [
         (
             request.model,
             request.max_output_tokens,
         )
         for request in engine.provider_requests
-    ] == [("gpt-old", 111), ("gpt-new", 222)]
+    ] == [("gpt-test", None), ("gpt-test", None)]
 
 
 @pytest.mark.parametrize(
@@ -4586,6 +4666,16 @@ async def test_boundary_poll_processes_turn_actions(
             reasoning_effort=None,
             enabled_execution_options=[],
         ),
+        prepared_inference_state=SessionInferenceState(
+            model_target_label="default",
+            model_selection=make_test_model_selection(),
+            model_settings=make_test_model_settings(),
+            reasoning_effort=None,
+            enabled_execution_options=[],
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=102_400,
+            resolved_at=datetime.datetime.now(datetime.UTC),
+        ),
         run_id="run-001",
         poll_fn=None,
         owner_generation=1,
@@ -4652,6 +4742,16 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
             model_target_label="default",
             reasoning_effort=None,
             enabled_execution_options=[],
+        ),
+        prepared_inference_state=SessionInferenceState(
+            model_target_label="default",
+            model_selection=make_test_model_selection(),
+            model_settings=make_test_model_settings(),
+            reasoning_effort=None,
+            enabled_execution_options=[],
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=102_400,
+            resolved_at=datetime.datetime.now(datetime.UTC),
         ),
         run_id="run-001",
         poll_fn=None,
