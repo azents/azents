@@ -973,24 +973,18 @@ class RunnerSessionOffer(_message.Message):
     RUNTIME_ID_FIELD_NUMBER: _builtins.int
     DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
     RUNNER_GENERATION_FIELD_NUMBER: _builtins.int
-    OWNER_REPLICA_ID_FIELD_NUMBER: _builtins.int
     OWNER_BOOT_ID_FIELD_NUMBER: _builtins.int
     SESSION_LEASE_ID_FIELD_NUMBER: _builtins.int
     LEASE_GENERATION_FIELD_NUMBER: _builtins.int
-    CONNECT_ADDRESS_FIELD_NUMBER: _builtins.int
-    TLS_SERVER_NAME_FIELD_NUMBER: _builtins.int
     JOIN_NONCE_FIELD_NUMBER: _builtins.int
     PROTOCOL_FINGERPRINT_FIELD_NUMBER: _builtins.int
     REGISTRATION_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     desired_generation: _builtins.int
     runner_generation: _builtins.int
-    owner_replica_id: _builtins.str
     owner_boot_id: _builtins.str
     session_lease_id: _builtins.str
     lease_generation: _builtins.int
-    connect_address: _builtins.str
-    tls_server_name: _builtins.str
     join_nonce: _builtins.str
     protocol_fingerprint: _builtins.str
     @_builtins.property
@@ -1001,12 +995,9 @@ class RunnerSessionOffer(_message.Message):
         runtime_id: _builtins.str = ...,
         desired_generation: _builtins.int = ...,
         runner_generation: _builtins.int = ...,
-        owner_replica_id: _builtins.str = ...,
         owner_boot_id: _builtins.str = ...,
         session_lease_id: _builtins.str = ...,
         lease_generation: _builtins.int = ...,
-        connect_address: _builtins.str = ...,
-        tls_server_name: _builtins.str = ...,
         join_nonce: _builtins.str = ...,
         protocol_fingerprint: _builtins.str = ...,
         registration_deadline_at: _timestamp_pb2.Timestamp | None = ...,
@@ -1016,8 +1007,6 @@ class RunnerSessionOffer(_message.Message):
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
-        "connect_address",
-        b"connect_address",
         "desired_generation",
         b"desired_generation",
         "join_nonce",
@@ -1026,8 +1015,6 @@ class RunnerSessionOffer(_message.Message):
         b"lease_generation",
         "owner_boot_id",
         b"owner_boot_id",
-        "owner_replica_id",
-        b"owner_replica_id",
         "protocol_fingerprint",
         b"protocol_fingerprint",
         "registration_deadline_at",
@@ -1038,8 +1025,6 @@ class RunnerSessionOffer(_message.Message):
         b"runtime_id",
         "session_lease_id",
         b"session_lease_id",
-        "tls_server_name",
-        b"tls_server_name",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...

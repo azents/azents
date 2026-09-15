@@ -33,7 +33,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 180 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 84 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 85 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-14 | 38 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 51 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
@@ -365,6 +365,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Runtime Web Browser and Services Correction Requirements](requirements/runtimeweb-260913-browser-services-correction.md) | runtimeweb-260913 | 2026-09-13 | - |
 | [Heavy-Workload Runtime Web Services Requirements](requirements/runtimeweb-260914-heavy-workload-services.md) | runtimeweb-260914 | 2026-09-14 | - |
+| [Runtime Web Owner Session Routing Requirements](requirements/runtimeweb-260915-owner-session-routing.md) | runtimeweb-260915 | 2026-09-15 | 2026-09-15 |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
 | [Sandbox Runtime Profile Abstraction Discussion Historical Requirements Reconstruction](requirements/sandbox-260419-sandbox-profile.md) | sandbox-260419 | 2026-04-19 | - |
@@ -799,6 +800,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Runtime Web Browser and Services Correction Decisions](adr/runtimeweb-260913-browser-services-correction.md)
 - [Heavy-Workload Runtime Web Services Decisions](adr/runtimeweb-260914-heavy-workload-services.md)
+- [Runtime Web Owner Session Routing Decisions](adr/runtimeweb-260915-owner-session-routing.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
 - [Sandbox Runtime Profile Abstraction Discussion](adr/sandbox-260419-sandbox-profile.md)

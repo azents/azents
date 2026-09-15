@@ -202,9 +202,6 @@ def _web_offer(*, lease_generation: int) -> RunnerSessionOffer:
     )
     return RunnerSessionOffer(
         owner=owner,
-        owner_replica_id="control-a",
-        connect_address="control-a.internal:8030",
-        tls_server_name="runtime-control.internal",
         session_nonce=f"nonce-{lease_generation}",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.now(UTC) + timedelta(minutes=1),

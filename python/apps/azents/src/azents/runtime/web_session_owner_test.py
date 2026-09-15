@@ -54,8 +54,6 @@ async def _owned(
         owner_replica_id="control-a",
         owner_boot_id="owner-boot-a",
         trusted_owner_address="control-a.internal:8032",
-        runner_connect_address="control-a.internal:8030",
-        runner_tls_server_name="runtime-control.internal",
         lease_seconds=30,
         clock=clock,
     )

@@ -80,7 +80,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-15
-spec_version: 84
+spec_version: 85
 ---
 
 # Agent Runtime Control
@@ -205,13 +205,13 @@ the application.
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
 items, or audit history. The replacement data plane uses three persistent
 bidirectional sessions: Gateway to an accepting Control, accepting Control to the
-exact Owner Control when one relay is required, and Runner through the same
-operator-configured stable Control endpoint as its ordinary Control stream. Gateway
-and relay peers use the dedicated trusted listener with role-specific mTLS in
-deployed environments. The Runner uses its generation-bound credential on the
-existing Runner-authenticated listener. The receiving replica joins the exact Owner
-locally or performs one relay; the address carried by the Owner session offer does
-not select the Runner connection destination. Local E2E may explicitly use isolated
+exact Owner Control when one relay is required, and Runner to that Owner through a
+distinct RPC stream on the same authenticated gRPC channel as its ordinary Control
+stream. Gateway and relay peers use the dedicated trusted listener with role-specific
+mTLS in deployed environments. The Runner uses its generation-bound credential on the
+existing Runner-authenticated listener. A Runner session offer carries the exact
+Owner epoch, one-time nonce, fingerprint, and join deadline but no replica address,
+connection destination, or TLS server name. Local E2E may explicitly use isolated
 insecure listeners.
 
 Every peer requires exact equality with the unversioned
@@ -1080,6 +1080,13 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-15 (spec_version=85)** — Attached the distinct Runner Web RPC to the
+  ordinary authenticated Runner Control gRPC channel and removed replica,
+  connect-address, and TLS-name routing authority from session offers and
+  deployment configuration.
+- **2026-09-15 (spec_version=84)** — Replaced direct offer-selected Control Pod
+  routing with the stable operator-configured Runner Control endpoint as an
+  immediate robust-routing correction.
 - **2026-09-14 (spec_version=83)** — Replaced request-scoped Runtime Web transport
   with exact-fingerprint persistent Gateway, maximum-one-hop Control relay, and
   Owner Runner sessions; added multiplexed logical streams, hierarchical absolute

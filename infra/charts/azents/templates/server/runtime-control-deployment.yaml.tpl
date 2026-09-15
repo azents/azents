@@ -87,10 +87,6 @@ spec:
               value: {{ required "server.runtimeControl.webTransport.controlPeerIdentities is required when trusted Runtime Web transport is enabled" $webTransport.controlPeerIdentities | quote }}
             - name: AZ_RUNTIME_CONTROL_WEB_ROUTE_LEASE_SECONDS
               value: {{ printf "%v" $webTransport.routeLeaseSeconds | quote }}
-            - name: AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS
-              value: "runtime-control.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc.cluster.local:8030"
-            - name: AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME
-              value: {{ required "server.runtimeControl.webTransport.runnerTlsServerName is required when Runtime Web transport is enabled" $webTransport.runnerTlsServerName | quote }}
             - name: AZ_RUNTIME_CONTROL_WEB_METRICS_PORT
               value: {{ printf "%d" (int64 .Values.server.runtimeControl.metricsPort) | quote }}
             - name: AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND

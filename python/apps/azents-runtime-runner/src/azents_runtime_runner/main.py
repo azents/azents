@@ -445,13 +445,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     lambda: runtime_configuration.desired_generation
                 ),
                 accepted_generation=accepted_generation,
-                control_endpoint=endpoint,
-                runner_auth_token=runner_auth_token,
-                tls=control_tls,
-                allow_insecure=allow_insecure_control,
                 loopback=RunnerWebLoopbackPool(maximum_connections=128),
-                client_factory=None,
-                outbound_resources=web_resources,
+                client_factory=lambda client=client: client.create_web_session_client(
+                    outbound_resources=web_resources
+                ),
             )
             web_dispatcher = RunnerWebSessionDispatcher(
                 web_manager,

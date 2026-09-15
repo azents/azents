@@ -9,6 +9,10 @@ from typing import TYPE_CHECKING, Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
+from azents_runtime_control.grpc_runner_web_session_client import (
+    GrpcRunnerWebSessionClient,
+    RunnerWebEnvelopeResources,
+)
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
@@ -84,9 +88,15 @@ if TYPE_CHECKING:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
         RuntimeRunnerControlAsyncStub as _RuntimeRunnerControlStub,
     )
+    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
+        RuntimeRunnerWebSessionAsyncStub as _RuntimeRunnerWebSessionStub,
+    )
 else:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
         RuntimeRunnerControlStub as _RuntimeRunnerControlStub,
+    )
+    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
+        RuntimeRunnerWebSessionStub as _RuntimeRunnerWebSessionStub,
     )
 
 
@@ -125,6 +135,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
+        self._runner_auth_token = runner_auth_token
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
         self._metadata = _auth_metadata(runner_auth_token)
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
@@ -220,6 +231,21 @@ class GrpcRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Set the exact replacement Runtime Web session offer handler."""
         self._web_session_offer_handler = handler
+
+    def create_web_session_client(
+        self,
+        *,
+        outbound_resources: RunnerWebEnvelopeResources | None,
+    ) -> GrpcRunnerWebSessionClient:
+        """Create one Runner Web RPC client borrowing this Control channel."""
+        if self._channel is None:
+            raise RuntimeError("Runner Control client does not own a gRPC channel")
+        return GrpcRunnerWebSessionClient(
+            _RuntimeRunnerWebSessionStub(self._channel).Connect,
+            runner_auth_token=self._runner_auth_token,
+            channel=None,
+            outbound_resources=outbound_resources,
+        )
 
     async def register_runner(
         self,
@@ -2127,9 +2153,6 @@ def runner_session_offer_from_message(
             desired_generation=message.desired_generation,
             runner_generation=message.runner_generation,
         ),
-        owner_replica_id=message.owner_replica_id,
-        connect_address=message.connect_address,
-        tls_server_name=message.tls_server_name,
         session_nonce=message.join_nonce,
         protocol_fingerprint=message.protocol_fingerprint,
         deadline_at=_datetime(message.registration_deadline_at),
@@ -2144,12 +2167,9 @@ def runner_session_offer_to_message(
         runtime_id=offer.owner.runtime_id,
         desired_generation=offer.owner.desired_generation,
         runner_generation=offer.owner.runner_generation,
-        owner_replica_id=offer.owner_replica_id,
         owner_boot_id=offer.owner.owner_boot_id,
         session_lease_id=offer.owner.session_lease_id,
         lease_generation=offer.owner.lease_generation,
-        connect_address=offer.connect_address,
-        tls_server_name=offer.tls_server_name,
         join_nonce=offer.session_nonce,
         protocol_fingerprint=offer.protocol_fingerprint,
         registration_deadline_at=_timestamp(offer.deadline_at),

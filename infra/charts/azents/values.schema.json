@@ -1363,7 +1363,6 @@
                 "enabled",
                 "trustedPort",
                 "routeLeaseSeconds",
-                "runnerTlsServerName",
                 "gatewayPeerIdentities",
                 "controlPeerIdentities"
               ],
@@ -1380,10 +1379,6 @@
                   "type": "number",
                   "minimum": 1,
                   "maximum": 60
-                },
-                "runnerTlsServerName": {
-                  "type": "string",
-                  "minLength": 1
                 },
                 "gatewayPeerIdentities": {
                   "type": "string"

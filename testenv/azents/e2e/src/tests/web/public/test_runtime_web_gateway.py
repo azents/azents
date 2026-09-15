@@ -390,14 +390,6 @@ def _runtime_control_relay_container(
             "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS",
             "runtime-control-relay:8033",
         )
-        .with_env(
-            "AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS",
-            "runtime-control-relay:8031",
-        )
-        .with_env(
-            "AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME",
-            "runtime-control",
-        )
         .with_env("AZ_RUNTIME_CONTROL_WEB_METRICS_PORT", "8034")
         .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND", capacity_backend)
         .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_ACTIVE_STREAMS", "128")

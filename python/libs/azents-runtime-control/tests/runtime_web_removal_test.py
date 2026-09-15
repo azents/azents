@@ -170,15 +170,30 @@ def test_runner_control_exposes_only_the_session_offer() -> None:
         "runtime_id",
         "desired_generation",
         "runner_generation",
-        "owner_replica_id",
         "owner_boot_id",
         "session_lease_id",
         "lease_generation",
-        "connect_address",
-        "tls_server_name",
         "join_nonce",
         "protocol_fingerprint",
         "registration_deadline_at",
+    }
+    file_descriptor = descriptor_pb2.FileDescriptorProto.FromString(
+        runtime_runner_control_pb2.DESCRIPTOR.serialized_pb
+    )
+    message = next(
+        message
+        for message in file_descriptor.message_type
+        if message.name == "RunnerSessionOffer"
+    )
+    assert {(value.start, value.end) for value in message.reserved_range} == {
+        (4, 5),
+        (8, 9),
+        (9, 10),
+    }
+    assert set(message.reserved_name) == {
+        "owner_replica_id",
+        "connect_address",
+        "tls_server_name",
     }
 
 

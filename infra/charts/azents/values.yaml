@@ -108,7 +108,6 @@ server:
       enabled: false
       trustedPort: 8032
       routeLeaseSeconds: 10
-      runnerTlsServerName: runtime-control
       gatewayPeerIdentities: ""
       controlPeerIdentities: ""
     webCapacity:
