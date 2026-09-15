@@ -64,6 +64,10 @@ from azents.services.mailbox import (
     PromotedMailboxItems,
     TurnEffect,
 )
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import OperationActionProcessResult, RunExecutor
@@ -1770,6 +1774,16 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             model_target_label="default",
             reasoning_effort=None,
             enabled_execution_options=[],
+        ),
+        prepared_inference_state=SessionInferenceState(
+            model_target_label="default",
+            model_selection=make_test_model_selection(),
+            model_settings=make_test_model_settings(),
+            reasoning_effort=None,
+            enabled_execution_options=[],
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=102_400,
+            resolved_at=datetime.now(timezone.utc),
         ),
         run_id="run-001",
         poll_fn=None,
