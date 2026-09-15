@@ -69,6 +69,7 @@ from testcontainers.postgres import PostgresContainer
 from websockets.asyncio.client import connect as async_connect
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
+from websockets.sync.connection import Connection
 from websockets.typing import Origin
 
 from support.runtime_profiles import create_workspace_runtime_profile
@@ -2421,41 +2422,19 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
         assert _route_open_count(metrics_after_recovery, "local") > local_opens_before
         _wait_for_runtime_web_stream_release(stack)
 
-        websocket_started = threading.Event()
         websocket_drained = threading.Event()
         sse_started = threading.Event()
         sse_drained = threading.Event()
 
-        def hold_websocket() -> None:
-            edge_address = stack.edge_host_url.removeprefix("https://")
-            edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
-            raw_socket = socket.create_connection(
-                (edge_host, int(edge_port_text)),
-                timeout=10,
-            )
-            tls_context = ssl.create_default_context()
-            tls_context.check_hostname = False
-            tls_context.verify_mode = ssl.CERT_NONE
-            with connect(
-                f"wss://{endpoint_host}/ws",
-                sock=raw_socket,
-                ssl=tls_context,
-                server_hostname=endpoint_host,
-                origin=Origin(endpoint_url.rstrip("/")),
-                additional_headers={"Cookie": headers["Cookie"]},
-                user_agent_header=headers["User-Agent"],
-                proxy=None,
-                open_timeout=10,
-            ) as websocket:
-                websocket_started.set()
-                try:
-                    websocket.recv(timeout=15)
-                except ConnectionClosed:
-                    websocket_drained.set()
-                else:
-                    raise AssertionError(
-                        "Runtime Web drain did not close the long-lived stream"
-                    )
+        def hold_websocket(websocket: Connection) -> None:
+            try:
+                websocket.recv(timeout=15)
+            except ConnectionClosed:
+                websocket_drained.set()
+            else:
+                raise AssertionError(
+                    "Runtime Web drain did not close the long-lived stream"
+                )
 
         def hold_sse() -> None:
             try:
@@ -2477,23 +2456,42 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
             finally:
                 sse_drained.set()
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            websocket = executor.submit(hold_websocket)
-            assert websocket_started.wait(timeout=10)
-            sse = executor.submit(hold_sse)
-            assert sse_started.wait(timeout=10)
-            active_long_lived = _runtime_application_state_via_terminal(
-                runtime_terminal
-            )
-            assert active_long_lived.active_websockets == 1
-            assert active_long_lived.websocket_connections == 1
-            assert active_long_lived.active_sse == 1
-            assert active_long_lived.sse_connections == 1
-            _drain_gateway(stack)
-            assert websocket_drained.wait(timeout=10)
-            assert sse_drained.wait(timeout=10)
-            websocket.result(timeout=10)
-            sse.result(timeout=10)
+        edge_address = stack.edge_host_url.removeprefix("https://")
+        edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
+        tls_context = ssl.create_default_context()
+        tls_context.check_hostname = False
+        tls_context.verify_mode = ssl.CERT_NONE
+        with socket.create_connection(
+            (edge_host, int(edge_port_text)),
+            timeout=10,
+        ) as raw_socket:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                with connect(
+                    f"wss://{endpoint_host}/ws",
+                    sock=raw_socket,
+                    ssl=tls_context,
+                    server_hostname=endpoint_host,
+                    origin=Origin(endpoint_url.rstrip("/")),
+                    additional_headers={"Cookie": headers["Cookie"]},
+                    user_agent_header=headers["User-Agent"],
+                    proxy=None,
+                    open_timeout=10,
+                ) as websocket:
+                    websocket_reader = executor.submit(hold_websocket, websocket)
+                    sse = executor.submit(hold_sse)
+                    assert sse_started.wait(timeout=10)
+                    active_long_lived = _runtime_application_state_via_terminal(
+                        runtime_terminal
+                    )
+                    assert active_long_lived.active_websockets == 1
+                    assert active_long_lived.websocket_connections == 1
+                    assert active_long_lived.active_sse == 1
+                    assert active_long_lived.sse_connections == 1
+                    _drain_gateway(stack)
+                    assert websocket_drained.wait(timeout=10)
+                    assert sse_drained.wait(timeout=10)
+                    websocket_reader.result(timeout=10)
+                    sse.result(timeout=10)
 
         deadline = time.monotonic() + 10
         while True:
