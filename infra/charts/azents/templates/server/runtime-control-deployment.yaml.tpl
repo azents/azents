@@ -88,7 +88,7 @@ spec:
             - name: AZ_RUNTIME_CONTROL_WEB_ROUTE_LEASE_SECONDS
               value: {{ printf "%v" $webTransport.routeLeaseSeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS
-              value: "$(AZ_RUNTIME_CONTROL_INSTANCE_ID).runtime-control-headless.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc:8030"
+              value: "runtime-control.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc.cluster.local:8030"
             - name: AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME
               value: {{ required "server.runtimeControl.webTransport.runnerTlsServerName is required when Runtime Web transport is enabled" $webTransport.runnerTlsServerName | quote }}
             - name: AZ_RUNTIME_CONTROL_WEB_METRICS_PORT
