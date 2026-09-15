@@ -45,13 +45,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Validate version, channel, chart lockstep
+      - name: Validate version, channel, and source
         id: validate
         env:
           VERSION: ${{ inputs.version }}
           CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo "Releases must run from the main branch; got $GITHUB_REF" >&2
+            exit 1
+          fi
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid SemVer tag: $VERSION" >&2
             exit 1
@@ -73,21 +77,6 @@ jobs:
             exit 1
           fi
           chart_version="${VERSION#v}"
-          python - <<'PY' "$chart_version"
-          import sys
-          from pathlib import Path
-          import yaml
-
-          expected = sys.argv[1]
-          chart = yaml.safe_load(Path('infra/charts/azents/Chart.yaml').read_text())
-          actual_version = str(chart['version'])
-          actual_app_version = str(chart['appVersion'])
-          if actual_version != expected or actual_app_version != expected:
-              raise SystemExit(
-                  f'Chart version/appVersion must both be {expected}; '
-                  f'got version={actual_version} appVersion={actual_app_version}'
-              )
-          PY
           version_core="${VERSION#v}"
           version_core="${version_core%%-*}"
           IFS=. read -r major minor patch <<< "$version_core"
@@ -156,7 +145,6 @@ jobs:
       - name: Build and push release image
         env:
           VERSION: ${{ needs.validate.outputs.version }}
-          CHART_VERSION: ${{ needs.validate.outputs.chart_version }}
           MAJOR_TAG: ${{ needs.validate.outputs.major }}
           MINOR_TAG: ${{ needs.validate.outputs.minor }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
@@ -210,12 +198,25 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Login Helm to GHCR
         run: echo "${{ github.token }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
-      - name: Package and push chart
+      - name: Package, validate, and push chart
+        env:
+          CHART_VERSION: ${{ needs.validate.outputs.chart_version }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/azents-chart
-          helm package infra/charts/azents --destination /tmp/azents-chart
-          helm push "/tmp/azents-chart/azents-${{ needs.validate.outputs.chart_version }}.tgz" oci://ghcr.io/azents/charts
+          helm package infra/charts/azents \
+            --version "$CHART_VERSION" \
+            --app-version "$CHART_VERSION" \
+            --destination /tmp/azents-chart
+          chart_path="/tmp/azents-chart/azents-${CHART_VERSION}.tgz"
+          chart_metadata="$(helm show chart "$chart_path")"
+          actual_version="$(awk '$1 == "version:" {print $2}' <<< "$chart_metadata")"
+          actual_app_version="$(awk '$1 == "appVersion:" {print $2}' <<< "$chart_metadata")"
+          if [ "$actual_version" != "$CHART_VERSION" ] || [ "$actual_app_version" != "$CHART_VERSION" ]; then
+            echo "Packaged chart version/appVersion must both be $CHART_VERSION; got version=$actual_version appVersion=$actual_app_version" >&2
+            exit 1
+          fi
+          helm push "$chart_path" oci://ghcr.io/azents/charts
 
   github-release:
     name: github-release
