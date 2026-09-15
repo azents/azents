@@ -1227,6 +1227,10 @@
             "enabled",
             "replicas",
             "port",
+            "metricsPort",
+            "maintenance",
+            "controlSessionPoolSize",
+            "hardLimits",
             "authMode",
             "mainWebOrigin",
             "brokerOrigin",
@@ -1241,6 +1245,7 @@
             "controlTls",
             "ingress",
             "resources",
+            "terminationGracePeriodSeconds",
             "autoscaling",
             "pdb"
           ],
@@ -1256,6 +1261,57 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 65535
+            },
+            "metricsPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "maintenance": {
+              "type": "boolean"
+            },
+            "controlSessionPoolSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "hardLimits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "activeExchanges",
+                "applicationBufferBytes",
+                "schedulerWaiters",
+                "eventLoopLagMilliseconds",
+                "residentMemoryBytes"
+              ],
+              "properties": {
+                "activeExchanges": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16384
+                },
+                "applicationBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1048576,
+                  "maximum": 17179869184
+                },
+                "schedulerWaiters": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65536
+                },
+                "eventLoopLagMilliseconds": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 60000
+                },
+                "residentMemoryBytes": {
+                  "type": "integer",
+                  "minimum": 67108864,
+                  "maximum": 68719476736
+                }
+              }
             },
             "authMode": {
               "type": "string",
@@ -1389,15 +1445,112 @@
               "$ref": "#/definitions/componentIngress"
             },
             "resources": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "requests": {
+                  "type": "object",
+                  "required": [
+                    "cpu",
+                    "memory"
+                  ],
+                  "properties": {
+                    "cpu": {
+                      "type": "string",
+                      "pattern": "^(?:[1-9][0-9]*m|[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"
+                    },
+                    "memory": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*(?:Ki|Mi|Gi|Ti)$"
+                    }
+                  }
+                }
+              }
+            },
+            "terminationGracePeriodSeconds": {
+              "type": "integer",
+              "const": 150
             },
             "autoscaling": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "minReplicas",
+                "maxReplicas",
+                "targetCPUUtilizationPercentage",
+                "targetMemoryUtilizationPercentage",
+                "scaleDownStabilizationSeconds",
+                "pressure"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "minReplicas": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxReplicas": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "targetCPUUtilizationPercentage": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "targetMemoryUtilizationPercentage": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "scaleDownStabilizationSeconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 3600
+                },
+                "pressure": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
             },
             "pdb": {
               "type": "object"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "autoscaling": {
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "resources": {
+                    "required": [
+                      "requests"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },

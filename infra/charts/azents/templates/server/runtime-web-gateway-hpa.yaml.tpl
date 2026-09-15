@@ -14,6 +14,9 @@ spec:
     name: runtime-web-gateway
   minReplicas: {{ $gateway.autoscaling.minReplicas }}
   maxReplicas: {{ $gateway.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ $gateway.autoscaling.scaleDownStabilizationSeconds }}
   metrics:
     - type: Resource
       resource:
@@ -21,4 +24,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ $gateway.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $gateway.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- if $gateway.autoscaling.pressure.enabled }}
+    - type: Pods
+      pods:
+        metric:
+          name: "runtime_web_gateway_pressure"
+        target:
+          type: AverageValue
+          averageValue: "700m"
+    {{- end }}
 {{- end }}

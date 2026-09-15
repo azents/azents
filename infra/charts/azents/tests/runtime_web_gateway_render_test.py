@@ -110,6 +110,87 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
         'RUNTIME_WEB_GATEWAY_IDENTITY_COOKIE_NAME: "__Http-Azents-Runtime-Web"'
         in rendered
     )
+    deployment = _rendered_resource(
+        rendered,
+        kind="Deployment",
+        name="runtime-web-gateway",
+    )
+    hpa = _rendered_resource(
+        rendered,
+        kind="HorizontalPodAutoscaler",
+        name="runtime-web-gateway",
+    )
+    assert "terminationGracePeriodSeconds: 150" in deployment
+    assert "containerPort: 8041" not in deployment
+    assert "path: /__azents/drain" not in deployment
+    assert "path: /__azents/live" not in deployment
+    assert "port: metrics" not in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_CONTROL_SESSION_POOL_SIZE" not in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES" not in deployment
+    assert "path: /__azents/ready" in deployment
+    assert "port: http" in deployment
+    assert "requests:" in deployment
+    assert "cpu: 250m" in deployment
+    assert "memory: 512Mi" in deployment
+    assert "name: cpu" in hpa
+    assert "name: memory" in hpa
+    assert "stabilizationWindowSeconds: 300" in hpa
+
+
+def test_gateway_hpa_can_render_optional_pressure_metric() -> None:
+    rendered = _helm_template(
+        *_enabled_values(),
+        "server.runtimeWebGateway.autoscaling.pressure.enabled=true",
+    )
+    hpa = _rendered_resource(
+        rendered,
+        kind="HorizontalPodAutoscaler",
+        name="runtime-web-gateway",
+    )
+
+    assert "type: Pods" in hpa
+    assert 'name: "runtime_web_gateway_pressure"' in hpa
+    assert 'averageValue: "700m"' in hpa
+
+
+@pytest.mark.parametrize(
+    "invalid_request",
+    (
+        "server.runtimeWebGateway.resources.requests.cpu=0",
+        "server.runtimeWebGateway.resources.requests.memory=0Mi",
+    ),
+)
+def test_gateway_hpa_rejects_zero_resource_requests(
+    invalid_request: str,
+) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(*_enabled_values(), invalid_request)
+
+
+def test_gateway_pressure_metric_contract_is_not_operator_overridable() -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            *_enabled_values(),
+            "server.runtimeWebGateway.autoscaling.pressure.metricName=other",
+        )
+
+
+def test_gateway_ingress_declares_streaming_and_large_request_contract() -> None:
+    rendered = _helm_template(*_enabled_values())
+    ingress = _rendered_resource(
+        rendered,
+        kind="Ingress",
+        name="runtime-web-gateway",
+    )
+
+    assert 'nginx.ingress.kubernetes.io/proxy-buffering: "off"' in ingress
+    assert 'nginx.ingress.kubernetes.io/proxy-request-buffering: "off"' in ingress
+    assert "nginx.ingress.kubernetes.io/proxy-body-size: 1g" in ingress
+    assert 'nginx.ingress.kubernetes.io/proxy-http-version: "1.1"' in ingress
+    assert 'nginx.ingress.kubernetes.io/proxy-next-upstream: "off"' in ingress
+    assert 'nginx.ingress.kubernetes.io/proxy-read-timeout: "28800"' in ingress
+    assert 'nginx.ingress.kubernetes.io/proxy-send-timeout: "28800"' in ingress
+    assert 'nginx.ingress.kubernetes.io/ssl-redirect: "true"' in ingress
 
 
 def test_enabled_gateway_configures_worker_endpoint_urls() -> None:

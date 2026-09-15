@@ -30,6 +30,7 @@ spec:
         {{- include "azents.componentLabels" (dict "root" . "component" "runtime-web-gateway") | nindent 8 }}
         app.kubernetes.io/part-of: "azents"
     spec:
+      terminationGracePeriodSeconds: {{ $gateway.terminationGracePeriodSeconds }}
       serviceAccountName: {{ include "azents.serverServiceAccountName" . | quote }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

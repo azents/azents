@@ -29,6 +29,38 @@ class RuntimeWebGatewaySettings(BaseSettings):
     sentry_dsn: str | None = None
     runtime_web_gateway_enabled: bool = False
     runtime_web_gateway_port: int = Field(default=8040, ge=1, le=65_535)
+    runtime_web_gateway_metrics_port: int = Field(default=8041, ge=1, le=65_535)
+    runtime_web_gateway_maintenance: bool = False
+    runtime_web_gateway_control_session_pool_size: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+    )
+    runtime_web_gateway_maximum_active_exchanges: int = Field(
+        default=512,
+        ge=1,
+        le=16_384,
+    )
+    runtime_web_gateway_maximum_application_buffer_bytes: int = Field(
+        default=256 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=16 * 1024 * 1024 * 1024,
+    )
+    runtime_web_gateway_maximum_scheduler_waiters: int = Field(
+        default=1024,
+        ge=1,
+        le=65_536,
+    )
+    runtime_web_gateway_maximum_event_loop_lag_milliseconds: int = Field(
+        default=250,
+        ge=10,
+        le=60_000,
+    )
+    runtime_web_gateway_maximum_resident_memory_bytes: int = Field(
+        default=1024 * 1024 * 1024,
+        ge=64 * 1024 * 1024,
+        le=64 * 1024 * 1024 * 1024,
+    )
     runtime_web_gateway_auth_mode: RuntimeWebAuthMode = RuntimeWebAuthMode.SHARED_COOKIE
     runtime_web_gateway_main_web_origin: str | None = None
     runtime_web_gateway_broker_origin: str | None = None
@@ -113,6 +145,8 @@ class RuntimeWebGatewaySettings(BaseSettings):
         """Reject incomplete or ambiguous public security configuration."""
         if not self.runtime_web_gateway_enabled:
             return self
+        if self.runtime_web_gateway_metrics_port == self.runtime_web_gateway_port:
+            raise ValueError("Runtime Web Gateway metrics port must be separate")
         required = {
             "main web origin": self.runtime_web_gateway_main_web_origin,
             "broker origin": self.runtime_web_gateway_broker_origin,

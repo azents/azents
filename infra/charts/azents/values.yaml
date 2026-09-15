@@ -126,6 +126,15 @@ server:
     enabled: false
     replicas: 2
     port: 8040
+    metricsPort: 8041
+    maintenance: false
+    controlSessionPoolSize: 4
+    hardLimits:
+      activeExchanges: 512
+      applicationBufferBytes: 268435456
+      schedulerWaiters: 1024
+      eventLoopLagMilliseconds: 250
+      residentMemoryBytes: 1073741824
     authMode: shared_cookie
     mainWebOrigin: ""
     brokerOrigin: ""
@@ -156,15 +165,31 @@ server:
     ingress:
       enabled: false
       className: ""
-      annotations: {}
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-buffering: "off"
+        nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+        nginx.ingress.kubernetes.io/proxy-body-size: "1g"
+        nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+        nginx.ingress.kubernetes.io/proxy-next-upstream: "off"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "28800"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "28800"
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
       hosts: []
       tls: []
-    resources: {}
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+    terminationGracePeriodSeconds: 150
     autoscaling:
       enabled: true
       minReplicas: 2
       maxReplicas: 4
       targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 70
+      scaleDownStabilizationSeconds: 300
+      pressure:
+        enabled: false
     pdb:
       enabled: true
       maxUnavailable: 1
