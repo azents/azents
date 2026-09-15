@@ -189,10 +189,12 @@ async def test_drain_coordinator_refuses_new_work_and_closes_gracefully() -> Non
     resources = RuntimeWebGatewayResourceTracker(_limits())
     state = _operational_state(resources)
     events: list[tuple[str, CloseReason]] = []
+    drain_started = asyncio.Event()
 
     async def begin_session_drain(reason: CloseReason) -> None:
         assert not state.health.ready
         events.append(("goaway", reason))
+        drain_started.set()
 
     coordinator = RuntimeWebDrainCoordinator(
         policy=RuntimeWebDrainPolicy(
@@ -236,7 +238,7 @@ async def test_drain_coordinator_refuses_new_work_and_closes_gracefully() -> Non
     assert long_lived is not None
 
     async def finish_http() -> None:
-        await asyncio.sleep(0)
+        await drain_started.wait()
         assert finite is not None
         assert await coordinator.release(finite)
 

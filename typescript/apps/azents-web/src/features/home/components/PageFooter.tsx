@@ -47,7 +47,7 @@ export function PageFooter(): React.ReactElement {
       component="footer"
       style={{
         backgroundColor: "var(--mantine-color-body)",
-        borderTop: "1px solid var(--mantine-color-default-border)",
+        borderTop: `${rem(1)} solid var(--mantine-color-default-border)`,
         paddingTop: "var(--mantine-spacing-4xl)",
         paddingBottom: "var(--mantine-spacing-2xl)",
       }}

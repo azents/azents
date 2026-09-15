@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { RuntimeWebAuth } from "@/features/runtime-web/components/RuntimeWebAuth";
+import { RuntimeWebAuthPage } from "@/features/runtime-web/RuntimeWebAuthPage";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 
 export const revalidate = 0;
@@ -8,7 +8,7 @@ interface RuntimeWebAuthPageProps {
   searchParams: Promise<{ service_id?: string }>;
 }
 
-export default async function RuntimeWebAuthPage({
+export default async function Page({
   searchParams,
 }: RuntimeWebAuthPageProps): Promise<React.ReactElement> {
   const { service_id: serviceId } = await searchParams;
@@ -20,5 +20,5 @@ export default async function RuntimeWebAuthPage({
     const next = `/runtime-web/auth?service_id=${encodeURIComponent(serviceId)}`;
     redirect(`/login?next=${encodeURIComponent(next)}`);
   }
-  return <RuntimeWebAuth serviceId={serviceId} />;
+  return <RuntimeWebAuthPage serviceId={serviceId} />;
 }

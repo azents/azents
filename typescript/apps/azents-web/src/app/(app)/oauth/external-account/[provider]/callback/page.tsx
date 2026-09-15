@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { cache } from "react";
-import { ExternalAccountOAuthResult } from "@/features/external-account-links/components/ExternalAccountOAuthResult";
+import { ExternalAccountOAuthPage } from "@/features/external-account-links/ExternalAccountOAuthPage";
 import { parseExternalAccountOAuthCallbackQuery } from "@/features/external-account-links/oauth-callback-query";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 import { trpc } from "@/trpc/server";
@@ -74,44 +74,31 @@ export default async function Page({
     searchParams,
   ]);
   const provider = parseProvider(providerParam);
+  const result = await resolveResult(provider, query);
+  return <ExternalAccountOAuthPage state={result} />;
+}
 
+async function resolveResult(
+  provider: ExternalAccountProvider | null,
+  query: Record<string, string | string[] | null>,
+): Promise<ExternalAccountOAuthResultState> {
   if (!(await hasLiveAuthSession())) {
-    return <ExternalAccountOAuthResult state={{ type: "AUTH_REQUIRED" }} />;
+    return { type: "AUTH_REQUIRED" };
   }
   if (provider === null) {
-    return (
-      <ExternalAccountOAuthResult
-        state={{ type: "FAILED", provider: null, reason: "invalid_provider" }}
-      />
-    );
+    return { type: "FAILED", provider: null, reason: "invalid_provider" };
   }
 
   const callback = parseExternalAccountOAuthCallbackQuery(query);
   if (callback.type === "CANCELLED") {
-    return (
-      <ExternalAccountOAuthResult state={{ type: "CANCELLED", provider }} />
-    );
+    return { type: "CANCELLED", provider };
   }
   if (callback.type === "PROVIDER_REJECTED") {
-    return (
-      <ExternalAccountOAuthResult
-        state={{ type: "FAILED", provider, reason: "provider_rejected" }}
-      />
-    );
+    return { type: "FAILED", provider, reason: "provider_rejected" };
   }
   if (callback.type === "INVALID") {
-    return (
-      <ExternalAccountOAuthResult
-        state={{ type: "FAILED", provider, reason: "invalid_callback" }}
-      />
-    );
+    return { type: "FAILED", provider, reason: "invalid_callback" };
   }
 
-  const result: ExchangeResult = await exchangeOnce(
-    provider,
-    callback.code,
-    callback.state,
-  );
-
-  return <ExternalAccountOAuthResult state={result} />;
+  return exchangeOnce(provider, callback.code, callback.state);
 }

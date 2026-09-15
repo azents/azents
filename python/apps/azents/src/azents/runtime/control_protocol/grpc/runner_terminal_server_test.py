@@ -182,7 +182,6 @@ async def test_control_message_cancellation_reaps_pending_frame_task() -> None:
     pending.cancel()
     with pytest.raises(asyncio.CancelledError):
         await pending
-    await asyncio.sleep(0)
 
     leaked = [
         task

@@ -1,7 +1,7 @@
 """Agent-owned Toolkit management Web Surface E2E journey."""
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TypedDict
 
 import azentsadminclient
 import azentspublicclient
@@ -55,6 +55,40 @@ class _AgentToolkitWebContext:
     member_email: str
     handle: str
     model_selection: AgentModelSelectionInput
+
+
+class _ToolkitLayout(TypedDict):
+    overflow: bool
+    toolkitTop: float
+    ownershipTop: float
+    readinessTop: float
+    actionTop: float
+
+
+def _toolkit_layout(value: object) -> _ToolkitLayout:
+    """Validate the browser layout measurement payload."""
+    if not isinstance(value, dict):
+        raise AssertionError("Expected a Toolkit layout object")
+    overflow = value.get("overflow")
+    toolkit_top = value.get("toolkitTop")
+    ownership_top = value.get("ownershipTop")
+    readiness_top = value.get("readinessTop")
+    action_top = value.get("actionTop")
+    if (
+        not isinstance(overflow, bool)
+        or not isinstance(toolkit_top, (int, float))
+        or not isinstance(ownership_top, (int, float))
+        or not isinstance(readiness_top, (int, float))
+        or not isinstance(action_top, (int, float))
+    ):
+        raise AssertionError("Expected numeric Toolkit layout measurements")
+    return {
+        "overflow": overflow,
+        "toolkitTop": float(toolkit_top),
+        "ownershipTop": float(ownership_top),
+        "readinessTop": float(readiness_top),
+        "actionTop": float(action_top),
+    }
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -385,9 +419,8 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         By.XPATH,
         "//button[normalize-space()='Disable']",
     )
-    layout = cast(
-        dict[str, float | bool],
-        cast(Any, browser_driver).execute_script(
+    layout = _toolkit_layout(
+        browser_driver.execute_script(
             "return {"
             "overflow: document.documentElement.scrollWidth > "
             "document.documentElement.clientWidth,"
@@ -400,7 +433,7 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
             ownership_element,
             readiness_element,
             primary_action_element,
-        ),
+        )
     )
     assert layout["overflow"] is False
     assert layout["toolkitTop"] <= layout["ownershipTop"]

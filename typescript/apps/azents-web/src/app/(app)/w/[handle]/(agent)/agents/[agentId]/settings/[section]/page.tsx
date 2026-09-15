@@ -1,24 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { AgentAutomaticProjectsPage } from "@/features/agents/AgentAutomaticProjectsPage";
-import { AgentMemorySettingsPage } from "@/features/agents/AgentMemorySettingsPage";
-import { AgentRuntimeSettingsPage } from "@/features/agents/AgentRuntimeSettingsPage";
-import { AgentRuntimeWebServicesPage } from "@/features/agents/AgentRuntimeWebServicesPage";
-import { AgentSettingsPage } from "@/features/agents/AgentSettingsPage";
-import { ExternalChannelSettingsPage } from "@/features/external-channel-management/ExternalChannelSettingsPage";
+import { AgentSettingsSectionPage } from "@/features/agents/AgentSettingsSectionPage";
 import { trpc } from "@/trpc/server";
-import type { AgentFormSection } from "@/features/agents/components/AgentForm";
+import type { AgentSettingsSection } from "@/features/agents/AgentSettingsSectionPage";
 
-type SettingsSection =
-  | AgentFormSection
-  | "memory"
-  | "runtime"
-  | "services"
-  | "channels"
-  | "projects"
-  | "danger";
-
-function parseSection(value: string): SettingsSection | null {
+function parseSection(value: string): AgentSettingsSection | null {
   switch (value) {
     case "profile":
     case "model":
@@ -49,26 +35,15 @@ export default async function Page({
   }
   try {
     const agent = await trpc.agent.get({ handle, agentId });
-    if (section === "memory") {
-      return <AgentMemorySettingsPage handle={handle} agent={agent} />;
-    }
-    if (section === "runtime") {
-      return <AgentRuntimeSettingsPage handle={handle} agent={agent} />;
-    }
-    if (section === "services") {
-      if (agent.runtime_capability !== "managed") {
-        notFound();
-      }
-      return <AgentRuntimeWebServicesPage handle={handle} agent={agent} />;
-    }
-    if (section === "channels") {
-      return <ExternalChannelSettingsPage handle={handle} agent={agent} />;
-    }
-    if (section === "projects") {
-      return <AgentAutomaticProjectsPage handle={handle} agent={agent} />;
+    if (section === "services" && agent.runtime_capability !== "managed") {
+      notFound();
     }
     return (
-      <AgentSettingsPage handle={handle} agent={agent} section={section} />
+      <AgentSettingsSectionPage
+        handle={handle}
+        agent={agent}
+        section={section}
+      />
     );
   } catch (e) {
     if (e instanceof TRPCError && e.code === "NOT_FOUND") {

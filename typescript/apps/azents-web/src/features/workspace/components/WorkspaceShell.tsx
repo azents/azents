@@ -6,7 +6,7 @@
  * Desktop: fixed left sidebar + right content area.
  * Mobile: toggle Drawer sidebar with AppBar Burger.
  */
-import { Box, Drawer, Group } from "@mantine/core";
+import { Box, Drawer, Group, rem } from "@mantine/core";
 import { useSidebar } from "@/shared/providers/sidebar";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import type { ReactNode } from "react";
@@ -16,8 +16,8 @@ interface WorkspaceShellProps {
   children: ReactNode;
 }
 
-/** Sidebar width (px) */
-const SIDEBAR_WIDTH = 250;
+/** Sidebar width. */
+const SIDEBAR_WIDTH = rem(250);
 
 export function WorkspaceShell({
   handle,
@@ -46,7 +46,7 @@ export function WorkspaceShell({
         wrap="nowrap"
         style={{
           flex: 1,
-          minHeight: "calc(100dvh - var(--app-shell-header-offset, 0px))",
+          minHeight: "calc(100dvh - var(--app-shell-header-offset, 0rem))",
         }}
       >
         {/* Desktop sidebar */}
@@ -55,7 +55,7 @@ export function WorkspaceShell({
           style={{
             width: SIDEBAR_WIDTH,
             minWidth: SIDEBAR_WIDTH,
-            borderRight: "1px solid var(--mantine-color-default-border)",
+            borderRight: `${rem(1)} solid var(--mantine-color-default-border)`,
           }}
           py="sm"
         >
