@@ -7,7 +7,7 @@ import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import AsyncContextManager
+from typing import AsyncContextManager, NamedTuple
 
 import pytest
 from azents_runtime_control.proto import runtime_web_session_pb2
@@ -447,13 +447,18 @@ def _data_plane(
     )
 
 
+class _LocalDataPlane(NamedTuple):
+    data_plane: RuntimeWebControlDataPlane
+    lifecycle: _OwnerLifecycle
+
+
 def _local_data_plane(
     *,
     lifecycle: _OwnerLifecycle | None = None,
     capacity_config: RuntimeWebCapacityConfig | None = None,
     hard_limits: RuntimeWebControlHardLimits | None = None,
     resident_memory_bytes: Callable[[], int] = lambda: 1,
-) -> tuple[RuntimeWebControlDataPlane, _OwnerLifecycle]:
+) -> _LocalDataPlane:
     owner = _owner()
     route = RuntimeWebSessionRoute(
         runtime_id=owner.runtime_id,
@@ -481,8 +486,8 @@ def _local_data_plane(
         peer_boot_id="control-boot",
     )
     effective_lifecycle = lifecycle or _OwnerLifecycle()
-    return (
-        RuntimeWebControlDataPlane(
+    return _LocalDataPlane(
+        data_plane=RuntimeWebControlDataPlane(
             session_manager=_RouteSessionManager(),
             route_repository=_RouteRepository(route),
             owner_replica_id="control-a",
@@ -498,7 +503,7 @@ def _local_data_plane(
             hard_limits=hard_limits or _hard_limits(),
             resident_memory_bytes=resident_memory_bytes,
         ),
-        effective_lifecycle,
+        lifecycle=effective_lifecycle,
     )
 
 

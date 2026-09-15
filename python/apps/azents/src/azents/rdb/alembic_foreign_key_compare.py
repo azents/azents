@@ -1,6 +1,6 @@
 """Alembic comparison normalization for historical foreign-key timing."""
 
-from typing import Any
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from alembic.autogenerate.api import AutogenContext
@@ -9,6 +9,14 @@ from alembic.util import DispatchPriority, PriorityDispatchResult
 from sqlalchemy.engine.interfaces import ReflectedForeignKeyConstraint
 
 _PLUGIN_NAME = "azents.autogenerate.foreign_key_options"
+
+
+class _ForeignKeyIdentity(NamedTuple):
+    constrained_columns: tuple[str, ...]
+    referred_columns: tuple[tuple[str | None, str, str], ...]
+    onupdate: str | None
+    ondelete: str | None
+    match: str | None
 
 
 def _normalize_action(action: str | None) -> str | None:
@@ -25,11 +33,11 @@ def _normalize_schema(schema: str | None) -> str | None:
 
 def _foreign_key_identity(
     constraint: sa.ForeignKeyConstraint,
-) -> tuple[Any, ...]:
+) -> _ForeignKeyIdentity:
     elements = tuple(constraint.elements)
-    return (
-        tuple(element.parent.name for element in elements),
-        tuple(
+    return _ForeignKeyIdentity(
+        constrained_columns=tuple(element.parent.name for element in elements),
+        referred_columns=tuple(
             (
                 _normalize_schema(element.column.table.schema),
                 element.column.table.name,
@@ -37,27 +45,27 @@ def _foreign_key_identity(
             )
             for element in elements
         ),
-        _normalize_action(constraint.onupdate),
-        _normalize_action(constraint.ondelete),
-        constraint.match,
+        onupdate=_normalize_action(constraint.onupdate),
+        ondelete=_normalize_action(constraint.ondelete),
+        match=constraint.match,
     )
 
 
 def _reflected_foreign_key_identity(
     foreign_key: ReflectedForeignKeyConstraint,
-) -> tuple[Any, ...]:
+) -> _ForeignKeyIdentity:
     options = foreign_key.get("options", {})
     referred_schema = _normalize_schema(foreign_key.get("referred_schema"))
     referred_table = foreign_key["referred_table"]
-    return (
-        tuple(foreign_key["constrained_columns"]),
-        tuple(
+    return _ForeignKeyIdentity(
+        constrained_columns=tuple(foreign_key["constrained_columns"]),
+        referred_columns=tuple(
             (referred_schema, referred_table, column)
             for column in foreign_key["referred_columns"]
         ),
-        _normalize_action(options.get("onupdate")),
-        _normalize_action(options.get("ondelete")),
-        options.get("match"),
+        onupdate=_normalize_action(options.get("onupdate")),
+        ondelete=_normalize_action(options.get("ondelete")),
+        match=options.get("match"),
     )
 
 

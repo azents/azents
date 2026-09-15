@@ -6,7 +6,7 @@ import asyncio
 import dataclasses
 import json
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
@@ -436,7 +436,7 @@ def _assert_workspace_path_missing(
             path=path,
             _headers=headers,
         )
-    assert cast(Any, error.value).status == 404
+    assert error.value.status == 404
 
 
 async def _wait_for_empty_store_recovery(
@@ -1392,7 +1392,7 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
                 handle=handle,
                 _headers=headers,
             )
-        assert cast(Any, restart_error.value).status == 409
+        assert restart_error.value.status == 409
     finally:
         _restart_runtime_provider(azents_runtime_provider_docker_container)
 
@@ -1598,7 +1598,7 @@ def run_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
             handle=handle,
             _headers=headers,
         )
-    assert cast(Any, deleted_profile_error.value).status == 404
+    assert deleted_profile_error.value.status == 404
     default_after = (
         profile_api.runtime_profile_v1_get_workspace_runtime_profile_default(
             handle=handle,

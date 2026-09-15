@@ -16,6 +16,7 @@ import {
   Group,
   Loader,
   NativeSelect,
+  rem,
   Stack,
   Table,
   Text,
@@ -125,9 +126,9 @@ function InviteForm({
   return (
     <Box
       style={{
-        border: "1px solid var(--mantine-color-default-border)",
-        borderRadius: 12,
-        padding: "20px",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-lg)",
       }}
     >
       <Stack gap="md">
@@ -320,9 +321,9 @@ function MemberListSection({
   return (
     <Box
       style={{
-        border: "1px solid var(--mantine-color-default-border)",
-        borderRadius: 12,
-        padding: "20px",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-lg)",
       }}
     >
       <Stack gap="md">
@@ -454,9 +455,9 @@ function PendingInvitationsSection({
   return (
     <Box
       style={{
-        border: "1px solid var(--mantine-color-default-border)",
-        borderRadius: 12,
-        padding: "20px",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-lg)",
       }}
     >
       <Stack gap="md">
@@ -631,9 +632,9 @@ function JoinRequestsSection({
   return (
     <Box
       style={{
-        border: "1px solid var(--mantine-color-default-border)",
-        borderRadius: 12,
-        padding: "20px",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-lg)",
       }}
     >
       <Stack gap="md">

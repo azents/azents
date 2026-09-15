@@ -108,6 +108,13 @@ class RunnerWebResourceSnapshot:
     resident_memory_bytes: int
 
 
+@dataclasses.dataclass(frozen=True)
+class _WebSocketFrame:
+    opcode: WebSocketOpcode
+    final: bool
+    data: bytes
+
+
 class RunnerWebResourceTracker:
     """Enforce process limits and retain bounded aggregate transport evidence."""
 
@@ -1224,7 +1231,9 @@ class RunnerWebSessionDispatcher:
             converted = _from_ws_event(event)
             if converted is None:
                 continue
-            opcode, final, data = converted
+            opcode = converted.opcode
+            final = converted.final
+            data = converted.data
             wire_opcode = opcode
             if opcode in {WebSocketOpcode.TEXT, WebSocketOpcode.BINARY}:
                 if fragmented_opcode is not None:
@@ -1522,19 +1531,35 @@ def _ws_event(opcode: WebSocketOpcode, data: bytes, *, final: bool) -> Event:
     raise ValueError("Runner WebSocket continuation must retain its message type")
 
 
-def _from_ws_event(event: Event) -> tuple[WebSocketOpcode, bool, bytes] | None:
+def _from_ws_event(event: Event) -> _WebSocketFrame | None:
     if isinstance(event, TextMessage):
-        return WebSocketOpcode.TEXT, event.message_finished, event.data.encode()
+        return _WebSocketFrame(
+            opcode=WebSocketOpcode.TEXT,
+            final=event.message_finished,
+            data=event.data.encode(),
+        )
     if isinstance(event, BytesMessage):
-        return WebSocketOpcode.BINARY, event.message_finished, bytes(event.data)
+        return _WebSocketFrame(
+            opcode=WebSocketOpcode.BINARY,
+            final=event.message_finished,
+            data=bytes(event.data),
+        )
     if isinstance(event, Ping):
-        return WebSocketOpcode.PING, True, event.payload
+        return _WebSocketFrame(
+            opcode=WebSocketOpcode.PING,
+            final=True,
+            data=event.payload,
+        )
     if isinstance(event, Pong):
-        return WebSocketOpcode.PONG, True, event.payload
+        return _WebSocketFrame(
+            opcode=WebSocketOpcode.PONG,
+            final=True,
+            data=event.payload,
+        )
     if isinstance(event, CloseConnection):
-        return (
-            WebSocketOpcode.CLOSE,
-            True,
-            event.code.to_bytes(2, "big") + (event.reason or "").encode(),
+        return _WebSocketFrame(
+            opcode=WebSocketOpcode.CLOSE,
+            final=True,
+            data=event.code.to_bytes(2, "big") + (event.reason or "").encode(),
         )
     return None

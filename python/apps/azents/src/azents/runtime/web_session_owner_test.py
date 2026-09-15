@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import datetime
 from collections.abc import AsyncIterator, Callable
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,11 +35,16 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+class _OwnedSession(NamedTuple):
+    manager: RuntimeWebSessionOwnerManager
+    session: RuntimeWebOwnedSession
+
+
 async def _owned(
     session_manager: SessionManager[AsyncSession],
     *,
     clock: Callable[[], datetime.datetime] = _now,
-) -> tuple[RuntimeWebSessionOwnerManager, RuntimeWebOwnedSession]:
+) -> _OwnedSession:
     async with session_manager() as session:
         workspace_id, agent_id, _ = await _authority_fixture(session)
         runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
@@ -57,10 +63,13 @@ async def _owned(
         lease_seconds=30,
         clock=clock,
     )
-    return manager, await manager.acquire(
-        runtime_id=runtime_id,
-        desired_generation=3,
-        runner_generation=4,
+    return _OwnedSession(
+        manager=manager,
+        session=await manager.acquire(
+            runtime_id=runtime_id,
+            desired_generation=3,
+            runner_generation=4,
+        ),
     )
 
 

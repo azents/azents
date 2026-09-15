@@ -5,7 +5,6 @@ import contextlib
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
-from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
@@ -13,9 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.session.supervisor as session_runner_supervisor_module
 import azents.worker.session.waiter as session_runner_waiter_module
-from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import (
-    SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
 )
@@ -42,7 +39,7 @@ from azents.engine.events.types import (
     SystemErrorPayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
-from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
+from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.errors import CompactionFailedError, UserVisibleRuntimeError
 from azents.engine.run.model_transport import InMemoryModelTransportState
@@ -50,8 +47,6 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
@@ -59,7 +54,6 @@ from azents.repos.session_execution.data import (
 )
 from azents.services.chat.live_events import LiveOwnerAdvance
 from azents.services.mailbox import (
-    MailboxService,
     PendingInputInferenceProfile,
     PromotedMailboxItems,
     TurnEffect,
@@ -80,20 +74,15 @@ from azents.worker.session.contracts import PrepareToolkits
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshotError,
-    CanonicalExecutionSnapshotLoader,
     CanonicalExecutionWorkDriftError,
 )
-from azents.worker.session.idle_continuation import IdleContinuationService
-from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.runner import SessionRunner
 from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
-from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 from azents.worker.session.waiter import (
     HeartbeatResult,
     IdleTimeoutResult,
     MessageResult,
     RunnerWaitResult,
-    SessionRunnerWaiter,
     ShutdownResult,
 )
 from azents.worker.worker import AgentWorker
@@ -120,6 +109,13 @@ class _Broadcast:
         del owner_generation
         self.events.append((session_id, event))
         return True
+
+
+def _event_payload(value: object) -> dict[str, object]:
+    """Validate one recorded broadcast event payload."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError("Expected a string-keyed event payload")
+    return value
 
 
 class _SessionRunnerEventPublisher:
@@ -214,7 +210,7 @@ class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
 
     async def __aenter__(self) -> AsyncSession:
         """Return test session."""
-        return cast(AsyncSession, object())
+        return AsyncSession()
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -913,31 +909,16 @@ def _make_session_runner(host: _Host) -> SessionRunner:
     """Create session runner with event publisher injected for tests."""
     return SessionRunner(
         shutdown_event=host.shutdown_event,
-        event_publisher=cast(
-            WorkerEventPublisher,
-            _SessionRunnerEventPublisher(host),
-        ),
-        session_lifecycle=cast(SessionLifecycleService, host),
-        execution_snapshot_loader=cast(
-            CanonicalExecutionSnapshotLoader,
-            _ExecutionSnapshotLoader(host),
-        ),
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            _AgentSessionRepository(host),
-        ),
-        mailbox_item_service=cast(
-            MailboxService,
-            _PendingMailboxService(host),
-        ),
-        idle_continuation_service=cast(
-            IdleContinuationService,
-            _IdleContinuationService(host),
-        ),
-        user_stop_finalizer=cast(UserStopFinalizer, _UserStopFinalizer(host)),
-        run_executor=cast(RunExecutor, _RunExecutor(host)),
-        engine=cast(AgentEngineProtocol, host),
+        event_publisher=_SessionRunnerEventPublisher(host),  # ty: ignore[invalid-argument-type] # Focused publisher implements only dispatch_event().
+        session_lifecycle=host,  # ty: ignore[invalid-argument-type] # Host implements only exercised lifecycle operations.
+        execution_snapshot_loader=_ExecutionSnapshotLoader(host),  # ty: ignore[invalid-argument-type] # Focused loader implements only load().
+        session_manager=_SessionManager(),
+        agent_session_repository=_AgentSessionRepository(host),  # ty: ignore[invalid-argument-type] # Focused repository implements only exercised operations.
+        mailbox_item_service=_PendingMailboxService(host),  # ty: ignore[invalid-argument-type] # Focused mailbox service implements only exercised operations.
+        idle_continuation_service=_IdleContinuationService(host),  # ty: ignore[invalid-argument-type] # Focused continuation service implements only exercised operations.
+        user_stop_finalizer=_UserStopFinalizer(host),  # ty: ignore[invalid-argument-type] # Focused finalizer implements only exercised operations.
+        run_executor=_RunExecutor(host),  # ty: ignore[invalid-argument-type] # Focused executor implements only execute().
+        engine=host,  # ty: ignore[invalid-argument-type] # Host implements exercised AgentEngine operations.
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
@@ -965,15 +946,15 @@ def _make_worker_event_publisher(
 ) -> WorkerEventPublisher:
     """Create event publisher for tests."""
     projector = LiveEventProjector(
-        live_event_store=cast(Any, live_event_store),
-        broadcast=cast(WebSocketBroadcast, broadcast),
-        session_manager=cast(Any, _SessionManager()),
-        agent_run_repository=cast(Any, object()),
-        agent_session_repository=cast(Any, _CurrentOwnerRepository()),
+        live_event_store=live_event_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
+        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
+        session_manager=_SessionManager(),
+        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # These tests never access the run repository.
+        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
     )
     return WorkerEventPublisher(
-        broker=cast(SessionBroker, broker),
-        broadcast=cast(WebSocketBroadcast, broadcast),
+        broker=broker,  # ty: ignore[invalid-argument-type] # Focused broker implements only exercised operations.
+        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
         live_event_projector=projector,
     )
 
@@ -1028,7 +1009,7 @@ class _ReceiveBroker:
 async def test_receive_returns_broker_messages() -> None:
     """Normal broker activity returns the received Worker signals."""
     worker = AgentWorker.__new__(AgentWorker)
-    worker.broker = cast(SessionBroker, _ReceiveBroker([_wake_up()]))
+    worker.broker = _ReceiveBroker([_wake_up()])  # ty: ignore[invalid-assignment] # Focused broker implements receive_messages().
     messages = await worker._receive_or_shutdown(
         asyncio.Event(),
     )
@@ -1367,7 +1348,7 @@ async def test_session_runner_carries_idle_baseline_across_explicit_transitions(
             ShutdownResult(),
         ]
     )
-    runner.waiter = cast(SessionRunnerWaiter, waiter)
+    runner.waiter = waiter  # ty: ignore[invalid-assignment] # Scripted waiter implements wait_next().
     now = 0.0
     completion_times = iter([1801.0, 5402.0])
 
@@ -1411,7 +1392,7 @@ async def test_session_runner_idle_timeout_releases_lock_once() -> None:
     waiter = _ScriptedSessionRunnerWaiter(
         [MessageResult(_wake_up()), IdleTimeoutResult()]
     )
-    runner.waiter = cast(SessionRunnerWaiter, waiter)
+    runner.waiter = waiter  # ty: ignore[invalid-assignment] # Scripted waiter implements wait_next().
 
     await runner.run()
 
@@ -1591,11 +1572,11 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     live_store = _LiveEventStore(before=[], after=[])
     broadcast = _Broadcast()
     projector = LiveEventProjector(
-        live_event_store=cast(Any, live_store),
-        broadcast=cast(WebSocketBroadcast, broadcast),
-        session_manager=cast(Any, _SessionManager()),
-        agent_run_repository=cast(Any, object()),
-        agent_session_repository=cast(Any, _CurrentOwnerRepository()),
+        live_event_store=live_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
+        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
+        session_manager=_SessionManager(),
+        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # This test never accesses the run repository.
+        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1674,7 +1655,7 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
         "history_event_appended",
         "live_event_removed",
     ]
-    appended = cast(dict[str, object], broadcast.events[0][1]["event"])
+    appended = _event_payload(broadcast.events[0][1]["event"])
     assert appended["id"] == "1123456789abcdef0123456789abcdeb"
     assert broadcast.events[1][1]["event_id"] == "0123456789abcdef0123456789abcdea"
     assert broker.renewed_session_ids == ["session-1"]
@@ -1687,7 +1668,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
     """MailboxItem flush broadcasts history append and live removal actions."""
     broadcast = _Broadcast()
     executor = object.__new__(RunExecutor)
-    executor.broadcast = cast(WebSocketBroadcast, broadcast)
+    executor.broadcast = broadcast  # ty: ignore[invalid-assignment] # Focused broadcast implements only publish operations.
     scheduled_title_events: list[str] = []
 
     def schedule_title(session_id: str, event: Event) -> None:
@@ -1736,10 +1717,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             suppress_parent_result=False,
         )
     )
-    executor.mailbox_item_service = cast(
-        MailboxService,
-        promotion,
-    )
+    executor.mailbox_item_service = promotion  # ty: ignore[invalid-assignment] # Focused mailbox service implements only exercised operations.
 
     async def has_actionable_model_input(session_id: str) -> bool:
         del session_id
@@ -1801,7 +1779,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
     assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]
     assert event_types == ["history_event_appended", "mailbox_item_removed"]
-    appended = cast(dict[str, object], broadcast.events[0][1]["event"])
+    appended = _event_payload(broadcast.events[0][1]["event"])
     assert appended["id"] == "1123456789abcdef0123456789abcdeb"
     assert appended["external_id"] == "buffer-1"
     assert broadcast.events[1][1]["mailbox_item_id"] == "buffer-1"

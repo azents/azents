@@ -1,7 +1,7 @@
 "use client";
 
 /** Features section — introduces main features with Bento Grid layout */
-import { Box, Container, rem, Text, Title } from "@mantine/core";
+import { Box, Container, em, rem, Text, Title } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import {
   IconBolt,
@@ -33,22 +33,47 @@ interface FeatureCard {
 
 /** Feature card list — layout emphasizing direct agent creation most */
 const FEATURE_CARDS: FeatureCard[] = [
-  { key: "uiBuilder", icon: IconPuzzle, accentColor: "#8b5cf6", colSpan: 2 },
-  { key: "teamAgents", icon: IconUsers, accentColor: "#0070f3", colSpan: 1 },
+  {
+    key: "uiBuilder",
+    icon: IconPuzzle,
+    accentColor: "var(--mantine-color-violet-6)",
+    colSpan: 2,
+  },
+  {
+    key: "teamAgents",
+    icon: IconUsers,
+    accentColor: "var(--mantine-color-blue-6)",
+    colSpan: 1,
+  },
   {
     key: "batteryIncluded",
     icon: IconBolt,
-    accentColor: "#10b981",
+    accentColor: "var(--mantine-color-teal-6)",
     colSpan: 1,
   },
-  { key: "automation", icon: IconRocket, accentColor: "#06b6d4", colSpan: 2 },
-  { key: "security", icon: IconShield, accentColor: "#f97316", colSpan: 2 },
-  { key: "multiAgent", icon: IconNetwork, accentColor: "#ec4899", colSpan: 1 },
+  {
+    key: "automation",
+    icon: IconRocket,
+    accentColor: "var(--mantine-color-cyan-6)",
+    colSpan: 2,
+  },
+  {
+    key: "security",
+    icon: IconShield,
+    accentColor: "var(--mantine-color-orange-6)",
+    colSpan: 2,
+  },
+  {
+    key: "multiAgent",
+    icon: IconNetwork,
+    accentColor: "var(--mantine-color-pink-6)",
+    colSpan: 1,
+  },
 ];
 
 export function FeaturesSection(): React.ReactElement {
   const t = useTranslations("features");
-  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const isDesktop = useMediaQuery(`(min-width: ${em(768)})`);
 
   return (
     <Box
@@ -67,7 +92,7 @@ export function FeaturesSection(): React.ReactElement {
             style={{
               fontFamily: "var(--font-geist-mono), monospace",
               fontSize: "var(--mantine-font-size-sm)",
-              color: "#0070f3",
+              color: "var(--mantine-color-blue-6)",
               textTransform: "uppercase",
               letterSpacing: rem(2),
               marginBottom: "var(--mantine-spacing-md)",
@@ -102,7 +127,7 @@ export function FeaturesSection(): React.ReactElement {
                 style={{
                   ...(isDesktop && { gridColumn: `span ${card.colSpan}` }),
                   backgroundColor: "var(--mantine-color-dark-8)",
-                  border: "1px solid var(--mantine-color-default-border)",
+                  border: `${rem(1)} solid var(--mantine-color-default-border)`,
                   borderRadius: "var(--mantine-radius-lg)",
                   padding: rem(36),
                   position: "relative",

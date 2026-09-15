@@ -125,10 +125,10 @@ export const ResolvedModel: Story = {
       boxShadow: popoverStyle.boxShadow,
       padding: popoverStyle.padding,
     }).toEqual({
-      backgroundColor: "rgb(33, 37, 41)",
-      borderRadius: "8px",
+      backgroundColor: "var(--mantine-color-dark-7)",
+      borderRadius: "var(--mantine-radius-md)",
       boxShadow: "none",
-      padding: "5px 10px",
+      padding: `${rem(5)} ${rem(10)}`,
     });
     await expect(
       getComputedStyle(within(popover).getByText("GPT 5.5")).fontSize,

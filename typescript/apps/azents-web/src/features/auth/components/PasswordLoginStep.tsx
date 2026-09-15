@@ -54,9 +54,9 @@ function PasswordLoginForm({
     };
   }, []);
 
-  function handleSubmit(e: React.FormEvent): void {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const formData = new FormData(e.currentTarget);
     const password = formData.get("password");
     if (typeof password === "string" && password) {
       onSubmit(password);

@@ -1,19 +1,16 @@
 /**
  * Workspace list route
  *
- * Checks authentication status server-side and
- * renders LoginRequired component when unauthenticated.
+ * Checks authentication status server-side and delegates presentation to the
+ * feature page.
  */
-import { LoginRequired } from "@/features/auth/components/LoginRequired";
-import { WorkspacesListPage } from "@/features/workspaces/pages/WorkspacesListPage";
+import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 
 export default async function Page(): Promise<React.ReactElement> {
   const authState = await getInitialAuthState();
 
-  if (authState.status !== "authenticated") {
-    return <LoginRequired />;
-  }
-
-  return <WorkspacesListPage />;
+  return (
+    <WorkspacesPage authenticated={authState.status === "authenticated"} />
+  );
 }

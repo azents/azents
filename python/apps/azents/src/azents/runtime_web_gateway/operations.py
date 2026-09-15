@@ -492,6 +492,12 @@ class RuntimeWebDrainResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class _ForcedCloseResult:
+    registration_ids: tuple[int, ...]
+    callback_failures: tuple[RuntimeWebDrainCallbackFailure, ...]
+
+
+@dataclasses.dataclass(frozen=True)
 class _ActiveDrainStream:
     registration: RuntimeWebDrainRegistration
     request_graceful_close: Callable[[CloseReason], Awaitable[None]]
@@ -640,10 +646,10 @@ class RuntimeWebDrainCoordinator:
             tuple(item.registration.registration_id for item in long_lived),
             timeout_seconds=remaining_long_lived_seconds,
         )
-        forced_long_lived, force_long_lived_failures = await self._force_remaining(
+        forced_long_lived = await self._force_remaining(
             tuple(item.registration.registration_id for item in long_lived)
         )
-        callback_failures.extend(force_long_lived_failures)
+        callback_failures.extend(forced_long_lived.callback_failures)
 
         remaining_http_seconds = max(
             0.0,
@@ -653,12 +659,20 @@ class RuntimeWebDrainCoordinator:
             finite_http_ids,
             timeout_seconds=remaining_http_seconds,
         )
-        forced_http, force_http_failures = await self._force_remaining(finite_http_ids)
-        callback_failures.extend(force_http_failures)
+        forced_http = await self._force_remaining(finite_http_ids)
+        callback_failures.extend(forced_http.callback_failures)
         async with self.condition:
             dynamic_forced = tuple(self.dynamic_force_closed)
             dynamic_failures = tuple(self.dynamic_callback_failures)
-        forced = tuple(sorted({*forced_long_lived, *forced_http, *dynamic_forced}))
+        forced = tuple(
+            sorted(
+                {
+                    *forced_long_lived.registration_ids,
+                    *forced_http.registration_ids,
+                    *dynamic_forced,
+                }
+            )
+        )
         async with self.condition:
             graceful = tuple(
                 sorted(
@@ -698,10 +712,12 @@ class RuntimeWebDrainCoordinator:
             - (asyncio.get_running_loop().time() - drain_started_at),
         )
         await self._wait_for_release((registration_id,), timeout_seconds=remaining)
-        forced, force_failures = await self._force_remaining((registration_id,))
+        forced = await self._force_remaining((registration_id,))
         async with self.condition:
-            self.dynamic_force_closed.update(forced)
-            self.dynamic_callback_failures.extend((*failures, *force_failures))
+            self.dynamic_force_closed.update(forced.registration_ids)
+            self.dynamic_callback_failures.extend(
+                (*failures, *forced.callback_failures)
+            )
 
     async def _wait_for_release(
         self,
@@ -724,10 +740,7 @@ class RuntimeWebDrainCoordinator:
     async def _force_remaining(
         self,
         registration_ids: tuple[int, ...],
-    ) -> tuple[
-        tuple[int, ...],
-        tuple[RuntimeWebDrainCallbackFailure, ...],
-    ]:
+    ) -> _ForcedCloseResult:
         registration_id_set = frozenset(registration_ids)
         async with self.condition:
             remaining = tuple(
@@ -752,7 +765,10 @@ class RuntimeWebDrainCoordinator:
                         self.resources.end_tasks(_TASK_SLOTS_PER_EXCHANGE)
                         self.resources.close_exchange()
                 self.condition.notify_all()
-        return forced_ids, failures
+        return _ForcedCloseResult(
+            registration_ids=forced_ids,
+            callback_failures=failures,
+        )
 
 
 async def _close_streams(

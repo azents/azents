@@ -1,7 +1,5 @@
 """Workspace settings hub Web Surface E2E tests."""
 
-from typing import Any, cast
-
 import azentsadminclient
 import azentspublicclient
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
@@ -212,10 +210,7 @@ def test_workspace_settings_hub_owner_and_member_flows(
             )
         )
     )
-    has_horizontal_overflow = cast(
-        Any,
-        browser_driver,
-    ).execute_script(
+    has_horizontal_overflow = browser_driver.execute_script(
         "return document.documentElement.scrollWidth > "
         "document.documentElement.clientWidth;"
     )
@@ -265,10 +260,7 @@ def test_workspace_settings_hub_owner_and_member_flows(
     browser_driver.get(settings_url)
     _assert_visible_text(browser_driver, workspace_name)
     _assert_visible_text(browser_driver, "Default models")
-    has_horizontal_overflow = cast(
-        Any,
-        browser_driver,
-    ).execute_script(
+    has_horizontal_overflow = browser_driver.execute_script(
         "return document.documentElement.scrollWidth > "
         "document.documentElement.clientWidth;"
     )
