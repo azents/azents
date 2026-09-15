@@ -15,7 +15,7 @@ def _helm_template(*values: str) -> str:
     helm = shutil.which("helm")
     if helm is None:
         pytest.skip("helm binary is not available")
-    command = ["helm", "template", "azents", str(CHART_DIR)]
+    command = [helm, "template", "azents", str(CHART_DIR)]
     base_values = (
         "server.image.repository=repo/server",
         "server.image.tag=sha",
