@@ -79,8 +79,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-14
-spec_version: 83
+last_verified_at: 2026-09-15
+spec_version: 84
 ---
 
 # Agent Runtime Control
@@ -205,12 +205,14 @@ the application.
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
 items, or audit history. The replacement data plane uses three persistent
 bidirectional sessions: Gateway to an accepting Control, accepting Control to the
-exact Owner Control when one relay is required, and Runner to its offered Owner
-Control. Gateway and relay peers use the dedicated trusted listener with
-role-specific mTLS in deployed environments. The Runner uses its generation-bound
-credential on the existing Runner-authenticated listener and connects to the exact
-Owner address and TLS name received through its ordinary control stream. Local E2E
-may explicitly use isolated insecure listeners.
+exact Owner Control when one relay is required, and Runner through the same
+operator-configured stable Control endpoint as its ordinary Control stream. Gateway
+and relay peers use the dedicated trusted listener with role-specific mTLS in
+deployed environments. The Runner uses its generation-bound credential on the
+existing Runner-authenticated listener. The receiving replica joins the exact Owner
+locally or performs one relay; the address carried by the Owner session offer does
+not select the Runner connection destination. Local E2E may explicitly use isolated
+insecure listeners.
 
 Every peer requires exact equality with the unversioned
 `RUNTIME_WEB_PROTOCOL_FINGERPRINT`; there is no supported-version list,
