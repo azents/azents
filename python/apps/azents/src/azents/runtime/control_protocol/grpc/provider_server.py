@@ -379,30 +379,63 @@ class RuntimeProviderControlGrpcServicer(
             ):
                 yield message
         finally:
-            commands_by_request_id.clear()
-            for task in (inbound_task, command_task):
-                task.cancel()
-            await self._control_protocol.revoke_provider(
-                provider_id=accepted.provider_id,
-                generation=accepted.generation,
+            cleanup = asyncio.create_task(
+                self._close_provider_stream(
+                    provider_id=accepted.provider_id,
+                    connection_id=accepted.connection_id,
+                    generation=accepted.generation,
+                    authentication=authentication,
+                    commands_by_request_id=commands_by_request_id,
+                    inbound_task=inbound_task,
+                    command_task=command_task,
+                ),
+                name=(
+                    "runtime-provider-stream-cleanup:"
+                    f"{accepted.provider_id}:{accepted.generation}"
+                ),
             )
-            await self._connection_tracker.disconnect_connection(
-                authentication=authentication,
-                generation=accepted.generation,
-                disconnected_at=datetime.now(UTC),
-            )
-            for task in (inbound_task, command_task):
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            _LOGGER.info(
-                "Runtime Provider stream closed",
-                extra={
-                    "provider_id": accepted.provider_id,
-                    "connection_id": accepted.connection_id,
-                    "provider_generation": accepted.generation,
-                    "owner_replica_id": self._owner_replica_id,
-                },
-            )
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await asyncio.shield(cleanup)
+                raise
+
+    async def _close_provider_stream(
+        self,
+        *,
+        provider_id: str,
+        connection_id: str,
+        generation: int,
+        authentication: RuntimeProviderCredentialAuthentication,
+        commands_by_request_id: dict[str, _RelayedProviderCommand],
+        inbound_task: asyncio.Task[None],
+        command_task: asyncio.Task[None],
+    ) -> None:
+        """Revoke Provider authority even when gRPC cancels its stream handler."""
+        commands_by_request_id.clear()
+        for task in (inbound_task, command_task):
+            task.cancel()
+        await self._control_protocol.revoke_provider(
+            provider_id=provider_id,
+            generation=generation,
+        )
+        await self._connection_tracker.disconnect_connection(
+            authentication=authentication,
+            generation=generation,
+            disconnected_at=datetime.now(UTC),
+        )
+        for task in (inbound_task, command_task):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        _LOGGER.info(
+            "Runtime Provider stream closed",
+            extra={
+                "provider_id": provider_id,
+                "connection_id": connection_id,
+                "provider_generation": generation,
+                "owner_replica_id": self._owner_replica_id,
+            },
+        )
 
     async def _consume_provider_messages(
         self,

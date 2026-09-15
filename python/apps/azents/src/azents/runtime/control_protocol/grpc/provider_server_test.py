@@ -271,6 +271,33 @@ class CancellationDelayedControlProtocolService(RuntimeControlProtocolService):
             raise
 
 
+class CancellationDelayedProviderRevokeControlProtocolService(
+    RuntimeControlProtocolService
+):
+    """Delay Provider revocation so stream-handler cancellation can race cleanup."""
+
+    def __init__(self, store: InMemoryRuntimeCoordinationStore) -> None:
+        """Initialize observable Provider revocation barriers."""
+        super().__init__(store)
+        self.store = store
+        self.revoke_started = asyncio.Event()
+        self.release_revoke = asyncio.Event()
+
+    async def revoke_provider(
+        self,
+        *,
+        provider_id: str,
+        generation: int,
+    ) -> bool:
+        """Hold Provider revocation until the test cancels the stream handler."""
+        self.revoke_started.set()
+        await self.release_revoke.wait()
+        return await super().revoke_provider(
+            provider_id=provider_id,
+            generation=generation,
+        )
+
+
 class FakeGrpcContext(
     BaseFakeGrpcContext[
         runtime_provider_control_pb2.ProviderMessage,
@@ -353,6 +380,35 @@ async def test_provider_grpc_disconnects_before_command_task_cleanup() -> None:
     assert disconnect_call["authentication"] == bridge.authentication
     assert disconnect_call["generation"] == accepted.register_accepted.generation
     assert isinstance(disconnect_call["disconnected_at"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_finishes_disconnect_when_stream_handler_is_cancelled() -> (
+    None
+):
+    """Shield live and durable authority cleanup from gRPC handler cancellation."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = CancellationDelayedProviderRevokeControlProtocolService(store)
+    bridge = FakeProviderCredentialBridge()
+    servicer = _servicer(service, FakeReportSink(), bridge=bridge)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    await inbound.put(None)
+    stream_finished = asyncio.ensure_future(anext(stream))
+    await asyncio.wait_for(service.revoke_started.wait(), timeout=1)
+    stream_finished.cancel()
+    service.release_revoke.set()
+
+    await asyncio.wait_for(bridge.disconnected.wait(), timeout=1)
+    with pytest.raises(asyncio.CancelledError):
+        await stream_finished
+    assert len(bridge.disconnect_calls) == 1
+    disconnect_call = bridge.disconnect_calls[0]
+    assert disconnect_call["authentication"] == bridge.authentication
+    assert disconnect_call["generation"] == accepted.register_accepted.generation
 
 
 @pytest.mark.asyncio
@@ -1171,7 +1227,9 @@ async def test_provider_grpc_rejects_protocol_mismatched_reconciliation(
 
 def _servicer(
     service: (
-        FakeRuntimeControlProtocolService | CancellationDelayedControlProtocolService
+        FakeRuntimeControlProtocolService
+        | CancellationDelayedControlProtocolService
+        | CancellationDelayedProviderRevokeControlProtocolService
     ),
     sink: FakeReportSink,
     *,
