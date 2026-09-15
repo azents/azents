@@ -173,13 +173,18 @@ def _accepted(
 
 def _manager(
     *,
-    client_factory: Callable[[RunnerSessionOffer], GrpcRunnerWebSessionClient] | None,
+    client_factory: Callable[
+        [str, RunnerSessionOffer],
+        GrpcRunnerWebSessionClient,
+    ]
+    | None,
 ) -> RunnerWebSessionManager:
     return RunnerWebSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="token",
         tls=None,
         allow_insecure=True,
@@ -520,7 +525,11 @@ async def test_replacement_offer_closes_old_stream_before_new_client_starts() ->
         finally:
             old_task_finished.set()
 
-    def client_factory(offer: RunnerSessionOffer) -> GrpcRunnerWebSessionClient:
+    def client_factory(
+        endpoint: str,
+        offer: RunnerSessionOffer,
+    ) -> GrpcRunnerWebSessionClient:
+        assert endpoint == "runtime-control.internal:8030"
         before_start = None
         if offer == second_offer:
 
@@ -630,7 +639,11 @@ async def test_receiver_eof_retires_manager_and_dispatcher_work() -> None:
         yield _accepted(offer)
         await release.wait()
 
-    def client_factory(candidate: RunnerSessionOffer) -> GrpcRunnerWebSessionClient:
+    def client_factory(
+        endpoint: str,
+        candidate: RunnerSessionOffer,
+    ) -> GrpcRunnerWebSessionClient:
+        assert endpoint == "runtime-control.internal:8030"
         assert candidate == offer
         client = GrpcRunnerWebSessionClient(
             transport,

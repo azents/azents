@@ -38,7 +38,9 @@ def _offer(*, runner_generation: int = 4) -> RunnerSessionOffer:
             runner_generation=runner_generation,
         ),
         owner_replica_id="control-a",
-        connect_address="control-a.internal:8030",
+        connect_address=(
+            "runtime-control-pod-a.runtime-control-headless.azents.svc:8030"
+        ),
         tls_server_name="runtime-control.internal",
         session_nonce="nonce-a",
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
@@ -375,9 +377,12 @@ async def test_loopback_websocket_rejects_unoffered_selected_subprotocol() -> No
 async def test_runner_manager_rejects_obsolete_generation_without_connecting() -> None:
     calls = 0
 
-    def client_factory(offer: RunnerSessionOffer) -> GrpcRunnerWebSessionClient:
+    def client_factory(
+        endpoint: str,
+        offer: RunnerSessionOffer,
+    ) -> GrpcRunnerWebSessionClient:
         nonlocal calls
-        del offer
+        del endpoint, offer
         calls += 1
         raise AssertionError("obsolete offer must not create a client")
 
@@ -386,6 +391,7 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 5,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,
@@ -425,6 +431,7 @@ async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,
@@ -463,8 +470,10 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         yield _accepted(offer)
 
     def client_factory(
+        endpoint: str,
         candidate: RunnerSessionOffer,
     ) -> GrpcRunnerWebSessionClient:
+        assert endpoint == "runtime-control.internal:8030"
         assert candidate == offer
         return GrpcRunnerWebSessionClient(
             stream,
@@ -478,6 +487,7 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: generation,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,
@@ -536,9 +546,11 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
     client: _StreamScopedClient | None = None
 
     def client_factory(
+        endpoint: str,
         candidate: RunnerSessionOffer,
     ) -> GrpcRunnerWebSessionClient:
         nonlocal client
+        assert endpoint == "runtime-control.internal:8030"
         assert candidate == offer
         client = _StreamScopedClient()
         return client
@@ -548,6 +560,7 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,
@@ -586,9 +599,11 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
         await asyncio.Event().wait()
 
     def client_factory(
+        endpoint: str,
         candidate: RunnerSessionOffer,
     ) -> GrpcRunnerWebSessionClient:
         nonlocal clients
+        assert endpoint == "runtime-control.internal:8030"
         assert candidate == offer
         clients += 1
         return GrpcRunnerWebSessionClient(
@@ -603,6 +618,7 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,
@@ -660,8 +676,10 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
         yield accepted
 
     def client_factory(
+        endpoint: str,
         candidate: RunnerSessionOffer,
     ) -> GrpcRunnerWebSessionClient:
+        assert endpoint == "runtime-control.internal:8030"
         assert candidate == offer
         return GrpcRunnerWebSessionClient(
             stream,
@@ -675,6 +693,7 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
         accepted_generation=lambda: 4,
+        control_endpoint="runtime-control.internal:8030",
         runner_auth_token="runner-token",
         tls=None,
         allow_insecure=True,

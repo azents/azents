@@ -22,6 +22,7 @@ from azents_runtime_control.runtime_web_session import (
     RunnerSessionOffer,
     SessionPeerRole,
     SessionProfile,
+    validate_runner_web_connect_address,
 )
 from wsproto import ConnectionType, WSConnection
 from wsproto.events import (
@@ -368,20 +369,26 @@ class RunnerWebSessionManager:
         runner_boot_id: str,
         accepted_desired_generation: Callable[[], int | None],
         accepted_generation: Callable[[], int | None],
+        control_endpoint: str,
         runner_auth_token: str,
         tls: GrpcClientTlsConfig | None,
         allow_insecure: bool,
         loopback: RunnerWebLoopbackPool,
-        client_factory: Callable[[RunnerSessionOffer], GrpcRunnerWebSessionClient]
+        client_factory: Callable[
+            [str, RunnerSessionOffer],
+            GrpcRunnerWebSessionClient,
+        ]
         | None,
         outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> None:
         if not runtime_id or not runner_boot_id or not runner_auth_token:
             raise ValueError("Runtime and Runner authentication identity are required")
+        validate_runner_web_connect_address(control_endpoint)
         self.runtime_id = runtime_id
         self.runner_boot_id = runner_boot_id
         self.accepted_desired_generation = accepted_desired_generation
         self.accepted_generation = accepted_generation
+        self.control_endpoint = control_endpoint
         self.runner_auth_token = runner_auth_token
         self.tls = tls
         self.allow_insecure = allow_insecure
@@ -420,10 +427,10 @@ class RunnerWebSessionManager:
             self.client = None
             self.offer = None
             client = (
-                self.client_factory(offer)
+                self.client_factory(self.control_endpoint, offer)
                 if self.client_factory is not None
                 else GrpcRunnerWebSessionClient.from_endpoint(
-                    offer.connect_address,
+                    self.control_endpoint,
                     tls_server_name=offer.tls_server_name,
                     runner_auth_token=self.runner_auth_token,
                     tls=self.tls,
