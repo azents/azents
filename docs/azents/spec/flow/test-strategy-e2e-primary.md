@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-15
-spec_version: 62
+spec_version: 63
 ---
 
 # E2E Primary Test Strategy
@@ -196,22 +196,25 @@ Always-on required CI does not depend on external credentials.
   improvement by removing tests, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
-- Required lanes resolve immutable snapshot images before enabling local Buildx.
-  Unchanged images may reuse the pull request base, the direct `main` predecessor, or
-  a compatible first-parent ancestor. A same-repository pull request, `main` push, or
-  explicit workflow dispatch may additionally reuse an already-published snapshot
-  tagged for the exact current commit SHA. Snapshot availability is never a workflow
-  dependency or wait condition: a missing, late, cancelled, or failed publication
-  immediately preserves the existing local Buildx/cache build path. Snapshot pulls
-  run in parallel. The direct snapshot attempt starts immediately after checkout and
-  overlaps uv installation, Python setup, dependency synchronization, and plan
-  download. A durable status handoff joins the attempt before ancestor fallback and
-  Buildx selection; an abnormal exit or nonzero result fails the preparation step
-  rather than silently bypassing fallback decisions. The direct attempt also
-  best-effort pre-pulls the exact public fixture images already required by the lane,
-  overlapping their network transfer without replacing the ordinary Testcontainers
-  pull fallback. Lane observability records snapshot sources, selected commit SHAs,
-  fallback state, and snapshot and prerequisite image timings. For pull requests
+- Every enabled E2E lane resolves the immutable snapshots needed by its suite before
+  selecting a local Buildx fallback. Required lanes resolve Server, Runtime Runner,
+  and Docker Runtime Provider. Web lanes additionally resolve Main Web and Admin Web.
+  An image whose complete Docker build inputs are unchanged may reuse the pull request
+  base, the direct `main` predecessor, or a compatible first-parent ancestor.
+  A same-repository pull request, `main` push, or explicit workflow dispatch may
+  additionally reuse an already-published snapshot tagged for the exact current
+  commit SHA. Snapshot availability is never a workflow dependency or wait condition:
+  a missing, late, cancelled, or failed publication immediately preserves the
+  existing local Buildx/cache build path. Snapshot pulls run in parallel. The direct
+  snapshot attempt starts immediately after checkout and overlaps uv installation,
+  Python setup, dependency synchronization, and plan download. A durable status
+  handoff joins the attempt before ancestor fallback and Buildx selection; an
+  abnormal exit or nonzero result fails the preparation step rather than silently
+  bypassing fallback decisions. The direct attempt also best-effort pre-pulls the
+  exact public fixture images already required by the lane, overlapping their network
+  transfer without replacing the ordinary Testcontainers pull fallback. Lane
+  observability records snapshot sources, selected commit SHAs, fallback state, and
+  snapshot and prerequisite image timings. For pull requests
   where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
@@ -316,8 +319,11 @@ Always-on required CI does not depend on external credentials.
   groups retain one team-primary journey. Barrier state is reset around every
   barrier-backed journey. The interrupted-child scenario blocks on that observable
   barrier instead of a wall-clock sleep.
-- Required lanes reuse the preceding immutable snapshot for Server, Runtime Runner,
-  and Docker Runtime Provider images whose complete build inputs are unchanged.
+- Required and Web lanes reuse the preceding immutable snapshot for every suite image
+  whose complete build inputs are unchanged. Required lanes select Server, Runtime
+  Runner, and Docker Runtime Provider images. Web lanes additionally select Main Web
+  and Admin Web images; any changed or unavailable image is built from the tested
+  worktree.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and
   manually dispatched measurements use the checked-out commit's first parent.
   Same-repository pull requests also try an already-published snapshot for the exact
@@ -508,6 +514,12 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-15** (spec_version 63) — Extended immutable snapshot reuse and
+  prerequisite pre-pulls to every Web E2E image, reused the session Chromium across
+  isolated Runtime Web scenarios, refreshed authoritative Runtime metrics instead of
+  waiting for a stale UI polling cycle, started independent Runtime Web topology
+  containers concurrently, and defined the full gated E2E critical path across every
+  enabled suite lane.
 - **2026-09-14** (spec_version 61) — Made recurring Runtime Web verification a
   four-test lightweight 1 MiB/eight-asset matrix with relay, hard-limit,
   maintenance, protocol, and optional Redis recovery coverage; added bounded

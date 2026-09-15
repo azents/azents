@@ -13,14 +13,16 @@ SHAs. An experiment must contain attempts from exactly one commit SHA.
     ├── run.json
     ├── e2e-observability-required-1/
     ├── e2e-observability-required-2/
-    └── e2e-observability-required-3/
+    ├── e2e-observability-required-3/
+    └── e2e-observability-web-1/
 
 /tmp/e2e-ci-experiment/
 └── pr-32321108387-attempt-1/
     ├── run.json
     ├── e2e-observability-required-1/
     ├── e2e-observability-required-2/
-    └── e2e-observability-required-3/
+    ├── e2e-observability-required-3/
+    └── e2e-observability-web-1/
 ```
 
 Each `run.json` must contain the output of:
@@ -31,8 +33,10 @@ gh run view RUN_ID --json status,conclusion,headSha,createdAt,jobs
 
 For a rerun attempt, include `--attempt ATTEMPT`.
 
-Each required-lane artifact must contain `pytest-timings.jsonl` with test call records
-and `junit.xml` with test cases. The analyzer rejects samples without this evidence.
+Each enabled suite-lane artifact gated by `ci-python-e2e` must contain
+`pytest-timings.jsonl` with test call records and `junit.xml` with test cases. This
+includes `web-*` whenever Web E2E is enabled. The analyzer rejects samples without
+this evidence.
 Reliability failure counts use every complete attempt; performance timing, image, and
 overlap summaries use successful attempts only.
 
@@ -41,12 +45,12 @@ downloads normally expose the latest attempt after rerun.
 
 ## Core metrics
 
-### Required critical path
+### Gated E2E critical path
 
 For one run:
 
 ```text
-max(required-1 wall, required-2 wall, required-3 wall, ...)
+max(required-1 wall, required-2 wall, ..., web-1 wall, ...)
 ```
 
 Use job `startedAt` and `completedAt`. Do not use queue time.
@@ -59,8 +63,8 @@ For every run:
 2. recompute the maximum lane wall;
 3. subtract the new maximum from the original maximum.
 
-Average those per-run savings. Never use aggregate test-duration reduction as the
-required-CI claim.
+Average those per-run savings. Never omit an enabled suite or use aggregate
+test-duration reduction as the required-CI claim.
 
 ### Parallel overlap
 

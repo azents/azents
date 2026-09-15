@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import statistics
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -17,7 +18,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class LaneSample:
-    """One required E2E lane from one preserved CI sample."""
+    """One gated E2E lane from one preserved CI sample."""
 
     sample: str
     lane: str
@@ -31,7 +32,7 @@ class LaneSample:
 
 @dataclass(frozen=True)
 class RunSample:
-    """One preserved required-E2E workflow attempt."""
+    """One preserved gated-E2E workflow attempt."""
 
     head_sha: str
     lanes: dict[str, LaneSample]
@@ -68,6 +69,11 @@ def _read_json_lines(path: Path) -> list[dict[str, Any]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line
     ]
+
+
+def _is_gated_e2e_job(name: str) -> bool:
+    """Return whether one matrix job contributes to the stable E2E gate."""
+    return re.fullmatch(r"ci-e2e-.+-[1-9][0-9]*", name) is not None
 
 
 def _parse_lane(
@@ -140,7 +146,7 @@ def _parse_lane(
 
 
 def load_samples(samples_root: Path, cohort: str) -> dict[str, RunSample]:
-    """Load preserved run metadata and required-lane artifacts."""
+    """Load preserved run metadata and every gated E2E lane artifact."""
     if cohort not in {"baseline", "experiment"}:
         raise ValueError(f"Unsupported cohort: {cohort}")
 
@@ -162,19 +168,20 @@ def load_samples(samples_root: Path, cohort: str) -> dict[str, RunSample]:
             for job in metadata.get("jobs", [])
             if isinstance(job, dict)
             and isinstance(job.get("name"), str)
-            and job["name"].startswith("ci-e2e-required-")
+            and _is_gated_e2e_job(job["name"])
         }
         if not jobs:
-            raise ValueError(f"{run_path} has no required E2E jobs.")
+            raise ValueError(f"{run_path} has no gated E2E jobs.")
 
         artifact_dirs = {
             path.name.removeprefix("e2e-observability-"): path
-            for path in sample_dir.glob("e2e-observability-required-*")
+            for path in sample_dir.glob("e2e-observability-*")
+            if path.name.removeprefix("e2e-observability-") in jobs
         }
         missing_lanes = sorted(set(jobs) - set(artifact_dirs))
         if missing_lanes:
             raise ValueError(
-                f"{sample_dir.name} is missing required lane artifacts: "
+                f"{sample_dir.name} is missing gated lane artifacts: "
                 f"{', '.join(missing_lanes)}"
             )
 

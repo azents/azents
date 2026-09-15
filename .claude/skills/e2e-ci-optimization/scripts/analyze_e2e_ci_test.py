@@ -67,7 +67,7 @@ class AnalyzeE2ECITest(unittest.TestCase):
             )
             self._write_lane(sample, "required-1")
 
-            with self.assertRaisesRegex(ValueError, "missing required lane artifacts"):
+            with self.assertRaisesRegex(ValueError, "missing gated lane artifacts"):
                 load_samples(Path(temporary_directory), "baseline")
 
     def test_rejects_missing_required_evidence(self) -> None:
@@ -249,6 +249,42 @@ class AnalyzeE2ECITest(unittest.TestCase):
             if row["lane"] == "required-1"
         )
         self.assertEqual(lane_overlap["overlap_seconds"], 35)
+
+    def test_includes_web_lane_in_gated_critical_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sample = Path(temporary_directory) / "sample-1"
+            sample.mkdir()
+            jobs = []
+            for lane, seconds in (
+                ("required-1", 600),
+                ("web-1", 720),
+                ("future-suite-1", 780),
+            ):
+                jobs.append(
+                    {
+                        "name": f"ci-e2e-{lane}",
+                        "conclusion": "success",
+                        "startedAt": "2026-08-20T00:00:00Z",
+                        "completedAt": f"2026-08-20T00:{seconds // 60:02d}:"
+                        f"{seconds % 60:02d}Z",
+                    }
+                )
+                self._write_lane(sample, lane, duration=100)
+            (sample / "run.json").write_text(
+                json.dumps({"headSha": "a" * 40, "jobs": jobs}),
+                encoding="utf-8",
+            )
+
+            report = analyze(
+                load_samples(Path(temporary_directory), "experiment"),
+                "experiment",
+            )
+
+        self.assertEqual(report["critical_paths"]["mean_seconds"], 780)
+        self.assertEqual(
+            report["samples"]["sample-1"]["critical_lane"],
+            "future-suite-1",
+        )
 
 
 if __name__ == "__main__":

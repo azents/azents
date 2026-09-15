@@ -51,7 +51,7 @@ presentation coverage in browser E2E.
 Required CI runs one Docker-free support-test job and folder-owned E2E suites from
 `testenv/azents/e2e`. `src/tests/required/` owns credential-free product E2E using
 the Docker Runtime Provider. `src/tests/web/` owns browser, TLS gateway, and
-worktree-built Web image E2E. Each suite directory contains one `suite.toml`; all
+content-matched Web image E2E. Each suite directory contains one `suite.toml`; all
 tests below that directory share one execution profile. The planner may split one
 suite into timing-balanced lanes, but a lane is not a separate profile.
 

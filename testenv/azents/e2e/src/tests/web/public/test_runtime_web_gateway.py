@@ -16,7 +16,7 @@ import time
 import zlib
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -769,36 +769,51 @@ def _runtime_web_stack(
             private_key_path=private_key_path,
             config_path=config_path,
         )
-        containers = [relay, gateway, public_api, main_web, edge]
-        with ExitStack() as stack:
-            stack.enter_context(relay)
+        started_containers: list[DockerContainer] = []
+        started_containers_lock = threading.Lock()
+
+        def start_container(container: DockerContainer) -> None:
+            try:
+                container.start()
+            except BaseException:
+                with suppress(Exception):
+                    container.stop()
+                raise
+            with started_containers_lock:
+                started_containers.append(container)
+
+        try:
+            start_container(relay)
             _wait_for_log(
                 relay,
                 "Runtime Control gRPC server started",
                 name="Runtime Control relay",
             )
-            stack.enter_context(gateway)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [
+                    executor.submit(start_container, container)
+                    for container in (gateway, public_api, main_web, edge)
+                ]
+                for future in futures:
+                    future.result()
             _wait_for_http(
                 gateway,
                 port=8041,
                 path="/__azents/live",
                 name="Runtime Web Gateway",
             )
-            stack.enter_context(public_api)
             _wait_for_http(
                 public_api,
                 port=8010,
                 path="/healthz",
                 name="Runtime Web Public API",
             )
-            stack.enter_context(main_web)
             _wait_for_http(
                 main_web,
                 port=3000,
                 path="/login",
                 name="Runtime Web Main Web",
             )
-            stack.enter_context(edge)
             try:
                 edge_host = edge.get_container_host_ip()
                 edge_port = edge.get_exposed_port(443)
@@ -877,9 +892,16 @@ def _runtime_web_stack(
                         },
                     )
                 raise
-            finally:
-                for container in reversed(containers):
-                    container.get_wrapped_container().reload()
+        finally:
+            with ThreadPoolExecutor(
+                max_workers=max(len(started_containers), 1)
+            ) as executor:
+                stop_futures = [
+                    executor.submit(container.stop)
+                    for container in reversed(started_containers)
+                ]
+                for future in stop_futures:
+                    future.result()
 
 
 @pytest.fixture

@@ -62,6 +62,9 @@ Never merge a PR without explicit approval.
    reused.
 5. Collect recent main runs and download every `e2e-observability-*` artifact before
    making performance claims.
+6. Derive the measured lane set from the suites gated by `ci-python-e2e`. Include
+   every enabled `ci-e2e-*` suite lane, especially `web-*`; never treat only the
+   `required-*` shards as the required-CI critical path.
 
 Keep research findings in a disposable working note outside the repository. Consolidate
 the result and delete or retain the note according to the current Session workflow.
@@ -95,7 +98,8 @@ Rank candidates in this order:
 4. Regression and operational risk.
 
 Do not rank by aggregate test duration. For each run, change the affected lane times
-and recompute the maximum required-lane wall time.
+and recompute the maximum wall time across every enabled E2E lane gated by
+`ci-python-e2e`.
 
 Default performance acceptance threshold:
 
@@ -197,8 +201,8 @@ After the first complete PR CI succeeds:
 2. Rerun the complete workflow on the same commit at least once.
 3. Require at least two successful attempts for acceptance.
 4. For each attempt, record:
-   - required lane wall times;
-   - required critical path;
+   - every gated E2E lane wall time, including Web when enabled;
+   - the full gated E2E critical path;
    - failures;
    - the changed fixture or image timings;
    - within-run overlap or removed work;
@@ -230,7 +234,7 @@ Replace expected impact in the PR body with:
 
 - baseline sample count, mean, and median;
 - exact commit SHA;
-- every same-SHA attempt and required lane time;
+- every same-SHA attempt and gated E2E lane time;
 - experiment mean;
 - absolute and percentage change;
 - mechanism evidence from artifacts;
