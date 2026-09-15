@@ -204,6 +204,14 @@ class _RuntimeWebApplication:
 
 
 @dataclass(frozen=True)
+class _RuntimeWebAuthSurface:
+    """Module-scoped stateless Web and API processes for one authentication mode."""
+
+    public_api_url: str
+    main_web_alias: str
+
+
+@dataclass(frozen=True)
 class _RuntimeWebStack:
     """Function-scoped Runtime Web browser topology."""
 
@@ -236,16 +244,12 @@ class _RuntimeWebStackFactory:
     network: Network
     postgres: PostgresContainer
     server_image: str
-    web_image: str
-    runner_image: str
     owner_control: DockerContainer
+    relay_operations_url: str
+    auth_surfaces: dict[str, _RuntimeWebAuthSurface]
+    diagnostic_containers: tuple[tuple[str, DockerContainer], ...]
     capacity_backend: str
     credential_encryption_key: str
-    auth_jwt_secret_key: str
-    system_bootstrap_setup_token: str
-    s3_bucket_name: str
-    s3_access_key: str
-    s3_secret_key: str
     selenium_url: str
 
     def start(
@@ -267,16 +271,12 @@ class _RuntimeWebStackFactory:
             network=self.network,
             postgres=self.postgres,
             server_image=self.server_image,
-            web_image=self.web_image,
-            runner_image=self.runner_image,
             owner_control=self.owner_control,
+            relay_operations_url=self.relay_operations_url,
+            auth_surface=self.auth_surfaces[mode],
+            diagnostic_containers=self.diagnostic_containers,
             capacity_backend=self.capacity_backend,
             credential_encryption_key=self.credential_encryption_key,
-            auth_jwt_secret_key=self.auth_jwt_secret_key,
-            system_bootstrap_setup_token=self.system_bootstrap_setup_token,
-            s3_bucket_name=self.s3_bucket_name,
-            s3_access_key=self.s3_access_key,
-            s3_secret_key=self.s3_secret_key,
             selenium_url=self.selenium_url,
         )
 
@@ -551,6 +551,7 @@ def _runtime_web_public_api_container(
     auth_jwt_secret_key: str,
     system_bootstrap_setup_token: str,
     mode: str,
+    network_alias: str,
 ) -> DockerContainer:
     """Create the Public API process with the matching Gateway configuration."""
     cookie_domain = (
@@ -559,7 +560,7 @@ def _runtime_web_public_api_container(
     base = (
         DockerContainer(image=image)
         .with_name(f"azents-runtime-web-public-{mode}-{unique()}")
-        .with_network_aliases("runtime-web-public-server")
+        .with_network_aliases(network_alias)
         .with_command(
             [
                 "uvicorn",
@@ -598,6 +599,8 @@ def _runtime_web_main_container(
     image: str,
     network: Network,
     mode: str,
+    network_alias: str,
+    public_api_alias: str,
 ) -> DockerContainer:
     """Create Main Web with the exact Runtime Web browser configuration."""
     cookie_domain = (
@@ -607,9 +610,9 @@ def _runtime_web_main_container(
         DockerContainer(image=image)
         .with_name(f"azents-runtime-web-main-{mode}-{unique()}")
         .with_network(network)
-        .with_network_aliases("runtime-web-main")
+        .with_network_aliases(network_alias)
         .with_env("PUBLIC_API_URL", _MAIN_ORIGIN)
-        .with_env("INTERNAL_API_URL", "http://runtime-web-public-server:8010")
+        .with_env("INTERNAL_API_URL", f"http://{public_api_alias}:8010")
         .with_env("RUNTIME_WEB_GATEWAY_ENABLED", "true")
         .with_env("RUNTIME_WEB_GATEWAY_AUTH_MODE", mode)
         .with_env("RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN", _MAIN_ORIGIN)
@@ -643,7 +646,11 @@ def _runtime_web_edge_container(
     )
 
 
-def _write_tls_edge_files(root: Path) -> _TlsEdgeFiles:
+def _write_tls_edge_files(
+    root: Path,
+    *,
+    main_web_alias: str,
+) -> _TlsEdgeFiles:
     """Write a local certificate and exact reverse-proxy configuration."""
     certificate_path = root / "tls.crt"
     private_key_path = root / "tls.key"
@@ -677,7 +684,7 @@ def _write_tls_edge_files(root: Path) -> _TlsEdgeFiles:
     config_path.write_text(
         """
 map $host $runtime_web_upstream {
-    web.runtime-e2e.test runtime-web-main:3000;
+    web.runtime-e2e.test __MAIN_WEB_ALIAS__:3000;
     default runtime-web-gateway:8040;
 }
 
@@ -719,10 +726,15 @@ server {
     }
 }
 """.replace(
+            "__MAIN_WEB_ALIAS__",
+            main_web_alias,
+        )
+        .replace(
             "map $host $runtime_web_upstream {",
             "map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n\n"
             "map $host $runtime_web_upstream {",
-        ).strip()
+        )
+        .strip()
         + "\n",
         encoding="utf-8",
     )
@@ -744,33 +756,19 @@ def _runtime_web_stack(
     network: Network,
     postgres: PostgresContainer,
     server_image: str,
-    web_image: str,
-    runner_image: str,
     owner_control: DockerContainer,
+    relay_operations_url: str,
+    auth_surface: _RuntimeWebAuthSurface,
+    diagnostic_containers: tuple[tuple[str, DockerContainer], ...],
     capacity_backend: str,
     credential_encryption_key: str,
-    auth_jwt_secret_key: str,
-    system_bootstrap_setup_token: str,
-    s3_bucket_name: str,
-    s3_access_key: str,
-    s3_secret_key: str,
     selenium_url: str,
 ) -> Generator[_RuntimeWebStack, None, None]:
-    """Start two-Control relay, Gateway, Main Web, and TLS edge."""
+    """Start one isolated Gateway and TLS edge against shared stateless surfaces."""
     with tempfile.TemporaryDirectory(prefix="runtime-web-e2e-") as temporary_root:
         certificate_path, private_key_path, config_path = _write_tls_edge_files(
-            Path(temporary_root)
-        )
-        relay = _runtime_control_relay_container(
-            image=server_image,
-            network=network,
-            postgres=postgres,
-            credential_encryption_key=credential_encryption_key,
-            runner_image=runner_image,
-            s3_bucket_name=s3_bucket_name,
-            s3_access_key=s3_access_key,
-            s3_secret_key=s3_secret_key,
-            capacity_backend=capacity_backend,
+            Path(temporary_root),
+            main_web_alias=auth_surface.main_web_alias,
         )
         gateway = _runtime_web_gateway_container(
             image=server_image,
@@ -784,20 +782,6 @@ def _runtime_web_stack(
             control_endpoint=(
                 "runtime-control-relay:8033" if relay_path else "runtime-control:8032"
             ),
-        )
-        public_api = _runtime_web_public_api_container(
-            image=server_image,
-            network=network,
-            postgres=postgres,
-            credential_encryption_key=credential_encryption_key,
-            auth_jwt_secret_key=auth_jwt_secret_key,
-            system_bootstrap_setup_token=system_bootstrap_setup_token,
-            mode=mode,
-        )
-        main_web = _runtime_web_main_container(
-            image=web_image,
-            network=network,
-            mode=mode,
         )
         edge = _runtime_web_edge_container(
             network=network,
@@ -820,19 +804,11 @@ def _runtime_web_stack(
                 started_containers.append((name, container))
 
         try:
-            start_container("Runtime Control relay", relay)
-            _wait_for_log(
-                relay,
-                "Runtime Control gRPC server started",
-                name="Runtime Control relay",
-            )
             concurrent_containers = (
                 ("Runtime Web Gateway", gateway),
-                ("Runtime Web Public API", public_api),
-                ("Runtime Web Main Web", main_web),
                 ("Runtime Web TLS edge", edge),
             )
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [
                     executor.submit(start_container, name, container)
                     for name, container in concurrent_containers
@@ -844,18 +820,6 @@ def _runtime_web_stack(
                 port=8041,
                 path="/__azents/live",
                 name="Runtime Web Gateway",
-            )
-            _wait_for_http(
-                public_api,
-                port=8010,
-                path="/healthz",
-                name="Runtime Web Public API",
-            )
-            _wait_for_http(
-                main_web,
-                port=3000,
-                path="/login",
-                name="Runtime Web Main Web",
             )
             edge_host = edge.get_container_host_ip()
             edge_port = edge.get_exposed_port(443)
@@ -887,10 +851,7 @@ def _runtime_web_stack(
                 raise AssertionError("Runtime Web TLS edge has no network address")
             yield _RuntimeWebStack(
                 main_origin=_MAIN_ORIGIN,
-                public_api_url=(
-                    f"http://{public_api.get_container_host_ip()}:"
-                    f"{public_api.get_exposed_port(8010)}"
-                ),
+                public_api_url=auth_surface.public_api_url,
                 operations_url=(
                     f"http://{gateway.get_container_host_ip()}:"
                     f"{gateway.get_exposed_port(8041)}"
@@ -900,10 +861,7 @@ def _runtime_web_stack(
                     f"{owner_control.get_exposed_port(8033)}"
                 ),
                 accepting_control_operations_url=(
-                    (
-                        f"http://{relay.get_container_host_ip()}:"
-                        f"{relay.get_exposed_port(8034)}"
-                    )
+                    (relay_operations_url)
                     if relay_path
                     else (
                         f"http://{owner_control.get_container_host_ip()}:"
@@ -916,7 +874,7 @@ def _runtime_web_stack(
                 selenium_url=selenium_url,
             )
         except Exception:
-            for name, container in started_containers:
+            for name, container in (*started_containers, *diagnostic_containers):
                 _log_runtime_web_container(name=name, container=container)
             raise
         finally:
@@ -931,7 +889,7 @@ def _runtime_web_stack(
                     future.result()
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def runtime_web_stack_factory(
     container_network: Network,
     postgres_container: PostgresContainer,
@@ -947,28 +905,146 @@ def runtime_web_stack_factory(
     s3_bucket_name: str,
     rustfs_access_key: str,
     rustfs_secret_key: str,
-) -> _RuntimeWebStackFactory:
-    """Capture secret fixture values behind a redacted stack factory."""
+) -> Generator[_RuntimeWebStackFactory, None, None]:
+    """Prepare shared stateless auth surfaces and one relay for isolated Gateways."""
     selenium_url = (
         f"http://{selenium_container.get_container_host_ip()}:"
         f"{selenium_container.get_exposed_port(4444)}"
     )
-    return _RuntimeWebStackFactory(
+    relay = _runtime_control_relay_container(
+        image=azents_server_image,
         network=container_network,
         postgres=postgres_container,
-        server_image=azents_server_image,
-        web_image=azents_web_image,
-        runner_image=azents_runtime_runner_image,
-        owner_control=azents_runtime_control_container,
-        capacity_backend=runtime_web_capacity_backend,
         credential_encryption_key=credential_encryption_key,
-        auth_jwt_secret_key=auth_jwt_secret_key,
-        system_bootstrap_setup_token=system_bootstrap_setup_token,
+        runner_image=azents_runtime_runner_image,
         s3_bucket_name=s3_bucket_name,
         s3_access_key=rustfs_access_key,
         s3_secret_key=rustfs_secret_key,
-        selenium_url=selenium_url,
+        capacity_backend=runtime_web_capacity_backend,
     )
+    auth_surface_containers: dict[
+        str,
+        tuple[DockerContainer, DockerContainer, str, str],
+    ] = {}
+    for mode in ("shared_cookie", "separate_domain"):
+        alias_suffix = mode.replace("_", "-")
+        public_api_alias = f"runtime-web-public-{alias_suffix}"
+        main_web_alias = f"runtime-web-main-{alias_suffix}"
+        public_api = _runtime_web_public_api_container(
+            image=azents_server_image,
+            network=container_network,
+            postgres=postgres_container,
+            credential_encryption_key=credential_encryption_key,
+            auth_jwt_secret_key=auth_jwt_secret_key,
+            system_bootstrap_setup_token=system_bootstrap_setup_token,
+            mode=mode,
+            network_alias=public_api_alias,
+        )
+        main_web = _runtime_web_main_container(
+            image=azents_web_image,
+            network=container_network,
+            mode=mode,
+            network_alias=main_web_alias,
+            public_api_alias=public_api_alias,
+        )
+        auth_surface_containers[mode] = (
+            public_api,
+            main_web,
+            public_api_alias,
+            main_web_alias,
+        )
+
+    started_containers: list[tuple[str, DockerContainer]] = []
+    started_containers_lock = threading.Lock()
+
+    def start_container(name: str, container: DockerContainer) -> None:
+        try:
+            container.start()
+        except BaseException:
+            _log_runtime_web_container(name=name, container=container)
+            with suppress(Exception):
+                container.stop()
+            raise
+        with started_containers_lock:
+            started_containers.append((name, container))
+
+    try:
+        configured_containers = [("Runtime Control relay", relay)]
+        for mode, (public_api, main_web, _, _) in auth_surface_containers.items():
+            configured_containers.extend(
+                (
+                    (f"Runtime Web Public API ({mode})", public_api),
+                    (f"Runtime Web Main Web ({mode})", main_web),
+                )
+            )
+        with ThreadPoolExecutor(max_workers=len(configured_containers)) as executor:
+            futures = [
+                executor.submit(start_container, name, container)
+                for name, container in configured_containers
+            ]
+            for future in futures:
+                future.result()
+
+        _wait_for_log(
+            relay,
+            "Runtime Control gRPC server started",
+            name="Runtime Control relay",
+        )
+        auth_surfaces: dict[str, _RuntimeWebAuthSurface] = {}
+        for mode, (
+            public_api,
+            main_web,
+            _public_api_alias,
+            main_web_alias,
+        ) in auth_surface_containers.items():
+            _wait_for_http(
+                public_api,
+                port=8010,
+                path="/healthz",
+                name=f"Runtime Web Public API ({mode})",
+            )
+            _wait_for_http(
+                main_web,
+                port=3000,
+                path="/login",
+                name=f"Runtime Web Main Web ({mode})",
+            )
+            auth_surfaces[mode] = _RuntimeWebAuthSurface(
+                public_api_url=(
+                    f"http://{public_api.get_container_host_ip()}:"
+                    f"{public_api.get_exposed_port(8010)}"
+                ),
+                main_web_alias=main_web_alias,
+            )
+
+        yield _RuntimeWebStackFactory(
+            network=container_network,
+            postgres=postgres_container,
+            server_image=azents_server_image,
+            owner_control=azents_runtime_control_container,
+            relay_operations_url=(
+                f"http://{relay.get_container_host_ip()}:{relay.get_exposed_port(8034)}"
+            ),
+            auth_surfaces=auth_surfaces,
+            diagnostic_containers=tuple(configured_containers),
+            capacity_backend=runtime_web_capacity_backend,
+            credential_encryption_key=credential_encryption_key,
+            selenium_url=selenium_url,
+        )
+    except Exception:
+        for name, container in started_containers:
+            _log_runtime_web_container(name=name, container=container)
+        raise
+    finally:
+        with ThreadPoolExecutor(
+            max_workers=max(len(started_containers), 1)
+        ) as executor:
+            stop_futures = [
+                executor.submit(container.stop)
+                for _, container in reversed(started_containers)
+            ]
+            for future in stop_futures:
+                future.result()
 
 
 def _create_workspace(
