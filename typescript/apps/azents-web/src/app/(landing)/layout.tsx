@@ -3,8 +3,11 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { TRPCProvider } from "@/app/providers";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
+import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 import { isSupportedLocale, type SupportedLocale } from "@/shared/lib/locale";
+import { AccountLocaleSync } from "@/shared/providers/account-locale-sync";
 import { LocaleProvider } from "@/shared/providers/locale";
 import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { Metadata } from "next";
@@ -65,6 +68,7 @@ export default async function LandingLayout({
 }): Promise<React.ReactElement> {
   const locale = await getLocale();
   const messages = await getMessages();
+  const authState = await getInitialAuthState();
 
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
@@ -84,7 +88,12 @@ export default async function LandingLayout({
       <body className={GeistSans.className}>
         <NextIntlClientProvider messages={messages}>
           <AppMantineProvider forceColorScheme="dark">
-            <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>
+            <TRPCProvider redirectOnUnauthorized={false}>
+              <LocaleProvider locale={supportedLocale}>
+                <AccountLocaleSync authStatus={authState.status} />
+                {children}
+              </LocaleProvider>
+            </TRPCProvider>
           </AppMantineProvider>
         </NextIntlClientProvider>
       </body>
