@@ -32,16 +32,23 @@ function redirectToLogin(): void {
   window.location.href = `/login?next=${encodeURIComponent(returnUrl)}`;
 }
 
+interface TRPCProviderProps {
+  children: React.ReactNode;
+  redirectOnUnauthorized?: boolean;
+}
+
 export function TRPCProvider({
   children,
-}: {
-  children: React.ReactNode;
-}): React.ReactElement {
-  const handleAuthError = useCallback((error: unknown) => {
-    if (isUnauthorizedError(error)) {
-      redirectToLogin();
-    }
-  }, []);
+  redirectOnUnauthorized = true,
+}: TRPCProviderProps): React.ReactElement {
+  const handleAuthError = useCallback(
+    (error: unknown) => {
+      if (redirectOnUnauthorized && isUnauthorizedError(error)) {
+        redirectToLogin();
+      }
+    },
+    [redirectOnUnauthorized],
+  );
 
   const [queryClient] = useState(
     () =>

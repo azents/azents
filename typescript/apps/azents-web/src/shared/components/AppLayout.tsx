@@ -8,6 +8,7 @@
 import { AppShell } from "@mantine/core";
 import { usePathname } from "next/navigation";
 import { AppBar } from "@/shared/components/AppBar";
+import { AccountLocaleSync } from "@/shared/providers/account-locale-sync";
 import { SidebarProvider } from "@/shared/providers/sidebar";
 import type { ReactNode } from "react";
 
@@ -33,6 +34,7 @@ export function AppLayout({
 
   return (
     <SidebarProvider>
+      <AccountLocaleSync authStatus={authStatus} />
       <AppShell header={{ height: headerHeight }} withBorder={withBorder}>
         {!isAgentDetailRoute && (
           <AppShell.Header>
